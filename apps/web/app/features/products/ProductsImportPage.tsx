@@ -11,7 +11,7 @@ import {
   type ImportColumn,
   importCellInputClass,
 } from '~/components/ui/import-bulk-data';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import {
   type CategoryInfo,
   type ParsedRow,
@@ -104,18 +104,18 @@ export function ProductsImportPage({ categories }: ProductsImportPageProps) {
         errorLabel: 'Category',
         getDisplayValue: (row) => row.categoryInput,
         renderCell: ({ row, disabled, errored, patch }) => (
-          <FormSelect
+          <SearchableSelect
             value={row.categoryId ?? ''}
-            onChange={(e) => {
-              const id = e.target.value;
+            onChange={(id) => {
               const cat = categories.find((c) => c.id === id);
               patch({ categoryInput: cat?.name ?? '' } as Partial<ResolvedRow>);
             }}
             disabled={disabled || categories.length === 0}
             controlSize="sm"
             wrapperClassName="w-full"
-            className={importSelectClass(errored)}
+            triggerClassName={importSelectClass(errored)}
             placeholder="— None —"
+            searchPlaceholder="Search categories..."
             options={categories.map((c) => ({ value: c.id, label: c.name }))}
           />
         ),

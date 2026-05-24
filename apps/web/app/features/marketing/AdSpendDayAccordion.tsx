@@ -572,13 +572,18 @@ export function AdSpendDayAccordion({
       </ul>
 
       {totalPages > 1 && (
-        <Pagination
-          page={page}
-          totalPages={totalPages}
-          pageParam="gpage"
-          pageSize={pageSize}
-          pageSizeParam="gPerPage"
-        />
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {`Page ${page} of ${totalPages}`}
+          </p>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            pageParam="gpage"
+            pageSize={pageSize}
+            pageSizeParam="gPerPage"
+          />
+        </div>
       )}
     </div>
   );

@@ -1253,7 +1253,14 @@ export function DisbursementsPage({
           </div>
 
           {totalPages > 1 && (
-            <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={perPage} pageSizeParam="perPage" />
+            <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-app-fg-muted">
+                {totalFunding > 0
+                  ? `Showing ${(page - 1) * perPage + 1}–${Math.min(page * perPage, totalFunding)} of ${totalFunding} disbursements`
+                  : 'No disbursements'}
+              </p>
+              <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={perPage} pageSizeParam="perPage" />
+            </div>
           )}
         </>
       )}
@@ -1319,7 +1326,14 @@ export function DisbursementsPage({
                 </div>
               </TableLoadingOverlay>
               {requestsTotalPages > 1 && (
-                <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" pageSize={requestsPerPage} pageSizeParam="requestsPerPage" />
+                <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <p className="text-sm text-app-fg-muted">
+                    {fundingRequestsTotal > 0
+                      ? `Showing ${(requestsPage - 1) * requestsPerPage + 1}–${Math.min(requestsPage * requestsPerPage, fundingRequestsTotal)} of ${fundingRequestsTotal} requests`
+                      : 'No requests'}
+                  </p>
+                  <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" pageSize={requestsPerPage} pageSizeParam="requestsPerPage" />
+                </div>
               )}
         </>
       )}
@@ -1472,7 +1486,12 @@ export function DisbursementsPage({
             </TableLoadingOverlay>
           </div>
           {balancesTotalPages > 1 && (
-            <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" pageSize={balancesPerPage} pageSizeParam="balancesPerPage" />
+            <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-app-fg-muted">
+                {`Page ${balancesPage} of ${balancesTotalPages}`}
+              </p>
+              <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" pageSize={balancesPerPage} pageSizeParam="balancesPerPage" />
+            </div>
           )}
         </>
       )}

@@ -1156,6 +1156,29 @@ export class OrdersService {
     // return idempotently, never reject: rejecting edge-form orders is what
     // caused the 2026-05-19 false-positive incident, and an idempotent return
     // cannot lose a sale. Window extended from 15 min → 24h (CEO 2026-05-24).
+    //
+    // RACE CONDITION FIX (2026-05-24): The idempotency SELECT and the order
+    // INSERT were not atomic — two concurrent requests with the same phone could
+    // both pass the SELECT before either INSERT completed. We now acquire a
+    // PostgreSQL session-level advisory lock keyed on the phone hash BEFORE the
+    // idempotency check, so concurrent creates for the same customer are
+    // serialized. The lock is released when the order INSERT finishes.
+    // Advisory locks do NOT block unrelated orders — only same-phone races.
+    let advisoryLockAcquired = false;
+    let advisoryLockKey1 = 0;
+    let advisoryLockKey2 = 0;
+    // Declared here so they're accessible after the try/finally block.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let order!: any;
+    let servicingBranchId: string | null = null;
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
+      const hashHex = orderInput.customerPhoneHash.slice(0, 16);
+      advisoryLockKey1 = parseInt(hashHex.slice(0, 8), 16) | 0;
+      advisoryLockKey2 = parseInt(hashHex.slice(8, 16), 16) | 0;
+      await this.db.execute(sql`SELECT pg_advisory_lock(${advisoryLockKey1}, ${advisoryLockKey2})`);
+      advisoryLockAcquired = true;
+    }
+    try {
     if (orderSource === 'edge-form') {
       const existingIdentical = await this.findRecentIdenticalOrder(orderInput);
       if (existingIdentical) {
@@ -1209,7 +1232,7 @@ export class OrdersService {
     // When no routing rule matches, CS services it in the marketing branch.
     // NOTE: routing must NEVER overwrite `branchId` — that was the cross-branch
     // leak fixed in migration 0150.
-    let servicingBranchId = branchId;
+    servicingBranchId = branchId;
     if (branchId) {
       const primaryProductId = orderInput.items[0]?.productId ?? null;
       const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
@@ -1225,31 +1248,31 @@ export class OrdersService {
     // Records when a different MB's funnel already captured this phone+product
     // within 24h — but NEVER blocks order creation. The cross_funnel_attempts
     // row is informational only; blocking was causing false positives that
-    // silently dropped legitimate orders (2026-05-19 incident: detectDuplicates
-    // returned stale/phantom matches, every submission for the campaign was
-    // rejected as cross-funnel). Orders still get duplicate-flagged below.
+    // silently dropped legitimate orders (2026-05-19 incident).
+    //
+    // Uses `findCrossFunnelCandidates` (not `detectDuplicates`) because the
+    // dedupe filter excludes already-flagged winners — and the post-create
+    // flagging hook stamps FLAGGED on any prior same-phone order within ms,
+    // silently masking cross-funnel hits (2026-05-24 incident).
     if (orderSource === 'edge-form' && orderInput.mediaBuyerId && orderInput.customerPhoneHash) {
       const productIds = orderInput.items.map((i) => i.productId);
-      const existing = await this.detectDuplicates(orderInput.customerPhoneHash, productIds);
-      const crossMbWinner = existing.find(
-        (o) => o.mediaBuyerId && o.mediaBuyerId !== orderInput.mediaBuyerId,
+      const candidates = await this.findCrossFunnelCandidates(
+        orderInput.customerPhoneHash,
+        productIds,
+        orderInput.mediaBuyerId,
       );
-      if (crossMbWinner) {
-        // Record for analytics — but do NOT return early. Let the order be
-        // created so CS can see it; the duplicate-flag below will still tag it.
-        await this.db.insert(schema.crossFunnelAttempts).values(
-          productIds.map((productId) => ({
-            customerPhoneHash: orderInput.customerPhoneHash,
-            customerName: orderInput.customerName,
-            productId,
-            mediaBuyerId: orderInput.mediaBuyerId!,
-            campaignId: orderInput.campaignId ?? null,
-            branchId: branchId ?? null,
-            originalOrderId: crossMbWinner.id,
-            originalMediaBuyerId: crossMbWinner.mediaBuyerId,
-          })),
-        ).catch((err) => {
-          this.logger.warn({ err, phoneHash: orderInput.customerPhoneHash }, 'cross-funnel attempt insert failed — continuing with order creation');
+      const winner = candidates[0]; // most-recent match
+      if (winner) {
+        // Fire-and-forget — recording must never block the order. Insert
+        // failures are logged at error level inside the helper.
+        await this.recordCrossFunnelAttempt({
+          customerPhoneHash: orderInput.customerPhoneHash,
+          customerName: orderInput.customerName,
+          productIds,
+          mediaBuyerId: orderInput.mediaBuyerId,
+          campaignId: orderInput.campaignId ?? null,
+          branchId: branchId ?? null,
+          winner,
         });
       }
     }
@@ -1325,9 +1348,16 @@ export class OrdersService {
       return created;
     };
 
-    const order = actorId
+    order = actorId
       ? await withActor(this.db, { id: actorId }, insertOrder)
       : await insertOrder(this.db);
+    } finally {
+      // Release advisory lock now that the order row is committed. Concurrent
+      // requests for the same phone hash will now see it via findRecentIdenticalOrder.
+      if (advisoryLockAcquired) {
+        await this.db.execute(sql`SELECT pg_advisory_unlock(${advisoryLockKey1}, ${advisoryLockKey2})`).catch(() => {});
+      }
+    }
 
     // Emit real-time event for CS dispatch
     this.events.emitNewOrder({
@@ -1962,7 +1992,7 @@ export class OrdersService {
     const rows = await this.db
       .select()
       .from(schema.orders)
-      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .where(eq(schema.orders.id, orderId))
       .limit(1);
 
     const order = rows[0];
@@ -2794,6 +2824,8 @@ export class OrdersService {
       // Back-link to the abandoned cart this order was recovered from (migration 0142).
       // Surfaced so list rows can offer a "View cart" quick-detail action.
       cartId: schema.orders.cartId,
+      // Duplicate flag — shown as a badge on the orders list table.
+      isDuplicate: schema.orders.isDuplicate,
     } as const;
 
     const [orders, totalRows] = await Promise.all([
@@ -3079,11 +3111,15 @@ export class OrdersService {
    * Enforces the state machine, gates, and side effects.
    */
   async transition(input: TransitionOrderInput, actor: SessionUser) {
-    // Get current order
+    // Get current order. We intentionally do NOT filter `isNull(deletedAt)` here:
+    // DELETED rows still need to be selectable so Admin/SuperAdmin can run the
+    // explicit `DELETED → UNPROCESSED` restore branch handled below (the state
+    // machine + status-based permission gates control which transitions are
+    // valid, so other status changes from DELETED are still blocked).
     const rows = await this.db
       .select()
       .from(schema.orders)
-      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+      .where(eq(schema.orders.id, input.orderId))
       .limit(1);
 
     const order = rows[0];
@@ -3448,14 +3484,24 @@ export class OrdersService {
       // Resolve the 3PL location name so the timeline reads
       // "Agent assigned for delivery at <Location>" instead of the generic logistics line.
       let logisticsLocationName: string | undefined;
+      let logisticsProviderName: string | undefined;
       let reallocatedFromName: string | undefined;
+      let reallocatedFromProviderName: string | undefined;
       if (newStatus === 'AGENT_ASSIGNED' && typeof input.metadata?.logisticsLocationId === 'string') {
         const locRows = await this.db
-          .select({ name: schema.logisticsLocations.name })
+          .select({
+            locationName: schema.logisticsLocations.name,
+            providerName: schema.logisticsProviders.name,
+          })
           .from(schema.logisticsLocations)
+          .innerJoin(
+            schema.logisticsProviders,
+            eq(schema.logisticsLocations.providerId, schema.logisticsProviders.id),
+          )
           .where(eq(schema.logisticsLocations.id, input.metadata.logisticsLocationId))
           .limit(1);
-        logisticsLocationName = locRows[0]?.name ?? undefined;
+        logisticsLocationName = locRows[0]?.locationName ?? undefined;
+        logisticsProviderName = locRows[0]?.providerName ?? undefined;
       }
       if (
         currentStatus === 'AGENT_ASSIGNED' &&
@@ -3463,11 +3509,19 @@ export class OrdersService {
         order.logisticsLocationId
       ) {
         const prevRows = await this.db
-          .select({ name: schema.logisticsLocations.name })
+          .select({
+            locationName: schema.logisticsLocations.name,
+            providerName: schema.logisticsProviders.name,
+          })
           .from(schema.logisticsLocations)
+          .innerJoin(
+            schema.logisticsProviders,
+            eq(schema.logisticsLocations.providerId, schema.logisticsProviders.id),
+          )
           .where(eq(schema.logisticsLocations.id, order.logisticsLocationId))
           .limit(1);
-        reallocatedFromName = prevRows[0]?.name ?? undefined;
+        reallocatedFromName = prevRows[0]?.locationName ?? undefined;
+        reallocatedFromProviderName = prevRows[0]?.providerName ?? undefined;
       }
       void this.writeTimelineEvent({
         orderId: input.orderId,
@@ -3481,7 +3535,9 @@ export class OrdersService {
               ? input.metadata.preferredDeliveryDate
               : undefined,
           logisticsLocationName,
+          logisticsProviderName,
           reallocatedFromName,
+          reallocatedFromProviderName,
           engagementMethod:
             typeof input.metadata?.engagementMethod === 'string'
               ? input.metadata.engagementMethod
@@ -6802,6 +6858,122 @@ export class OrdersService {
     });
   }
 
+  /**
+   * Find candidate "winner" orders for cross-funnel attribution analysis.
+   *
+   * Returns orders with the same phone+product in the last 24h attributed to a
+   * DIFFERENT media buyer than the caller. Intentionally separate from
+   * `detectDuplicates`:
+   *   - Does NOT filter on `is_duplicate`. The dedupe path excludes FLAGGED /
+   *     POSSIBLY_DUPLICATE / MERGED winners — and the post-create flagging hook
+   *     stamps `FLAGGED` on any prior same-phone order within ms. Reusing that
+   *     filter here was silently skipping cross-funnel hits because the winner
+   *     was already flagged by the time the runner-up's check ran (2026-05-24
+   *     incident — two edge-form orders from different MBs, zero cross-funnel
+   *     rows recorded).
+   *   - Excludes CANCELLED, DELETED, and soft-deleted rows (winners must be
+   *     live orders, not editorial removals).
+   *   - Requires the winner's `media_buyer_id` to be set AND different from
+   *     `requestingMbId` (attribution requires a contested MB on both sides).
+   *
+   * Returns the most-recent matches first, capped at 5.
+   */
+  private async findCrossFunnelCandidates(
+    phoneHash: string,
+    productIds: string[],
+    requestingMbId: string,
+  ): Promise<Array<{ id: string; mediaBuyerId: string; createdAt: Date }>> {
+    if (productIds.length === 0) return [];
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        mediaBuyerId: schema.orders.mediaBuyerId,
+        createdAt: schema.orders.createdAt,
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.customerPhoneHash, phoneHash),
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(schema.orderItems)
+              .where(
+                and(
+                  eq(schema.orderItems.orderId, schema.orders.id),
+                  inArray(schema.orderItems.productId, productIds),
+                ),
+              ),
+          ),
+          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
+          notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+          isNull(schema.orders.deletedAt),
+          sql`${schema.orders.mediaBuyerId} IS NOT NULL`,
+          sql`${schema.orders.mediaBuyerId} <> ${requestingMbId}`,
+        ),
+      )
+      .orderBy(desc(schema.orders.createdAt))
+      .limit(5);
+    // Narrow the type — the SQL guard guarantees mediaBuyerId is non-null.
+    return rows.map((r) => ({ id: r.id, mediaBuyerId: r.mediaBuyerId!, createdAt: r.createdAt }));
+  }
+
+  /**
+   * Record one `cross_funnel_attempts` row per product when the new order
+   * collides with a prior different-MB winner. Idempotency is not guaranteed
+   * by the table (no unique index) — callers gate via `findCrossFunnelCandidates`.
+   *
+   * Insert failures are logged at `error` level (not swallowed) — these rows
+   * are the audit trail for Pillar 2 / attribution truth, and a silent drop
+   * is exactly what masked the 2026-05-24 incident.
+   */
+  private async recordCrossFunnelAttempt(args: {
+    customerPhoneHash: string;
+    customerName: string;
+    productIds: string[];
+    mediaBuyerId: string;
+    campaignId: string | null;
+    branchId: string | null;
+    winner: { id: string; mediaBuyerId: string };
+  }): Promise<void> {
+    try {
+      await this.db.insert(schema.crossFunnelAttempts).values(
+        args.productIds.map((productId) => ({
+          customerPhoneHash: args.customerPhoneHash,
+          customerName: args.customerName,
+          productId,
+          mediaBuyerId: args.mediaBuyerId,
+          campaignId: args.campaignId,
+          branchId: args.branchId,
+          originalOrderId: args.winner.id,
+          originalMediaBuyerId: args.winner.mediaBuyerId,
+        })),
+      );
+      // Info log so monitoring can verify detection is firing without waiting
+      // for someone to open the cross-funnel UI.
+      this.logger.log(
+        {
+          runnerUpMbId: args.mediaBuyerId,
+          winnerMbId: args.winner.mediaBuyerId,
+          winnerOrderId: args.winner.id,
+          productCount: args.productIds.length,
+        },
+        'cross-funnel attempt recorded',
+      );
+    } catch (err) {
+      this.logger.error(
+        {
+          err,
+          phoneHash: args.customerPhoneHash,
+          runnerUpMbId: args.mediaBuyerId,
+          winnerMbId: args.winner.mediaBuyerId,
+          winnerOrderId: args.winner.id,
+        },
+        'cross-funnel attempt insert FAILED — runner-up not recorded',
+      );
+    }
+  }
+
   private async findRecentPhoneOrder(phoneHash: string) {
     const [recent] = await this.db
       .select({ id: schema.orders.id })
@@ -7195,7 +7367,11 @@ export class OrdersService {
       reason?: string;
       preferredDeliveryDate?: string;
       logisticsLocationName?: string;
+      /** Provider (3PL company) that owns `logisticsLocationName`. When present the
+       *  timeline reads "Agent assigned for delivery at Ikeja (GIG Logistics)". */
+      logisticsProviderName?: string;
       reallocatedFromName?: string;
+      reallocatedFromProviderName?: string;
       /** What action triggered the CS_ENGAGED transition — drives a precise timeline line
        *  ("revealed phone for manual call" vs "started VOIP call" vs generic). */
       engagementMethod?: string;
@@ -7224,16 +7400,22 @@ export class OrdersService {
         return `Order deleted${reasonSuffix}`;
       case 'UNPROCESSED':
         return 'Order restored to the unprocessed queue';
-      case 'AGENT_ASSIGNED':
-        if (
-          options?.reallocatedFromName &&
-          options?.logisticsLocationName
-        ) {
-          return `Delivery assignment moved from ${options.reallocatedFromName} to ${options.logisticsLocationName}`;
+      case 'AGENT_ASSIGNED': {
+        // Render "Location (Provider)" when both are known so a reader sees the
+        // 3PL company name, not just the warehouse / pickup point. CEO directive
+        // 2026-05-24 — provider was previously invisible on the timeline.
+        const formatLocation = (loc?: string, provider?: string) =>
+          loc && provider ? `${loc} (${provider})` : loc ?? '';
+        if (options?.reallocatedFromName && options?.logisticsLocationName) {
+          const from = formatLocation(options.reallocatedFromName, options.reallocatedFromProviderName);
+          const to = formatLocation(options.logisticsLocationName, options.logisticsProviderName);
+          return `Delivery assignment moved from ${from} to ${to}`;
         }
-        return options?.logisticsLocationName
-          ? `Agent assigned for delivery at ${options.logisticsLocationName}`
-          : 'Agent assigned for delivery (logistics)';
+        if (options?.logisticsLocationName) {
+          return `Agent assigned for delivery at ${formatLocation(options.logisticsLocationName, options.logisticsProviderName)}`;
+        }
+        return 'Agent assigned for delivery (logistics)';
+      }
       case 'DISPATCHED':
         return 'Order dispatched to rider';
       case 'IN_TRANSIT':

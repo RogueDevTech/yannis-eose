@@ -37,7 +37,7 @@ export function CSLeaderboardPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const pageParam = Number(searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(50);
   const [peekEntry, setPeekEntry] = useState<(CSLeaderboardEntry & { rank: number }) | null>(null);
 
   const goToPage = (nextPage: number) => {

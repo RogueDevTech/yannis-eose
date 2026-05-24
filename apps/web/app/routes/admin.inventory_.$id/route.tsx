@@ -343,10 +343,10 @@ function InventoryLevelDetailRouteInner({
             triggerAriaLabel="Inventory level toolbar"
             desktop={
               <>
+                <PageRefreshButton />
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
                   <DateFilterBar startDate={startDate ?? undefined} endDate={endDate ?? undefined} />
                 </div>
-                <PageRefreshButton />
               </>
             }
           />

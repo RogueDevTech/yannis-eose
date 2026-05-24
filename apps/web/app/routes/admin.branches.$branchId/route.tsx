@@ -24,6 +24,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { SearchInput } from '~/components/ui/search-input';
@@ -1166,11 +1167,12 @@ function BranchMembersPanel({
             {selectedCount} selected
           </p>
           <div className="flex-1 min-w-[12rem] max-w-xs">
-            <FormSelect
+            <SearchableSelect
               id="bulk-team-picker"
               value={bulkTeamId}
-              onChange={(e) => setBulkTeamId(e.target.value)}
+              onChange={setBulkTeamId}
               placeholder="Pick a team…"
+              searchPlaceholder="Search teams..."
               options={teamsForBulk.map((t) => ({ value: t.id, label: t.label }))}
             />
           </div>
@@ -1812,6 +1814,8 @@ function BranchSupervisorTeamsPanel({
   const squadSurface = useFetcherActionSurface(squadFetcher);
   const [confirmIntent, setConfirmIntent] = useState<SquadConfirmIntent | null>(null);
   const [openTeamId, setOpenTeamId] = useState<string | null>(flatTeams[0]?.id ?? null);
+  // Controlled state for the per-team add-member SearchableSelect.
+  const [addMemberByTeam, setAddMemberByTeam] = useState<Record<string, string>>({});
 
   useFetcherToast(squadFetcher.data, {
     successMessage: 'Teams updated',
@@ -2718,11 +2722,14 @@ function BranchSupervisorTeamsPanel({
                                       />
                                       <input type="hidden" name="teamId" value={team.id} />
                                       <div className="min-w-[12rem] flex-1">
-                                        <FormSelect
+                                        <input type="hidden" name="userId" value={addMemberByTeam[team.id] ?? ''} />
+                                        <SearchableSelect
                                           id={`add-${team.id}`}
-                                          name="userId"
+                                          value={addMemberByTeam[team.id] ?? ''}
+                                          onChange={(v) => setAddMemberByTeam((prev) => ({ ...prev, [team.id]: v }))}
                                           required
                                           placeholder="Pick a member…"
+                                          searchPlaceholder="Search members..."
                                           options={pick}
                                         />
                                       </div>
@@ -2930,6 +2937,7 @@ function BranchOverviewPage({
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
+  const [addMemberUserId, setAddMemberUserId] = useState('');
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Saved',
@@ -2950,6 +2958,7 @@ function BranchOverviewPage({
     setEditOpen(false);
     setAddMemberOpen(false);
     setIsPrimary(false);
+    setAddMemberUserId('');
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleBranchDetailSuccess);
 
@@ -3199,16 +3208,21 @@ function BranchOverviewPage({
                   roles — others are org-wide and don't belong to a branch.
                 </p>
               ) : (
-                <FormSelect
-                  id="add-member-user"
-                  name="userId"
-                  required
-                  placeholder="Select a staff member…"
-                  options={availableUsers.map((u) => ({
-                    value: u.id,
-                    label: `${u.name} — ${formatRoleLabel(u.role)}`,
-                  }))}
-                />
+                <>
+                  <input type="hidden" name="userId" value={addMemberUserId} />
+                  <SearchableSelect
+                    id="add-member-user"
+                    value={addMemberUserId}
+                    onChange={setAddMemberUserId}
+                    required
+                    placeholder="Select a staff member…"
+                    searchPlaceholder="Search staff..."
+                    options={availableUsers.map((u) => ({
+                      value: u.id,
+                      label: `${u.name} — ${formatRoleLabel(u.role)}`,
+                    }))}
+                  />
+                </>
               )}
             </div>
             <FormSelect

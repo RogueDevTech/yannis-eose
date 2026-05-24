@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Link, useLoaderData } from '@remix-run/react';
@@ -21,6 +22,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import type { LocationOption, ShipmentRow, ShipmentStatus } from '~/features/inventory/types';
 import { ShipmentsTab } from '~/features/inventory/ShipmentsTab';
@@ -300,6 +302,10 @@ function ShipmentsIndexContent(data: {
     ...data.locations.map((location) => ({ value: location.id, label: location.name })),
   ];
 
+  // Controlled state for SearchableSelect warehouse filters (mobile + desktop).
+  const [mobileWarehouse, setMobileWarehouse] = useState(data.filters.destinationLocationId);
+  const [desktopWarehouse, setDesktopWarehouse] = useState(data.filters.destinationLocationId);
+
   // Build a status-filter URL that preserves the other active filters and resets
   // pagination to page 1 — mirrors the GET filter form.
   const buildStatusQuery = (status: string) => {
@@ -337,12 +343,15 @@ function ShipmentsIndexContent(data: {
                   className="!bg-app-hover text-center"
                   options={statusFilterOptions}
                 />
-                <FormSelect
-                  name="destinationLocationId"
-                  defaultValue={data.filters.destinationLocationId}
+                <input type="hidden" name="destinationLocationId" value={mobileWarehouse} />
+                <SearchableSelect
+                  value={mobileWarehouse}
+                  onChange={setMobileWarehouse}
                   wrapperClassName="w-full"
                   controlSize="lg"
-                  className="!bg-app-hover text-center"
+                  triggerClassName="!bg-app-hover text-center"
+                  placeholder="All warehouses"
+                  searchPlaceholder="Search warehouses..."
                   options={warehouseFilterOptions}
                 />
                 <div className="grid grid-cols-2 gap-3">
@@ -426,13 +435,18 @@ function ShipmentsIndexContent(data: {
               wrapperClassName="w-full sm:w-48"
               options={statusFilterOptions}
             />
-            <FormSelect
-              label="Warehouse"
-              name="destinationLocationId"
-              defaultValue={data.filters.destinationLocationId}
-              wrapperClassName="w-full sm:w-56"
-              options={warehouseFilterOptions}
-            />
+            <div className="w-full sm:w-56">
+              <input type="hidden" name="destinationLocationId" value={desktopWarehouse} />
+              <SearchableSelect
+                label="Warehouse"
+                value={desktopWarehouse}
+                onChange={setDesktopWarehouse}
+                wrapperClassName="w-full"
+                placeholder="All warehouses"
+                searchPlaceholder="Search warehouses..."
+                options={warehouseFilterOptions}
+              />
+            </div>
             <div className="w-full sm:w-40">
               <TextInput label="From" type="date" name="fromDate" defaultValue={data.filters.fromDate} />
             </div>

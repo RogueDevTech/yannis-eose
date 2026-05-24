@@ -1279,23 +1279,27 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         />
         {activeTab === 'locations' && (
           <>
-            <FormSelect
+            <SearchableSelect
               value={filterProviderId}
-              onChange={(e) => setFilterProviderId(e.target.value)}
+              onChange={(v) => setFilterProviderId(v)}
               placeholder="All companies"
-              options={displayProviders.map((p) => ({ value: p.id, label: p.name }))}
-              controlSize="sm"
+              options={[
+                { value: '', label: 'All companies' },
+                ...displayProviders.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+              searchPlaceholder="Search companies..."
               wrapperClassName="w-40 sm:w-48"
-              className="!bg-app-elevated"
             />
-            <FormSelect
+            <SearchableSelect
               value={filterState}
-              onChange={(e) => setFilterState(e.target.value)}
+              onChange={(v) => setFilterState(v)}
               placeholder="All states"
-              options={availableStates.map((s) => ({ value: s, label: s }))}
-              controlSize="sm"
+              options={[
+                { value: '', label: 'All states' },
+                ...availableStates.map((s) => ({ value: s, label: s })),
+              ]}
+              searchPlaceholder="Search states..."
               wrapperClassName="w-36 sm:w-44"
-              className="!bg-app-elevated"
             />
             {(filterProviderId || filterState) && (
               <Button

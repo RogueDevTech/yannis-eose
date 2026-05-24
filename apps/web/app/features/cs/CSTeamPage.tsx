@@ -37,6 +37,9 @@ export interface CSTeamPageProps {
     engagedTotal: number;
     confirmedTotal: number;
     deliveredTotal: number;
+    cancelledTotal: number;
+    callsMadeTotal: number;
+    avgCallDuration: number | null;
     confirmationRate: number | null;
     deliveryRate: number | null;
   };
@@ -78,6 +81,13 @@ function formatLastActive(lastActionAt: string | null): string {
 
 function csRoleLabel(role: string): string {
   return role === 'CS_CLOSER' ? 'Closer' : formatRoleLabel(role);
+}
+
+function formatCallDuration(seconds: number | null): string {
+  if (seconds == null || seconds <= 0) return '—';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 function CSTeamCompactStat({
@@ -169,9 +179,20 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
           </div>
           {leaderboard && (
             <div className="grid grid-cols-3 gap-2">
-              <CSTeamCompactStat label="Assigned" value={leaderboard.ordersEngaged} />
-              <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
+              <CSTeamCompactStat label="Total" value={leaderboard.ordersEngaged} valueClassName="text-brand-600 dark:text-brand-400" />
               <CSTeamCompactStat label="Confirmed" value={leaderboard.ordersConfirmed} />
+              <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
+            </div>
+          )}
+          {leaderboard && (
+            <div className="grid grid-cols-3 gap-2">
+              <CSTeamCompactStat
+                label="Cancelled"
+                value={leaderboard.ordersCancelled}
+                valueClassName={leaderboard.ordersCancelled > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}
+              />
+              <CSTeamCompactStat label="Calls" value={leaderboard.callsMade} />
+              <CSTeamCompactStat label="Avg call" value={formatCallDuration(leaderboard.avgCallDurationSeconds)} />
             </div>
           )}
           {leaderboard && (
@@ -331,14 +352,28 @@ export function CSTeamPage({
         },
       },
       {
-        key: 'assigned',
-        header: 'Assigned',
+        key: 'totalOrders',
+        header: 'Total',
         align: 'right',
         nowrap: true,
         render: (member) => {
           const lb = member.leaderboardEntry;
           return lb ? (
-            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersEngaged}</span>
+            <span className="text-sm font-semibold text-brand-600 dark:text-brand-400 tabular-nums">{lb.ordersEngaged}</span>
+          ) : (
+            '\u2014'
+          );
+        },
+      },
+      {
+        key: 'confirmed',
+        header: 'Confirmed',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          return lb ? (
+            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersConfirmed}</span>
           ) : (
             '\u2014'
           );
@@ -359,14 +394,29 @@ export function CSTeamPage({
         },
       },
       {
-        key: 'confirmed',
-        header: 'Confirmed',
+        key: 'cancelled',
+        header: 'Cancelled',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          if (!lb) return '\u2014';
+          return (
+            <span className={`text-sm font-medium tabular-nums ${lb.ordersCancelled > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
+              {lb.ordersCancelled}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'calls',
+        header: 'Calls',
         align: 'right',
         nowrap: true,
         render: (member) => {
           const lb = member.leaderboardEntry;
           return lb ? (
-            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersConfirmed}</span>
+            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.callsMade}</span>
           ) : (
             '\u2014'
           );
@@ -458,6 +508,7 @@ export function CSTeamPage({
               }
               desktop={
                 <>
+                  <PageRefreshButton />
                   <DateFilterBar
                       startDate={dateFilters.startDate}
                       endDate={dateFilters.endDate}
@@ -465,7 +516,6 @@ export function CSTeamPage({
                   <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                     Generate report
                   </Button>
-                  <PageRefreshButton />
                 </>
               }
               sheet={({ closeSheet }) => (
@@ -527,10 +577,10 @@ export function CSTeamPage({
               valueClassName: 'text-app-fg',
             },
             {
-              label: 'Engaged',
+              label: 'Total orders',
               value: summary.engagedTotal.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'Total orders the team engaged with in this period',
+              valueClassName: 'text-brand-600 dark:text-brand-400',
+              title: 'Total orders assigned to the team in this period',
             },
             {
               label: 'Confirmed',
@@ -545,6 +595,12 @@ export function CSTeamPage({
               title: 'Total orders attributed to the team that were delivered',
             },
             {
+              label: 'Cancelled',
+              value: summary.cancelledTotal.toString(),
+              valueClassName: summary.cancelledTotal > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
+              title: 'Total orders cancelled/deleted in this period',
+            },
+            {
               label: 'Confirm rate',
               value: formatRate(summary.confirmationRate),
               valueClassName: confirmationRateColorClass(summary.confirmationRate),
@@ -555,6 +611,18 @@ export function CSTeamPage({
               value: formatRate(summary.deliveryRate),
               valueClassName: deliveryRateColorClass(summary.deliveryRate),
               title: 'Delivered ÷ Engaged across the whole team in this period',
+            },
+            {
+              label: 'Calls made',
+              value: summary.callsMadeTotal.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'Total calls made by the team in this period',
+            },
+            {
+              label: 'Avg call',
+              value: formatCallDuration(summary.avgCallDuration),
+              valueClassName: 'text-app-fg',
+              title: 'Average call duration across the team',
             },
             {
               label: 'Pending',
@@ -681,10 +749,10 @@ export function CSTeamPage({
                         </span>
                       ) : null}
                     </div>
-                    {/* Row 2: duty + CR + DR */}
+                    {/* Row 2: total orders + CR + DR */}
                     <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums pl-[calc(1.75rem+0.625rem)]">
-                      {workload && (
-                        <span>{workload.todayClosesCount ?? 0}/{workload.capacity} duty</span>
+                      {leaderboard && (
+                        <span className="font-medium text-brand-600 dark:text-brand-400">{leaderboard.ordersEngaged} orders</span>
                       )}
                       {leaderboard?.confirmationRate != null && (
                         <span className={confirmationRateColorClass(leaderboard.confirmationRate)}>

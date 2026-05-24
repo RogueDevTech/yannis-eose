@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
@@ -404,12 +405,11 @@ export function MarketingFormEditPage({
                     { value: 'ARCHIVED', label: 'Archived' },
                   ]}
                 />
-                <FormSelect
+                <SearchableSelect
                   label="Offer"
-                  name="offerGroupIdSelect"
                   value={selectedOfferGroupId}
-                  onChange={(e) => {
-                    setSelectedOfferGroupId(e.target.value);
+                  onChange={(v) => {
+                    setSelectedOfferGroupId(v);
                     // Selecting an offer group supersedes legacy tier selection.
                     setSelectedOfferTemplateIds([]);
                   }}
@@ -421,6 +421,8 @@ export function MarketingFormEditPage({
                         : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
                   }
                   disabled={picklistsLoading || compatibleOfferGroups.length === 0}
+                  searchPlaceholder="Search offers..."
+                  loading={picklistsLoading}
                 />
               </div>
 

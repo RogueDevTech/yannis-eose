@@ -159,6 +159,8 @@ export interface MarketingOverviewPageProps {
   recentOrders?: MarketingOverviewRecentOrder[];
   /** Initial cart/order activity rendered on first paint before fetcher refresh. */
   liveActivity?: LiveActivityItem[];
+  /** Open (un-recovered) abandoned-cart count, scoped to the viewer's media buyer / branch. */
+  abandonedCartCount?: number;
 }
 
 export function MarketingOverviewPage({
@@ -170,6 +172,7 @@ export function MarketingOverviewPage({
   liveEvents,
   recentOrders = [],
   liveActivity = [],
+  abandonedCartCount = 0,
 }: MarketingOverviewPageProps) {
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [liveOrdersPage, setLiveOrdersPage] = useState(1);
@@ -387,6 +390,15 @@ export function MarketingOverviewPage({
       value: formatNaira(Math.round(metrics.deliveredRevenue)),
       valueClassName: 'text-app-fg',
     },
+    {
+      label: 'Open carts',
+      value: abandonedCartCount,
+      valueClassName:
+        abandonedCartCount > 0
+          ? 'text-amber-600 dark:text-amber-400'
+          : 'text-app-fg',
+      title: 'Open abandoned carts not yet recovered',
+    },
   ];
 
   return (
@@ -410,11 +422,11 @@ export function MarketingOverviewPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />

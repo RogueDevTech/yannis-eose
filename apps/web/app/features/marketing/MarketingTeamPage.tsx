@@ -62,6 +62,131 @@ function profitabilityCellColorClass(
     : 'text-danger-600 dark:text-danger-400 font-semibold';
 }
 
+/** Single compact stat tile — mirrors `CSTeamCompactStat` from Sales for visual parity. */
+function MarketingTeamCompactStat({
+  label,
+  value,
+  valueClassName = 'text-app-fg',
+}: {
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-app-border bg-app-hover/40 px-2.5 py-2">
+      <span className={['block text-sm font-semibold leading-none tabular-nums', valueClassName].filter(Boolean).join(' ')}>
+        {value}
+      </span>
+      <span className="mt-1 block text-micro font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Media buyer peek card — visual mirror of `CSTeamMemberCard`.
+ * Header + stacked stat-tile grids + actions row. Use `embedded` inside the
+ * mobile peek modal (no outer card chrome); omit it for stand-alone use.
+ */
+function MarketingTeamMemberCard({
+  member,
+  dateFilters,
+  greenThreshold,
+  embedded,
+}: {
+  member: FundingBalanceRow;
+  dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
+  greenThreshold: number;
+  embedded?: boolean;
+}) {
+  const balance = Number(member.balance);
+  const balanceToneClass =
+    balance > 0
+      ? 'text-success-600 dark:text-success-400'
+      : balance < 0
+        ? 'text-danger-600 dark:text-danger-400'
+        : 'text-brand-600 dark:text-brand-400';
+  const profitabilityToneClass =
+    member.profitabilityScore != null && member.trueRoas != null
+      ? member.trueRoas >= greenThreshold
+        ? 'text-success-600 dark:text-success-400'
+        : 'text-danger-600 dark:text-danger-400'
+      : 'text-app-fg';
+
+  return (
+    <div className={embedded ? 'space-y-3' : 'card space-y-3'}>
+      <div className="flex items-start gap-3">
+        <CompactUserAvatar name={member.name} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-app-fg">{member.name}</p>
+          <p className="truncate text-mini font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+            Media Buyer
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <MarketingTeamCompactStat
+          label="Balance"
+          value={formatNaira(balance)}
+          valueClassName={balanceToneClass}
+        />
+        <MarketingTeamCompactStat label="Received" value={formatNaira(Number(member.totalReceived))} />
+        <MarketingTeamCompactStat label="Spent" value={formatNaira(Number(member.totalSpend))} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <MarketingTeamCompactStat
+          label="Orders"
+          value={member.totalOrders != null ? member.totalOrders.toLocaleString() : '—'}
+          valueClassName="text-brand-600 dark:text-brand-400"
+        />
+        <MarketingTeamCompactStat
+          label="CPA"
+          value={member.cpa != null ? formatNaira(member.cpa) : '—'}
+        />
+        <MarketingTeamCompactStat
+          label="Profitability"
+          value={member.profitabilityScore != null ? member.profitabilityScore.toFixed(1) : '—'}
+          valueClassName={profitabilityToneClass}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <MarketingTeamCompactStat
+          label="Conf. rate"
+          value={member.confirmationRate != null ? `${Math.round(member.confirmationRate)}%` : '—'}
+          valueClassName={confirmationRateColorClass(member.confirmationRate)}
+        />
+        <MarketingTeamCompactStat
+          label="Delivery rate"
+          value={member.deliveryRate != null ? `${Math.round(member.deliveryRate)}%` : '—'}
+          valueClassName={deliveryRateColorClass(member.deliveryRate)}
+        />
+      </div>
+
+      <div className="border-t border-app-border pt-3">
+        <div className="grid grid-cols-2 gap-2">
+          <CompactTableActionButton
+            to={buildOrdersQuery(member.userId, dateFilters)}
+            className="w-full justify-center"
+            tone="brand"
+          >
+            View orders
+          </CompactTableActionButton>
+          <CompactTableActionButton
+            to={`/hr/users/${member.userId}`}
+            className="w-full justify-center"
+          >
+            View profile
+          </CompactTableActionButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Build the query string to forward the active date filter to /admin/marketing/orders. */
 function buildOrdersQuery(
   mediaBuyerId: string,
@@ -355,6 +480,7 @@ export function MarketingTeamPage({
             }
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
@@ -362,7 +488,6 @@ export function MarketingTeamPage({
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                   Generate report
                 </Button>
-                <PageRefreshButton />
               </>
             }
             sheet={({ closeSheet }) => (
@@ -620,107 +745,21 @@ export function MarketingTeamPage({
         )}
       </div>
 
-      {/* Mobile quick-preview modal */}
+      {/* Mobile peek modal — full media-buyer detail + actions, mirrors Sales pattern */}
       <Modal
         open={!!previewMember}
         onClose={() => setPreviewMember(null)}
         maxWidth="max-w-sm"
-        contentClassName="p-5"
+        contentClassName="p-4"
       >
-        {previewMember && (() => {
-          const m = previewMember;
-          const initials = m.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
-          return (
-            <div className="space-y-4">
-              {/* Header */}
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-brand-600 dark:text-brand-400">{initials}</span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-app-fg truncate">{m.name}</p>
-                  <p className="text-xs text-app-fg-muted">Media Buyer</p>
-                </div>
-              </div>
-
-              {/* Stats */}
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-app-fg-muted">Balance</span>
-                  <span className="font-medium text-brand-600 dark:text-brand-400">{formatNaira(Number(m.balance))}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-app-fg-muted">Received</span>
-                  <span className="text-app-fg">{formatNaira(Number(m.totalReceived))}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-app-fg-muted">Spent</span>
-                  <span className="text-app-fg">{formatNaira(Number(m.totalSpend))}</span>
-                </div>
-                {m.totalOrders != null && (
-                  <div className="flex justify-between">
-                    <span className="text-app-fg-muted">Orders</span>
-                    <span className="font-medium tabular-nums text-app-fg">{m.totalOrders.toLocaleString()}</span>
-                  </div>
-                )}
-                {m.confirmationRate != null && (
-                  <div className="flex justify-between">
-                    <span className="text-app-fg-muted">Confirmation rate</span>
-                    <span className={`font-medium tabular-nums ${confirmationRateColorClass(m.confirmationRate)}`}>
-                      {Math.round(m.confirmationRate)}%
-                    </span>
-                  </div>
-                )}
-                {m.deliveryRate != null && (
-                  <div className="flex justify-between">
-                    <span className="text-app-fg-muted">Delivery rate</span>
-                    <span className={`font-medium tabular-nums ${deliveryRateColorClass(m.deliveryRate)}`}>
-                      {Math.round(m.deliveryRate)}%
-                    </span>
-                  </div>
-                )}
-                {m.cpa != null && (
-                  <div className="flex justify-between">
-                    <span className="text-app-fg-muted">CPA</span>
-                    <span className="font-medium text-app-fg">{formatNaira(m.cpa)}</span>
-                  </div>
-                )}
-                {m.profitabilityScore != null && (
-                  <div className="flex justify-between">
-                    <span className="text-app-fg-muted">Profitability</span>
-                    <span className={`font-medium tabular-nums ${
-                      m.trueRoas != null && m.trueRoas >= greenThreshold
-                        ? 'text-success-600 dark:text-success-400'
-                        : 'text-danger-600 dark:text-danger-400'
-                    }`}>
-                      {m.profitabilityScore.toFixed(1)}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2 pt-1 border-t border-app-border">
-                <Link
-                  to={buildOrdersQuery(m.userId, dateFilters)}
-                  prefetch="intent"
-                  className="btn-primary btn-sm inline-flex flex-1 items-center justify-center"
-                  onClick={() => setPreviewMember(null)}
-                >
-                  View orders
-                </Link>
-                <Link
-                  to={`/hr/users/${m.userId}`}
-                  prefetch="intent"
-                  className="btn-secondary btn-sm inline-flex flex-1 items-center justify-center"
-                  onClick={() => setPreviewMember(null)}
-                >
-                  View profile
-                </Link>
-              </div>
-            </div>
-          );
-        })()}
+        {previewMember && (
+          <MarketingTeamMemberCard
+            member={previewMember}
+            dateFilters={dateFilters}
+            greenThreshold={greenThreshold}
+            embedded
+          />
+        )}
       </Modal>
     </div>
   );

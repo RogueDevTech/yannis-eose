@@ -29,6 +29,7 @@ import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { FormSelect } from '~/components/ui/form-select';
 import { NumberInput } from '~/components/ui/number-input';
+import { AmountInput } from '~/components/ui/amount-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -126,7 +127,6 @@ function canCopyOrderSummaryForChat(
 
 /** After allocation: roles that can copy may still need the summary on delivered / settled orders. */
 const ORDER_STATUSES_LOGISTICS_SUMMARY_COPY = new Set<string>([
-  'CS_ENGAGED',
   'CONFIRMED',
   'AGENT_ASSIGNED',
   'DISPATCHED',
@@ -946,7 +946,7 @@ export function OrderDetailPage({
   const [deliverModalOpen, setDeliverModalOpen] = useState(false);
   const [deliverNote, setDeliverNote] = useState('');
   const [deliverProofUrl, setDeliverProofUrl] = useState('');
-  const [deliverCost, setDeliverCost] = useState<number | null>(null);
+  const [deliverCost, setDeliverCost] = useState('');
   /** Logistics location selected at delivery time. Pre-filled with the order's
    *  current allocation (`order.logisticsLocationId`) so the common case (same provider
    *  delivered) is one click. Editable because a different provider may have stepped
@@ -1601,61 +1601,53 @@ export function OrderDetailPage({
             {/* Status Timeline */}
             <div className="card overflow-hidden order-[-3] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
-              <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
-                <div
-                  className={`flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:gap-x-3 lg:gap-y-4 ${
-                    orderStatusFlow.length === 5
-                      ? 'lg:grid-cols-5'
-                      : orderStatusFlow.length === 6
-                        ? 'lg:grid-cols-6'
-                        : 'lg:grid-cols-7'
-                  }`}
-                >
+              {/* Mobile: 3-col grid wrapping; Desktop: single-row grid */}
+              <div
+                className={`grid grid-cols-3 gap-x-2 gap-y-3 lg:gap-x-3 lg:gap-y-4 ${
+                  orderStatusFlow.length === 5
+                    ? 'lg:grid-cols-5'
+                    : orderStatusFlow.length === 6
+                      ? 'lg:grid-cols-6'
+                      : 'lg:grid-cols-7'
+                }`}
+              >
                 {orderStatusFlow.map((status, idx) => {
                   const isPast = idx < currentStatusIndex;
                   const isCurrent = idx === currentStatusIndex;
-                  // Brand "current" ring reads as in-progress; Delivered / Remitted match
-                  // OrderStatusBadge (emerald / green) and prior completed steps (success).
                   const isSuccessMilestone =
                     status === 'DELIVERED' || status === 'REMITTED';
                   const renderedComplete = isPast || (isCurrent && isSuccessMilestone);
                   const showInProgressCurrent = isCurrent && !isSuccessMilestone;
 
                   return (
-                    <div key={status} className="flex items-center flex-shrink-0 lg:justify-center">
-                      <div className="flex flex-col items-center lg:w-full">
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                          showInProgressCurrent
-                            ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
-                            : renderedComplete
-                              ? 'bg-success-500 text-white'
-                              : 'bg-app-hover text-app-fg-muted'
-                        }`}>
-                          {renderedComplete ? (
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          ) : (
-                            idx + 1
-                          )}
-                        </div>
-                        <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
-                          showInProgressCurrent
-                            ? 'text-brand-600 dark:text-brand-400 font-semibold'
-                            : renderedComplete
-                              ? 'text-success-600 dark:text-success-500 font-semibold'
-                              : 'text-app-fg-muted'
-                        }`}>
-                          {STATUS_LABELS[status] ?? formatStatus(status)}
-                        </span>
+                    <div key={status} className="flex flex-col items-center">
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                        showInProgressCurrent
+                          ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
+                          : renderedComplete
+                            ? 'bg-success-500 text-white'
+                            : 'bg-app-hover text-app-fg-muted'
+                      }`}>
+                        {renderedComplete ? (
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        ) : (
+                          idx + 1
+                        )}
                       </div>
-                      {idx < orderStatusFlow.length - 1 && (
-                        <div className={`h-0.5 w-8 mx-1 flex-shrink-0 lg:hidden ${isPast ? 'bg-success-500' : 'bg-app-hover'}`} />
-                      )}
+                      <span className={`text-2xs mt-1 text-center leading-tight ${
+                        showInProgressCurrent
+                          ? 'text-brand-600 dark:text-brand-400 font-semibold'
+                          : renderedComplete
+                            ? 'text-success-600 dark:text-success-500 font-semibold'
+                            : 'text-app-fg-muted'
+                      }`}>
+                        {STATUS_LABELS[status] ?? formatStatus(status)}
+                      </span>
                     </div>
                   );
                 })}
-                </div>
               </div>
               {order.confirmedAt ? (
                 <div className="mt-4 pt-4 border-t border-app-border">
@@ -2259,7 +2251,7 @@ export function OrderDetailPage({
               if (!canEditOrder) return null;
               const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
               const canShareToWhatsApp =
-                (order.status === 'CONFIRMED' || order.status === 'AGENT_ASSIGNED') &&
+                order.status === 'AGENT_ASSIGNED' &&
                 locationsWithGroup.length > 0 &&
                 logisticsDispatchTemplates.length > 0;
               const canMarkDelivered =
@@ -2274,7 +2266,7 @@ export function OrderDetailPage({
                 canReallocate ||
                 canMarkDelivered ||
                 canShareToWhatsApp ||
-                showLogisticsOrderSummaryCopy;
+                showPostAllocationWhatsAppActions;
               if (!showCard) return null;
               return (
                 <div className="card order-[-2] lg:order-none">
@@ -2342,39 +2334,19 @@ export function OrderDetailPage({
                       </Button>
                     )}
                     {showPostAllocationWhatsAppActions && (
-                      <>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="w-full"
-                          onClick={() => void handleCopyOrderSummary()}
-                        >
-                          Copy order
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="w-full"
-                          onClick={() =>
-                            window.open(
-                              logisticsLocationWithGroupLink!.whatsappGroupLink as string,
-                              '_blank',
-                              'noopener,noreferrer',
-                            )
-                          }
-                        >
-                          Open Logistics Group Chat
-                        </Button>
-                      </>
-                    )}
-                    {showLogisticsOrderSummaryCopy && !showPostAllocationWhatsAppActions && (
                       <Button
                         type="button"
                         variant="secondary"
                         className="w-full"
-                        onClick={() => void handleCopyOrderSummary()}
+                        onClick={() =>
+                          window.open(
+                            logisticsLocationWithGroupLink!.whatsappGroupLink as string,
+                            '_blank',
+                            'noopener,noreferrer',
+                          )
+                        }
                       >
-                        Copy order
+                        Open Logistics Group Chat
                       </Button>
                     )}
                     {showCopyOrderSummary &&
@@ -2402,7 +2374,7 @@ export function OrderDetailPage({
                           // Pre-fill with the original allocation so the common path
                           // (same provider delivered) is a single click.
                           setDeliverLocationId(order.logisticsLocationId ?? '');
-                          setDeliverCost(null);
+                          setDeliverCost('');
                           setDeliverModalOpen(true);
                         }}
                         disabled={fetcher.state === 'submitting'}
@@ -2860,36 +2832,39 @@ export function OrderDetailPage({
               : 'Select the logistics company location that will fulfil this order. Stock must be available at that location.'}
           </p>
           <ModalFetcherInlineError message={fetcherErrorForTransition('AGENT_ASSIGNED')} />
-          {syncHandoffAllocatableLocations.length > 0 ? (
-            <>
-              {eligibleAllocatableCount === 0 ? (
-                <InlineNotification
-                  variant="warning"
-                  className="mb-3"
-                  message="No hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Expand a location below to see the reason."
+          {syncHandoffAllocatableLocations.length > 0 ? (() => {
+            // Only show locations with enough stock (eligible) for assignment.
+            const eligibleOnly = syncHandoffAllocatableLocations.filter((l) =>
+              l.eligible && !(order.status === 'AGENT_ASSIGNED' && l.id === order.logisticsLocationId),
+            );
+            if (eligibleOnly.length === 0) {
+              return (
+                <EmptyState
+                  title="No locations with enough stock"
+                  description="No logistics hub currently has enough free shelf stock for every line on this order. Receive stock (intake or verified transfer) and try again."
+                  variant="card"
                 />
-              ) : null}
-              <SearchableSelect
-                id="allocate-location-id"
-                label="Logistics location"
-                value={allocateLocationId}
-                onChange={setAllocateLocationId}
-                placeholder="Select a location..."
-                searchPlaceholder="Search locations..."
-                options={syncHandoffAllocatableLocations.map((loc) => ({
-                  value: loc.id,
-                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                  description: describeAllocatableLocation(loc),
-                  disabled:
-                    !loc.eligible ||
-                    (order.status === 'AGENT_ASSIGNED' && loc.id === order.logisticsLocationId),
-                }))}
-              />
-              <div className="flex gap-2 mt-4 justify-end">
-                <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
-                  Back
-                </Button>
-                {eligibleAllocatableCount > 0 && (
+              );
+            }
+            return (
+              <>
+                <SearchableSelect
+                  id="allocate-location-id"
+                  label="Logistics location"
+                  value={allocateLocationId}
+                  onChange={setAllocateLocationId}
+                  placeholder="Select a location..."
+                  searchPlaceholder="Search locations..."
+                  options={eligibleOnly.map((loc) => ({
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    description: describeAllocatableLocation(loc),
+                  }))}
+                />
+                <div className="flex gap-2 mt-4 justify-end">
+                  <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
+                    Back
+                  </Button>
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
@@ -2901,10 +2876,7 @@ export function OrderDetailPage({
                       disabled={
                         !allocateLocationId ||
                         !selectedAllocatableLocation?.eligible ||
-                        fetcher.state === 'submitting' ||
-                        (order.status === 'AGENT_ASSIGNED' &&
-                          !!order.logisticsLocationId &&
-                          allocateLocationId === order.logisticsLocationId)
+                        fetcher.state === 'submitting'
                       }
                       loading={fetcher.state === 'submitting'}
                       loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
@@ -2912,10 +2884,10 @@ export function OrderDetailPage({
                       {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
                     </Button>
                   </fetcher.Form>
-                )}
-              </div>
-            </>
-          ) : allocatableLocationsDeferred ? (
+                </div>
+              </>
+            );
+          })() : allocatableLocationsDeferred ? (
             <DeferredSection resolve={allocatableLocationsDeferred} skeleton="card">
               {(rows) => {
                 const rawList = Array.isArray(rows) ? rows : [];
@@ -2923,10 +2895,13 @@ export function OrderDetailPage({
                   rawList,
                   mayIncludeInternalWarehousesForHandoff,
                 );
-                const eligibleCount = list.filter((l) => l.eligible).length;
-                const selected = allocateLocationId ? list.find((l) => l.id === allocateLocationId) : undefined;
+                // Only show eligible locations (with enough stock).
+                const eligibleList = list.filter((l) =>
+                  l.eligible && !(order.status === 'AGENT_ASSIGNED' && l.id === order.logisticsLocationId),
+                );
+                const selected = allocateLocationId ? eligibleList.find((l) => l.id === allocateLocationId) : undefined;
 
-                if (rawList.length === 0) {
+                if (eligibleList.length === 0) {
                   return (
                     <EmptyState
                       title="No locations with enough stock"
@@ -2936,25 +2911,8 @@ export function OrderDetailPage({
                   );
                 }
 
-                if (list.length === 0) {
-                  return (
-                    <EmptyState
-                      title="No external logistics partners available"
-                      description="Company-owned warehouse hubs are not listed in this hand-off. Pick a third-party logistics location, or ask a logistics team member to assign internal fulfillment."
-                      variant="card"
-                    />
-                  );
-                }
-
                 return (
                   <>
-                    {eligibleCount === 0 ? (
-                      <InlineNotification
-                        variant="warning"
-                        className="mb-3"
-                        message="No hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Expand a location below to see the reason."
-                      />
-                    ) : null}
                     <SearchableSelect
                       id="allocate-location-id"
                       label="Logistics location"
@@ -2962,43 +2920,35 @@ export function OrderDetailPage({
                       onChange={setAllocateLocationId}
                       placeholder="Select a location..."
                       searchPlaceholder="Search locations..."
-                      options={list.map((loc) => ({
+                      options={eligibleList.map((loc) => ({
                         value: loc.id,
                         label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                         description: describeAllocatableLocation(loc),
-                        disabled:
-                          !loc.eligible ||
-                          (order.status === 'AGENT_ASSIGNED' && loc.id === order.logisticsLocationId),
                       }))}
                     />
                     <div className="flex gap-2 mt-4 justify-end">
                       <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
                         Back
                       </Button>
-                      {eligibleCount > 0 && (
-                        <fetcher.Form method="post">
-                          <input type="hidden" name="intent" value="transition" />
-                          <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
-                          {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-                          <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
-                          <Button
-                            type="submit"
-                            variant="primary"
-                            disabled={
-                              !allocateLocationId ||
-                              !selected?.eligible ||
-                              fetcher.state === 'submitting' ||
-                              (order.status === 'AGENT_ASSIGNED' &&
-                                !!order.logisticsLocationId &&
-                                allocateLocationId === order.logisticsLocationId)
-                            }
-                            loading={fetcher.state === 'submitting'}
-                            loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
-                          >
-                            {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
-                          </Button>
-                        </fetcher.Form>
-                      )}
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="transition" />
+                        <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
+                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                        <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          disabled={
+                            !allocateLocationId ||
+                            !selected?.eligible ||
+                            fetcher.state === 'submitting'
+                          }
+                          loading={fetcher.state === 'submitting'}
+                          loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
+                        >
+                          {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
+                        </Button>
+                      </fetcher.Form>
                     </div>
                   </>
                 );
@@ -3034,67 +2984,78 @@ export function OrderDetailPage({
             Confirm that the customer received the order. A note and screenshot are optional.
           </p>
           <ModalFetcherInlineError message={fetcherErrorForTransition('DELIVERED')} />
-          {/* Logistics provider that actually delivered. Pre-filled with the original
-              allocation; can be changed if a different provider stepped in. The
-              dropdown surfaces per-product stock counts (same data the Assign
-              modal uses) so the user can pick the provider that actually has the
-              units they need to deduct from. */}
-          {logisticsLocations.length > 0 && (
-            <div className="mb-4">
-              <p className="text-xs font-medium text-app-fg-muted mb-1.5">Logistics provider</p>
-              <SearchableSelect
-                id="deliver-logistics-location"
-                value={deliverLocationId}
-                onChange={setDeliverLocationId}
-                placeholder="Select the provider that delivered…"
-                options={logisticsLocations.map((loc) => {
-                  const stockInfo = resolvedAllocatableLocations.find((a) => a.id === loc.id);
-                  const hasStock =
-                    !!stockInfo?.availabilityByProduct &&
-                    stockInfo.availabilityByProduct.length > 0;
-                  // Locations with no inventory level for this order's products
-                  // can't have stock deducted — disable them so they can't be
-                  // picked (which would fail the delivery with a stock error).
-                  const stockDesc = hasStock
-                    ? stockInfo!.availabilityByProduct
-                        .map((p) => `${p.productName}: ${p.available} available`)
-                        .join(' · ')
-                    : 'No inventory for this order — cannot deliver from here';
-                  const originLabel =
-                    loc.id === order.logisticsLocationId ? 'Originally allocated' : undefined;
+          {/* Logistics location picker — resolves allocatable-locations data
+              inline (same deferred source the Assign modal uses) so stock
+              counts are always available. Only locations with stock for this
+              order's products are shown; the allocated location is always
+              included and sorted first. */}
+          <DeferredSection resolve={allocatableLocationsDeferred} skeleton="inline">
+            {(rows) => {
+              const allLocs = Array.isArray(rows) ? (rows as typeof resolvedAllocatableLocations) : [];
+              // Only show the allocated location + locations with available stock
+              const options = allLocs
+                .filter((loc) => {
+                  if (loc.id === order.logisticsLocationId) return true;
+                  if (!loc.availabilityByProduct?.length) return false;
+                  return loc.availabilityByProduct.some((p) => p.available > 0);
+                })
+                .map((loc) => {
+                  const isAllocated = loc.id === order.logisticsLocationId;
+                  const stockDesc = loc.availabilityByProduct
+                    ?.map((p) => {
+                      const total = p.available + p.needed;
+                      return isAllocated
+                        ? `${p.productName}: ${total} in stock (${p.needed} reserved for this order)`
+                        : `${p.productName}: ${p.available} available`;
+                    })
+                    .join(' · ');
+                  const originLabel = isAllocated ? 'Originally allocated' : undefined;
                   const description = [stockDesc, originLabel].filter(Boolean).join(' · ') || undefined;
                   return {
                     value: loc.id,
                     label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                     description,
-                    disabled: !hasStock,
+                    _isAllocated: isAllocated,
                   };
-                })}
-                searchPlaceholder="Search providers..."
-                controlSize="lg"
-              />
-              {order.logisticsLocationId &&
-                deliverLocationId &&
-                deliverLocationId !== order.logisticsLocationId && (
-                  <p className="mt-1.5 text-xs text-warning-700 dark:text-warning-400">
-                    Different provider from the original allocation — the original reserve will
-                    be released and stock will be deducted at the chosen provider.
-                  </p>
-                )}
-            </div>
-          )}
+                })
+                .sort((a, b) => (a._isAllocated === b._isAllocated ? 0 : a._isAllocated ? -1 : 1));
+
+              if (options.length === 0) return null;
+              return (
+                <div className="mb-4">
+                  <p className="text-xs font-medium text-app-fg-muted mb-1.5">Logistics location</p>
+                  <SearchableSelect
+                    id="deliver-logistics-location"
+                    value={deliverLocationId}
+                    onChange={setDeliverLocationId}
+                    placeholder="Select the location that delivered…"
+                    options={options}
+                    searchPlaceholder="Search locations..."
+                    controlSize="lg"
+                  />
+                  {order.logisticsLocationId &&
+                    deliverLocationId &&
+                    deliverLocationId !== order.logisticsLocationId && (
+                      <p className="mt-1.5 text-xs text-warning-700 dark:text-warning-400">
+                        Different location from the original allocation — the original reserve will
+                        be released and stock will be deducted at the chosen location.
+                      </p>
+                    )}
+                </div>
+              );
+            }}
+          </DeferredSection>
           <div className="mb-4">
-            <NumberInput
+            <label htmlFor="delivery-cost" className="block text-sm font-medium text-app-fg mb-1">
+              Cost of delivery (optional)
+            </label>
+            <AmountInput
               id="delivery-cost"
-              label="Cost of delivery (optional)"
+              placeholder="e.g. 2,500"
               value={deliverCost}
-              onValueChange={setDeliverCost}
-              onValueCleared={() => setDeliverCost(null)}
-              allowEmpty
-              placeholder="e.g. 2500"
-              min={0}
-              coerce="decimal"
-              leftAddon="₦"
+              onChange={setDeliverCost}
+              prefix="₦"
+              className="input w-full"
             />
           </div>
           <Textarea
@@ -3105,16 +3066,6 @@ export function OrderDetailPage({
             placeholder="e.g. Customer confirmed receipt on follow-up call at 3:42pm."
             rows={3}
           />
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
-              Screenshot (optional)
-            </label>
-            <FileUpload
-              folder={ASSET_FOLDERS.DELIVERY_PROOF}
-              onUpload={(url) => setDeliverProofUrl(url)}
-              accept="image/*"
-            />
-          </div>
           <div className="flex gap-2 mt-5 justify-end">
             <Button type="button" variant="secondary" onClick={() => setDeliverModalOpen(false)}>
               Back
@@ -3126,7 +3077,7 @@ export function OrderDetailPage({
               {deliverLocationId && (
                 <input type="hidden" name="logisticsLocationId" value={deliverLocationId} />
               )}
-              {deliverCost != null && deliverCost > 0 && (
+              {deliverCost && parseFloat(deliverCost) > 0 && (
                 <input type="hidden" name="deliveryFeeAddOn" value={deliverCost} />
               )}
               {deliverNote.trim() && <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />}
@@ -3179,12 +3130,12 @@ export function OrderDetailPage({
 
             <div className="space-y-3">
               <div>
-                <FormSelect
-                  id="share-location"
+                <SearchableSelect
                   label="Logistics company location"
                   value={shareLocationId}
-                  onChange={(e) => setShareLocationId(e.target.value)}
+                  onChange={(v) => setShareLocationId(v)}
                   placeholder="Select a location..."
+                  searchPlaceholder="Search locations..."
                   options={locationsWithGroup.map((loc) => ({
                     value: loc.id,
                     label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
@@ -3198,12 +3149,12 @@ export function OrderDetailPage({
               </div>
 
               <div>
-                <FormSelect
-                  id="share-template"
+                <SearchableSelect
                   label="Template"
                   value={shareTemplateId}
-                  onChange={(e) => setShareTemplateId(e.target.value)}
+                  onChange={(v) => setShareTemplateId(v)}
                   placeholder="Select a template..."
+                  searchPlaceholder="Search templates..."
                   options={logisticsDispatchTemplates.map((t) => ({ value: t.id, label: t.name }))}
                 />
               </div>

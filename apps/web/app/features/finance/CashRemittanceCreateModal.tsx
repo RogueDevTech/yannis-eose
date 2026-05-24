@@ -3,6 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { Textarea } from '~/components/ui/textarea';
+import { AmountInput } from '~/components/ui/amount-input';
 import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upload';
 import { Checkbox } from '~/components/ui/checkbox';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -16,6 +17,8 @@ export interface EligibleOrder {
   id: string;
   customerName: string;
   totalAmount: string | null;
+  /** Delivery fee already set on the order (e.g. by CS closer). */
+  deliveryFee: string | null;
   deliveredAt: string | null;
   logisticsLocationId: string | null;
   logisticsLocationName: string | null;
@@ -53,7 +56,21 @@ export function CashRemittanceCreateModal({
   const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
   const [notes, setNotes] = useState('');
   const [markReceivedNow, setMarkReceivedNow] = useState(false);
+  const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
   const [inlineError, setInlineError] = useState<string | null>(null);
+
+  // Pre-populate delivery fees from orders that already have one set (e.g. by CS closer).
+  useEffect(() => {
+    if (open) {
+      const initial: Record<string, string> = {};
+      for (const o of selectedOrders) {
+        if (o.deliveryFee != null && o.deliveryFee !== '' && parseFloat(o.deliveryFee) > 0) {
+          initial[o.id] = o.deliveryFee;
+        }
+      }
+      setDeliveryFees(initial);
+    }
+  }, [open, selectedOrders]);
 
   useEffect(() => {
     if (!open) {
@@ -61,6 +78,7 @@ export function CashRemittanceCreateModal({
       setUploadState('idle');
       setNotes('');
       setMarkReceivedNow(false);
+      setDeliveryFees({});
       setInlineError(null);
     }
   }, [open]);
@@ -86,8 +104,11 @@ export function CashRemittanceCreateModal({
   }, [selectedOrders]);
 
   const totalAmount = useMemo(
-    () => selectedOrders.reduce((acc, o) => acc + lineAmount(o), 0),
-    [selectedOrders],
+    () => selectedOrders.reduce((acc, o) => {
+      const fee = parseFloat(deliveryFees[o.id] ?? '0') || 0;
+      return acc + lineAmount(o) + fee;
+    }, 0),
+    [selectedOrders, deliveryFees],
   );
 
   const submitting = fetcher.state !== 'idle';
@@ -117,6 +138,15 @@ export function CashRemittanceCreateModal({
     fd.set('receiptUrls', JSON.stringify(receiptUrls));
     if (notes.trim()) fd.set('notes', notes.trim());
     fd.set('markReceivedNow', markReceivedNow ? 'true' : 'false');
+    // Collect non-zero delivery fees
+    const feesMap: Record<string, string> = {};
+    for (const o of selectedOrders) {
+      const fee = deliveryFees[o.id]?.trim();
+      if (fee && parseFloat(fee) > 0) feesMap[o.id] = fee;
+    }
+    if (Object.keys(feesMap).length > 0) {
+      fd.set('deliveryFees', JSON.stringify(feesMap));
+    }
     fetcher.submit(fd, { method: 'POST', action: actionUrl });
   };
 
@@ -162,16 +192,33 @@ export function CashRemittanceCreateModal({
             </p>
           ) : (
             <ul className="rounded-lg border border-app-border divide-y divide-app-border overflow-hidden">
-              {selectedOrders.map((o) => (
-                <li key={o.id} className="flex items-center justify-between gap-3 px-3 py-2.5 bg-app-elevated">
-                  <span className="font-mono text-sm font-medium text-app-fg min-w-0 truncate">
-                    {o.invoice ? o.invoice.referenceFormatted : 'No invoice'}
-                  </span>
-                  <span className="shrink-0 tabular-nums">
-                    {lineAmount(o) > 0 ? <NairaPrice amount={lineAmount(o)} /> : '—'}
-                  </span>
-                </li>
-              ))}
+              {selectedOrders.map((o) => {
+                const fee = parseFloat(deliveryFees[o.id] ?? '0') || 0;
+                const lineTotal = lineAmount(o) + fee;
+                return (
+                  <li key={o.id} className="bg-app-elevated px-3 py-2.5 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-sm font-medium text-app-fg min-w-0 truncate">
+                        {o.invoice ? o.invoice.referenceFormatted : 'No invoice'}
+                      </span>
+                      <span className="shrink-0 tabular-nums">
+                        {lineTotal > 0 ? <NairaPrice amount={lineTotal} /> : '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-1">
+                      <AmountInput
+                        placeholder="Delivery fee"
+                        value={deliveryFees[o.id] ?? ''}
+                        onChange={(raw) =>
+                          setDeliveryFees((prev) => ({ ...prev, [o.id]: raw }))
+                        }
+                        prefix="₦"
+                        className="input input-sm w-full"
+                      />
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
 

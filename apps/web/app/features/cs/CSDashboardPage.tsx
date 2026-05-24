@@ -325,7 +325,7 @@ function AgentWorkloadDetailModal({
             <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.capacity}</p>
           </div>
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-mini leading-4 text-app-fg-muted uppercase tracking-wide">Closed today</p>
+            <p className="text-mini leading-4 text-app-fg-muted uppercase tracking-wide">Closed this month</p>
             <p className={`text-xl leading-7 font-bold mt-1 ${closesToday >= agent.capacity ? 'text-success-600 dark:text-success-400' : 'text-app-fg'}`}>{closesToday}</p>
           </div>
         </div>
@@ -334,7 +334,7 @@ function AgentWorkloadDetailModal({
       {/* Utilization bar */}
       <div className="px-5 pt-5 pb-2">
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-app-fg-muted">Today&apos;s duty (Lagos)</p>
+          <p className="text-xs font-medium text-app-fg-muted">This month&apos;s duty (Lagos)</p>
           <p className={`text-xs font-bold ${statusColor}`}>{closesToday} / {agent.capacity}</p>
         </div>
         <div className="w-full h-2.5 bg-app-hover rounded-full overflow-hidden">
@@ -595,7 +595,7 @@ function CSQueueStaticHeader({
     <PageHeader
       title="Live Activities"
       mobileInlineActions
-      description="Today's queue and closer activity."
+      description="This month's queue and closer activity."
       actions={
         <PageHeaderMobileTools
           sheetTitle="Sales queue tools"
@@ -1470,7 +1470,7 @@ function CSDashboardPageLoaded({
       valueClassName: 'text-app-fg',
     },
     {
-      label: 'Duty today',
+      label: 'Duty this month',
       value: (
         <>
           {totalClosesToday}
@@ -1676,7 +1676,7 @@ function CSDashboardPageLoaded({
                         </span>
                       )}
                     </h2>
-                    <p className="text-xs text-app-fg-muted mt-0.5">Today's orders and carts. Tap a card.</p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">This month's orders and carts. Tap a card.</p>
                   </div>
                   <div className="flex items-center gap-1 sm:gap-2">
                     <div className="hidden md:flex items-center gap-1 sm:gap-2">
@@ -1732,7 +1732,7 @@ function CSDashboardPageLoaded({
                         <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
                     }
-                    title="No activity yet today"
+                    title="No activity yet this month"
                     description="Orders and carts will show here."
                   />
                 )}
@@ -1757,7 +1757,7 @@ function CSDashboardPageLoaded({
                     </div>
                     <div className="px-4 py-2 border-b border-app-border shrink-0">
                       <p className="text-sm text-app-fg-muted">
-                        {sorted.length} item{sorted.length !== 1 ? 's' : ''} — today
+                        {sorted.length} item{sorted.length !== 1 ? 's' : ''} — this month
                       </p>
                     </div>
                     <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -1861,7 +1861,7 @@ function CSDashboardPageLoaded({
             <h2 className="text-sm font-semibold text-app-fg">Closer workloads</h2>
             <p className="text-xs text-app-fg-muted mt-0.5">
               {workloads.length} active closer{workloads.length !== 1 ? 's' : ''} · {totalPending}/{totalCapacity}{' '}
-              backlog · {totalClosesToday} closed today (Lagos)
+              backlog · {totalClosesToday} closed this month (Lagos)
             </p>
           </div>
           {workloads.length > 0 && (
@@ -2630,7 +2630,12 @@ function CSDashboardPageLoaded({
                 ))}
               </div>
               {abandonedTotalPages >= 1 ? (
-                <div className="mt-4 flex justify-center border-t border-app-border pt-4">
+                <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border pt-4">
+                  <p className="text-sm text-app-fg-muted">
+                    {abandonedPagination.total && abandonedPagination.total > 0
+                      ? `Showing ${(abandonedPagination.page - 1) * abandonedPagination.limit + 1}–${Math.min(abandonedPagination.page * abandonedPagination.limit, abandonedPagination.total)} of ${abandonedPagination.total} carts`
+                      : 'No carts'}
+                  </p>
                   <Pagination
                     page={abandonedPagination.page}
                     totalPages={abandonedTotalPages}

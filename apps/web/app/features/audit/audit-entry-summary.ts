@@ -284,52 +284,61 @@ export function getAuditDescriptionPieces(
 
   const data = entry.data;
   const actor = getActorDisplay(entry.changedBy, actorNames, entry.validFrom);
-  const status = pickStr(data, 'transfer_status', 'transferStatus');
-  const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+  const oldStatus = pickStr(data, 'transfer_status', 'transferStatus');
+  const statusLabel = oldStatus ? (STATUS_LABELS[oldStatus] ?? oldStatus) : '';
   const fromId = pickStr(data, 'from_location_id', 'fromLocationId');
   const toId = pickStr(data, 'to_location_id', 'toLocationId');
-  const sentQty = pickNum(data, 'sent_quantity', 'sentQuantity');
-  const receivedQty = pickNum(data, 'received_quantity', 'receivedQuantity');
+  const sentQty = pickNum(data, 'quantity_sent', 'quantitySent', 'sent_quantity', 'sentQuantity');
+  const receivedQty = pickNum(data, 'quantity_received', 'quantityReceived', 'received_quantity', 'receivedQuantity');
   const qtyStr = sentQty != null ? String(sentQty) : '';
+
+  // For UPDATE rows the data contains the OLD (pre-update) row. Infer what
+  // transition happened from the old status so the audit label makes sense.
+  const isUpdate = entry.action === 'UPDATE';
 
   const pieces: AuditDescriptionPiece[] = [];
 
-  if (status === 'RECEIVED') {
+  // Verification: old status was IN_TRANSIT → transfer was marked received or disputed.
+  if (isUpdate && oldStatus === 'IN_TRANSIT') {
     const received = receivedQty != null ? String(receivedQty) : qtyStr;
     pieces.push({
       kind: 'text',
       text: `${actor} confirmed receipt of a warehouse transfer`,
     });
-    appendWarehouseTransferGeoLinks(
-      pieces,
-      entry,
-      fromId,
-      toId,
-      locationNames,
-      received ? `${received} units` : null,
-    );
+    appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, received ? `${received} units` : null);
     return pieces;
   }
 
-  if (status === 'DISPUTED') {
+  // Approval: old status was PENDING → transfer was approved (→ IN_TRANSIT) or rejected.
+  if (isUpdate && oldStatus === 'PENDING') {
+    pieces.push({ kind: 'text', text: `${actor} approved a warehouse transfer` });
+    appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, qtyStr ? `${qtyStr} units` : null);
+    return pieces;
+  }
+
+  // INSERT rows carry the initial state — display as-is.
+  if (oldStatus === 'RECEIVED') {
+    const received = receivedQty != null ? String(receivedQty) : qtyStr;
+    pieces.push({
+      kind: 'text',
+      text: `${actor} confirmed receipt of a warehouse transfer`,
+    });
+    appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, received ? `${received} units` : null);
+    return pieces;
+  }
+
+  if (oldStatus === 'DISPUTED') {
     pieces.push({ kind: 'text', text: `${actor} disputed a warehouse transfer` });
     appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, qtyStr ? `${qtyStr} units` : null);
     return pieces;
   }
 
-  if (status === 'CANCELLED') {
+  if (oldStatus === 'CANCELLED') {
     pieces.push({
       kind: 'text',
       text: `${actor} cancelled a warehouse transfer${statusLabel ? ` (${statusLabel})` : ''}`,
     });
-    appendWarehouseTransferGeoLinks(
-      pieces,
-      entry,
-      fromId,
-      toId,
-      locationNames,
-      qtyStr ? `${qtyStr} units` : null,
-    );
+    appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, qtyStr ? `${qtyStr} units` : null);
     return pieces;
   }
 
@@ -339,14 +348,7 @@ export function getAuditDescriptionPieces(
     kind: 'text',
     text: `${actor} ${verb} a warehouse transfer${mid}`,
   });
-  appendWarehouseTransferGeoLinks(
-    pieces,
-    entry,
-    fromId,
-    toId,
-    locationNames,
-    qtyStr ? `${qtyStr} units` : null,
-  );
+  appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, qtyStr ? `${qtyStr} units` : null);
   return pieces;
 }
 
@@ -406,77 +408,69 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'orders') {
-    const status = pickStr(data, 'order_status', 'orderStatus');
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const oldStatus = pickStr(data, 'status', 'order_status', 'orderStatus');
+    const statusLabel = oldStatus ? (STATUS_LABELS[oldStatus] ?? oldStatus) : '';
     const customer = pickStr(data, 'customer_name', 'customerName');
     const ref = pickStr(data, 'reference_number', 'referenceNumber');
     const who = customer ?? ref;
-    const customerPhrase = customer ? ` for ${customer}` : '';
+    const isUpdate = entry.action === 'UPDATE';
 
-    if (status === 'UNPROCESSED') {
+    // For UPDATE rows, `data` contains the OLD state. The action that happened
+    // is the transition FROM this old status to the next. Map old status → verb
+    // describing what the actor did to leave that state.
+    if (isUpdate && oldStatus) {
+      const orderUpdateVerbs: Record<string, string> = {
+        UNPROCESSED: 'assigned a closer to',
+        CS_ASSIGNED: 'engaged with',
+        CS_ENGAGED: 'confirmed',
+        CONFIRMED: 'dispatched',
+        AGENT_ASSIGNED: 'dispatched',
+        DISPATCHED: 'marked in transit',
+        IN_TRANSIT: 'marked delivered',
+        DELIVERED: 'recorded remittance for',
+        PARTIALLY_DELIVERED: 'updated',
+        RETURNED: 'restocked',
+        RESTOCKED: 'updated',
+        WRITTEN_OFF: 'updated',
+        REMITTED: 'updated',
+        CANCELLED: 'updated',
+        DELETED: 'updated',
+      };
+      const verb = orderUpdateVerbs[oldStatus] ?? 'updated';
+      if (!who) return { prefix: `${actor} ${verb} the order.`, entityLabel: null, suffix: '' };
+      return { prefix: `${actor} ${verb} the order for `, entityLabel: who, suffix: '.' };
+    }
+
+    // INSERT rows carry the initial state (typically UNPROCESSED).
+    if (oldStatus === 'UNPROCESSED') {
       if (!who) return { prefix: `${actor} recorded a new order.`, entityLabel: null, suffix: '' };
       return { prefix: `${actor} recorded a new order for `, entityLabel: who, suffix: '.' };
     }
-    if (status === 'CS_ASSIGNED') {
+    if (oldStatus === 'CS_ASSIGNED') {
       if (!who) return { prefix: `${actor} assigned a sales closer to the order.`, entityLabel: null, suffix: '' };
       return { prefix: `${actor} assigned a sales closer for `, entityLabel: who, suffix: '.' };
     }
-    if (status === 'CS_ENGAGED') {
-      if (!who) return { prefix: `${actor} started working on the order.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} started working on the order for `, entityLabel: who, suffix: '.' };
-    }
-    if (status === 'CONFIRMED') {
+    if (oldStatus === 'CONFIRMED') {
       if (!who) return { prefix: `${actor} confirmed the order.`, entityLabel: null, suffix: '' };
       return { prefix: `${actor} confirmed the order for `, entityLabel: who, suffix: '.' };
     }
-    if (status === 'CANCELLED') {
+    if (oldStatus === 'DELIVERED') {
+      if (!who) return { prefix: `${actor} marked the order delivered.`, entityLabel: null, suffix: '' };
+      return { prefix: `${actor} marked the order delivered (`, entityLabel: who, suffix: ').' };
+    }
+    if (oldStatus === 'REMITTED') {
+      if (!who) return { prefix: `${actor} recorded remittance for the order.`, entityLabel: null, suffix: '' };
+      return { prefix: `${actor} recorded remittance for `, entityLabel: who, suffix: '.' };
+    }
+    if (oldStatus === 'CANCELLED') {
       const reasonRaw = pickStr(data, 'cancel_reason', 'cancelReason');
       const reason = reasonRaw ? ` (${reasonRaw})` : '';
       if (!who) return { prefix: `${actor} cancelled the order${reason}.`, entityLabel: null, suffix: '' };
       return { prefix: `${actor} cancelled the order for `, entityLabel: who, suffix: `${reason}.` };
     }
-    if (status === 'AGENT_ASSIGNED') {
-      if (!who) return { prefix: `${actor} shared the order with a logistics company.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} shared the order with a logistics company (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'DISPATCHED') {
-      if (!who) return { prefix: `${actor} marked the order dispatched.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} marked the order dispatched (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'IN_TRANSIT') {
-      return {
-        prefix: `The order${customerPhrase} was marked in transit.`,
-        entityLabel: null,
-        suffix: '',
-      };
-    }
-    if (status === 'DELIVERED') {
-      if (!who) return { prefix: `${actor} marked the order delivered.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} marked the order delivered (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'PARTIALLY_DELIVERED') {
-      if (!who) return { prefix: `${actor} marked the order partially delivered.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} marked the order partially delivered (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'RETURNED') {
-      if (!who) return { prefix: `${actor} marked the order returned.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} marked the order returned (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'RESTOCKED') {
-      if (!who) return { prefix: `${actor} restocked units from a returned order.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} restocked units from a returned order (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'WRITTEN_OFF') {
-      if (!who) return { prefix: `${actor} wrote off the order.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} wrote off the order (`, entityLabel: who, suffix: ').' };
-    }
-    if (status === 'REMITTED') {
-      if (!who) return { prefix: `${actor} recorded remittance for the order.`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} recorded remittance for `, entityLabel: who, suffix: '.' };
-    }
     if (statusLabel) {
-      if (!who) return { prefix: `${actor} updated the order (status: ${statusLabel}).`, entityLabel: null, suffix: '' };
-      return { prefix: `${actor} updated the order for `, entityLabel: who, suffix: ` (status: ${statusLabel}).` };
+      if (!who) return { prefix: `${actor} updated the order (${statusLabel}).`, entityLabel: null, suffix: '' };
+      return { prefix: `${actor} updated the order for `, entityLabel: who, suffix: ` (${statusLabel}).` };
     }
     if (!who) return { prefix: `${actor} updated the order.`, entityLabel: null, suffix: '' };
     return { prefix: `${actor} updated the order for `, entityLabel: who, suffix: '.' };
@@ -512,10 +506,10 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'stock_transfers') {
-    const status = pickStr(data, 'transfer_status', 'transferStatus');
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const sentQty = pickNum(data, 'sent_quantity', 'sentQuantity');
-    const receivedQty = pickNum(data, 'received_quantity', 'receivedQuantity');
+    const oldStatus = pickStr(data, 'transfer_status', 'transferStatus');
+    const statusLabel = oldStatus ? (STATUS_LABELS[oldStatus] ?? oldStatus) : '';
+    const sentQty = pickNum(data, 'quantity_sent', 'quantitySent', 'sent_quantity', 'sentQuantity');
+    const receivedQty = pickNum(data, 'quantity_received', 'quantityReceived', 'received_quantity', 'receivedQuantity');
     const qtyStr = sentQty != null ? String(sentQty) : '';
     const fromId = pickStr(data, 'from_location_id', 'fromLocationId');
     const toId = pickStr(data, 'to_location_id', 'toLocationId');
@@ -523,8 +517,11 @@ export function getAuditSummaryParts(
     const toLm = resolveLocationAuditLabel(toId, locationNames);
     const routePhrase =
       fromLm && toLm ? `from ${fromLm} to ${toLm}` : fromLm ? `from ${fromLm}` : toLm ? `to ${toLm}` : '';
+    const isUpdate = entry.action === 'UPDATE';
 
-    if (status === 'RECEIVED') {
+    // UPDATE rows carry the OLD (pre-update) state. Infer the transition from the old status.
+    if (isUpdate && oldStatus === 'IN_TRANSIT') {
+      // Transfer was verified — marked received or disputed.
       const received = receivedQty != null ? String(receivedQty) : qtyStr;
       const qtyPart = received ? `${received} units` : '';
       const detailParts = [routePhrase, qtyPart].filter((p) => p.length > 0);
@@ -535,7 +532,30 @@ export function getAuditSummaryParts(
         suffix: '.',
       };
     }
-    if (status === 'DISPUTED') {
+    if (isUpdate && oldStatus === 'PENDING') {
+      // Transfer was approved (→ IN_TRANSIT) or rejected.
+      const detailParts = [routePhrase, qtyStr ? `${qtyStr} units` : ''].filter((p) => p.length > 0);
+      const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
+      return {
+        prefix: `${actor} approved a warehouse transfer${detail}`,
+        entityLabel: null,
+        suffix: '.',
+      };
+    }
+
+    // INSERT rows or rows whose status already reflects the final state (legacy data).
+    if (oldStatus === 'RECEIVED') {
+      const received = receivedQty != null ? String(receivedQty) : qtyStr;
+      const qtyPart = received ? `${received} units` : '';
+      const detailParts = [routePhrase, qtyPart].filter((p) => p.length > 0);
+      const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
+      return {
+        prefix: `${actor} confirmed receipt of a warehouse transfer${detail}`,
+        entityLabel: null,
+        suffix: '.',
+      };
+    }
+    if (oldStatus === 'DISPUTED') {
       const detailParts = [routePhrase, qtyStr ? `${qtyStr} units sent` : ''].filter((p) => p.length > 0);
       const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
       return {
@@ -544,7 +564,7 @@ export function getAuditSummaryParts(
         suffix: '.',
       };
     }
-    if (status === 'CANCELLED') {
+    if (oldStatus === 'CANCELLED') {
       const detailParts = [routePhrase, qtyStr ? `${qtyStr} units` : ''].filter((p) => p.length > 0);
       const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
       return {
@@ -571,7 +591,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'invoices') {
-    const status = pickStr(data, 'invoice_status', 'invoiceStatus');
+    const status = pickStr(data, 'status', 'invoice_status', 'invoiceStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amountRaw = pickDataField(data, 'amount');
     const amount = amountRaw != null && amountRaw !== '' ? ` for ${formatCurrency(amountRaw)}` : '';
@@ -584,7 +604,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'marketing_funding') {
-    const status = pickStr(data, 'funding_status', 'fundingStatus');
+    const status = pickStr(data, 'status', 'funding_status', 'fundingStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amountRaw = pickDataField(data, 'amount');
     const amount = amountRaw != null && amountRaw !== '' ? ` (${formatCurrency(amountRaw)})` : '';
@@ -592,6 +612,10 @@ export function getAuditSummaryParts(
     const receiver = lookupName(pickDataField(data, 'receiver_id', 'receiverId'), actorNames, asOf);
     const parties =
       sender && receiver ? ` from ${sender} to ${receiver}` : sender ? ` from ${sender}` : receiver ? ` to ${receiver}` : '';
+    // For UPDATE rows, old status tells us what transition happened.
+    if (entry.action === 'UPDATE' && status === 'SENT') {
+      return { prefix: `${actor} confirmed marketing funding was received`, entityLabel: null, suffix: `${parties}${amount}.` };
+    }
     if (status === 'COMPLETED') {
       return { prefix: `${actor} confirmed marketing funding was received`, entityLabel: null, suffix: `${parties}${amount}.` };
     }
@@ -615,7 +639,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'payout_records') {
-    const status = pickStr(data, 'payout_status', 'payoutStatus');
+    const status = pickStr(data, 'status', 'payout_status', 'payoutStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amountRaw = pickDataField(data, 'net_amount', 'netAmount');
     const amount = amountRaw != null && amountRaw !== '' ? ` (${formatCurrency(amountRaw)})` : '';
@@ -643,7 +667,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'marketing_funding_requests') {
-    const status = pickStr(data, 'funding_request_status', 'fundingRequestStatus', 'status');
+    const status = pickStr(data, 'status', 'funding_request_status', 'fundingRequestStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amountRaw = pickDataField(data, 'amount');
     const amount = amountRaw != null && amountRaw !== '' ? ` (${formatCurrency(amountRaw)})` : '';
@@ -658,7 +682,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'ad_spend_logs') {
-    const status = pickStr(data, 'ad_spend_status', 'adSpendStatus', 'status');
+    const status = pickStr(data, 'status', 'ad_spend_status', 'adSpendStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amountRaw = pickDataField(data, 'spend_amount', 'spendAmount');
     const amount = amountRaw != null && amountRaw !== '' ? ` (${formatCurrency(amountRaw)})` : '';
@@ -684,7 +708,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'approval_requests') {
-    const status = pickStr(data, 'approval_status', 'approvalStatus', 'status');
+    const status = pickStr(data, 'status', 'approval_status', 'approvalStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amountRaw = pickDataField(data, 'amount');
     const amount = amountRaw != null && amountRaw !== '' ? ` (${formatCurrency(amountRaw)})` : '';
@@ -729,7 +753,7 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'permission_requests') {
-    const status = pickStr(data, 'permission_request_status', 'permissionRequestStatus', 'status');
+    const status = pickStr(data, 'status', 'permission_request_status', 'permissionRequestStatus');
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const typeRaw = pickStr(data, 'type');
     const typePhrase = typeRaw ? (PERMISSION_REQUEST_TYPE_PHRASES[typeRaw] ?? typeRaw.replace(/_/g, ' ').toLowerCase()) : 'take a sensitive action';
