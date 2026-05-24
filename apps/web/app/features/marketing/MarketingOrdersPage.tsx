@@ -784,10 +784,41 @@ export function MarketingOrdersPage({
                     wrapperClassName="w-auto min-w-[11rem]"
                   />
                   {showMediaBuyerColumn ? (
-                    <div
-                      className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
-                      aria-hidden
-                    />
+                    <Suspense
+                      fallback={
+                        <div
+                          className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
+                          aria-hidden
+                        />
+                      }
+                    >
+                      <Await resolve={secondary}>
+                        {(ins) =>
+                          ins.mediaBuyersForFilter.length > 0 ? (
+                            <SearchableSelect
+                              id="marketing-orders-filter-buyer-desktop"
+                              value={searchParams.get('mediaBuyerId') || 'ALL'}
+                              onChange={(v) => {
+                                setSearchParams((p) => {
+                                  const next = new URLSearchParams(p);
+                                  next.set('page', '1');
+                                  if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                                  else next.delete('mediaBuyerId');
+                                  return next;
+                                });
+                              }}
+                              options={[
+                                { value: 'ALL', label: 'All media buyers' },
+                                ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                              ]}
+                              wrapperClassName="w-auto min-w-[12rem] sm:w-56"
+                              placeholder="All media buyers"
+                              searchPlaceholder="Search buyers…"
+                            />
+                          ) : null
+                        }
+                      </Await>
+                    </Suspense>
                   ) : null}
                 </>
               }

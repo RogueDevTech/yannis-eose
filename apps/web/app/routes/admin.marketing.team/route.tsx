@@ -244,6 +244,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const start = (page - 1) * PAGE_SIZE;
   const pagedMembers = sorted.slice(start, start + PAGE_SIZE);
 
+  // Full id+name list for the Media Buyer SearchableSelect — derived from the
+  // pre-search set so the dropdown shows every team member, not just whoever
+  // happens to match the current `q` search.
+  const allMembersForFilter = teamMembersWithMetrics
+    .map((m) => ({ id: m.userId, name: m.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
   return {
     teamMembers: pagedMembers,
     fundingSummary,
@@ -259,6 +266,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     unfilteredCount,
     profitabilityConfig,
     overviewStats,
+    allMembersForFilter,
   };
   })();
 
@@ -291,6 +299,7 @@ export default function MarketingTeamRoute() {
             unfilteredCount={data.unfilteredCount}
             profitabilityConfig={data.profitabilityConfig}
             overviewStats={data.overviewStats}
+            allMembersForFilter={data.allMembersForFilter}
           />
         )}
     </CachedAwait>
