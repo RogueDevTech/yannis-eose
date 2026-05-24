@@ -202,12 +202,12 @@ describe('listOrdersSchema', () => {
     expect(result.limit).toBe(20);
   });
 
-  it('rejects limit above 100', () => {
-    expect(() => listOrdersSchema.parse({ limit: 101 })).toThrow();
+  it('rejects limit above 1000', () => {
+    expect(() => listOrdersSchema.parse({ limit: 1001 })).toThrow();
   });
 
-  it('accepts limit of exactly 100', () => {
-    expect(() => listOrdersSchema.parse({ limit: 100 })).not.toThrow();
+  it('accepts limit of exactly 1000', () => {
+    expect(() => listOrdersSchema.parse({ limit: 1000 })).not.toThrow();
   });
 
   it('rejects page below 1', () => {
