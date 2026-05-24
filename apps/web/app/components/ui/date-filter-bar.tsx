@@ -45,8 +45,17 @@ function isValidHHMM(t: string): boolean {
   return /^([01]?\d|2[0-3]):([0-5]\d)$/.test(t);
 }
 
+/** Format a Date as YYYY-MM-DD in Africa/Lagos (WAT, UTC+1). Using the
+ *  user's business timezone prevents the first hour of each WAT day
+ *  (00:00–01:00 WAT = 23:00–00:00 UTC) from mapping to the previous date. */
+const NIGERIA_YMD = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Africa/Lagos',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 function toYMD(d: Date): string {
-  return d.toISOString().split('T')[0]!;
+  return NIGERIA_YMD.format(d);
 }
 
 function formatPeriodLabel(

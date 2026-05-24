@@ -148,6 +148,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           limit: ORDERS_PER_PAGE,
           ...(mediaBuyerId ? { mediaBuyerId } : {}),
           ...(search ? { search } : {}),
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
         }),
       );
       const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {

@@ -65,6 +65,8 @@ export const cartRouter = router({
           mediaBuyerId: z.string().uuid().optional(),
           branchId: z.string().uuid().optional(),
           search: z.string().trim().min(1).max(120).optional(),
+          startDate: z.string().optional(),
+          endDate: z.string().optional(),
         })
         .optional(),
     )
@@ -95,6 +97,8 @@ export const cartRouter = router({
         mediaBuyerId,
         branchId,
         search: input?.search,
+        startDate: input?.startDate,
+        endDate: input?.endDate,
       });
     }),
 
