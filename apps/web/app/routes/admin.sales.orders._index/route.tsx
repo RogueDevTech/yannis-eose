@@ -8,7 +8,7 @@ import {
   BULK_ORDER_MUTATION_TIMEOUT_MS,
   getSessionCookie,
   requirePermission,
-  defaultTodayRange,
+  defaultThisMonthRange,
   parsePerPage,
   safeStatus,
 } from '~/lib/api.server';
@@ -49,7 +49,7 @@ const CS_ORDERS_LIVE_EVENTS = [
   'order:transfer_rejected',
 ] as const;
 
-const defaultToday = defaultTodayRange;
+const defaultToday = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'orders.read');
