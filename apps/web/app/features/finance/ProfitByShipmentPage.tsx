@@ -203,6 +203,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
     <div className="space-y-4">
       <PageHeader
         title="Profit by Shipment"
+        backTo="/admin/finance/overview"
         mobileInlineActions
         description="Review shipment cost and estimated revenue."
         actions={

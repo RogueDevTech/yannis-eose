@@ -28,6 +28,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
       {/* Header */}
       <PageHeader
         title={product.name}
+        backTo="/admin/products"
         mobileInlineActions
         description="View product details."
         actions={

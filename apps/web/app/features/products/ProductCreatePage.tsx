@@ -66,6 +66,7 @@ export function ProductCreatePage({ actionData, categoriesPromise = [], allProdu
 
       <PageHeader
         title="Add Product"
+        backTo="/admin/products"
         description="Create a catalog product."
       />
 

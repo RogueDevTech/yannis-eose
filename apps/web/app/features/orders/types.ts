@@ -34,6 +34,8 @@ export interface Order {
   cartId?: string | null;
   /** Duplicate flag: FLAGGED | POSSIBLY_DUPLICATE | MERGED | DISMISSED | null */
   isDuplicate?: string | null;
+  /** Last CS comment left on the order — shown as an icon + tooltip on the list. */
+  lastCsComment?: { comment: string; actorName: string | null; at: string } | null;
 }
 
 export interface CallLogEntry {

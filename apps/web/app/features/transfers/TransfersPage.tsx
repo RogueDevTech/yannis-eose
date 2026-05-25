@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
+import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -69,6 +70,7 @@ export function TransfersPage({
     error: string | null;
   }>();
   const navigation = useNavigation();
+  usePersistedFilters('transfers');
   const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const [viewTransfer, setViewTransfer] = useState<Transfer | null>(null);

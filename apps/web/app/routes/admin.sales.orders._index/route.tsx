@@ -173,12 +173,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // happens server-side via the partial index added in migration 0142.
   const fromCartParam = url.searchParams.get('fromCart') === '1';
   const canFilterFromCart =
-    user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+    user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
   const fromCart = fromCartParam && canFilterFromCart;
 
   const testOrdersParam = url.searchParams.get('testOrders') === '1';
   const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
   const testOrders = testOrdersParam && canFilterTestOrders;
+
+  const productIdParam = url.searchParams.get('productId') || undefined;
 
   const listInput: Record<string, unknown> = {
     page,
@@ -186,6 +188,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     status: status || undefined,
     search: search || undefined,
     ...(assignedCsId && { assignedCsId }),
+    ...(productIdParam && { productId: productIdParam }),
     ...(fromCart && { fromCart: true }),
     ...(testOrders && { testOrders: true }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
@@ -378,6 +381,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       csClosersForFilter: bundle?.csClosersForFilter ?? [],
       logisticsLocationsForBulk: bundle?.logisticsLocationsForBulk ?? [],
       productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
+      productsForFilter: (bundle?.productsForOfflineOrder ?? []).map((p) => ({ id: p.id, name: p.name })),
       cartAbandonmentCount: bundle?.cartAbandonmentCount ?? null,
     };
   })();
@@ -410,6 +414,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateOffline,
     canExport,
     canBulkPick,
+    productFilter: productIdParam,
     branchesForMove,
     filters: {
       startDate: startDate ?? '',
@@ -716,7 +721,7 @@ export default function CSOrdersRoute() {
   // orders via the "Cart abandonment" pseudo-option in the status dropdown.
   // CS_CLOSER never sees the option (filter is also enforced server-side).
   const isHoCSPlus =
-    userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
+    userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT';
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
     <CachedAwait

@@ -545,6 +545,7 @@ export function UserCreatePage({
 
       <PageHeader
         title={isEditMode ? 'Edit user' : 'Add User'}
+        backTo={usersBasePath}
         description={
           isEditMode
             ? 'Update account, branch memberships, permissions, and role settings.'

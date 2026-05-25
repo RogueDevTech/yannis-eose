@@ -15,6 +15,7 @@ import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreat
 import { normalizeBuilderFieldOrder, parseFieldOrderPayload } from '~/features/campaigns/form-field-order';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
 import {
+  ensureFixedStandardFields,
   parseAdditionalFieldSelectOptionsPayload,
   parseStandardFieldsPayload,
   toLegacyStandardFieldFlags,
@@ -118,7 +119,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!parsedStandard.ok) {
     return json({ error: parsedStandard.error }, { status: 400 });
   }
-  const standardFields = parsedStandard.fields;
+  const standardFields = ensureFixedStandardFields(parsedStandard.fields);
   const legacyStandardFlags = toLegacyStandardFieldFlags(standardFields);
   const hasStandardFields = standardFields.length > 0;
 

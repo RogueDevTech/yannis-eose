@@ -336,6 +336,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
 
       <PageHeader
         title={shipment.referenceLabel}
+        backTo="/admin/shipments"
         mobileInlineActions
         description={shipment.label ?? undefined}
         actions={

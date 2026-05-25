@@ -1,6 +1,7 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -163,6 +164,7 @@ export function MarketingOrdersPage({
   isCartAbandonmentView = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
+  usePersistedFilters('marketing-orders');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   // Treat both the initial Suspense fallback AND any same-path loader refetch

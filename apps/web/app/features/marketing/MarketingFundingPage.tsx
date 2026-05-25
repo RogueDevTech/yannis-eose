@@ -12,6 +12,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -999,14 +1000,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount ({'₦'})</label>
               <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input w-full" />
             </div>
-            <FileUpload
-              folder={ASSET_FOLDERS.RECEIPTS}
-              name="receiptUrl"
-              label="Receipt (optional)"
-              size="sm"
-              onUpload={(url) => setCreateFundingReceiptUrl(url)}
-              onUploadStateChange={setCreateFundingUploadState}
-            />
             <div className="flex gap-2 pt-1">
               <Button
                 type="submit"
@@ -1194,14 +1187,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 className="input w-full"
               />
             </div>
-            <FileUpload
-              folder={ASSET_FOLDERS.RECEIPTS}
-              name="receiptUrl"
-              label="Receipt (optional)"
-              size="sm"
-              onUpload={(url) => setApproveFundingReceiptUrl(url)}
-              onUploadStateChange={setApproveFundingUploadState}
-            />
             <Textarea
               label="Reason (optional)"
               name="reason"
@@ -1860,35 +1845,25 @@ function UnifiedDistributingTable({
         mobileShowLabel: false,
         render: (entry) => {
           const isPendingRequest = entry.entryType === 'request' && entry.status === 'PENDING';
-          if (entry.entryType === 'request') {
-            return (
-              <div className="inline-flex flex-nowrap items-center justify-start gap-x-2 md:justify-end">
-                <TableActionButton variant="primary" type="button" onClick={() => onOpenDetails(entry)}>
-                  View
-                </TableActionButton>
-                {isPendingRequest && canApproveFunding ? (
-                  <>
-                    <TableActionButton variant="primary" type="button" onClick={() => onApprove(entry.id)}>
-                      Approve
-                    </TableActionButton>
-                    <TableActionButton variant="danger" type="button" onClick={() => onReject(entry.id)}>
-                      Reject
-                    </TableActionButton>
-                  </>
-                ) : null}
-              </div>
-            );
-          }
+          const entryLabel = entry.entryType === 'request'
+            ? (entry.requesterName ?? 'Request')
+            : (users.get(entry.receiverId) ?? 'Transfer');
           return (
-            <div className="inline-flex flex-nowrap items-center justify-start gap-x-2 md:justify-end">
-              <TableActionButton variant="primary" type="button" onClick={() => onOpenDetails(entry)}>
-                View flow
-              </TableActionButton>
-              {entry.receiptUrl ? (
-                <TableActionButton
-                  variant="primary"
-                  type="button"
-                  onClick={() =>
+            <TableRowActionsSheet
+              ariaLabel={`Actions for ${entryLabel}`}
+              sheetTitle={entryLabel}
+              actions={[
+                {
+                  key: 'view',
+                  kind: 'button',
+                  label: entry.entryType === 'request' ? 'View' : 'View flow',
+                  onClick: () => onOpenDetails(entry),
+                },
+                {
+                  key: 'receipt',
+                  kind: 'button',
+                  label: 'Receipt',
+                  onClick: () =>
                     onViewReceipt({
                       id: entry.id,
                       senderId: entry.senderId,
@@ -1900,13 +1875,27 @@ function UnifiedDistributingTable({
                       verifiedAt: null,
                       senderName: entry.senderName,
                       receiverName: entry.receiverName,
-                    })
-                  }
-                >
-                  Receipt
-                </TableActionButton>
-              ) : null}
-            </div>
+                    }),
+                  show: entry.entryType === 'transfer' && !!entry.receiptUrl,
+                },
+                {
+                  key: 'approve',
+                  kind: 'button',
+                  label: 'Approve',
+                  tone: 'success',
+                  onClick: () => onApprove(entry.id),
+                  show: isPendingRequest && canApproveFunding,
+                },
+                {
+                  key: 'reject',
+                  kind: 'button',
+                  label: 'Reject',
+                  tone: 'danger',
+                  onClick: () => onReject(entry.id),
+                  show: isPendingRequest && canApproveFunding,
+                },
+              ]}
+            />
           );
         },
       },
@@ -2220,43 +2209,64 @@ function UnifiedReceivedTable({
             isTransfer && entry.status === 'SENT' && entry.receiverId === currentUserId;
           const canResend =
             !isTransfer && entry.status === 'PENDING' && entry.requesterId === currentUserId;
+          const entryLabel = isTransfer
+            ? (users.get(entry.senderId ?? '') ?? 'Transfer')
+            : (entry.requesterName ?? 'Request');
 
           return (
-            <div className="flex flex-wrap items-center justify-start gap-x-2 gap-y-1 md:justify-end">
-              <TableActionButton variant="primary" type="button" onClick={() => onOpenDetails(entry)}>
-                View flow
-              </TableActionButton>
-              {canMarkReceived ? (
-                <>
-                  <TableActionButton
-                    variant="primary"
-                    type="button"
-                    onClick={() => onOpenMarkReceived(transferToFundingRecord(entry))}
-                  >
-                    Received
-                  </TableActionButton>
-                  <TableActionButton
-                    variant="danger"
-                    type="button"
-                    onClick={() => onOpenNotReceived(transferToFundingRecord(entry))}
-                  >
-                    Not Received
-                  </TableActionButton>
-                </>
-              ) : canResend ? (
-                <fetcher.Form method="post" className="inline">
-                  <input type="hidden" name="intent" value="resendFundingRequest" />
-                  <input type="hidden" name="requestId" value={entry.id} />
-                  <TableActionButton
-                    type="submit"
-                    variant="neutral"
-                    title="Send a reminder (once every 30 minutes)"
-                  >
-                    Resend
-                  </TableActionButton>
-                </fetcher.Form>
-              ) : null}
-            </div>
+            <TableRowActionsSheet
+              ariaLabel={`Actions for ${entryLabel}`}
+              sheetTitle={entryLabel}
+              actions={[
+                {
+                  key: 'view',
+                  kind: 'button',
+                  label: 'View flow',
+                  onClick: () => onOpenDetails(entry),
+                },
+                {
+                  key: 'received',
+                  kind: 'button',
+                  label: 'Mark Received',
+                  tone: 'success',
+                  onClick: () => onOpenMarkReceived(transferToFundingRecord(entry)),
+                  show: canMarkReceived,
+                },
+                {
+                  key: 'not-received',
+                  kind: 'button',
+                  label: 'Not Received',
+                  tone: 'danger',
+                  onClick: () => onOpenNotReceived(transferToFundingRecord(entry)),
+                  show: canMarkReceived,
+                },
+                {
+                  key: 'resend',
+                  kind: 'custom',
+                  show: canResend,
+                  render: ({ close }) => (
+                    <fetcher.Form method="post" className="w-full" onSubmit={() => close()}>
+                      <input type="hidden" name="intent" value="resendFundingRequest" />
+                      <input type="hidden" name="requestId" value={entry.id} />
+                      <button
+                        type="submit"
+                        className="flex w-full items-center justify-between rounded-xl border bg-app-elevated px-4 py-3.5 text-left text-sm font-semibold transition-colors text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20 border-brand-200 dark:border-brand-800 md:hidden"
+                      >
+                        Resend
+                      </button>
+                      <CompactTableActionButton
+                        type="submit"
+                        tone="brand"
+                        className="hidden md:inline-flex"
+                        title="Send a reminder (once every 30 minutes)"
+                      >
+                        Resend
+                      </CompactTableActionButton>
+                    </fetcher.Form>
+                  ),
+                },
+              ]}
+            />
           );
         },
       },
