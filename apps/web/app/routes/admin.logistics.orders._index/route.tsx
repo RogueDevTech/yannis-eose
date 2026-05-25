@@ -10,7 +10,7 @@ import {
   parsePerPage,
   requirePermission,
   safeStatus,
-  defaultTodayRange,
+  defaultThisMonthRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -38,7 +38,7 @@ const LOGISTICS_STATUS_SCOPE = [
   'REMITTED',
 ] as const;
 
-const defaultToday = defaultTodayRange;
+const defaultToday = defaultThisMonthRange;
 
 export interface LogisticsOrder extends Order {
   logisticsLocationId?: string | null;
@@ -63,8 +63,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const status = url.searchParams.get('status') || 'ALL';
+  const isOverdueFilter = status === 'OVERDUE';
   const search = url.searchParams.get('search') || undefined;
-  const scopedStatuses = status === 'ALL' ? [...LOGISTICS_STATUS_SCOPE] : undefined;
+  const scopedStatuses = (status === 'ALL' || isOverdueFilter) ? [...LOGISTICS_STATUS_SCOPE] : undefined;
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
@@ -83,8 +84,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
-    status: status === 'ALL' ? undefined : status,
+    // OVERDUE is not a real status — use scheduleKind filter instead
+    status: (status === 'ALL' || isOverdueFilter) ? undefined : status,
     ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
+    ...(isOverdueFilter ? { scheduleKind: 'delivery_overdue' as const } : {}),
     search: search || undefined,
     sortBy: 'preferredDeliveryDate' as const,
     sortOrder: 'asc' as const,
@@ -150,10 +153,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     let statusCounts: Record<string, number> = {};
     let locations: Location[] = [];
     try {
-      const [countsRes, locationsRes] = await Promise.all([
+      const overdueCountInput = {
+        page: 1,
+        limit: 1,
+        scheduleKind: 'delivery_overdue' as const,
+        ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
+        ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
+      };
+      const [countsRes, locationsRes, overdueRes] = await Promise.all([
         apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
         apiRequest<unknown>(
           `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
+          { method: 'GET', cookie },
+        ),
+        apiRequest<unknown>(
+          `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(overdueCountInput))}`,
           { method: 'GET', cookie },
         ),
       ]);
@@ -164,6 +180,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
         : null;
       locations = locationsData?.locations ?? [];
+      const overdueData = overdueRes.ok
+        ? (overdueRes.data as { result?: { data?: { pagination?: { total?: number } } } })?.result?.data
+        : null;
+      statusCounts['__OVERDUE'] = overdueData?.pagination?.total ?? 0;
     } catch {
       statusCounts = {};
       locations = [];

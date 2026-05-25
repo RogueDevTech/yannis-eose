@@ -211,19 +211,14 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
                 { label: 'Unique customers', value: <StatValuePulse className="min-w-[2rem]" /> },
               ]}
             />
-            <Card>
-              <CardHeader title="By product" />
-              <CardBody>
-                <ul className="divide-y divide-app-border">
-                  {[1, 2, 3].map((i) => (
-                    <li key={i} className="flex items-center justify-between gap-4 py-2">
-                      <span className="h-4 flex-1 max-w-[14rem] rounded bg-app-hover animate-pulse" aria-hidden />
-                      <span className="h-4 w-8 rounded bg-app-hover animate-pulse" aria-hidden />
-                    </li>
-                  ))}
-                </ul>
-              </CardBody>
-            </Card>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="rounded-xl border border-app-border bg-app-elevated p-3.5 shadow-sm animate-pulse" aria-hidden>
+                  <span className="block h-7 w-10 rounded bg-app-hover" />
+                  <span className="mt-2 block h-3 w-20 rounded bg-app-hover" />
+                </div>
+              ))}
+            </div>
           </>
         }
       >
@@ -239,19 +234,21 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
               />
 
               {stats.perProduct.length > 0 && (
-                <Card>
-                  <CardHeader title="By product" />
-                  <CardBody>
-                    <ul className="divide-y divide-app-border">
-                      {stats.perProduct.map((p) => (
-                        <li key={p.productId} className="flex items-center justify-between py-2">
-                          <span>{p.productName ?? '—'}</span>
-                          <span className="font-semibold">{p.attempts}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardBody>
-                </Card>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {stats.perProduct.map((p) => (
+                    <div
+                      key={p.productId}
+                      className="rounded-xl border border-app-border bg-app-elevated p-3.5 shadow-sm"
+                    >
+                      <span className="block text-2xl font-bold tabular-nums text-app-fg leading-tight">
+                        {p.attempts}
+                      </span>
+                      <span className="mt-1 block text-xs font-medium text-app-fg-muted truncate">
+                        {p.productName ?? '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </>
           )}

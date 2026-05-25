@@ -321,6 +321,12 @@ export function MarketingOrdersPage({
                 {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
+                {order.isDuplicate === 'FLAGGED' && (
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">Duplicate</span>
+                )}
+                {order.isDuplicate === 'POSSIBLY_DUPLICATE' && (
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Possible dup</span>
+                )}
               </span>
             ),
       },
@@ -469,6 +475,12 @@ export function MarketingOrdersPage({
               {order.customerName || '—'}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+              )}
+              {order.isDuplicate === 'FLAGGED' && (
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">Duplicate</span>
+              )}
+              {order.isDuplicate === 'POSSIBLY_DUPLICATE' && (
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Possible dup</span>
               )}
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
