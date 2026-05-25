@@ -1,7 +1,7 @@
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
-import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultTodayRange } from '~/lib/api.server';
 import { isAdminLevel, isSuperAdminOnly } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let endDate = url.searchParams.get('endDate') ?? undefined;
 
   if (!periodAllTime && !startDate && !endDate) {
-    const range = defaultThisMonthRange();
+    const range = defaultTodayRange();
     startDate = range.startDate;
     endDate = range.endDate;
   }
