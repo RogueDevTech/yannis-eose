@@ -8,14 +8,14 @@ import {
   standardFieldOrderToken,
   type CampaignFieldOrderToken,
 } from '@yannis/shared';
-import { getStandardFieldLabel, STANDARD_FIELD_LABELS } from './standard-fields';
+import { FIXED_STANDARD_FIELD_KEYS, getStandardFieldLabel, STANDARD_FIELD_LABELS } from './standard-fields';
 import type { CustomFormField, StandardFieldConfig, StandardFieldKey } from './types';
 
 export type OrderedPreviewField =
   | {
       token: CampaignFieldOrderToken;
       kind: 'fixed';
-      key: 'fullName' | 'phoneNumber';
+      key: 'fullName' | 'phoneNumber' | 'deliveryAddress';
     }
   | {
       token: CampaignFieldOrderToken;
@@ -82,7 +82,9 @@ export function buildOrderedPreviewFields(
     getOrderedCustomFields(customFields, fieldOrder).map((field) => [field.id, field]),
   );
 
-  return fieldOrder
+  const fixedStdKeys = new Set<string>(FIXED_STANDARD_FIELD_KEYS);
+
+  const result = fieldOrder
     .map((token): OrderedPreviewField | null => {
       if (token === fixedFieldOrderToken('fullName')) {
         return { token, kind: 'fixed', key: 'fullName' };
@@ -95,6 +97,10 @@ export function buildOrderedPreviewFields(
       }
       if (token.startsWith('standard.')) {
         const key = token.slice('standard.'.length) as StandardFieldKey;
+        // Fixed standard fields render as fixed (always present, always required).
+        if (fixedStdKeys.has(key)) {
+          return { token, kind: 'fixed', key: key as 'deliveryAddress' };
+        }
         const field = standardMap.get(key);
         if (!field) return null;
         return { token, kind: 'standard', key, label: getStandardFieldLabel(field), required: field.required === true };
@@ -107,11 +113,34 @@ export function buildOrderedPreviewFields(
       return null;
     })
     .filter((field): field is OrderedPreviewField => field != null);
+
+  // Ensure fixed standard fields are present even if missing from fieldOrder
+  // (backwards compat for forms created before deliveryAddress became fixed).
+  const presentFixedKeys = new Set(result.filter((f) => f.kind === 'fixed').map((f) => f.key));
+  for (const key of FIXED_STANDARD_FIELD_KEYS) {
+    if (!presentFixedKeys.has(key)) {
+      // Insert after phoneNumber (or at end if phoneNumber not found).
+      const phoneIdx = result.findIndex((f) => f.kind === 'fixed' && f.key === 'phoneNumber');
+      const entry: OrderedPreviewField = {
+        token: standardFieldOrderToken(key) as CampaignFieldOrderToken,
+        kind: 'fixed',
+        key: key as 'deliveryAddress',
+      };
+      if (phoneIdx >= 0) {
+        result.splice(phoneIdx + 1, 0, entry);
+      } else {
+        result.push(entry);
+      }
+    }
+  }
+
+  return result;
 }
 
 export function describeFieldOrderToken(token: CampaignFieldOrderToken): string {
   if (token === fixedFieldOrderToken('fullName')) return 'Full Name';
   if (token === fixedFieldOrderToken('phoneNumber')) return 'Phone Number';
+  if (token === standardFieldOrderToken('deliveryAddress')) return 'Delivery Address';
   if (token === OFFER_FIELD_ORDER_TOKEN) return 'Offer selection';
   if (token.startsWith('standard.')) {
     const key = token.slice('standard.'.length) as StandardFieldKey;

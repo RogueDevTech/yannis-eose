@@ -782,9 +782,6 @@ function DashboardLayoutInner({
   // Must match SSR (no sessionStorage): hydrate first, then read storage in useEffect.
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const { isDarkTheme } = useAppTheme();
-  const [updateReady, setUpdateReady] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState(0);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
   // Hard-logout the browser if the server revokes the user's sessions
@@ -807,7 +804,15 @@ function DashboardLayoutInner({
   }, []);
 
   useEffect(() => {
-    const handler = () => setUpdateReady(true);
+    const handler = () => {
+      // Silently activate the waiting SW — it takes over on next navigation.
+      // No blocking modal needed (removed 2026-05-25).
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        });
+      }
+    };
     window.addEventListener('yannis:sw-update-ready', handler);
     return () => window.removeEventListener('yannis:sw-update-ready', handler);
   }, []);
@@ -1211,110 +1216,8 @@ function DashboardLayoutInner({
         </div>
       </Modal>
 
-      {/* App update modal — forced, no dismiss, shown when a new service worker is waiting */}
-      {updateReady && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
-          <div className="w-full max-w-sm rounded-2xl bg-app-surface shadow-2xl overflow-hidden">
-            {/* Top accent */}
-            <div className="bg-brand-600 px-6 py-5 text-white text-center">
-              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
-                {updating ? (
-                  <svg className="w-7 h-7 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M5.64 19.36A9 9 0 0 1 4 12a9 9 0 0 1 9-9c2.39 0 4.57.94 6.17 2.47" />
-                    <path d="M18.36 4.64A9 9 0 0 1 20 12a9 9 0 0 1-9 9c-2.39 0-4.57-.94-6.17-2.47" />
-                  </svg>
-                ) : (
-                  <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                )}
-              </div>
-              <h2 className="text-lg font-bold">
-                {updating ? 'Updating…' : 'Update Required'}
-              </h2>
-              <p className="text-sm text-white/80 mt-1">
-                {updating ? 'Installing new version' : 'A new version of Yannis is ready'}
-              </p>
-            </div>
-
-            {/* Body */}
-            <div className="px-6 py-5 text-center">
-              {updating ? (
-                <div className="space-y-3">
-                  {/* Progress bar */}
-                  <div className="h-2 w-full rounded-full bg-app-border overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-brand-600 transition-all duration-300 ease-out"
-                      style={{ width: `${updateProgress}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-app-fg-muted">
-                    {updateProgress < 40
-                      ? 'Activating new service worker…'
-                      : updateProgress < 75
-                        ? 'Loading latest assets…'
-                        : updateProgress < 95
-                          ? 'Almost done…'
-                          : 'Reloading app…'}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-app-fg-muted leading-relaxed">
-                  To keep your data accurate and avoid errors, please update to the latest version now. This only takes a second.
-                </p>
-              )}
-            </div>
-
-            {/* Action */}
-            <div className="px-6 pb-6">
-              <button
-                disabled={updating}
-                onClick={() => {
-                  setUpdating(true);
-                  setUpdateProgress(0);
-
-                  // Animate progress: fast to 30% immediately, then slow crawl to 90%, reload finishes it
-                  let progress = 0;
-                  const tick = () => {
-                    progress = progress < 30
-                      ? progress + 10
-                      : progress < 60
-                        ? progress + 4
-                        : progress < 85
-                          ? progress + 1.5
-                          : progress < 92
-                            ? progress + 0.5
-                            : progress;
-                    setUpdateProgress(Math.min(Math.round(progress), 92));
-                    if (progress < 92) setTimeout(tick, progress < 30 ? 80 : progress < 60 ? 120 : 200);
-                  };
-                  setTimeout(tick, 50);
-
-                  // Tell the waiting SW to take over
-                  if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.ready.then((reg) => {
-                      if (reg.waiting) {
-                        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                      }
-                    });
-                  }
-
-                  // Jump to 100% then reload
-                  setTimeout(() => {
-                    setUpdateProgress(100);
-                    setTimeout(() => window.location.reload(), 400);
-                  }, 1800);
-                }}
-                className="w-full rounded-xl bg-brand-600 py-3.5 text-sm font-semibold text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed hover:bg-brand-700 active:bg-brand-800"
-              >
-                {updating ? 'Updating…' : 'Update now'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* SW update: silently activate the waiting worker on next navigation instead
+           of blocking the user with a forced modal (removed 2026-05-25). */}
 
       {/* Main content area */}
       <main

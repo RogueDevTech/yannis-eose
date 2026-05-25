@@ -19,7 +19,7 @@ SELECT
 FROM users u
 CROSS JOIN permissions p
 WHERE u.role = 'HEAD_OF_LOGISTICS'
-  AND u.deleted_at IS NULL
+  AND u.status = 'ACTIVE'
   AND p.code = 'finance.read'
   AND NOT EXISTS (
     SELECT 1 FROM user_permissions up
@@ -41,7 +41,7 @@ SELECT
 FROM users u
 CROSS JOIN permissions p
 WHERE u.role = 'STOCK_MANAGER'
-  AND u.deleted_at IS NULL
+  AND u.status = 'ACTIVE'
   AND p.code = 'logistics.read'
   AND NOT EXISTS (
     SELECT 1 FROM user_permissions up
@@ -63,7 +63,7 @@ SELECT
 FROM users u
 CROSS JOIN permissions p
 WHERE u.role = 'STOCK_MANAGER'
-  AND u.deleted_at IS NULL
+  AND u.status = 'ACTIVE'
   AND p.code = 'orders.read'
   AND NOT EXISTS (
     SELECT 1 FROM user_permissions up

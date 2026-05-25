@@ -1607,8 +1607,9 @@ function getFormInnerHTML(config: CampaignConfig): string {
     | 'customerEmail'
     | 'paymentMethod';
   const showField = (key: StdFieldKey) => {
+    // Delivery address is always shown — basic required field (CEO 2026-05-25).
+    if (key === 'deliveryAddress') return true;
     if (hasStandard) return standard.has(key);
-    if (key === 'deliveryAddress') return fc.showDeliveryAddress !== false;
     if (key === 'deliveryNotes') return fc.showDeliveryNotes === true;
     if (key === 'deliveryState') return fc.showDeliveryState === true;
     if (key === 'gender') return fc.showGender === true;
@@ -1617,8 +1618,9 @@ function getFormInnerHTML(config: CampaignConfig): string {
     return fc.showPaymentMethod === true;
   };
   const requiredField = (key: StdFieldKey) => {
+    // Delivery address is always required — basic required field (CEO 2026-05-25).
+    if (key === 'deliveryAddress') return true;
     if (hasStandard) return standard.get(key)?.required === true;
-    if (key === 'deliveryAddress') return fc.requireDeliveryAddress === true;
     if (key === 'deliveryNotes') return fc.requireDeliveryNotes === true;
     if (key === 'deliveryState') return fc.requireDeliveryState === true;
     if (key === 'gender') return fc.requireGender === true;

@@ -103,6 +103,7 @@ export function ProductEditPage({
 
       <PageHeader
         title="Edit Product"
+        backTo="/admin/products"
         description="Update product details."
         actions={<StatusBadge status={product.status} />}
       />

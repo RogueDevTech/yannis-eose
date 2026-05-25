@@ -23,7 +23,7 @@ import type { Campaign, CustomFormField, OfferGroupRow, Product, StandardFieldCo
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { sortAndReindexCustomFields } from './custom-fields-order';
 import { FormFullPreview } from './form-full-preview';
-import { additionalFieldSelectOptionsFromConfig, normalizeStandardFields } from './standard-fields';
+import { additionalFieldSelectOptionsFromConfig, ensureFixedStandardFields, normalizeStandardFields } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
 type MarketingFormEditPicklists = {
@@ -158,7 +158,7 @@ export function MarketingFormEditPage({
   const [formButtonText, setFormButtonText] = useState(() => cfg?.buttonText ?? '');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState(() => cfg?.successCallbackUrl ?? '');
   const [showProductImages, setShowProductImages] = useState(() => cfg?.showProductImages !== false);
-  const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() => normalizeStandardFields(campaign.formConfig));
+  const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() => ensureFixedStandardFields(normalizeStandardFields(campaign.formConfig)));
   const [fieldOrder, setFieldOrder] = useState<CampaignFieldOrderToken[]>(() =>
     normalizeBuilderFieldOrder(cfg?.fieldOrder, normalizeStandardFields(campaign.formConfig), sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[])),
   );
@@ -339,12 +339,10 @@ export function MarketingFormEditPage({
     <div className="space-y-4">
       <PageHeader
         title="Edit form"
+        backTo="/admin/marketing/forms"
         description={
           <>
-            Update settings for <span className="font-medium text-app-fg">{campaign.name}</span>.{' '}
-            <Link to="/admin/marketing/forms" className="text-brand-600 dark:text-brand-400 hover:underline">
-              Back to all forms
-            </Link>
+            Update settings for <span className="font-medium text-app-fg">{campaign.name}</span>.
           </>
         }
         actions={statusActions}

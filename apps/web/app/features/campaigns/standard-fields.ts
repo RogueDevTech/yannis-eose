@@ -10,6 +10,12 @@ export const STANDARD_FIELD_LABELS: Record<StandardFieldKey, string> = {
   paymentMethod: 'Payment Method',
 };
 
+/**
+ * Fields that are always present and required on every form — not toggleable.
+ * CEO 2026-05-25: deliveryAddress is a basic required field like fullName/phoneNumber.
+ */
+export const FIXED_STANDARD_FIELD_KEYS: readonly StandardFieldKey[] = ['deliveryAddress'];
+
 export const STANDARD_FIELD_ORDER: StandardFieldKey[] = [
   'gender',
   'deliveryState',
@@ -19,6 +25,11 @@ export const STANDARD_FIELD_ORDER: StandardFieldKey[] = [
   'customerEmail',
   'paymentMethod',
 ];
+
+/** Standard fields that can be toggled on/off in the form builder. */
+export const TOGGLEABLE_STANDARD_FIELD_ORDER: StandardFieldKey[] = STANDARD_FIELD_ORDER.filter(
+  (key) => !(FIXED_STANDARD_FIELD_KEYS as readonly string[]).includes(key),
+);
 
 const MAX_STANDARD_FIELD_LABEL_LENGTH = 120;
 
@@ -267,6 +278,26 @@ export function normalizeStandardFields(config: CampaignFormConfig | null | unde
     label: getDefaultStandardFieldLabel(key),
     required: readLegacyRequired(config, key),
   }));
+}
+
+/**
+ * Ensures fixed standard fields (deliveryAddress) are always present and required.
+ * Call this before saving — guarantees every form includes them regardless of
+ * whether the user toggled them in an older builder version.
+ */
+export function ensureFixedStandardFields(fields: StandardFieldConfig[]): StandardFieldConfig[] {
+  const existing = new Map(fields.map((f) => [f.key, f]));
+  for (const key of FIXED_STANDARD_FIELD_KEYS) {
+    if (!existing.has(key)) {
+      existing.set(key, { key, label: getDefaultStandardFieldLabel(key), required: true });
+    } else {
+      // Force required even if user somehow set it to optional.
+      const field = existing.get(key)!;
+      existing.set(key, { ...field, required: true });
+    }
+  }
+  // Maintain canonical order.
+  return STANDARD_FIELD_ORDER.filter((k) => existing.has(k)).map((k) => existing.get(k)!);
 }
 
 export function toLegacyStandardFieldFlags(fields: StandardFieldConfig[]): Pick<

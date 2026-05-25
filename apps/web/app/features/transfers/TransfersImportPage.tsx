@@ -352,6 +352,7 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
     <div className="space-y-6">
       <PageHeader
         title="Bulk import transfers"
+        backTo="/admin/transfers"
         mobileInlineActions
         description="Upload a spreadsheet to create multiple stock transfers at once."
         actions={
@@ -359,33 +360,23 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
             sheetTitle="Actions"
             triggerAriaLabel="Import tools"
             desktop={
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => fileRef.current?.click()}
-                >
-                  {hasFile ? 'Replace file' : 'Choose file'}
-                </Button>
-                <Link to="/admin/transfers" className="btn-secondary btn-sm">
-                  ← Back to transfers
-                </Link>
-              </>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => fileRef.current?.click()}
+              >
+                {hasFile ? 'Replace file' : 'Choose file'}
+              </Button>
             }
             sheet={
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => fileRef.current?.click()}
-                >
-                  {hasFile ? 'Replace file' : 'Choose file'}
-                </Button>
-                <Link to="/admin/transfers" className="btn-secondary btn-sm h-12 flex items-center justify-center w-full">
-                  ← Back to transfers
-                </Link>
-              </>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-12 w-full justify-center"
+                onClick={() => fileRef.current?.click()}
+              >
+                {hasFile ? 'Replace file' : 'Choose file'}
+              </Button>
             }
           />
         }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigation, useSearchParams } from '@remix-run/react';
+import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
@@ -16,6 +17,7 @@ type FinanceTab = 'remittance' | 'disbursements' | 'payroll';
 
 export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
   const { pulse, filters, branches = [], fundingSummary, byProduct = [], byLocation = [] } = data;
+  usePersistedFilters('finance-overview');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<FinanceTab>('remittance');

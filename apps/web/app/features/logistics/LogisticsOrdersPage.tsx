@@ -1,5 +1,6 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
@@ -220,6 +221,7 @@ function LogisticsOrdersPageImpl({
     [orderDetailBasePath, orderDetailFrom],
   );
 
+  usePersistedFilters('logistics-orders');
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
   const isFilterLoading = useLoaderRefetchBusy().busy;

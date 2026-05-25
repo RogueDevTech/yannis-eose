@@ -528,6 +528,18 @@ function renderPreviewField({
         />
       );
     }
+    if (field.key === 'deliveryAddress') {
+      return (
+        <Textarea
+          label="Delivery Address"
+          required
+          rows={2}
+          placeholder="Your delivery address"
+          className={`${PREVIEW_FIELD_SURFACE} min-h-[4.5rem] !resize-y`}
+          wrapperClassName={PREVIEW_LABEL_WRAP}
+        />
+      );
+    }
     return (
       <TextInput
         label="Phone Number"
