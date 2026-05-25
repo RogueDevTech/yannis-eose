@@ -68,25 +68,48 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
   ) {}
 
   /**
-   * Boot-time sweep — scans ALL orders (not just 48h) so a fresh deploy
-   * catches any test orders the cron missed. Errors swallowed so a purge
-   * hiccup never blocks the API from coming up.
+   * Boot-time sweep — fires 30s after startup so the API is fully up and
+   * serving requests first. Runs all three purge passes with `allDates=true`
+   * in sequence, with 2s pauses between passes to avoid sustained DB load.
+   * Loops until no more targets remain (drains across MAX_PER_RUN batches).
+   * Errors are swallowed so a purge hiccup never blocks the API.
    */
   async onApplicationBootstrap(): Promise<void> {
-    try {
-      await this.purgeTestOrders(true);
-    } catch (err) {
-      this.logger.error(
-        `Boot-time test-order purge failed: ${(err as Error)?.message ?? err}`,
-      );
-    }
-    try {
-      await this.purgeDuplicateOrders(true);
-    } catch (err) {
-      this.logger.error(
-        `Boot-time duplicate-order purge failed: ${(err as Error)?.message ?? err}`,
-      );
-    }
+    setTimeout(() => void this.runBootSweep(), 30_000);
+  }
+
+  private async runBootSweep(): Promise<void> {
+    this.logger.log('Boot sweep starting (30s post-startup)');
+    const pause = () => new Promise<void>((r) => setTimeout(r, 2000));
+
+    // Each pass loops until it returns 0 deletions (table is clean).
+    // The MAX_PER_RUN cap inside each method prevents any single batch
+    // from being too large; the pause between batches keeps DB load low.
+    const drain = async (name: string, fn: (allDates: boolean) => Promise<{ deleted: number }>) => {
+      let total = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        try {
+          const result = await fn.call(this, true);
+          total += result.deleted;
+          if (result.deleted === 0) break;
+          this.logger.log(`Boot sweep [${name}]: batch deleted ${result.deleted}, draining next batch…`);
+          await pause();
+        } catch (err) {
+          this.logger.error(`Boot sweep [${name}] failed: ${(err as Error)?.message ?? err}`);
+          break;
+        }
+      }
+      if (total > 0) this.logger.log(`Boot sweep [${name}]: done — ${total} total deleted`);
+    };
+
+    await drain('test-orders', this.purgeTestOrders);
+    await pause();
+    await drain('exact-duplicates', this.purgeDuplicateOrders);
+    await pause();
+    await drain('cross-funnel-duplicates', this.purgeCrossFunnelDuplicates);
+
+    this.logger.log('Boot sweep complete');
   }
 
   /** Every 2 hours, on the hour (00:00, 02:00, 04:00 … server time). */
@@ -101,6 +124,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       await this.purgeDuplicateOrders();
     } catch (err) {
       this.logger.error(`Duplicate-order purge run failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.purgeCrossFunnelDuplicates();
+    } catch (err) {
+      this.logger.error(`Cross-funnel duplicate purge run failed: ${(err as Error)?.message ?? err}`);
     }
   }
 
@@ -321,5 +349,189 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         (ids.length > 20 ? ` … +${ids.length - 20} more` : ''),
     );
     return { deleted: ids.length, skipped: 0 };
+  }
+
+  /**
+   * Cross-funnel duplicate purge — catches orders that slipped past the
+   * creation-time cross-funnel block (race conditions, advisory lock edge
+   * cases, or orders created before the blocking fix of 2026-05-25).
+   *
+   * Finds orders where the same phone hash + overlapping product exists from
+   * a DIFFERENT media buyer within 24 hours. Keeps the earliest order
+   * (winner), soft-deletes the runner-ups to DELETED, and records
+   * `cross_funnel_attempts` rows so the runner-up MB retains visibility.
+   *
+   * Only touches stock-neutral statuses — if a cross-funnel duplicate has
+   * already moved past confirmation, it's logged for manual review.
+   */
+  async purgeCrossFunnelDuplicates(
+    allDates = false,
+  ): Promise<{ deleted: number; skipped: number }> {
+    const dateFilter = allDates
+      ? sql`TRUE`
+      : sql`loser.created_at >= NOW() - INTERVAL '48 hours'`;
+
+    // Find cross-funnel duplicates: same phone hash, overlapping product in
+    // order_items, different media_buyer_id, within 24h of each other.
+    // The "winner" is the earliest order; "losers" are later orders from
+    // different MBs. Only touch losers in stock-neutral pre-delete statuses.
+    const losers = await this.db.execute<{
+      loser_id: string;
+      loser_customer_name: string;
+      loser_customer_phone: string | null;
+      loser_customer_phone_hash: string;
+      loser_mb_id: string;
+      loser_campaign_id: string | null;
+      loser_branch_id: string | null;
+      loser_status: string;
+      winner_id: string;
+      winner_mb_id: string;
+      product_id: string;
+    }>(sql`
+      SELECT DISTINCT ON (loser.id)
+        loser.id              AS loser_id,
+        loser.customer_name   AS loser_customer_name,
+        loser.customer_phone  AS loser_customer_phone,
+        loser.customer_phone_hash AS loser_customer_phone_hash,
+        loser.media_buyer_id  AS loser_mb_id,
+        loser.campaign_id     AS loser_campaign_id,
+        loser.branch_id       AS loser_branch_id,
+        loser.status          AS loser_status,
+        winner.id             AS winner_id,
+        winner.media_buyer_id AS winner_mb_id,
+        oi_loser.product_id   AS product_id
+      FROM orders loser
+      JOIN order_items oi_loser ON oi_loser.order_id = loser.id
+      JOIN order_items oi_winner ON oi_winner.product_id = oi_loser.product_id
+      JOIN orders winner ON winner.id = oi_winner.order_id
+      WHERE loser.customer_phone_hash IS NOT NULL
+        AND loser.media_buyer_id IS NOT NULL
+        AND winner.media_buyer_id IS NOT NULL
+        AND loser.media_buyer_id != winner.media_buyer_id
+        AND loser.customer_phone_hash = winner.customer_phone_hash
+        AND winner.created_at < loser.created_at
+        AND loser.created_at - winner.created_at < INTERVAL '24 hours'
+        AND loser.status IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED')
+        AND loser.deleted_at IS NULL
+        AND winner.status NOT IN ('CANCELLED', 'DELETED')
+        AND winner.deleted_at IS NULL
+        AND ${dateFilter}
+        -- Skip orders that already have a cross_funnel_attempts row recorded
+        AND NOT EXISTS (
+          SELECT 1 FROM cross_funnel_attempts cfa
+          WHERE cfa.customer_phone_hash = loser.customer_phone_hash
+            AND cfa.media_buyer_id = loser.media_buyer_id
+            AND cfa.original_order_id = winner.id
+            AND cfa.product_id = oi_loser.product_id
+        )
+      ORDER BY loser.id, winner.created_at ASC
+      LIMIT ${MAX_PER_RUN}
+    `);
+
+    if (losers.length === 0) {
+      return { deleted: 0, skipped: 0 };
+    }
+
+    // Group by loser order so we collect all product IDs per loser
+    const loserMap = new Map<string, {
+      loserId: string;
+      customerName: string;
+      customerPhone: string | null;
+      customerPhoneHash: string;
+      mbId: string;
+      campaignId: string | null;
+      branchId: string | null;
+      status: string;
+      winnerId: string;
+      winnerMbId: string;
+      productIds: string[];
+    }>();
+    for (const row of losers) {
+      const existing = loserMap.get(row.loser_id);
+      if (existing) {
+        if (!existing.productIds.includes(row.product_id)) {
+          existing.productIds.push(row.product_id);
+        }
+      } else {
+        loserMap.set(row.loser_id, {
+          loserId: row.loser_id,
+          customerName: row.loser_customer_name,
+          customerPhone: row.loser_customer_phone,
+          customerPhoneHash: row.loser_customer_phone_hash,
+          mbId: row.loser_mb_id,
+          campaignId: row.loser_campaign_id,
+          branchId: row.loser_branch_id,
+          status: row.loser_status,
+          winnerId: row.winner_id,
+          winnerMbId: row.winner_mb_id,
+          productIds: [row.product_id],
+        });
+      }
+    }
+
+    const loserEntries = [...loserMap.values()];
+    const loserIds = loserEntries.map((e) => e.loserId);
+    const preview = loserEntries
+      .slice(0, 20)
+      .map((e) => `${e.loserId} (${e.customerName} · MB ${e.mbId.slice(0, 8)}… → winner ${e.winnerId.slice(0, 8)}…)`)
+      .join('; ');
+
+    const now = new Date();
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      // 1. Soft-delete the loser orders
+      await tx
+        .update(schema.orders)
+        .set({
+          status: 'DELETED',
+          deletedAt: now,
+          updatedAt: now,
+          isDuplicate: 'FLAGGED',
+        })
+        .where(
+          and(
+            inArray(schema.orders.id, loserIds),
+            inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        );
+
+      // 2. Record cross_funnel_attempts rows for each loser+product
+      const cfaRows = loserEntries.flatMap((e) =>
+        e.productIds.map((productId) => ({
+          customerPhoneHash: e.customerPhoneHash,
+          customerPhone: e.customerPhone,
+          customerName: e.customerName,
+          productId,
+          mediaBuyerId: e.mbId,
+          campaignId: e.campaignId,
+          branchId: e.branchId,
+          originalOrderId: e.winnerId,
+          originalMediaBuyerId: e.winnerMbId,
+        })),
+      );
+      if (cfaRows.length > 0) {
+        await tx.insert(schema.crossFunnelAttempts).values(cfaRows);
+      }
+
+      // 3. Timeline events for audit trail
+      await tx.insert(schema.orderTimelineEvents).values(
+        loserEntries.map((e) => ({
+          orderId: e.loserId,
+          eventType: 'ORDER_DELETED' as const,
+          actorId: null,
+          actorName: 'System' as const,
+          description: `Auto-deleted: cross-funnel duplicate (same customer, different MB, within 24h — winner: ${e.winnerId.slice(0, 8)}…)`,
+          branchId: e.branchId ?? null,
+        })),
+      );
+    });
+
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+    this.logger.log(
+      `Deleted ${loserIds.length} cross-funnel duplicate(s) → Deleted tab + cross_funnel_attempts recorded. Targets: ${preview}` +
+        (loserIds.length > 20 ? ` … +${loserIds.length - 20} more` : ''),
+    );
+    return { deleted: loserIds.length, skipped: 0 };
   }
 }

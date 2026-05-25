@@ -185,8 +185,10 @@ export const crossFunnelAttempts = pgTable(
   'cross_funnel_attempts',
   {
     id: uuidv7Pk(),
-    /** SHA-256 hash of the normalized phone — never store raw phone (Pillar 2). */
+    /** SHA-256 hash of the normalized phone. */
     customerPhoneHash: text('customer_phone_hash').notNull(),
+    /** Raw phone — visible to the runner-up MB on the cross-funnel page. */
+    customerPhone: text('customer_phone'),
     customerName: text('customer_name').notNull(),
     productId: uuid('product_id')
       .notNull()

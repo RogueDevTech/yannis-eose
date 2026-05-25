@@ -1194,6 +1194,7 @@ export class OrdersService {
           await this.db.insert(schema.crossFunnelAttempts).values(
             productIds.map((productId) => ({
               customerPhoneHash: orderInput.customerPhoneHash!,
+              customerPhone: orderInput.customerPhone ?? null,
               customerName: orderInput.customerName,
               productId,
               mediaBuyerId: orderInput.mediaBuyerId!,
@@ -1245,10 +1246,10 @@ export class OrdersService {
     }
 
     // Cross-funnel attempt detection (Pillar 2 / attribution truth):
-    // Records when a different MB's funnel already captured this phone+product
-    // within 24h — but NEVER blocks order creation. The cross_funnel_attempts
-    // row is informational only; blocking was causing false positives that
-    // silently dropped legitimate orders (2026-05-19 incident).
+    // When a different MB's funnel already captured this phone+product within
+    // 24h, the runner-up is BLOCKED — no duplicate order is created. A
+    // cross_funnel_attempts row is inserted so the runner-up MB can see traction
+    // on the cross-funnel page.
     //
     // Uses `findCrossFunnelCandidates` (not `detectDuplicates`) because the
     // dedupe filter excludes already-flagged winners — and the post-create
@@ -1263,10 +1264,9 @@ export class OrdersService {
       );
       const winner = candidates[0]; // most-recent match
       if (winner) {
-        // Fire-and-forget — recording must never block the order. Insert
-        // failures are logged at error level inside the helper.
         await this.recordCrossFunnelAttempt({
           customerPhoneHash: orderInput.customerPhoneHash,
+          customerPhone: orderInput.customerPhone ?? null,
           customerName: orderInput.customerName,
           productIds,
           mediaBuyerId: orderInput.mediaBuyerId,
@@ -1274,6 +1274,16 @@ export class OrdersService {
           branchId: branchId ?? null,
           winner,
         });
+        this.logger.log(
+          {
+            runnerUpMbId: orderInput.mediaBuyerId,
+            winnerMbId: winner.mediaBuyerId,
+            winnerOrderId: winner.id,
+            phoneHash: orderInput.customerPhoneHash,
+          },
+          'cross-funnel: blocked duplicate order — runner-up MB recorded',
+        );
+        return { crossFunnelAttempt: true as const };
       }
     }
     // Two-tier duplicate flagging:
@@ -2454,10 +2464,12 @@ export class OrdersService {
       order = refreshed;
     }
 
-    // CS can call the customer at any pre-delivery stage: initial engagement, post-confirm
-    // upsell/adjustment, or delivery-coordination follow-up after allocation/dispatch.
-    // Blocked only once the order is closed out (DELIVERED / RETURNED / CANCELLED / etc.).
-    const callableStatuses = ['CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
+    // Phone stays visible once CS has engaged — post-delivery calls (returns, follow-ups,
+    // remittance queries) still need it. Only DELETED / CANCELLED are blocked.
+    const callableStatuses = [
+      'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
+      'DELIVERED', 'PARTIALLY_DELIVERED', 'REMITTED', 'RETURNED',
+    ];
     if (!callableStatuses.includes(order.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -2509,11 +2521,8 @@ export class OrdersService {
     const order = rows[0];
     if (!order) return null;
 
-    const callableStatuses = [
-      'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED',
-      'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
-    ];
-    if (!callableStatuses.includes(order.status)) return null;
+    // Phone is always visible once loaded — no status restriction.
+    // VOIP gate + role/assignment gate above are sufficient.
 
     const elevatedPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const isElevated =
@@ -6671,6 +6680,55 @@ export class OrdersService {
    * pull them in a single `WHERE id IN (...)` query, then merge in memory. Saves
    * (N − 1) round-trips on the remote DB.
    */
+  /**
+   * Return raw customer phones for a legitimate duplicate pair so the comparison
+   * modal can show them side-by-side. Validates that the two IDs form an actual
+   * FLAGGED/POSSIBLY_DUPLICATE relationship — prevents abuse as an arbitrary
+   * phone lookup. Permission gate is at the tRPC layer.
+   */
+  async getDuplicateComparisonPhones(
+    orderId: string,
+    originalOrderId: string,
+  ): Promise<{ orderPhone: string; originalPhone: string }> {
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        customerPhone: schema.orders.customerPhone,
+        customerPhoneHash: schema.orders.customerPhoneHash,
+        isDuplicate: schema.orders.isDuplicate,
+        duplicateOfId: schema.orders.duplicateOfId,
+      })
+      .from(schema.orders)
+      .where(inArray(schema.orders.id, [orderId, originalOrderId]));
+
+    const dupRow = rows.find((r) => r.id === orderId);
+    const origRow = rows.find((r) => r.id === originalOrderId);
+
+    // Validate this is a legitimate pair
+    if (
+      !dupRow ||
+      !origRow ||
+      !['FLAGGED', 'POSSIBLY_DUPLICATE'].includes(dupRow.isDuplicate ?? '') ||
+      dupRow.duplicateOfId !== originalOrderId
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Invalid duplicate pair — cannot retrieve comparison phones.',
+      });
+    }
+
+    const resolve = (phone: string | null, hash: string | null) => {
+      if (phone?.trim()) return phone.trim();
+      if (hash && !/^[a-f0-9]{64}$/i.test(hash)) return hash;
+      return 'Hidden';
+    };
+
+    return {
+      orderPhone: resolve(dupRow.customerPhone, dupRow.customerPhoneHash),
+      originalPhone: resolve(origRow.customerPhone, origRow.customerPhoneHash),
+    };
+  }
+
   async getFlaggedDuplicates(branchId?: string | null) {
     const flagged = await this.db
       .select()
@@ -6929,6 +6987,7 @@ export class OrdersService {
    */
   private async recordCrossFunnelAttempt(args: {
     customerPhoneHash: string;
+    customerPhone: string | null;
     customerName: string;
     productIds: string[];
     mediaBuyerId: string;
@@ -6940,6 +6999,7 @@ export class OrdersService {
       await this.db.insert(schema.crossFunnelAttempts).values(
         args.productIds.map((productId) => ({
           customerPhoneHash: args.customerPhoneHash,
+          customerPhone: args.customerPhone,
           customerName: args.customerName,
           productId,
           mediaBuyerId: args.mediaBuyerId,

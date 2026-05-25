@@ -3940,6 +3940,7 @@ export class MarketingService {
       .select({
         id: schema.crossFunnelAttempts.id,
         customerName: schema.crossFunnelAttempts.customerName,
+        customerPhone: schema.crossFunnelAttempts.customerPhone,
         attemptedAt: schema.crossFunnelAttempts.attemptedAt,
         productId: schema.crossFunnelAttempts.productId,
         productName: productAlias.name,
