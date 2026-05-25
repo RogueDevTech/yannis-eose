@@ -2464,18 +2464,8 @@ export class OrdersService {
       order = refreshed;
     }
 
-    // Phone stays visible once CS has engaged — post-delivery calls (returns, follow-ups,
-    // remittance queries) still need it. Only DELETED / CANCELLED are blocked.
-    const callableStatuses = [
-      'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
-      'DELIVERED', 'PARTIALLY_DELIVERED', 'REMITTED', 'RETURNED',
-    ];
-    if (!callableStatuses.includes(order.status)) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Cannot reveal phone: order is in ${order.status} status`,
-      });
-    }
+    // Phone is always available regardless of status — no re-masking after first call.
+    // VOIP gate + role/assignment gate above are sufficient.
 
     const elevatedPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const isElevated =
