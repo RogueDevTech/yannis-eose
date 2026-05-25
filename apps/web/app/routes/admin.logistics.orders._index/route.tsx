@@ -165,7 +165,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const [countsRes, locationsRes, overdueRes] = await Promise.all([
         apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
         apiRequest<unknown>(
-          `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
+          `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 200, status: 'ACTIVE' }))}`,
           { method: 'GET', cookie },
         ),
         apiRequest<unknown>(

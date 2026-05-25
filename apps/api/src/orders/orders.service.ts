@@ -1287,15 +1287,17 @@ export class OrdersService {
       }
     }
     // Two-tier duplicate flagging:
-    //   24h match → 'FLAGGED' (hard, fresh — likely an accidental resubmission)
-    //   24h–30d match → 'POSSIBLY_DUPLICATE' (soft, historical — repeat customer or stale scam)
+    //   24h match with same product → 'FLAGGED' (hard, fresh — likely accidental resubmission)
+    //   24h–30d match with same product → 'POSSIBLY_DUPLICATE' (soft, historical — repeat)
+    //   Same phone + different product → null (legitimate new order, not a duplicate)
     //   else → null (clean)
+    const incomingProductIds = orderInput.items.map((i) => i.productId);
     const recentSamePhoneOrder = orderInput.customerPhoneHash
-      ? await this.findRecentPhoneOrder(orderInput.customerPhoneHash)
+      ? await this.findRecentPhoneOrder(orderInput.customerPhoneHash, incomingProductIds)
       : null;
     const historicalSamePhoneOrder =
       !recentSamePhoneOrder && orderInput.customerPhoneHash
-        ? await this.findHistoricalSamePhoneOrder(orderInput.customerPhoneHash)
+        ? await this.findHistoricalSamePhoneOrder(orderInput.customerPhoneHash, incomingProductIds)
         : null;
     const duplicateFlag: 'FLAGGED' | 'POSSIBLY_DUPLICATE' | null = recentSamePhoneOrder
       ? 'FLAGGED'
@@ -1585,9 +1587,11 @@ export class OrdersService {
     // 24h match exists, so `findRecentPhoneOrder` will normally be null
     // here — `findHistoricalSamePhoneOrder` still tags week-old repeats as
     // POSSIBLY_DUPLICATE for HoCS visibility.
-    const recentSamePhoneOrder = await this.findRecentPhoneOrder(customerPhoneHash);
+    // Product-aware: same phone + different product = legitimate, not a duplicate.
+    const offlineProductIds = (input.items ?? []).map((i: { productId: string }) => i.productId);
+    const recentSamePhoneOrder = await this.findRecentPhoneOrder(customerPhoneHash, offlineProductIds);
     const historicalSamePhoneOrder = !recentSamePhoneOrder
-      ? await this.findHistoricalSamePhoneOrder(customerPhoneHash)
+      ? await this.findHistoricalSamePhoneOrder(customerPhoneHash, offlineProductIds)
       : null;
     const offlineDuplicateFlag: 'FLAGGED' | 'POSSIBLY_DUPLICATE' | null = recentSamePhoneOrder
       ? 'FLAGGED'
@@ -2269,13 +2273,60 @@ export class OrdersService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to allocate.' });
     }
 
+    // Expand bundle products into their components for allocation eligibility.
+    // The order item shows the bundle name, but stock lives on the components.
+    const rawProductIds = [...new Set(orderItems.map((i) => i.productId))];
+    const bundleRows = rawProductIds.length > 0
+      ? await this.db
+          .select({
+            bundleProductId: schema.productBundleComponents.bundleProductId,
+            componentProductId: schema.productBundleComponents.componentProductId,
+            quantity: schema.productBundleComponents.quantity,
+          })
+          .from(schema.productBundleComponents)
+          .where(inArray(schema.productBundleComponents.bundleProductId, rawProductIds))
+      : [];
+    const bundleComponentMap = new Map<string, Array<{ componentProductId: string; quantity: number }>>();
+    for (const row of bundleRows) {
+      let comps = bundleComponentMap.get(row.bundleProductId);
+      if (!comps) { comps = []; bundleComponentMap.set(row.bundleProductId, comps); }
+      comps.push({ componentProductId: row.componentProductId, quantity: row.quantity });
+    }
+
+    // Resolve component product names if needed
+    const componentIds = new Set<string>();
+    for (const comps of bundleComponentMap.values()) {
+      for (const c of comps) componentIds.add(c.componentProductId);
+    }
+    const componentNameMap = new Map<string, string>();
+    if (componentIds.size > 0) {
+      const nameRows = await this.db
+        .select({ id: schema.products.id, name: schema.products.name })
+        .from(schema.products)
+        .where(inArray(schema.products.id, [...componentIds]));
+      for (const r of nameRows) componentNameMap.set(r.id, r.name);
+    }
+
+    // Build the needs map — expanding bundles into component products
     const needsByProduct = new Map<string, { qty: number; name: string }>();
     for (const item of orderItems) {
-      const curr = needsByProduct.get(item.productId);
-      needsByProduct.set(item.productId, {
-        qty: (curr?.qty ?? 0) + item.quantity,
-        name: item.productName ?? 'Unknown product',
-      });
+      const components = bundleComponentMap.get(item.productId);
+      if (components) {
+        for (const comp of components) {
+          const need = item.quantity * comp.quantity;
+          const curr = needsByProduct.get(comp.componentProductId);
+          needsByProduct.set(comp.componentProductId, {
+            qty: (curr?.qty ?? 0) + need,
+            name: componentNameMap.get(comp.componentProductId) ?? 'Unknown product',
+          });
+        }
+      } else {
+        const curr = needsByProduct.get(item.productId);
+        needsByProduct.set(item.productId, {
+          qty: (curr?.qty ?? 0) + item.quantity,
+          name: item.productName ?? 'Unknown product',
+        });
+      }
     }
 
     const locations = await this.db
@@ -7024,17 +7075,34 @@ export class OrdersService {
     }
   }
 
-  private async findRecentPhoneOrder(phoneHash: string) {
+  private async findRecentPhoneOrder(phoneHash: string, productIds?: string[]) {
+    const conditions = [
+      eq(schema.orders.customerPhoneHash, phoneHash),
+      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
+      sql`${schema.orders.status} != 'CANCELLED'`,
+      sql`${schema.orders.status} != 'DELETED'`,
+    ];
+    // Only flag as duplicate when at least one product overlaps.
+    // Same customer + different product = legitimate new order.
+    if (productIds && productIds.length > 0) {
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.orderItems)
+            .where(
+              and(
+                eq(schema.orderItems.orderId, schema.orders.id),
+                inArray(schema.orderItems.productId, productIds),
+              ),
+            ),
+        ),
+      );
+    }
     const [recent] = await this.db
       .select({ id: schema.orders.id })
       .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.customerPhoneHash, phoneHash),
-          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
-          sql`${schema.orders.status} != 'CANCELLED'`,
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(desc(schema.orders.createdAt))
       .limit(1);
     return recent ?? null;
@@ -7046,18 +7114,34 @@ export class OrdersService {
    * "this customer ordered something a week ago, is this a real new order or
    * a confused resubmission?" without the rapid-fire urgency of FLAGGED.
    */
-  private async findHistoricalSamePhoneOrder(phoneHash: string) {
+  private async findHistoricalSamePhoneOrder(phoneHash: string, productIds?: string[]) {
+    const conditions = [
+      eq(schema.orders.customerPhoneHash, phoneHash),
+      sql`${schema.orders.createdAt} < NOW() - INTERVAL '24 hours'`,
+      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '30 days'`,
+      sql`${schema.orders.status} != 'CANCELLED'`,
+      sql`${schema.orders.status} != 'DELETED'`,
+    ];
+    // Only flag as possibly-duplicate when at least one product overlaps.
+    if (productIds && productIds.length > 0) {
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.orderItems)
+            .where(
+              and(
+                eq(schema.orderItems.orderId, schema.orders.id),
+                inArray(schema.orderItems.productId, productIds),
+              ),
+            ),
+        ),
+      );
+    }
     const [recent] = await this.db
       .select({ id: schema.orders.id })
       .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.customerPhoneHash, phoneHash),
-          sql`${schema.orders.createdAt} < NOW() - INTERVAL '24 hours'`,
-          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '30 days'`,
-          sql`${schema.orders.status} != 'CANCELLED'`,
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(desc(schema.orders.createdAt))
       .limit(1);
     return recent ?? null;
