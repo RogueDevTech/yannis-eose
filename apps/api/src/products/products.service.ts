@@ -391,7 +391,7 @@ export class ProductsService {
     // rather than sequentially. On a remote DB this saves a full RTT (~120 ms) per call —
     // the products list endpoint runs on every dropdown / catalog page open.
     const productIds = rows.map((r) => r.id);
-    const [templateMap, stockRows] = await Promise.all([
+    const [templateMap, stockRows, bundleComponentRows] = await Promise.all([
       this.loadActiveOfferTemplatesByProductIds(productIds),
       productIds.length > 0
         ? this.db
@@ -403,9 +403,57 @@ export class ProductsService {
             .where(inArray(schema.inventoryLevels.productId, productIds))
             .groupBy(schema.inventoryLevels.productId)
         : Promise.resolve([] as Array<{ productId: string; totalStock: number }>),
+      // Load bundle components so we can compute bundle availability
+      productIds.length > 0
+        ? this.db
+            .select({
+              bundleProductId: schema.productBundleComponents.bundleProductId,
+              componentProductId: schema.productBundleComponents.componentProductId,
+              quantity: schema.productBundleComponents.quantity,
+            })
+            .from(schema.productBundleComponents)
+            .where(inArray(schema.productBundleComponents.bundleProductId, productIds))
+        : Promise.resolve([] as Array<{ bundleProductId: string; componentProductId: string; quantity: number }>),
     ]);
+
+    // Build stock map from inventory_levels (standalone products)
     const stockMap = new Map<string, number>();
     for (const s of stockRows) stockMap.set(s.productId, Number(s.totalStock) || 0);
+
+    // For bundle products, compute availability = min(component_stock / component_qty)
+    if (bundleComponentRows.length > 0) {
+      // Group components by bundle
+      const bundleMap = new Map<string, Array<{ componentProductId: string; quantity: number }>>();
+      const componentIds = new Set<string>();
+      for (const row of bundleComponentRows) {
+        let comps = bundleMap.get(row.bundleProductId);
+        if (!comps) { comps = []; bundleMap.set(row.bundleProductId, comps); }
+        comps.push({ componentProductId: row.componentProductId, quantity: row.quantity });
+        componentIds.add(row.componentProductId);
+      }
+      // Fetch stock for component products not already in stockMap
+      const missingComponentIds = [...componentIds].filter((id) => !stockMap.has(id));
+      if (missingComponentIds.length > 0) {
+        const compStockRows = await this.db
+          .select({
+            productId: schema.inventoryLevels.productId,
+            totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::int`,
+          })
+          .from(schema.inventoryLevels)
+          .where(inArray(schema.inventoryLevels.productId, missingComponentIds))
+          .groupBy(schema.inventoryLevels.productId);
+        for (const s of compStockRows) stockMap.set(s.productId, Number(s.totalStock) || 0);
+      }
+      // Compute bundle availability
+      for (const [bundleId, components] of bundleMap) {
+        let bundleAvailable = Infinity;
+        for (const comp of components) {
+          const compStock = stockMap.get(comp.componentProductId) ?? 0;
+          bundleAvailable = Math.min(bundleAvailable, Math.floor(compStock / comp.quantity));
+        }
+        stockMap.set(bundleId, bundleAvailable === Infinity ? 0 : bundleAvailable);
+      }
+    }
 
     const products = rows.map((r) => ({
       id: r.id,

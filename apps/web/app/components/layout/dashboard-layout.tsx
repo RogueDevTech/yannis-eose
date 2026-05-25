@@ -508,8 +508,11 @@ function getNavGroupsForUser(
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
 
-  const isLogisticsOnly = ['HEAD_OF_LOGISTICS', 'TPL_MANAGER'].includes(role);
+  const isLogisticsOnly = role === 'TPL_MANAGER';
   const logisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Finance'];
+  /** Head of Logistics sees Finance overview but not the full logistics-hidden set. */
+  const isHoLogistics = role === 'HEAD_OF_LOGISTICS';
+  const hoLogisticsHiddenGroups = ['Catalog', 'HR', 'Analytics'];
 
   for (const groupDef of navStructure) {
     // Head of Logistics has their own Logistics Orders page; hide Sales & CS group.
@@ -521,6 +524,9 @@ function getNavGroupsForUser(
       continue;
     // Logistics-only roles: hide Catalog, HR, Analytics, Finance (defense in depth).
     if (isLogisticsOnly && groupDef.group != null && logisticsHiddenGroups.includes(groupDef.group))
+      continue;
+    // Head of Logistics: hide Catalog, HR, Analytics but keep Finance.
+    if (isHoLogistics && groupDef.group != null && hoLogisticsHiddenGroups.includes(groupDef.group))
       continue;
 
     const visibleItems = groupDef.items
@@ -656,6 +662,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/logistics/orders',
     '/admin/logistics/partners',
     '/admin/logistics/transfers',
+    '/admin/finance/overview',
   ],
   TPL_MANAGER: [
     '/admin',

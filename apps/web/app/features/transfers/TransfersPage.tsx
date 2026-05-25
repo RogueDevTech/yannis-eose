@@ -530,6 +530,7 @@ export function TransfersPage({
           onChange={(v) => updateFilter('fromLocationId', v)}
           placeholder="All locations"
           searchPlaceholder="Search locations..."
+          clearable
           options={[
             { value: '', label: 'All locations' },
             ...locations.map((l: Location) => ({
@@ -545,6 +546,7 @@ export function TransfersPage({
           onChange={(v) => updateFilter('toLocationId', v)}
           placeholder="All locations"
           searchPlaceholder="Search locations..."
+          clearable
           options={[
             { value: '', label: 'All locations' },
             ...locations.map((l: Location) => ({
@@ -560,6 +562,7 @@ export function TransfersPage({
           onChange={(v) => updateFilter('productId', v)}
           placeholder={formDataLoading ? 'Loading products…' : 'All products'}
           searchPlaceholder="Search products..."
+          clearable
           options={[
             { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
             ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
