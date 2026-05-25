@@ -459,17 +459,13 @@ export class InventoryService {
    */
   private canApproveSourceTransfer(
     actor: SessionUser,
-    providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null,
+    _providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null,
   ): boolean {
     if (isAdminLevel(actor)) return true;
-    if (providerKind === 'WAREHOUSE') {
-      return actor.role === 'STOCK_MANAGER' || actor.role === 'BRANCH_ADMIN';
-    }
-    if (providerKind === 'THIRD_PARTY') {
-      return actor.role === 'TPL_MANAGER' || actor.role === 'HEAD_OF_LOGISTICS';
-    }
-    // Unknown / null provider kind — fail closed (require approval).
-    return false;
+    // Stock Manager + Head of Logistics go straight to RECEIVED — no approval
+    // bottleneck. HoL manages agent-to-agent movements and notifies management
+    // but doesn't wait for human approval (CEO directive 2026-05-25).
+    return actor.role === 'STOCK_MANAGER' || actor.role === 'HEAD_OF_LOGISTICS';
   }
 
   /**
@@ -480,11 +476,10 @@ export class InventoryService {
    * `inventory.approveTransfer` grant cover their need to approve).
    */
   private getSourceAuthorityRolesForNotification(
-    providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null,
-  ): Array<'STOCK_MANAGER' | 'BRANCH_ADMIN' | 'TPL_MANAGER' | 'HEAD_OF_LOGISTICS'> {
-    if (providerKind === 'WAREHOUSE') return ['STOCK_MANAGER', 'BRANCH_ADMIN'];
-    if (providerKind === 'THIRD_PARTY') return ['TPL_MANAGER', 'HEAD_OF_LOGISTICS'];
-    return [];
+    _providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null,
+  ): Array<'STOCK_MANAGER'> {
+    // Stock Manager is the sole approver for all pending transfers.
+    return ['STOCK_MANAGER'];
   }
 
   /**
@@ -623,12 +618,13 @@ export class InventoryService {
       .values({
         productId: line.productId,
         quantitySent: line.quantity,
-        quantityReceived: null,
+        // Source-authority fast-path: auto-receive with full quantity.
+        quantityReceived: requiresApproval ? null : line.quantity,
         fromLocationId,
         toLocationId,
-        transferStatus: requiresApproval ? 'PENDING' : 'IN_TRANSIT',
+        transferStatus: requiresApproval ? 'PENDING' : 'RECEIVED',
         transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
-        verifiedAt: null,
+        verifiedAt: requiresApproval ? null : now,
         initiatedBy: actor.id,
       })
       .returning();
@@ -638,9 +634,11 @@ export class InventoryService {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
     }
 
-    // Fast-path (source-authority initiator): deduct source + write movement
-    // inside the same transaction. Otherwise the side effects defer to approve.
+    // Fast-path (source-authority initiator): deduct source, add to destination,
+    // and write both movement rows inside the same transaction so the transfer
+    // lands as RECEIVED in one step — no separate approve/verify needed.
     if (!requiresApproval) {
+      // Deduct source stock
       if (sourceLevel[0]) {
         await tx
           .update(schema.inventoryLevels)
@@ -658,6 +656,57 @@ export class InventoryService {
         toLocationId,
         referenceId: newTransfer.id,
         actorId: actor.id,
+      });
+
+      // Add stock to destination
+      const destLevel = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, line.productId),
+            eq(schema.inventoryLevels.locationId, toLocationId),
+          ),
+        )
+        .limit(1);
+
+      if (destLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${line.quantity}`,
+            updatedAt: now,
+          })
+          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
+      } else {
+        await tx
+          .insert(schema.inventoryLevels)
+          .values({
+            productId: line.productId,
+            locationId: toLocationId,
+            stockCount: line.quantity,
+            reservedCount: 0,
+            status: 'AVAILABLE',
+          });
+      }
+
+      // Log TRANSFER_IN movement
+      await tx.insert(schema.stockMovements).values({
+        productId: line.productId,
+        movementType: 'TRANSFER_IN',
+        quantity: line.quantity,
+        fromLocationId,
+        toLocationId,
+        referenceId: newTransfer.id,
+        actorId: actor.id,
+      });
+
+      // Write settlement outcome row
+      await tx.insert(schema.stockTransferOutcomes).values({
+        transferId: newTransfer.id,
+        status: 'APPROVED',
+        quantity: line.quantity,
+        recordedBy: actor.id,
       });
     }
 
@@ -718,9 +767,10 @@ export class InventoryService {
       this.events.emitToRoom('inventory', 'transfer:created', {
         transferId: result.transfer.id,
         productId: line.productId,
-        completed: false,
+        completed: true,
       });
       this.scheduleLowStockCheck(line.productId, fromLocationId);
+      this.scheduleLowStockCheck(line.productId, toLocationId);
     }
   }
 
@@ -778,7 +828,7 @@ export class InventoryService {
         });
       }
 
-      // Deduct source + flip status + audit columns + insert movement (single tx).
+      // Deduct source, add to destination, flip to RECEIVED in one tx.
       if (sourceLevel[0]) {
         await tx
           .update(schema.inventoryLevels)
@@ -791,9 +841,11 @@ export class InventoryService {
       await tx
         .update(schema.stockTransfers)
         .set({
-          transferStatus: 'IN_TRANSIT',
+          transferStatus: 'RECEIVED',
+          quantityReceived: transfer.quantitySent,
           approvedBy: actor.id,
           approvedAt: now,
+          verifiedAt: now,
         })
         .where(eq(schema.stockTransfers.id, transfer.id));
       await tx.insert(schema.stockMovements).values({
@@ -804,6 +856,54 @@ export class InventoryService {
         toLocationId: transfer.toLocationId,
         referenceId: transfer.id,
         actorId: actor.id,
+      });
+
+      // Add stock to destination
+      const destLevel = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, transfer.productId),
+            eq(schema.inventoryLevels.locationId, transfer.toLocationId),
+          ),
+        )
+        .limit(1);
+      if (destLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${transfer.quantitySent}`,
+            updatedAt: now,
+          })
+          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
+      } else {
+        await tx.insert(schema.inventoryLevels).values({
+          productId: transfer.productId,
+          locationId: transfer.toLocationId,
+          stockCount: transfer.quantitySent,
+          reservedCount: 0,
+          status: 'AVAILABLE',
+        });
+      }
+
+      // TRANSFER_IN movement
+      await tx.insert(schema.stockMovements).values({
+        productId: transfer.productId,
+        movementType: 'TRANSFER_IN',
+        quantity: transfer.quantitySent,
+        fromLocationId: transfer.fromLocationId,
+        toLocationId: transfer.toLocationId,
+        referenceId: transfer.id,
+        actorId: actor.id,
+      });
+
+      // Settlement outcome
+      await tx.insert(schema.stockTransferOutcomes).values({
+        transferId: transfer.id,
+        status: 'APPROVED',
+        quantity: transfer.quantitySent,
+        recordedBy: actor.id,
       });
 
       return { transfer, sourceLocationName: sourceInfo.locationName };
@@ -827,7 +927,7 @@ export class InventoryService {
           userId: result.transfer.initiatedBy,
           type: 'inventory:transfer_approved',
           title: 'Transfer approved',
-          body: `${actor.name ?? 'A source manager'} approved your transfer of ${result.transfer.quantitySent} × ${productName} out of ${result.sourceLocationName}. Stock is now in transit.`,
+          body: `${actor.name ?? 'A source manager'} approved your transfer of ${result.transfer.quantitySent} × ${productName} out of ${result.sourceLocationName}. Stock has been received at destination.`,
           data: {
             transferId: result.transfer.id,
             productId: result.transfer.productId,
@@ -1965,7 +2065,7 @@ export class InventoryService {
    * `canApprove: boolean` so the client can render the Approve / Reject buttons
    * without mirroring the source-authority rule. Server is canonical.
    */
-  async listTransfers(status?: string, viewer?: SessionUser) {
+  async listTransfers(status?: string, viewer?: SessionUser, page = 1, limit = 1000) {
     const conditions = [];
     if (status) {
       conditions.push(
@@ -1977,17 +2077,26 @@ export class InventoryService {
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 1000);
+    const offset = (safePage - 1) * safeLimit;
 
-    const transfers = await this.db
-      .select()
-      .from(schema.stockTransfers)
-      .where(whereClause)
-      .orderBy(desc(schema.stockTransfers.createdAt))
-      // Enough rows that in-transit transfers aren't dropped for high-volume orgs
-      // (newest sort — a row missing here felt like the transfer "vanished").
-      .limit(200);
+    const [transfers, countRows] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.stockTransfers)
+        .where(whereClause)
+        .orderBy(desc(schema.stockTransfers.createdAt))
+        .limit(safeLimit)
+        .offset(offset),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.stockTransfers)
+        .where(whereClause),
+    ]);
+    const total = countRows[0]?.count ?? 0;
 
-    if (transfers.length === 0) return transfers;
+    if (transfers.length === 0) return { transfers: [], total, page: safePage, limit: safeLimit, totalPages: Math.ceil(total / safeLimit) };
 
     // Batch-resolve location names so the frontend never sees "Unknown location".
     const allLocationIds = Array.from(
@@ -2161,14 +2270,15 @@ export class InventoryService {
       }));
     });
 
-    if (!status) return mapped;
+    const paginationMeta = { total, page: safePage, limit: safeLimit, totalPages: Math.ceil(total / safeLimit) };
+    if (!status) return { transfers: mapped, ...paginationMeta };
     if (status === 'RECEIVED') {
-      return mapped.filter((row) => row.outcomeStatus === 'APPROVED');
+      return { transfers: mapped.filter((row) => row.outcomeStatus === 'APPROVED'), ...paginationMeta };
     }
     if (status === 'DISPUTED') {
-      return mapped.filter((row) => row.outcomeStatus === 'DISPUTED');
+      return { transfers: mapped.filter((row) => row.outcomeStatus === 'DISPUTED'), ...paginationMeta };
     }
-    return mapped.filter((row) => row.transferStatus === status);
+    return { transfers: mapped.filter((row) => row.transferStatus === status), ...paginationMeta };
   }
 
   /**
@@ -2607,6 +2717,14 @@ export class InventoryService {
 
   // ── Order lifecycle inventory integrity (global + per-location) ─────────────
 
+  /**
+   * Load order line quantities, expanding bundle products into their component
+   * products. If product A is a bundle of (B×2, C×1) and the order has A×3,
+   * the returned map contains B→6, C→3 (not A→3). Standalone products pass
+   * through unchanged. This is the single chokepoint — every inventory op
+   * (assert, reserve, release, deliver, FIFO) calls this, so bundle awareness
+   * propagates automatically.
+   */
   private async loadAggregatedOrderLineQuantities(orderId: string): Promise<Map<string, number>> {
     const rows = await this.db
       .select({
@@ -2616,9 +2734,44 @@ export class InventoryService {
       .from(schema.orderItems)
       .where(eq(schema.orderItems.orderId, orderId));
 
+    if (rows.length === 0) return new Map();
+
+    // Check which of these products are bundles (have components)
+    const productIds = [...new Set(rows.map((r) => r.productId))];
+    const bundleRows = await this.db
+      .select({
+        bundleProductId: schema.productBundleComponents.bundleProductId,
+        componentProductId: schema.productBundleComponents.componentProductId,
+        quantity: schema.productBundleComponents.quantity,
+      })
+      .from(schema.productBundleComponents)
+      .where(inArray(schema.productBundleComponents.bundleProductId, productIds));
+
+    // Group bundle components by bundle product ID
+    const bundleMap = new Map<string, Array<{ componentProductId: string; quantity: number }>>();
+    for (const row of bundleRows) {
+      let components = bundleMap.get(row.bundleProductId);
+      if (!components) {
+        components = [];
+        bundleMap.set(row.bundleProductId, components);
+      }
+      components.push({ componentProductId: row.componentProductId, quantity: row.quantity });
+    }
+
+    // Expand: bundle items → component items; standalone items pass through
     const byProduct = new Map<string, number>();
     for (const row of rows) {
-      byProduct.set(row.productId, (byProduct.get(row.productId) ?? 0) + row.quantity);
+      const components = bundleMap.get(row.productId);
+      if (components) {
+        // Bundle product — expand into component quantities
+        for (const comp of components) {
+          const need = row.quantity * comp.quantity;
+          byProduct.set(comp.componentProductId, (byProduct.get(comp.componentProductId) ?? 0) + need);
+        }
+      } else {
+        // Standalone product — pass through
+        byProduct.set(row.productId, (byProduct.get(row.productId) ?? 0) + row.quantity);
+      }
     }
     return byProduct;
   }

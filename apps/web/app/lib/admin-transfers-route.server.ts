@@ -13,7 +13,14 @@ export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-    const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
+    const url = new URL(request.url);
+    const transfersInput: Record<string, unknown> = { limit: 1000 };
+    const statusParam = url.searchParams.get('status');
+    if (statusParam) transfersInput.status = statusParam;
+    const transfersPromise = apiRequest<unknown>(
+      `/trpc/inventory.transfers?input=${encodeURIComponent(JSON.stringify(transfersInput))}`,
+      { method: 'GET', cookie },
+    );
     // Use the lightweight locationOptions endpoint (unpaginated, cached) instead
     // of the paginated listLocations (capped at 100). Transfers can reference any
     // location — ACTIVE default is fine since inactive locations are rare.
@@ -24,9 +31,16 @@ export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
 
     const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
 
-    const transfersData = transfersRes.ok
-      ? (transfersRes.data as { result?: { data?: Transfer[] } })?.result?.data
+    const transfersResult = transfersRes.ok
+      ? (transfersRes.data as { result?: { data?: { transfers?: Transfer[]; total?: number; page?: number; limit?: number; totalPages?: number } | Transfer[] } })?.result?.data
       : null;
+    // Handle both paginated { transfers, total, ... } and legacy array responses.
+    const transfersData = Array.isArray(transfersResult)
+      ? transfersResult
+      : (transfersResult?.transfers ?? null) as Transfer[] | null;
+    const transfersTotal = Array.isArray(transfersResult) ? transfersResult.length : ((transfersResult as { total?: number } | null)?.total ?? 0);
+    const transfersPage = Array.isArray(transfersResult) ? 1 : ((transfersResult as { page?: number } | null)?.page ?? 1);
+    const transfersTotalPages = Array.isArray(transfersResult) ? 1 : ((transfersResult as { totalPages?: number } | null)?.totalPages ?? 1);
 
     type LocationOption = { id: string; name: string; status: string; providerId: string; providerName: string | null };
     const locationsRaw = locationsRes.ok
@@ -43,6 +57,9 @@ export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
 
     return {
       transfers: transfersData ?? [],
+      transfersTotal,
+      transfersPage,
+      transfersTotalPages,
       locations: locationsData,
       products: null,
       levels: null,

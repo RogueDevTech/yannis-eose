@@ -7591,12 +7591,20 @@ export class OrdersService {
 
         // Inter-branch CS routing moves the *servicing* branch only — marketing
         // attribution (`branch_id` + media buyer credit) is preserved. Migration 0150.
+        // CEO directive 2026-05-25: preserve status and records on branch transfer.
+        // Only clear CS assignment for pre-confirmation statuses (closer belongs to old branch).
+        const preConfirmStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
+        const isPreConfirm = preConfirmStatuses.includes(order.status as string);
         const updateFields: Record<string, unknown> = {
           servicingBranchId: targetBranchId,
-          status: 'UNPROCESSED',
-          assignedCsId: null,
           updatedAt: new Date(),
         };
+        // Pre-confirmation: reset to UNPROCESSED + clear CS so the new branch pool picks it up.
+        // Post-confirmation: keep status + assignment intact — order has progressed past CS.
+        if (isPreConfirm) {
+          updateFields.status = 'UNPROCESSED';
+          updateFields.assignedCsId = null;
+        }
         if (opts?.clearMediaBuyer) {
           updateFields.mediaBuyerId = null;
         }
@@ -7615,7 +7623,9 @@ export class OrdersService {
         const eventType = opts?.clearMediaBuyer ? 'FOLLOW_UP_REASSIGNED' : 'BRANCH_MOVED';
         const description = opts?.clearMediaBuyer
           ? `Order reassigned for follow-up. Previous status: ${order.status}.`
-          : `Order moved to a different branch. Previous status: ${order.status}. Status reset to Unprocessed.`;
+          : isPreConfirm
+            ? `Order moved to a different branch. Previous status: ${order.status}. Status reset to Unprocessed.`
+            : `Order moved to a different branch. Status preserved: ${order.status}.`;
 
         await this.writeTimelineEvent({
           orderId,

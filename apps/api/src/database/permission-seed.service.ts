@@ -64,7 +64,7 @@ export class PermissionSeedService implements OnApplicationBootstrap {
       });
       const ms = Date.now() - startedAt;
       this.logger.log(
-        `RBAC catalog in sync in ${ms}ms (${result.permsTotal} permission codes; ${result.rolePermsInserted} role assignments added, ${result.rolePermsRevoked} revoked).`,
+        `RBAC catalog in sync in ${ms}ms (${result.permsTotal} permission codes; ${result.rolePermsInserted} role assignments added, ${result.rolePermsRevoked} revoked, ${result.usersRestamped} user snapshots restamped).`,
       );
     } catch (err) {
       // Soft fail — log + continue boot. Existing grants still work.

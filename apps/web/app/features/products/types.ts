@@ -25,6 +25,13 @@ export interface Product {
   createdAt: string;
   /** Total available stock summed across all locations (stock - reserved). */
   totalStock?: number;
+  /** Bundle components — present if this product is a bundle/kit. */
+  bundleComponents?: Array<{
+    id: string;
+    componentProductId: string;
+    componentName: string;
+    quantity: number;
+  }>;
 }
 
 export const PRODUCT_STATUS_COLORS: Record<string, string> = {

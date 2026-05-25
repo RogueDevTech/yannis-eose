@@ -450,7 +450,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
       receiptUrl: approveFundingReceiptUrl.trim(),
     });
     if (!parsed.success) {
-      toast.error('Cannot approve request', parsed.error.issues[0]?.message ?? 'Attach a valid receipt image.');
+      toast.error('Cannot approve request', parsed.error.issues[0]?.message ?? 'Check the form fields.');
       return;
     }
     const fd = new FormData(formEl);
@@ -463,9 +463,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   };
 
   const createFundingSubmitDisabled =
-    createFundingUploadState === 'uploading' || !createFundingReceiptUrl.trim();
+    createFundingUploadState === 'uploading';
   const approveFundingSubmitDisabled =
-    approveFundingUploadState === 'uploading' || !approveFundingReceiptUrl.trim();
+    approveFundingUploadState === 'uploading';
 
   const rawTransfersSlice: FundingSliceData =
     activeSection === 'distributing' && outgoingTransfers ? outgoingTransfers : receivedTransfers;
@@ -1002,7 +1002,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             <FileUpload
               folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
-              label="Receipt Upload"
+              label="Receipt (optional)"
+              size="sm"
               onUpload={(url) => setCreateFundingReceiptUrl(url)}
               onUploadStateChange={setCreateFundingUploadState}
             />
@@ -1196,7 +1197,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             <FileUpload
               folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
-              label="Receipt image"
+              label="Receipt (optional)"
+              size="sm"
               onUpload={(url) => setApproveFundingReceiptUrl(url)}
               onUploadStateChange={setApproveFundingUploadState}
             />

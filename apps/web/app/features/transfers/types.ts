@@ -65,6 +65,9 @@ export interface InventoryLevel {
 /** Streaming loader shape — products and levels arrive as deferred promises */
 export interface TransfersStreamData {
   transfers: Transfer[];
+  transfersTotal?: number;
+  transfersPage?: number;
+  transfersTotalPages?: number;
   locations: Location[];
   /** Loaded post-mount from `/api/transfers-form-data`. */
   products: Product[] | null;
