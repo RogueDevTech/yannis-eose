@@ -154,12 +154,13 @@ export function LogisticsProviderDetailPage({
 
       <PageHeader
         title={provider.name}
+        backTo="/admin/logistics/partners"
         mobileInlineActions
         description="View logistics company details and performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Provider tools"
-            sheetSubtitle={<span>Date range and navigation</span>}
+            sheetSubtitle={<span>Date range and filters</span>}
             triggerAriaLabel="Provider toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
@@ -168,25 +169,8 @@ export function LogisticsProviderDetailPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={periodAllTime} chrome="pill" />
-                <Link
-                  to={backHref}
-                  className="btn-secondary btn-sm inline-flex items-center justify-center"
-                >
-                  ← Back to team analysis
-                </Link>
               </div>
             }
-            sheet={({ closeSheet }) => (
-              <>
-                <Link
-                  to={backHref}
-                  className="btn-secondary btn-sm h-12 w-full justify-center"
-                  onClick={() => closeSheet()}
-                >
-                  Back to team analysis
-                </Link>
-              </>
-            )}
           />
         }
       />

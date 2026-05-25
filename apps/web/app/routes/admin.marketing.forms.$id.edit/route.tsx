@@ -16,6 +16,7 @@ import { MarketingFormEditPage } from '~/features/campaigns/MarketingFormEditPag
 import { normalizeBuilderFieldOrder, parseFieldOrderPayload } from '~/features/campaigns/form-field-order';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
 import {
+  ensureFixedStandardFields,
   parseAdditionalFieldSelectOptionsPayload,
   parseStandardFieldsPayload,
   toLegacyStandardFieldFlags,
@@ -285,13 +286,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     ...(accentColor ? { accentColor } : {}),
     successCallbackUrl: successCallbackUrl ?? undefined,
     showProductImages,
-    standardFields: parsedStandard.fields,
+    standardFields: ensureFixedStandardFields(parsedStandard.fields),
     fieldOrder: normalizeBuilderFieldOrder(
       parsedFieldOrder.fieldOrder,
-      parsedStandard.fields,
+      ensureFixedStandardFields(parsedStandard.fields),
       parsedCustom.fields,
     ),
-    ...toLegacyStandardFieldFlags(parsedStandard.fields),
+    ...toLegacyStandardFieldFlags(ensureFixedStandardFields(parsedStandard.fields)),
     customFields: parsedCustom.fields,
     deliveryStateOptions: parsedSelectOpts.options.deliveryStateOptions,
     preferredDeliveryDateOptions: parsedSelectOpts.options.preferredDeliveryDateOptions,

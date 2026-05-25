@@ -2906,7 +2906,7 @@ export class OrdersService {
     const orderIds = orders.map((o) => o.id);
     const campaignIds = [...new Set(orders.map((o) => o.campaignId).filter(Boolean))] as string[];
 
-    const [usersRes, itemsRes, campsRes] = await Promise.all([
+    const [usersRes, itemsRes, campsRes, commentsRes] = await Promise.all([
       userIdsToLookup.length > 0
         ? this.db
             .select({ id: schema.users.id, name: schema.users.name })
@@ -2939,6 +2939,33 @@ export class OrdersService {
             .from(schema.campaigns)
             .where(inArray(schema.campaigns.id, campaignIds))
         : Promise.resolve([] as Array<{ id: string; name: string }>),
+      // 4) Last CS comment per order — for the list view comment indicator.
+      orderIds.length > 0
+        ? this.db
+            .select({
+              orderId: schema.orderTimelineEvents.orderId,
+              description: schema.orderTimelineEvents.description,
+              actorName: schema.orderTimelineEvents.actorName,
+              createdAt: schema.orderTimelineEvents.createdAt,
+              metadata: schema.orderTimelineEvents.metadata,
+            })
+            .from(schema.orderTimelineEvents)
+            .where(
+              and(
+                inArray(schema.orderTimelineEvents.orderId, orderIds),
+                eq(schema.orderTimelineEvents.eventType, 'CS_ORDER_COMMENT'),
+              ),
+            )
+            .orderBy(desc(schema.orderTimelineEvents.createdAt))
+        : Promise.resolve(
+            [] as Array<{
+              orderId: string;
+              description: string;
+              actorName: string | null;
+              createdAt: Date;
+              metadata: unknown;
+            }>,
+          ),
     ]);
 
     const userNamesById = new Map<string, string>();
@@ -2966,10 +2993,20 @@ export class OrdersService {
     const campaignNames = new Map<string, string>();
     for (const c of campsRes) campaignNames.set(c.id, c.name);
 
+    // Build last-comment map (first occurrence per order = most recent, since ordered DESC).
+    const lastCommentByOrder = new Map<string, { comment: string; actorName: string | null; at: Date }>();
+    for (const c of commentsRes) {
+      if (lastCommentByOrder.has(c.orderId)) continue;
+      const meta = c.metadata as { commentBody?: string } | null;
+      const comment = meta?.commentBody ?? c.description.replace(/^Comment:\s*/, '');
+      lastCommentByOrder.set(c.orderId, { comment, actorName: c.actorName, at: c.createdAt });
+    }
+
     return {
       orders: orders.map((order) => {
         const { customerPhone, ...orderRest } = order;
         const primary = primaryItemByOrder.get(order.id);
+        const lastComment = lastCommentByOrder.get(order.id) ?? null;
         return {
           ...orderRest,
           customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
@@ -2979,6 +3016,7 @@ export class OrdersService {
           primaryProductName: primary?.productName ?? null,
           itemCount: primary?.itemCount ?? 0,
           campaignName: order.campaignId ? campaignNames.get(order.campaignId) ?? null : null,
+          lastCsComment: lastComment,
         };
       }),
       pagination: {

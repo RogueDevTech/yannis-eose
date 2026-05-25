@@ -403,8 +403,10 @@ export function getMarketingRoleFlags(
     !!user.currentBranchId;
 
   const isMediaBuyer = role === 'MEDIA_BUYER' && !isMarketingSupervisorOnBranch;
+  // SuperAdmin sees funding read-only — they should not approve/send funding
+  // that is not meant for them. Only HoM, Finance, Admin, or explicit permission holders.
   const isFundingAdmin =
-    ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role) ||
+    ['ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role) ||
     has('marketing.funding.approve') ||
     isMarketingSupervisorOnBranch;
   const canRequestFunding =

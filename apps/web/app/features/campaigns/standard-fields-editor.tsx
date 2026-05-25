@@ -9,12 +9,13 @@ import type { StandardFieldConfig, StandardFieldKey } from './types';
 import {
   ADDITIONAL_FIELD_OPTION_KEYS,
   type AdditionalFieldSelectOptionsState,
+  FIXED_STANDARD_FIELD_KEYS,
   getDefaultStandardFieldLabel,
   getStandardFieldLabel,
   joinOptionLines,
   parseOptionLines,
   STANDARD_FIELD_LABELS,
-  STANDARD_FIELD_ORDER,
+  TOGGLEABLE_STANDARD_FIELD_ORDER,
 } from './standard-fields';
 
 interface StandardFieldsEditorProps {
@@ -31,8 +32,10 @@ export function StandardFieldsEditor({
   onSelectOptionsChange,
 }: StandardFieldsEditorProps) {
   const [editingFieldKey, setEditingFieldKey] = useState<StandardFieldKey | null>(null);
-  const selected = new Set(fields.map((f) => f.key));
-  const remaining = STANDARD_FIELD_ORDER.filter((key) => !selected.has(key));
+  const fixedSet = new Set<string>(FIXED_STANDARD_FIELD_KEYS);
+  const toggleableFields = fields.filter((f) => !fixedSet.has(f.key));
+  const selected = new Set(toggleableFields.map((f) => f.key));
+  const remaining = TOGGLEABLE_STANDARD_FIELD_ORDER.filter((key) => !selected.has(key));
   const editingField = editingFieldKey ? fields.find((field) => field.key === editingFieldKey) ?? null : null;
 
   function addField(key: StandardFieldKey) {
@@ -57,11 +60,11 @@ export function StandardFieldsEditor({
       <div className="card">
         <div className="flex justify-end mb-2">
           <span className="text-xs text-app-fg-muted">
-            {fields.length} of {STANDARD_FIELD_ORDER.length} selected
+            {toggleableFields.length} of {TOGGLEABLE_STANDARD_FIELD_ORDER.length} selected
           </span>
         </div>
 
-        {fields.length === 0 ? (
+        {toggleableFields.length === 0 ? (
           <div className="border border-dashed border-app-border rounded-lg p-8 text-center">
             <p className="text-sm font-medium text-app-fg mb-1">No additional fields added</p>
             <p className="text-xs text-app-fg-muted mb-4">
@@ -80,7 +83,7 @@ export function StandardFieldsEditor({
           </div>
         ) : (
           <div className="space-y-2">
-            {fields.map((field) => (
+            {toggleableFields.map((field) => (
               <div
                 key={field.key}
                 className="group rounded-lg border bg-app-elevated p-3 border-app-border hover:border-app-border-strong transition-colors"

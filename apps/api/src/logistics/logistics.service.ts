@@ -1884,10 +1884,17 @@ export class LogisticsService {
   /**
    * Breakdown of delivered + remitted orders by product.
    * Optional branchId scopes to a single branch.
+   * Optional startDate/endDate filter by orders.deliveredAt.
    */
-  async deliveredOrdersByProduct(branchId?: string) {
+  async deliveredOrdersByProduct(
+    branchId?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
     if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.deliveredAt, new Date(endDate)));
 
     const rows = await this.db
       .select({
@@ -1910,10 +1917,17 @@ export class LogisticsService {
   /**
    * Breakdown of delivered + remitted orders by logistics location.
    * Optional branchId scopes to a single branch.
+   * Optional startDate/endDate filter by orders.deliveredAt.
    */
-  async deliveredOrdersByLocation(branchId?: string) {
+  async deliveredOrdersByLocation(
+    branchId?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
     if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.deliveredAt, new Date(endDate)));
 
     const rows = await this.db
       .select({

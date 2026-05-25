@@ -254,8 +254,12 @@ export const financeRouter = router({
         getMarketingService()
           .getFundingSummary(input.branchId ?? null)
           .catch(() => ({ totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 })),
-        getLogisticsService().deliveredOrdersByProduct(input.branchId).catch(() => []),
-        getLogisticsService().deliveredOrdersByLocation(input.branchId).catch(() => []),
+        getLogisticsService()
+          .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate)
+          .catch(() => []),
+        getLogisticsService()
+          .deliveredOrdersByLocation(input.branchId, input.startDate, input.endDate)
+          .catch(() => []),
       ]);
 
       return {

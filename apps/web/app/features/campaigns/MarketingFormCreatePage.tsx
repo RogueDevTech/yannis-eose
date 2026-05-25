@@ -27,6 +27,7 @@ import { FormFullPreview, type FormFullPreviewPreviewProduct } from './form-full
 import {
   additionalFieldSelectOptionsFromConfig,
   cloneDefaultAdditionalFieldSelectOptions,
+  ensureFixedStandardFields,
   normalizeStandardFields,
 } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
@@ -107,7 +108,7 @@ export function MarketingFormCreatePage({
     sortAndReindexCustomFields((dupCfg?.customFields ?? []) as CustomFormField[]),
   );
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() =>
-    normalizeStandardFields(dupCfg),
+    ensureFixedStandardFields(normalizeStandardFields(dupCfg)),
   );
   const [fieldOrder, setFieldOrder] = useState<CampaignFieldOrderToken[]>(() =>
     normalizeBuilderFieldOrder(
@@ -238,12 +239,10 @@ export function MarketingFormCreatePage({
     <div className="space-y-4">
       <PageHeader
         title="New form"
+        backTo="/admin/marketing/forms"
         description={
           <>
-            Configure your public order form in one place. The preview on the right updates as you edit.{' '}
-            <Link to="/admin/marketing/forms" className="text-brand-600 dark:text-brand-400 hover:underline">
-              Back to all forms
-            </Link>
+            Configure your public order form in one place. The preview on the right updates as you edit.
           </>
         }
       />

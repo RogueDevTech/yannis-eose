@@ -231,26 +231,8 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
     <div className="space-y-6 max-w-3xl">
       <PageHeader
         title="Generate Payroll Batch"
-        mobileInlineActions
+        backTo="/hr/payroll"
         description="Generate payroll for a selected month and scope."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Payroll tools"
-            sheetSubtitle={<span>Navigation</span>}
-            triggerAriaLabel="Payroll generator toolbar"
-            showMobileRefresh={false}
-            desktop={
-              <Link to="/hr/payroll" className="btn-ghost btn-sm shrink-0">
-                ← Back to payroll
-              </Link>
-            }
-            sheet={
-              <Link to="/hr/payroll" className="btn-secondary btn-sm w-full justify-center">
-                Back to payroll
-              </Link>
-            }
-          />
-        }
       />
 
       {(previewError ?? previewActionError) && (

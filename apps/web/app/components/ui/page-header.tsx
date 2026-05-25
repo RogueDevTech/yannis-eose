@@ -8,7 +8,12 @@
  *     description="Manage your product catalogue"
  *     actions={<Button>Add Product</Button>}
  *   />
+ *
+ *   // Inner page with back button:
+ *   <PageHeader title="New Form" backTo="/admin/marketing/forms" />
  */
+
+import { Link } from '@remix-run/react';
 
 interface PageHeaderProps {
   /** Page title. Usually a string; accepts a node so loading shells can pass a
@@ -19,6 +24,9 @@ interface PageHeaderProps {
   description?: React.ReactNode;
   /** Breadcrumb path shown above the title */
   breadcrumb?: React.ReactNode;
+  /** Link target for a back arrow rendered inline before the title.
+   *  Use on detail / create / edit pages that have a clear parent list. */
+  backTo?: string;
   /** Right-side action buttons / controls */
   actions?: React.ReactNode;
   /** Keep compact mobile actions on the title row; description stays below. */
@@ -32,6 +40,7 @@ export function PageHeader({
   title,
   description,
   breadcrumb,
+  backTo,
   actions,
   mobileInlineActions = false,
   children,
@@ -57,7 +66,21 @@ export function PageHeader({
             mobileInlineActions && actions ? 'relative pr-20 md:pr-0' : '',
           ].join(' ')}
         >
-          <h1 className="min-w-0 text-xl font-bold text-app-fg md:truncate">{title}</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            {backTo && (
+              <Link
+                to={backTo}
+                prefetch="intent"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-app-fg-muted hover:bg-surface-100 hover:text-app-fg dark:hover:bg-surface-800 transition-colors"
+                aria-label="Go back"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
+                </svg>
+              </Link>
+            )}
+            <h1 className="min-w-0 text-xl font-bold text-app-fg md:truncate">{title}</h1>
+          </div>
           {actions && mobileInlineActions ? (
             <div className="absolute right-0 top-0 flex shrink-0 items-center justify-end md:hidden">
               {actions}

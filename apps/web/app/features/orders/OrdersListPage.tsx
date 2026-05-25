@@ -1,5 +1,6 @@
 import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { SmartPick } from '~/components/ui/smart-pick';
@@ -72,6 +73,7 @@ export type CsOrdersDeferredSecondary = {
   csClosersForFilter: Array<{ agentId: string; agentName: string }>;
   logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }>;
   productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+  productsForFilter?: Array<{ id: string; name: string }>;
   /** Open abandoned-cart count for the overview strip — null when the viewer is not HoCS+. */
   cartAbandonmentCount: number | null;
 };
@@ -125,6 +127,47 @@ function CallbackDueTag() {
       title="Scheduled callback time has arrived"
     >
       Callback due
+    </span>
+  );
+}
+
+/** Comment icon shown before customer name when the order has a CS comment.
+ *  Desktop: hovering shows the comment in a tooltip-style popup.
+ *  The icon itself is always small (14×14) and inline. */
+function CsCommentIcon({ comment, actorName }: { comment: string; actorName: string | null }) {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  // Close on outside click (desktop popup).
+  useEffect(() => {
+    if (!show) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setShow(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [show]);
+
+  return (
+    <span
+      ref={ref}
+      className="relative inline-flex shrink-0 cursor-pointer rounded-full bg-amber-100 p-1 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShow((p) => !p); }}
+      aria-label="CS comment"
+      title="CS comment"
+    >
+      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+        <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97zM6.75 8.25a.75.75 0 01.75-.75h9a.75.75 0 010 1.5h-9a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H7.5z" clipRule="evenodd" />
+      </svg>
+      {show && (
+        <span className="absolute bottom-full right-0 z-50 mb-2 whitespace-normal rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-lg text-left dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          style={{ minWidth: '12rem', maxWidth: '18rem' }}
+        >
+          <span className="block leading-relaxed">{comment}</span>
+        </span>
+      )}
     </span>
   );
 }
@@ -325,6 +368,7 @@ function OrdersListPageImpl({
   bulkSelectAllMatchingInput,
   branchesForMove,
 }: OrdersListPageImplProps) {
+  usePersistedFilters('sales-orders');
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
     (orderId: string) => orderDetailHref('/admin/orders', orderId, orderDetailFrom ?? undefined),
@@ -1001,16 +1045,16 @@ function OrdersListPageImpl({
         key: 'closer',
         header: 'Assigned closer',
         render: (order) => (
-          <span className="text-app-fg-muted">
+          <span className="font-medium text-app-fg">
             {order.assignedCsId ? (
               <Link
                 to={`/hr/users/${order.assignedCsId}`}
-                className="font-medium text-brand-500 hover:text-brand-600 hover:underline"
+                className="hover:text-brand-600 hover:underline"
               >
                 {order.assignedCsName ?? 'View user'}
               </Link>
             ) : (
-              '—'
+              <span className="text-app-fg-muted">—</span>
             )}
           </span>
         ),
@@ -1100,6 +1144,9 @@ function OrdersListPageImpl({
             </TableActionButton>
           ) : (
             <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+              {order.lastCsComment && (
+                <CsCommentIcon comment={order.lastCsComment.comment} actorName={order.lastCsComment.actorName} />
+              )}
               {ORDER_STATUSES_WITH_COPY_ACTION.has(order.status) && (
                 <TableActionButton
                   variant="neutral"
@@ -1177,6 +1224,14 @@ function OrdersListPageImpl({
               {formatOrderTimestamp(order.createdAt)}
             </span>
           </div>
+          {order.lastCsComment && (
+            <div className="flex items-start gap-2 rounded-lg bg-app-hover/60 px-2.5 py-1.5 text-xs border border-app-border">
+              <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-app-fg-muted" viewBox="0 0 24 24" fill="currentColor">
+                <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97zM6.75 8.25a.75.75 0 01.75-.75h9a.75.75 0 010 1.5h-9a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H7.5z" clipRule="evenodd" />
+              </svg>
+              <span className="min-w-0 flex-1 line-clamp-2 text-app-fg">{order.lastCsComment.comment}</span>
+            </div>
+          )}
           {hasTags ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
@@ -2495,38 +2550,51 @@ function OrdersListPageImpl({
 }
 
 export function OrdersListPage(props: OrdersListPageProps) {
+  // Cache the last resolved secondary data so filter changes don't flash the
+  // skeleton for stats that haven't changed (status counts, workload, etc.).
+  const cachedSecRef = useRef<CsOrdersDeferredSecondary | null>(null);
+
   if (props.deferredSecondary) {
     const { deferredSecondary, ...rest } = props;
+    const cached = cachedSecRef.current;
     return (
       <Suspense
         fallback={
           <OrdersListPageImpl
             {...rest}
-            deferredLoading
-            statusCounts={{}}
-            dailyCounts={undefined}
-            scheduleHeat={undefined}
-            myWorkload={null}
-            csClosersForFilter={undefined}
-            logisticsLocationsForBulk={[]}
-            productsForOfflineOrder={[]}
+            // When we have cached data, show it instead of empty skeleton.
+            // Only the table shows a loading overlay via useLoaderRefetchBusy.
+            deferredLoading={!cached}
+            statusCounts={cached?.statusCounts ?? {}}
+            dailyCounts={cached?.dailyCounts}
+            scheduleHeat={cached?.scheduleHeat}
+            myWorkload={cached?.myWorkload ?? null}
+            csClosersForFilter={cached?.csClosersForFilter}
+            logisticsLocationsForBulk={cached?.logisticsLocationsForBulk ?? []}
+            productsForOfflineOrder={cached?.productsForOfflineOrder ?? []}
+            productsForFilter={cached?.productsForFilter}
+            cartAbandonmentCount={cached?.cartAbandonmentCount ?? null}
           />
         }
       >
         <Await resolve={deferredSecondary} errorElement={<DeferredError />}>
-          {(sec) => (
-            <OrdersListPageImpl
-              {...rest}
-              statusCounts={sec.statusCounts}
-              dailyCounts={sec.dailyCounts}
-              scheduleHeat={sec.scheduleHeat}
-              myWorkload={sec.myWorkload}
-              csClosersForFilter={sec.csClosersForFilter}
-              logisticsLocationsForBulk={sec.logisticsLocationsForBulk}
-              productsForOfflineOrder={sec.productsForOfflineOrder}
-              cartAbandonmentCount={sec.cartAbandonmentCount}
-            />
-          )}
+          {(sec) => {
+            cachedSecRef.current = sec;
+            return (
+              <OrdersListPageImpl
+                {...rest}
+                statusCounts={sec.statusCounts}
+                dailyCounts={sec.dailyCounts}
+                scheduleHeat={sec.scheduleHeat}
+                myWorkload={sec.myWorkload}
+                csClosersForFilter={sec.csClosersForFilter}
+                logisticsLocationsForBulk={sec.logisticsLocationsForBulk}
+                productsForOfflineOrder={sec.productsForOfflineOrder}
+                productsForFilter={sec.productsForFilter}
+                cartAbandonmentCount={sec.cartAbandonmentCount}
+              />
+            );
+          }}
         </Await>
       </Suspense>
     );

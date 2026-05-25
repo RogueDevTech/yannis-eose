@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cpaColorClass } from '~/lib/rate-color';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -189,6 +190,7 @@ export function MarketingAdSpendPage({
   const campaigns = campaignsProp ?? [];
   const mediaBuyersForFilter = mediaBuyersForFilterProp ?? [];
   const dateFilters = filters;
+  usePersistedFilters('ad-spend');
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const secondaryFetcher = useFetcher<SecondaryResponse>();
