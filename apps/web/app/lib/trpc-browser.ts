@@ -312,3 +312,28 @@ export async function fetchOrderClipboardSummary(orderId: string): Promise<Order
   if (!data?.text) throw new Error('Copy order summary failed: empty payload');
   return data;
 }
+
+/**
+ * Fetch raw customer phones for a duplicate comparison pair. Returns `null`
+ * when the viewer lacks `orders.flaggedDuplicates` permission (403) — the
+ * modal falls back to masked `customerPhoneDisplay`.
+ */
+export async function fetchDuplicateComparisonPhones(
+  orderId: string,
+  originalOrderId: string,
+): Promise<{ orderPhone: string; originalPhone: string } | null> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) return null;
+  const input = encodeURIComponent(JSON.stringify({ orderId, originalOrderId }));
+  try {
+    const res = await fetch(
+      `${base}/trpc/orders.getDuplicateComparisonPhones?input=${input}`,
+      { credentials: 'include' },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as TrpcEnvelope<{ orderPhone: string; originalPhone: string }>;
+    return json.result?.data ?? null;
+  } catch {
+    return null;
+  }
+}
