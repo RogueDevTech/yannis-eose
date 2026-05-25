@@ -1615,6 +1615,13 @@ export const ordersRouter = router({
     return getOrdersService().getFlaggedDuplicates(ctx.currentBranchId);
   }),
 
+  /** Raw phones for a duplicate pair — used by the comparison modal on the order detail page. */
+  getDuplicateComparisonPhones: permissionProcedure('orders.flaggedDuplicates')
+    .input(z.object({ orderId: z.string().uuid(), originalOrderId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getOrdersService().getDuplicateComparisonPhones(input.orderId, input.originalOrderId);
+    }),
+
   /**
    * Merge a duplicate order into the original.
    */

@@ -22,6 +22,7 @@ import { orderDetailHref } from '~/lib/order-detail-return';
 export interface CrossFunnelAttemptRow {
   id: string;
   customerName: string;
+  customerPhone: string | null;
   attemptedAt: string;
   productId: string;
   productName: string | null;
@@ -111,18 +112,18 @@ function CrossFunnelAttemptCard({ row, embedded }: { row: CrossFunnelAttemptRow;
           value={row.productName ?? '—'}
           valueClassName="text-brand-600 dark:text-brand-400"
         />
+        <CrossFunnelCompactStat label="Phone" value={row.customerPhone ?? '—'} />
         <CrossFunnelCompactStat label="Your funnel" value={row.mediaBuyerName ?? '—'} />
         <CrossFunnelCompactStat
           label="Credited to"
           value={row.originalMediaBuyerName ?? <em className="not-italic text-app-fg-muted">unknown</em>}
         />
-        <CrossFunnelCompactStat label="Form" value={row.campaignId ? 'Linked' : '—'} />
       </div>
 
       {row.originalOrderId ? (
         <div className="border-t border-app-border pt-3">
           <CompactTableActionButton
-            to={orderDetailHref('/admin/marketing/orders', row.originalOrderId, 'marketing')}
+            to={orderDetailHref('/admin/orders', row.originalOrderId, 'marketing')}
             className="w-full justify-center"
             tone="brand"
           >
@@ -147,7 +148,14 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
     {
       key: 'customerName',
       header: 'Customer',
-      render: (row) => <span className="font-medium">{row.customerName}</span>,
+      render: (row) => (
+        <div>
+          <span className="font-medium">{row.customerName}</span>
+          {row.customerPhone && (
+            <span className="block text-xs text-app-fg-muted">{row.customerPhone}</span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'productName',
@@ -201,11 +209,6 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
               items={[
                 { label: 'Attempts', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Unique customers', value: <StatValuePulse className="min-w-[2rem]" /> },
-                {
-                  label: 'Top product',
-                  value: <StatValuePulse className="min-w-[10rem] max-w-[14rem]" />,
-                  plainValue: true,
-                },
               ]}
             />
             <Card>
@@ -232,12 +235,6 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
                 items={[
                   { label: 'Attempts', value: stats.totalAttempts },
                   { label: 'Unique customers', value: stats.uniqueCustomers },
-                  {
-                    label: 'Top product',
-                    value: stats.perProduct[0]?.productName ?? '—',
-                    plainValue: true,
-                    valueClassName: 'text-base font-semibold mt-1 truncate max-w-[14rem]',
-                  },
                 ]}
               />
 
@@ -294,8 +291,14 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
                     {formatDate(row.attemptedAt)}
                   </span>
                 </div>
-                {/* Row 2: product · credited-to MB */}
+                {/* Row 2: phone · product · credited-to MB */}
                 <div className="flex items-center gap-2 text-xs text-app-fg-muted pl-[calc(1.75rem+0.625rem)]">
+                  {row.customerPhone && (
+                    <>
+                      <span className="shrink-0">{row.customerPhone}</span>
+                      <span aria-hidden>·</span>
+                    </>
+                  )}
                   <span className="truncate">{row.productName ?? '—'}</span>
                   <span aria-hidden>·</span>
                   <span className="truncate">

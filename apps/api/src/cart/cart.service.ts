@@ -28,12 +28,29 @@ export class CartService {
   ) {}
 
   private async getCampaignBranchId(campaignId: string): Promise<string | null> {
+    const info = await this.getCampaignInfo(campaignId);
+    return info.branchId;
+  }
+
+  private async getCampaignInfo(campaignId: string): Promise<{ branchId: string | null; mediaBuyerId: string | null }> {
     const rows = await this.db
-      .select({ branchId: schema.campaigns.branchId })
+      .select({ branchId: schema.campaigns.branchId, mediaBuyerId: schema.campaigns.mediaBuyerId })
       .from(schema.campaigns)
       .where(eq(schema.campaigns.id, campaignId))
       .limit(1);
-    return rows[0]?.branchId ?? null;
+    return { branchId: rows[0]?.branchId ?? null, mediaBuyerId: rows[0]?.mediaBuyerId ?? null };
+  }
+
+  /**
+   * Emit `cart:updated` to CS, marketing-all (HoM), and the individual MB room
+   * so the "Open Carts" KPI live-updates for every role that sees it.
+   */
+  private emitCartUpdated(branchId: string | null, mediaBuyerId?: string | null): void {
+    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
+    this.events.emitToRoom('marketing-all', 'cart:updated', {}, branchId);
+    if (mediaBuyerId) {
+      this.events.emitToRoom(`marketing-${mediaBuyerId}`, 'cart:updated', {});
+    }
   }
 
   /**
@@ -194,7 +211,7 @@ export class CartService {
       : await run(this.db);
 
     const branchId = await this.getCampaignBranchId(input.campaignId);
-    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
+    this.emitCartUpdated(branchId, input.mediaBuyerId);
     return result;
   }
 
@@ -205,7 +222,10 @@ export class CartService {
   async convert(cartId: string, orderId: string, actorId?: string | null): Promise<void> {
     const run = async (db: CartDbOrTx) => {
       const cartRows = await db
-        .select({ campaignId: schema.cartAbandonments.campaignId })
+        .select({
+          campaignId: schema.cartAbandonments.campaignId,
+          mediaBuyerId: schema.cartAbandonments.mediaBuyerId,
+        })
         .from(schema.cartAbandonments)
         .where(eq(schema.cartAbandonments.id, cartId))
         .limit(1);
@@ -219,15 +239,15 @@ export class CartService {
         })
         .where(eq(schema.cartAbandonments.id, cartId));
 
-      return cartRows[0]?.campaignId ?? null;
+      return { campaignId: cartRows[0]?.campaignId ?? null, mediaBuyerId: cartRows[0]?.mediaBuyerId ?? null };
     };
 
-    const campaignId = actorId
+    const { campaignId, mediaBuyerId } = actorId
       ? await withActor(this.db, { id: actorId }, (tx) => run(tx))
       : await run(this.db);
 
     const branchId = campaignId ? await this.getCampaignBranchId(campaignId) : null;
-    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
+    this.emitCartUpdated(branchId, mediaBuyerId);
   }
 
   /**
@@ -265,8 +285,8 @@ export class CartService {
       await run(this.db);
     }
 
-    const branchId = await this.getCampaignBranchId(campaignId);
-    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
+    const info = await this.getCampaignInfo(campaignId);
+    this.emitCartUpdated(info.branchId, info.mediaBuyerId);
   }
 
   /**
@@ -344,8 +364,8 @@ export class CartService {
     if (result.length > 0) {
       const campaignIds = Array.from(new Set(result.map((row) => row.campaignId)));
       for (const campaignId of campaignIds) {
-        const branchId = await this.getCampaignBranchId(campaignId);
-        this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
+        const info = await this.getCampaignInfo(campaignId);
+        this.emitCartUpdated(info.branchId, info.mediaBuyerId);
       }
     }
     return result.length;

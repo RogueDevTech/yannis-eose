@@ -25,6 +25,9 @@ const OrderTimeline = lazy(() =>
 const InvoicePreviewModal = lazy(() =>
   import('~/components/ui/invoice-preview-modal').then((m) => ({ default: m.InvoicePreviewModal })),
 );
+const DuplicateComparisonModal = lazy(() =>
+  import('~/features/orders/DuplicateComparisonModal').then((m) => ({ default: m.DuplicateComparisonModal })),
+);
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { FormSelect } from '~/components/ui/form-select';
@@ -512,6 +515,76 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   },
 ];
 
+/** Number of detail rows visible before "Show more" */
+const DETAIL_PREVIEW_COUNT = 4;
+
+function DetailFieldRow({ field, order }: { field: DetailFieldConfig; order: OrderDetail }) {
+  const value = field.getValue(order);
+  const formatted = field.format(value, order);
+  const valueClass =
+    typeof field.ddClassName === 'function'
+      ? field.ddClassName(value, order)
+      : field.ddClassName ?? '';
+  const ddClass = ['mt-0.5 break-words', valueClass || 'text-app-fg'].filter(Boolean).join(' ');
+  const rowClass = ['min-w-0 pl-3 py-1.5 rounded-r-md -ml-px', field.rowAccent ?? ''].filter(Boolean).join(' ');
+  return (
+    <div className={rowClass}>
+      <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wider">{field.label}</dt>
+      <dd className={ddClass}>{formatted}</dd>
+    </div>
+  );
+}
+
+function OrderDetailsCard({ order }: { order: OrderDetail }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Filter to only visible fields
+  const visibleFields = ORDER_DETAIL_FIELDS.filter((field) => {
+    if (field.suppressAfterConfirm && order.confirmedAt) return false;
+    const value = field.getValue(order);
+    if (!field.alwaysShow && !hasValue(value)) return false;
+    return true;
+  });
+
+  const previewFields = visibleFields.slice(0, DETAIL_PREVIEW_COUNT);
+  const overflowFields = visibleFields.slice(DETAIL_PREVIEW_COUNT);
+  const hasOverflow = overflowFields.length > 0;
+
+  return (
+    <div className="card">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between text-left"
+        onClick={() => hasOverflow && setExpanded((p) => !p)}
+        aria-expanded={expanded}
+      >
+        <h2 className="text-lg font-semibold text-app-fg">Details</h2>
+        {hasOverflow && (
+          <span className="flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400">
+            {expanded ? 'Show less' : `+${overflowFields.length} more`}
+            <svg
+              className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </span>
+        )}
+      </button>
+
+      <dl className="mt-3 space-y-2.5 text-sm">
+        {previewFields.map((field) => (
+          <DetailFieldRow key={field.label} field={field} order={order} />
+        ))}
+
+        {hasOverflow && expanded && overflowFields.map((field) => (
+          <DetailFieldRow key={field.label} field={field} order={order} />
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 // ── Call Status Indicator Component ─────────────────────────────
 
 function CallStatusIndicator({ call }: { call: CallLogEntry }) {
@@ -959,6 +1032,7 @@ export function OrderDetailPage({
   const [sharePending, setSharePending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
+  const [duplicateCompareOpen, setDuplicateCompareOpen] = useState(false);
   // Resolve the deferred allocatable-locations promise once into local state so
   // both the Assign modal AND the Mark Delivered dropdown can show per-product
   // stock counts. The sync `allocatableLocations` prop is currently empty in the
@@ -1210,7 +1284,7 @@ export function OrderDetailPage({
     !!currentBranchId &&
     order.branchId === currentBranchId;
   const isCSOrHoS =
-    ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole) || branchAdminSameBranch;
+    ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(userRole) || branchAdminSameBranch;
   const isElevated =
     userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
   const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
@@ -1548,12 +1622,17 @@ export function OrderDetailPage({
                 duplicates tab.
               </p>
             </div>
-            <Link
-              to="/admin/sales/queue?tab=duplicates"
-              className="btn-secondary btn-sm inline-flex shrink-0"
-            >
-              Open duplicates →
-            </Link>
+            {order.duplicateOfId && (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setDuplicateCompareOpen(true)}
+              >
+                Compare with original
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -2440,38 +2519,8 @@ export function OrderDetailPage({
               </div>
             )}
 
-            {/* Order Info — dynamic fields: show when value present or alwaysShow */}
-            <div className="card">
-              <h2 className="text-lg font-semibold text-app-fg mb-3">Details</h2>
-              <dl className="space-y-2.5 text-sm">
-                {ORDER_DETAIL_FIELDS.map((field) => {
-                  if (field.suppressAfterConfirm && order.confirmedAt) return null;
-                  const value = field.getValue(order);
-                  if (!field.alwaysShow && !hasValue(value)) return null;
-                  const formatted = field.format(value, order);
-                  const valueClass =
-                    typeof field.ddClassName === 'function'
-                      ? field.ddClassName(value, order)
-                      : field.ddClassName ?? '';
-                  const ddClass = [
-                    'mt-0.5 break-words',
-                    valueClass || 'text-app-fg',
-                  ].filter(Boolean).join(' ');
-                  const rowClass = [
-                    'min-w-0 pl-3 py-1.5 rounded-r-md -ml-px',
-                    field.rowAccent ?? '',
-                  ].filter(Boolean).join(' ');
-                  return (
-                    <div key={field.label} className={rowClass}>
-                      <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wider">
-                        {field.label}
-                      </dt>
-                      <dd className={ddClass}>{formatted}</dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </div>
+            {/* Order Info — dynamic fields: show 4 preview rows, rest in collapsible */}
+            <OrderDetailsCard order={order} />
 
             {/* Form-builder custom fields — only rendered when the campaign has custom
                 fields defined AND the customer answered at least one. Uses the campaign's
@@ -3687,6 +3736,16 @@ export function OrderDetailPage({
       <Suspense fallback={null}>
         <InvoicePreviewModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
       </Suspense>
+
+      {duplicateCompareOpen && order.duplicateOfId && (
+        <Suspense fallback={null}>
+          <DuplicateComparisonModal
+            open
+            onClose={() => setDuplicateCompareOpen(false)}
+            currentOrder={order}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
