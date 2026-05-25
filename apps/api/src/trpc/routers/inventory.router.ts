@@ -230,9 +230,9 @@ export const inventoryRouter = router({
    * List stock transfers.
    */
   transfers: authedProcedure
-    .input(z.object({ status: z.string().optional() }))
+    .input(z.object({ status: z.string().optional(), page: z.number().int().min(1).optional(), limit: z.number().int().min(1).max(1000).optional() }))
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listTransfers(input.status, ctx.user);
+      return getInventoryService().listTransfers(input.status, ctx.user, input.page, input.limit);
     }),
 
   /**
@@ -375,7 +375,7 @@ export const inventoryRouter = router({
           ctx.user.role,
         ),
         getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
-        getInventoryService().listTransfers(undefined, ctx.user),
+        getInventoryService().listTransfers(undefined, ctx.user).then((r) => r.transfers),
         canSeeReturned
           ? getInventoryService().listReturnedOrders(input.locationId)
           : Promise.resolve([]),

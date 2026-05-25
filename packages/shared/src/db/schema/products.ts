@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, numeric, jsonb } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, integer, index } from 'drizzle-orm/pg-core';
 import { recordStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 
@@ -32,3 +32,31 @@ export const products = pgTable('products', {
   ...temporalColumns,
   ...timestampColumns,
 });
+
+/**
+ * Bundle components — a product that is composed of other products.
+ * When a bundle is ordered, inventory is checked/reserved/deducted
+ * from the component products, not the bundle itself.
+ *
+ * A product IS a bundle if it has rows in this table.
+ * Bundles are strictly one level deep — a component cannot itself be a bundle.
+ */
+export const productBundleComponents = pgTable(
+  'product_bundle_components',
+  {
+    id: uuidv7Pk(),
+    bundleProductId: uuid('bundle_product_id')
+      .notNull()
+      .references(() => products.id),
+    componentProductId: uuid('component_product_id')
+      .notNull()
+      .references(() => products.id),
+    quantity: integer('quantity').notNull(),
+    ...temporalColumns,
+    ...timestampColumns,
+  },
+  (table) => ({
+    bundleIdx: index('idx_bundle_components_bundle').on(table.bundleProductId),
+    componentIdx: index('idx_bundle_components_component').on(table.componentProductId),
+  }),
+);

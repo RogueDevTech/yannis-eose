@@ -5,6 +5,7 @@ import {
   updateProductSchema,
   listProductsSchema,
   requestProductArchiveSchema,
+  setBundleComponentsSchema,
 } from '@yannis/shared';
 import type { ProductsService } from '../../products/products.service';
 import { CacheService } from '../../common/cache/cache.service';
@@ -130,4 +131,27 @@ export const productsRouter = router({
   categories: authedProcedure.query(async ({ ctx }) => {
     return getProductsService().getCategories(ctx.user.id, ctx.user.role);
   }),
+
+  /**
+   * Get bundle components for a product.
+   */
+  getBundleComponents: authedProcedure
+    .input(z.object({ productId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getProductsService().getBundleComponents(input.productId);
+    }),
+
+  /**
+   * Set bundle components for a product (replaces all existing).
+   * Requires products.update permission.
+   */
+  setBundleComponents: permissionProcedure('products.update')
+    .input(setBundleComponentsSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getProductsService().setBundleComponents(
+        input.productId,
+        input.components,
+        ctx.user,
+      );
+    }),
 });

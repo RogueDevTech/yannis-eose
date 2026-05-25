@@ -23,10 +23,16 @@ interface CategoryOption {
   brandName: string;
 }
 
+interface ProductOption {
+  id: string;
+  name: string;
+}
+
 interface LoaderData {
   product: Product;
   categories: CategoryOption[];
   canEditProduct: boolean;
+  allProducts: ProductOption[];
 }
 
 function canonicalPerm(p: string) {
@@ -73,6 +79,9 @@ function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
     brandName: apiProduct.brandName != null ? String(apiProduct.brandName) : null,
     status: String(apiProduct.status ?? 'ACTIVE'),
     createdAt: String(apiProduct.createdAt ?? apiProduct.created_at ?? ''),
+    bundleComponents: Array.isArray(apiProduct.bundleComponents)
+      ? (apiProduct.bundleComponents as Array<{ id: string; componentProductId: string; componentName: string; quantity: number }>)
+      : undefined,
   };
 }
 
@@ -92,12 +101,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const pageData = (async (): Promise<LoaderData> => {
-    const [productRes, categoriesRes] = await Promise.all([
+    const [productRes, categoriesRes, productsListRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/products.getById?input=${encodeURIComponent(JSON.stringify({ productId }))}`,
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>('/trpc/productCategories.listActive', { method: 'GET', cookie }),
+      apiRequest<unknown>(
+        `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 200 }))}`,
+        { method: 'GET', cookie },
+      ),
     ]);
 
     if (!productRes.ok) {
@@ -123,7 +136,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       user.role === 'ADMIN' ||
       (user.permissions ?? []).map(canonicalPerm).includes('products.update');
 
-    return { product, categories, canEditProduct };
+    let allProducts: ProductOption[] = [];
+    if (productsListRes.ok) {
+      const pData = productsListRes.data as { result?: { data?: { products?: Array<{ id: string; name: string }> } } };
+      allProducts = (pData?.result?.data?.products ?? [])
+        .filter((p) => p.id !== productId) // exclude self
+        .map((p) => ({ id: p.id, name: p.name }));
+    }
+
+    return { product, categories, canEditProduct, allProducts };
   })();
 
   return defer({ pageData });
@@ -199,6 +220,7 @@ function ProductDetailBody({
   product,
   categories,
   canEditProduct,
+  allProducts,
 }: LoaderData) {
   const actionData = useActionData<typeof action>();
   const [searchParams] = useSearchParams();
@@ -210,6 +232,7 @@ function ProductDetailBody({
       <ProductEditPage
         product={product}
         categories={categories}
+        allProducts={allProducts}
         actionData={
           typeof actionData === 'object' && actionData !== null && 'error' in actionData
             ? (actionData as { error?: string })

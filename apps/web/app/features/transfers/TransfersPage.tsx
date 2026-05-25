@@ -36,15 +36,8 @@ import { Spinner } from '~/components/ui/spinner';
 import { Pagination } from '~/components/ui/pagination';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from './types';
 
-/** Status options shown as filter pills. Order matches the lifecycle. */
-const STATUS_FILTER_OPTIONS: { value: string; label: string; dotColor: string }[] = [
-  { value: 'PENDING', label: 'Pending approval', dotColor: 'bg-warning-500' },
-  { value: 'IN_TRANSIT', label: 'In transit', dotColor: 'bg-brand-500' },
-  { value: 'RECEIVED', label: 'Received', dotColor: 'bg-success-500' },
-  { value: 'DISPUTED', label: 'Disputed', dotColor: 'bg-danger-500' },
-  { value: 'REJECTED', label: 'Rejected', dotColor: 'bg-danger-500' },
-  { value: 'CANCELLED', label: 'Cancelled', dotColor: 'bg-app-fg-muted' },
-];
+/** Status options — kept for legacy data display but tabs are hidden. */
+const STATUS_FILTER_OPTIONS: { value: string; label: string; dotColor: string }[] = [];
 
 function formatRecordedAt(iso: string | null) {
   if (!iso) return '—';
@@ -200,7 +193,7 @@ export function TransfersPage({
     if (intent !== 'approveTransfer') return null;
     const id = fd.get('transferId')?.toString();
     if (!id) return null;
-    return [{ id, patch: { transferStatus: 'IN_TRANSIT' as const, canApprove: false } }];
+    return [{ id, patch: { transferStatus: 'RECEIVED' as const, canApprove: false } }];
   }, []);
   const buildRejectPatches = useCallback((fd: FormData, intent: string) => {
     if (intent !== 'rejectTransfer') return null;
@@ -298,7 +291,7 @@ export function TransfersPage({
         quantityReceived: null,
         fromLocationId,
         toLocationId,
-        transferStatus: 'IN_TRANSIT',
+        transferStatus: 'RECEIVED',
         shrinkageReason: null,
         receiverNotes: null,
         transferCost: null,
@@ -477,11 +470,8 @@ export function TransfersPage({
 
   const summaryStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {
-      PENDING: 0,
-      IN_TRANSIT: 0,
       RECEIVED: 0,
       DISPUTED: 0,
-      REJECTED: 0,
       CANCELLED: 0,
     };
     for (const t of summaryTransfers) {
@@ -743,53 +733,22 @@ export function TransfersPage({
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Transfer records', value: summaryTransfers.length, valueClassName: 'text-app-fg', active: !statusFilter, to: buildStatusQuery('') },
+          { label: 'Total transfers', value: summaryTransfers.length, valueClassName: 'text-app-fg' },
+          { label: 'Total units moved', value: summaryQuantitySent, valueClassName: 'text-brand-600 dark:text-brand-400' },
           {
-            label: 'Pending',
-            value: summaryStatusCounts.PENDING,
-            valueClassName: 'text-warning-600 dark:text-warning-400',
-            to: buildStatusQuery('PENDING'),
-            active: statusFilter === 'PENDING',
+            label: 'Products',
+            value: new Set(summaryTransfers.map((t) => t.productId)).size,
+            valueClassName: 'text-app-fg',
           },
           {
-            label: 'In transit',
-            value: summaryStatusCounts.IN_TRANSIT,
-            valueClassName: 'text-brand-600 dark:text-brand-400',
-            to: buildStatusQuery('IN_TRANSIT'),
-            active: statusFilter === 'IN_TRANSIT',
-          },
-          {
-            label: 'Received',
-            value: summaryStatusCounts.RECEIVED,
-            valueClassName: 'text-success-600 dark:text-success-400',
-            to: buildStatusQuery('RECEIVED'),
-            active: statusFilter === 'RECEIVED',
-          },
-          {
-            label: 'Disputed',
-            value: summaryStatusCounts.DISPUTED,
-            valueClassName: 'text-danger-600 dark:text-danger-400',
-            to: buildStatusQuery('DISPUTED'),
-            active: statusFilter === 'DISPUTED',
-          },
-          {
-            label: 'Cancelled',
-            value: summaryStatusCounts.CANCELLED,
-            valueClassName: 'text-app-fg-muted',
-            to: buildStatusQuery('CANCELLED'),
-            active: statusFilter === 'CANCELLED',
-          },
-          { label: 'Qty sent', value: summaryQuantitySent, valueClassName: 'text-app-fg' },
-          {
-            label: 'Qty received',
-            value: summaryQuantityReceived,
-            valueClassName: 'text-brand-600 dark:text-brand-400',
+            label: 'Locations',
+            value: new Set(summaryTransfers.flatMap((t) => [t.fromLocationId, t.toLocationId])).size,
+            valueClassName: 'text-app-fg',
           },
         ]}
       />
 
-      {/* Status tabs — primary navigation, always visible at every viewport. */}
-      <Tabs value={uiStatusFilter} onChange={handleStatusTabChange} tabs={statusTabItems} />
+      {/* Status tabs removed — transfers go straight to RECEIVED (CEO 2026-05-25). */}
 
       {/* Filters — from/to/product dropdowns. URL-synced so filters persist
           across refreshes and can be deep-linked. Desktop-only here; on mobile the same
@@ -1272,7 +1231,7 @@ export function TransfersPage({
                 emptyTitle="No transfers yet"
                 emptyDescription={
                   periodAllTime
-                    ? 'No transfers match your filters, or none recorded yet. Try the In transit tab or clear filters.'
+                    ? 'No transfers match your filters. Try clearing filters or adjusting the date range.'
                     : 'No transfers in this date range. Try All time or widen the range.'
                 }
                 withCard={false}
@@ -1369,7 +1328,7 @@ export function TransfersPage({
             })()}
             {viewTransfer.transferStatus === 'PENDING' && viewTransfer.canApprove ? (
               <p className="rounded-md border border-warning-200 bg-warning-50/60 px-3 py-2 text-xs text-warning-800 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-200">
-                This transfer is awaiting your approval as the source-location authority. Approving deducts source stock and flips the transfer to In transit. Rejecting leaves stock untouched.
+                This transfer is awaiting your approval. Approving moves stock from source to destination immediately. Rejecting leaves stock untouched.
               </p>
             ) : viewTransfer.transferStatus === 'PENDING' ? (
               <p className="text-xs text-app-fg-muted">
@@ -1381,7 +1340,7 @@ export function TransfersPage({
               </p>
             ) : (
               <p className="text-xs text-app-fg-muted">
-                Confirm or dispute receipt in <span className="font-medium text-app-fg">Logistics → Stock Transfer Confirmations</span>.
+                This transfer has been completed.
               </p>
             )}
             <div className="flex flex-wrap items-center justify-end gap-2">

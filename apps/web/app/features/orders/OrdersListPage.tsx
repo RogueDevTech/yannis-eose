@@ -1083,8 +1083,8 @@ function OrdersListPageImpl({
       {
         key: 'actions',
         header: 'Actions',
-        align: 'center',
-        headerClassName: 'text-center',
+        align: 'right',
+        headerClassName: 'text-right',
         tight: true,
         mobileShowLabel: false,
         // Abandoned-cart rows (cart-abandonment view) get "View cart" — the quick
@@ -1099,7 +1099,7 @@ function OrdersListPageImpl({
               View cart
             </TableActionButton>
           ) : (
-            <div className="inline-flex flex-nowrap items-center justify-center gap-1.5">
+            <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
               {ORDER_STATUSES_WITH_COPY_ACTION.has(order.status) && (
                 <TableActionButton
                   variant="neutral"
