@@ -260,8 +260,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return json({ error: 'Select at least one delivered order' }, { status: 400 });
     }
-    if (!Array.isArray(receiptUrls) || receiptUrls.length === 0) {
-      return json({ error: 'Upload at least one payment receipt' }, { status: 400 });
+    if (!Array.isArray(receiptUrls)) {
+      receiptUrls = [];
     }
 
     let deliveryFees: Record<string, string> | undefined;

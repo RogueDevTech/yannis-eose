@@ -328,7 +328,10 @@ function LogisticsOrdersPageImpl({
   const dispatchedCount = statusCounts['DISPATCHED'] ?? 0;
   const inTransitCount = statusCounts['IN_TRANSIT'] ?? 0;
   const deliveredCount = statusCounts['DELIVERED'] ?? 0;
-  const totalOrdersCount = Object.values(statusCounts).reduce((sum, n) => sum + (n ?? 0), 0);
+  const overdueCount = statusCounts['__OVERDUE'] ?? 0;
+  const totalOrdersCount = Object.entries(statusCounts)
+    .filter(([k]) => !k.startsWith('__'))
+    .reduce((sum, [, n]) => sum + (n ?? 0), 0);
 
   const buildStatusQuery = (status: string) => {
     const next = new URLSearchParams(searchParams);
@@ -672,6 +675,7 @@ function LogisticsOrdersPageImpl({
             { label: 'Dispatched', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Overdue', value: <StatValuePulse className="min-w-[2rem]" /> },
           ]}
         />
       ) : (
@@ -684,6 +688,7 @@ function LogisticsOrdersPageImpl({
             { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('DISPATCHED') },
             { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('IN_TRANSIT') },
             { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED') },
+            { label: 'Overdue', value: overdueCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('OVERDUE') },
           ]}
         />
       )}

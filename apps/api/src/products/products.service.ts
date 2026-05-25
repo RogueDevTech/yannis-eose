@@ -296,12 +296,16 @@ export class ProductsService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
     }
 
-    const templateMap = await this.loadActiveOfferTemplatesByProductIds([product.id]);
+    const [templateMap, bundleComponents] = await Promise.all([
+      this.loadActiveOfferTemplatesByProductIds([product.id]),
+      this.getBundleComponents(product.id),
+    ]);
     const templates = templateMap.get(product.id) ?? [];
     return {
       ...product,
       galleryImageUrls: parseJsonStringArray(product.galleryImageUrls),
       offers: resolveOffersForProduct(templates, product.offers, String(product.baseSalePrice)),
+      bundleComponents,
     };
   }
 
@@ -661,5 +665,129 @@ export class ProductsService {
    */
   async archiveProductAsApprover(productId: string, approver: SessionUser) {
     return this.update({ productId, status: 'ARCHIVED' }, approver);
+  }
+
+  // ── Bundle Components ────────────────────────────────────────────────────────
+
+  /**
+   * Get bundle components for a product. Returns empty array if not a bundle.
+   */
+  async getBundleComponents(productId: string) {
+    const rows = await this.db
+      .select({
+        id: schema.productBundleComponents.id,
+        componentProductId: schema.productBundleComponents.componentProductId,
+        componentName: schema.products.name,
+        quantity: schema.productBundleComponents.quantity,
+      })
+      .from(schema.productBundleComponents)
+      .innerJoin(
+        schema.products,
+        eq(schema.productBundleComponents.componentProductId, schema.products.id),
+      )
+      .where(eq(schema.productBundleComponents.bundleProductId, productId))
+      .orderBy(asc(schema.products.name));
+    return rows;
+  }
+
+  /**
+   * Set bundle components for a product. Replaces all existing components.
+   * Pass an empty array to remove all components (product is no longer a bundle).
+   *
+   * Validates:
+   * - All component products exist and are ACTIVE
+   * - No component is itself a bundle (one level deep only)
+   * - The bundle product is not referencing itself
+   */
+  async setBundleComponents(
+    productId: string,
+    components: Array<{ componentProductId: string; quantity: number }>,
+    actor: SessionUser,
+  ) {
+    // Validate the bundle product exists
+    const [bundleProduct] = await this.db
+      .select({ id: schema.products.id })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    if (!bundleProduct) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+    }
+
+    // Self-reference check
+    const selfRef = components.find((c) => c.componentProductId === productId);
+    if (selfRef) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'A bundle cannot contain itself as a component.',
+      });
+    }
+
+    if (components.length > 0) {
+      const componentIds = components.map((c) => c.componentProductId);
+
+      // Validate all component products exist and are ACTIVE
+      const existingProducts = await this.db
+        .select({ id: schema.products.id, status: schema.products.status })
+        .from(schema.products)
+        .where(inArray(schema.products.id, componentIds));
+
+      const existingMap = new Map(existingProducts.map((p) => [p.id, p]));
+      for (const comp of components) {
+        const product = existingMap.get(comp.componentProductId);
+        if (!product) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Component product ${comp.componentProductId} does not exist.`,
+          });
+        }
+        if (product.status !== 'ACTIVE') {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Component product ${comp.componentProductId} is not ACTIVE.`,
+          });
+        }
+      }
+
+      // No circular bundles — components must not themselves be bundles
+      const nestedBundles = await this.db
+        .select({ bundleProductId: schema.productBundleComponents.bundleProductId })
+        .from(schema.productBundleComponents)
+        .where(inArray(schema.productBundleComponents.bundleProductId, componentIds))
+        .limit(1);
+
+      if (nestedBundles.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A component cannot itself be a bundle. Bundles are one level deep only.',
+        });
+      }
+    }
+
+    // Replace in a transaction
+    await withActor(this.db, actor, async (tx) => {
+      // Delete existing components
+      await tx
+        .delete(schema.productBundleComponents)
+        .where(eq(schema.productBundleComponents.bundleProductId, productId));
+
+      // Insert new components
+      if (components.length > 0) {
+        await tx.insert(schema.productBundleComponents).values(
+          components.map((c) => ({
+            bundleProductId: productId,
+            componentProductId: c.componentProductId,
+            quantity: c.quantity,
+          })),
+        );
+      }
+    });
+
+    this.logger.log(
+      { productId, componentCount: components.length },
+      'Bundle components updated',
+    );
+
+    return { success: true, componentCount: components.length };
   }
 }

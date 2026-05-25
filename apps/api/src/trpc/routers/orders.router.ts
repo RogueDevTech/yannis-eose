@@ -1351,7 +1351,8 @@ export const ordersRouter = router({
           getInventoryService().listReturnedOrders(locationFilter),
         ]);
 
-      const inTransitTransfers = (transfers as Array<{ transferStatus: string }>).filter(
+      const transferList = (transfers as unknown as { transfers: Array<{ transferStatus: string }> }).transfers ?? [];
+      const inTransitTransfers = transferList.filter(
         (t) => t.transferStatus === 'IN_TRANSIT',
       ).length;
 

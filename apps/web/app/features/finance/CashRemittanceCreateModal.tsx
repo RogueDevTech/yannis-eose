@@ -123,10 +123,6 @@ export function CashRemittanceCreateModal({
       setInlineError(multiLocationError);
       return;
     }
-    if (receiptUrls.length === 0) {
-      setInlineError('Upload at least one payment receipt.');
-      return;
-    }
     if (uploadState === 'uploading') {
       setInlineError('Wait for the receipt upload to finish.');
       return;
@@ -239,7 +235,8 @@ export function CashRemittanceCreateModal({
             folder={ASSET_FOLDERS.RECEIPTS}
             onUpload={(url) => setReceiptUrls((prev) => [...prev, url])}
             onUploadStateChange={(s) => setUploadState(s)}
-            label="Upload receipt(s)"
+            label="Upload receipt(s) (optional)"
+            size="sm"
           />
           {receiptUrls.length > 0 && (
             <ul className="text-xs text-app-fg-muted space-y-1">
@@ -344,7 +341,6 @@ export function CashRemittanceCreateModal({
             submitting ||
             n === 0 ||
             !!multiLocationError ||
-            receiptUrls.length === 0 ||
             uploadState === 'uploading'
           }
           loading={submitting}

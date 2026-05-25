@@ -19,6 +19,7 @@ export interface PermissionSeedResult {
   templatesInserted: number;
   templatePermsInserted: number;
   templatePermsRevoked: number;
+  usersRestamped: number;
 }
 
 /**
@@ -267,6 +268,92 @@ export async function applyPermissionCatalog(
     `SYSTEM templates: ${templatesInserted} new. Template perms: ${templatePermsInserted} added, ${templatePermsRevoked} revoked.`,
   );
 
+  // ── 4. Auto-restamp user_permissions when role grants changed ────
+  // When `role_permissions` or template grants changed, existing users of those
+  // roles have stale `user_permissions` snapshots. Re-derive and overwrite them
+  // so the next request sees the updated effective set — no manual backfill needed.
+  let usersRestamped = 0;
+  const catalogChanged =
+    rolePermsInserted > 0 || rolePermsRevoked > 0 ||
+    templatePermsInserted > 0 || templatePermsRevoked > 0;
+  if (catalogChanged) {
+    // Find all non-SuperAdmin/non-Support users (their perms are computed on
+    // the fly from the full catalog, never snapshotted).
+    const users: Array<{ id: string; role: string; role_template_id: string | null }> = await sql`
+      SELECT id, role::text AS role, role_template_id
+      FROM users
+      WHERE role NOT IN ('SUPER_ADMIN', 'SUPPORT')
+    `;
+
+    for (const u of users) {
+      // Collect the effective permission set for this user:
+      //   template grants ∪ role_permissions grants ∪ user-level grants − user-level revokes
+      const effectiveRows: Array<{ code: string }> = await sql`
+        WITH template_perms AS (
+          SELECT p.id AS permission_id, p.code
+          FROM role_template_permissions rtp
+          JOIN permissions p ON p.id = rtp.permission_id
+          WHERE rtp.role_template_id = ${u.role_template_id}
+        ),
+        role_perms AS (
+          SELECT p.id AS permission_id, p.code
+          FROM role_permissions rp
+          JOIN permissions p ON p.id = rp.permission_id
+          WHERE rp.role = ${u.role}::user_role
+        ),
+        user_grants AS (
+          SELECT p.id AS permission_id, p.code
+          FROM user_permissions up
+          JOIN permissions p ON p.id = up.permission_id
+          WHERE up.user_id = ${u.id}
+            AND up.valid_to IS NULL
+            AND up.granted = true
+        ),
+        user_revokes AS (
+          SELECT p.id AS permission_id
+          FROM user_permissions up
+          JOIN permissions p ON p.id = up.permission_id
+          WHERE up.user_id = ${u.id}
+            AND up.valid_to IS NULL
+            AND up.granted = false
+        ),
+        combined AS (
+          SELECT DISTINCT code, permission_id FROM template_perms
+          UNION
+          SELECT DISTINCT code, permission_id FROM role_perms
+          UNION
+          SELECT DISTINCT code, permission_id FROM user_grants
+        )
+        SELECT DISTINCT c.code
+        FROM combined c
+        WHERE c.permission_id NOT IN (SELECT permission_id FROM user_revokes)
+      `;
+
+      const codes = effectiveRows.map((r) => canonicalPermissionCode(r.code));
+      const uniqueCodes = [...new Set(codes)];
+
+      // Delete old snapshot, then insert new one.
+      await sql`
+        DELETE FROM user_permissions
+        WHERE user_id = ${u.id}
+          AND valid_to IS NULL
+      `;
+      if (uniqueCodes.length > 0) {
+        // Re-insert the derived effective set from the permission IDs.
+        await sql`
+          INSERT INTO user_permissions (user_id, permission_id, granted)
+          SELECT ${u.id}::uuid, p.id, true
+          FROM permissions p
+          WHERE p.code = ANY(${uniqueCodes})
+          ON CONFLICT (user_id, permission_id) WHERE valid_to IS NULL DO NOTHING
+        `;
+      }
+      usersRestamped++;
+    }
+
+    log(`User permission snapshots restamped: ${usersRestamped} users.`);
+  }
+
   return {
     permsInserted,
     permsTotal: CANONICAL_PERMISSIONS.length,
@@ -275,5 +362,6 @@ export async function applyPermissionCatalog(
     templatesInserted,
     templatePermsInserted,
     templatePermsRevoked,
+    usersRestamped,
   };
 }

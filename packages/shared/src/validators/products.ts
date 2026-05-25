@@ -99,3 +99,20 @@ export const listProductsSchema = z.object({
 });
 
 export type ListProductsInput = z.infer<typeof listProductsSchema>;
+
+// ============================================
+// Bundle Components
+// ============================================
+
+export const bundleComponentSchema = z.object({
+  componentProductId: z.string().uuid(),
+  quantity: z.number().int().min(1, 'Quantity must be at least 1'),
+});
+
+export const setBundleComponentsSchema = z.object({
+  productId: z.string().uuid(),
+  /** Empty array removes all components (product is no longer a bundle). */
+  components: z.array(bundleComponentSchema).max(20, 'A bundle can have at most 20 components'),
+});
+
+export type SetBundleComponentsInput = z.infer<typeof setBundleComponentsSchema>;

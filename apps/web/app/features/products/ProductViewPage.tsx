@@ -101,6 +101,31 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
         </dl>
       </div>
 
+      {/* Bundle Components */}
+      {product.bundleComponents && product.bundleComponents.length > 0 && (
+        <div className="card space-y-4">
+          <h2 className="text-lg font-semibold text-app-fg">Bundle Components</h2>
+          <p className="text-xs text-app-fg-muted">
+            This product is a bundle. Inventory is checked and deducted from these component products.
+          </p>
+          <ul className="divide-y divide-app-border">
+            {product.bundleComponents.map((comp) => (
+              <li key={comp.id} className="flex items-center justify-between py-2.5 text-sm">
+                <Link
+                  to={`/admin/products/${comp.componentProductId}`}
+                  className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                >
+                  {comp.componentName}
+                </Link>
+                <span className="shrink-0 text-app-fg-muted">
+                  &times;{comp.quantity}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Gallery */}
       {product.galleryImageUrls?.length ? (
         <div className="card space-y-4">
@@ -127,7 +152,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
         </div>
       ) : null}
 
-      {/* Cost & Stock (only if API returned cost; backend may strip for non-Finance/SuperAdmin) */}
+      {/* Cost & Stock */}
       {product.costPrice != null && product.costPrice !== '' && (
         <div className="card space-y-4">
           <h2 className="text-lg font-semibold text-app-fg">Cost & Stock</h2>

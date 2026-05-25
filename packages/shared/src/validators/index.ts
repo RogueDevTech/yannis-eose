@@ -112,6 +112,8 @@ export {
   updateProductSchema,
   listProductsSchema,
   requestProductArchiveSchema,
+  setBundleComponentsSchema,
+  bundleComponentSchema,
 } from './products';
 
 export type {
@@ -120,6 +122,7 @@ export type {
   UpdateProductInput,
   ListProductsInput,
   RequestProductArchiveInput,
+  SetBundleComponentsInput,
 } from './products';
 
 // Product category validators

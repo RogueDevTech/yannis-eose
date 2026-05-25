@@ -26,20 +26,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'products.create');
   const cookie = getSessionCookie(request);
 
-  // App Shell pattern — defer the category fetch so the form chrome renders
-  // instantly. Only the category dropdown briefly shows a "Loading…" state.
-  const categoriesPromise = apiRequest<unknown>('/trpc/productCategories.listActive', {
-    method: 'GET',
-    cookie,
-  })
-    .then((res) => {
-      if (!res.ok) return [] as CategoryOption[];
-      const trpcData = res.data as { result?: { data?: CategoryOption[] } };
-      return trpcData?.result?.data ?? [];
+  const [categoriesPromise, productsRes] = await Promise.all([
+    apiRequest<unknown>('/trpc/productCategories.listActive', {
+      method: 'GET',
+      cookie,
     })
-    .catch(() => [] as CategoryOption[]);
+      .then((res) => {
+        if (!res.ok) return [] as CategoryOption[];
+        const trpcData = res.data as { result?: { data?: CategoryOption[] } };
+        return trpcData?.result?.data ?? [];
+      })
+      .catch(() => [] as CategoryOption[]),
+    apiRequest<unknown>(
+      `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 200 }))}`,
+      { method: 'GET', cookie },
+    ),
+  ]);
 
-  return defer({ categoriesPromise });
+  let allProducts: Array<{ id: string; name: string }> = [];
+  if (productsRes.ok) {
+    const pData = productsRes.data as { result?: { data?: { products?: Array<{ id: string; name: string }> } } };
+    allProducts = (pData?.result?.data?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
+  }
+
+  return defer({ categoriesPromise, allProducts });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -95,16 +105,38 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
+  // If bundle type, set bundle components on the newly created product
+  const productType = formData.get('productType')?.toString();
+  if (productType === 'bundle') {
+    const createdData = res.data as { result?: { data?: { id?: string } } };
+    const newProductId = createdData?.result?.data?.id;
+    if (newProductId) {
+      let bundleComponents: Array<{ componentProductId: string; quantity: number }> = [];
+      try {
+        bundleComponents = JSON.parse(formData.get('bundleComponents')?.toString() ?? '[]');
+      } catch { /* ignore parse errors */ }
+
+      if (bundleComponents.length > 0) {
+        await apiRequest<unknown>('/trpc/products.setBundleComponents', {
+          method: 'POST',
+          cookie,
+          body: { productId: newProductId, components: bundleComponents },
+        });
+      }
+    }
+  }
+
   return redirect('/admin/products');
 }
 
 export default function NewProductRoute() {
-  const { categoriesPromise } = useLoaderData<typeof loader>();
+  const { categoriesPromise, allProducts } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   return (
     <ProductCreatePage
       actionData={actionData}
       categoriesPromise={categoriesPromise}
+      allProducts={allProducts}
     />
   );
 }

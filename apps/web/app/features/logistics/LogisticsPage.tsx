@@ -202,6 +202,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [search, setSearch] = useState('');
   const [filterProviderId, setFilterProviderId] = useState('');
   const [filterState, setFilterState] = useState('');
+  const [filterHasStock, setFilterHasStock] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'stock-asc' | 'stock-desc' | 'provider'>('name');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
@@ -395,6 +397,11 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         return detectState(l, provider?.coverageArea) === filterState;
       });
     }
+    if (filterHasStock === 'has_stock') {
+      result = result.filter((l) => (l.totalStock ?? 0) > 0);
+    } else if (filterHasStock === 'no_stock') {
+      result = result.filter((l) => (l.totalStock ?? 0) === 0);
+    }
     if (searchQuery) {
       result = result.filter((l) =>
         [l.name, l.address, l.providerName].some((field) =>
@@ -402,8 +409,25 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         ),
       );
     }
-    return result;
-  }, [displayLocations, displayProviders, filterProviderId, filterState, searchQuery]);
+    // Sort
+    const sorted = [...result];
+    switch (sortBy) {
+      case 'stock-desc':
+        sorted.sort((a, b) => (b.totalStock ?? 0) - (a.totalStock ?? 0));
+        break;
+      case 'stock-asc':
+        sorted.sort((a, b) => (a.totalStock ?? 0) - (b.totalStock ?? 0));
+        break;
+      case 'provider':
+        sorted.sort((a, b) => (a.providerName ?? '').localeCompare(b.providerName ?? ''));
+        break;
+      case 'name':
+      default:
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+    }
+    return sorted;
+  }, [displayLocations, displayProviders, filterProviderId, filterState, filterHasStock, searchQuery, sortBy]);
 
   /** Nigerian states that actually appear in the current location data. */
   const availableStates = useMemo(() => {
@@ -1301,12 +1325,34 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               searchPlaceholder="Search states..."
               wrapperClassName="w-36 sm:w-44"
             />
-            {(filterProviderId || filterState) && (
+            <FormSelect
+              value={filterHasStock}
+              onChange={(e) => setFilterHasStock(e.target.value)}
+              placeholder="All stock"
+              options={[
+                { value: '', label: 'All stock levels' },
+                { value: 'has_stock', label: 'Has stock' },
+                { value: 'no_stock', label: 'No stock' },
+              ]}
+              wrapperClassName="w-36 sm:w-40"
+            />
+            <FormSelect
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              options={[
+                { value: 'name', label: 'Sort: Name' },
+                { value: 'stock-desc', label: 'Sort: Stock (high)' },
+                { value: 'stock-asc', label: 'Sort: Stock (low)' },
+                { value: 'provider', label: 'Sort: Company' },
+              ]}
+              wrapperClassName="w-36 sm:w-44"
+            />
+            {(filterProviderId || filterState || filterHasStock) && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => { setFilterProviderId(''); setFilterState(''); }}
+                onClick={() => { setFilterProviderId(''); setFilterState(''); setFilterHasStock(''); }}
               >
                 Clear filters
               </Button>
@@ -1363,13 +1409,13 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id) ? 'opacity-60' : ''
           }
           emptyTitle={
-            searchQuery || filterProviderId || filterState
+            searchQuery || filterProviderId || filterState || filterHasStock
               ? 'No locations match your filters'
               : 'No locations yet'
           }
           emptyDescription={
-            searchQuery || filterProviderId || filterState
-              ? 'Try adjusting your search, company, or state filter.'
+            searchQuery || filterProviderId || filterState || filterHasStock
+              ? 'Try adjusting your search, company, state, or stock filter.'
               : 'Add a logistics company first, then add locations.'
           }
           renderMobileCard={(l) => {

@@ -14,7 +14,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'logistics.write');
+  await requirePermission(request, ['logistics.write', 'inventory.verifyTransfer']);
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {
@@ -62,10 +62,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (pageRows.length < 100) break;
   }
 
-  const transfers =
-    transfersRes.ok
-      ? ((transfersRes.data as { result?: { data?: TransferConfirmationRecord[] } })?.result?.data ?? [])
-      : [];
+  const transfersRaw = transfersRes.ok
+    ? (transfersRes.data as { result?: { data?: { transfers?: TransferConfirmationRecord[] } | TransferConfirmationRecord[] } })?.result?.data
+    : null;
+  const transfers: TransferConfirmationRecord[] = Array.isArray(transfersRaw)
+    ? transfersRaw
+    : (transfersRaw?.transfers ?? []);
   const locations =
     locationsRes.ok
       ? (
@@ -167,7 +169,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'markTransferReceived') {
-    await requirePermission(request, 'logistics.write');
+    await requirePermission(request, ['logistics.write', 'inventory.verifyTransfer']);
     const transferId = formData.get('transferId')?.toString();
     const quantityReceived = parseInt(formData.get('quantityReceived')?.toString() ?? '0', 10);
     const shrinkageReason = formData.get('shrinkageReason')?.toString()?.trim() || undefined;
