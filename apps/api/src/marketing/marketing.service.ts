@@ -3478,7 +3478,8 @@ export class MarketingService {
     };
 
     const orderConditions: Parameters<typeof and>[0][] = [
-      // Exclude DELETED orders from all marketing metrics.
+      // Exclude DELETED orders (editorial) from all marketing metrics.
+      // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
     ];
     appendMetricsOrderScope(orderConditions);
@@ -3887,6 +3888,10 @@ export class MarketingService {
       startDate?: string;
       endDate?: string;
       productId?: string;
+      campaignId?: string;
+      mediaBuyerId?: string;
+      search?: string;
+      duplicateType?: string;
       page?: number;
       limit?: number;
     },
@@ -3916,25 +3921,69 @@ export class MarketingService {
     }
 
     if (input.startDate) {
-      conditions.push(gte(schema.crossFunnelAttempts.attemptedAt, new Date(input.startDate)));
+      conditions.push(gte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      conditions.push(lte(schema.crossFunnelAttempts.attemptedAt, new Date(input.endDate)));
+      conditions.push(lte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayEnd(input.endDate)));
     }
     if (input.productId) {
       conditions.push(eq(schema.crossFunnelAttempts.productId, input.productId));
     }
+    if (input.campaignId) {
+      conditions.push(eq(schema.crossFunnelAttempts.campaignId, input.campaignId));
+    }
+    if (input.mediaBuyerId) {
+      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.search) {
+      const q = `%${input.search.trim().toLowerCase()}%`;
+      conditions.push(
+        or(
+          ilike(schema.crossFunnelAttempts.customerName, q),
+          ilike(schema.crossFunnelAttempts.customerPhoneHash, q),
+          sql`${schema.crossFunnelAttempts.customerPhone} ILIKE ${q}`,
+        )!,
+      );
+    }
+    // Duplicate type filter — classification uses MB comparison + campaign comparison.
+    // The campaign comparison needs the orders join, so we add these as raw SQL
+    // conditions that reference both tables (the main query already LEFT JOINs orders).
+    const typeConditions: SQL[] = [];
+    if (input.duplicateType === 'resubmission') {
+      typeConditions.push(
+        sql`${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
+        sql`${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId}`,
+      );
+    } else if (input.duplicateType === 'same-mb') {
+      typeConditions.push(
+        sql`${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
+        sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId}`,
+      );
+    } else if (input.duplicateType === 'cross-funnel') {
+      typeConditions.push(
+        or(
+          sql`${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
+          isNull(schema.crossFunnelAttempts.originalMediaBuyerId),
+        )!,
+      );
+    }
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const allConditions = [...conditions, ...typeConditions];
+    const whereClause = allConditions.length > 0 ? and(...allConditions) : undefined;
 
+    // Count query — needs the orders join for type classification (campaign comparison).
     const [{ value: total } = { value: 0 }] = await this.db
       .select({ value: count() })
       .from(schema.crossFunnelAttempts)
+      .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
       .where(whereClause);
+    const totalCount = Number(total);
 
     const productAlias = alias(schema.products, 'cfa_product');
     const winnerAlias = alias(schema.users, 'cfa_winner');
     const ownerAlias = alias(schema.users, 'cfa_owner');
+
+    const campaignAlias = alias(schema.campaigns, 'cfa_campaign');
 
     const rows = await this.db
       .select({
@@ -3947,13 +3996,22 @@ export class MarketingService {
         mediaBuyerId: schema.crossFunnelAttempts.mediaBuyerId,
         mediaBuyerName: ownerAlias.name,
         campaignId: schema.crossFunnelAttempts.campaignId,
+        campaignName: campaignAlias.name,
         originalOrderId: schema.crossFunnelAttempts.originalOrderId,
+        originalMediaBuyerId: schema.crossFunnelAttempts.originalMediaBuyerId,
         originalMediaBuyerName: winnerAlias.name,
+        originalCampaignId: schema.orders.campaignId,
+        originalOrderStatus: schema.orders.status,
+        originalOrderAmount: schema.orders.totalAmount,
+        originalOrderNumber: schema.orders.orderNumber,
+        originalOrderCreatedAt: schema.orders.createdAt,
       })
       .from(schema.crossFunnelAttempts)
       .leftJoin(productAlias, eq(schema.crossFunnelAttempts.productId, productAlias.id))
       .leftJoin(winnerAlias, eq(schema.crossFunnelAttempts.originalMediaBuyerId, winnerAlias.id))
       .leftJoin(ownerAlias, eq(schema.crossFunnelAttempts.mediaBuyerId, ownerAlias.id))
+      .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
+      .leftJoin(campaignAlias, eq(schema.crossFunnelAttempts.campaignId, campaignAlias.id))
       .where(whereClause)
       .orderBy(desc(schema.crossFunnelAttempts.attemptedAt))
       .limit(limit)
@@ -3961,10 +4019,10 @@ export class MarketingService {
 
     return {
       rows,
-      total: Number(total),
+      total: totalCount,
       page,
       limit,
-      totalPages: Math.max(1, Math.ceil(Number(total) / limit)),
+      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
     };
   }
 
@@ -3993,19 +4051,25 @@ export class MarketingService {
     }
 
     if (input.startDate) {
-      conditions.push(gte(schema.crossFunnelAttempts.attemptedAt, new Date(input.startDate)));
+      conditions.push(gte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      conditions.push(lte(schema.crossFunnelAttempts.attemptedAt, new Date(input.endDate)));
+      conditions.push(lte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayEnd(input.endDate)));
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const [totals = { totalAttempts: 0, uniqueCustomers: 0 }] = await this.db
+    // Total + unique + per-type breakdown in one query using CASE.
+    // Type logic: same MB + same campaign = resubmission, same MB + different campaign = same-mb, different MB = cross-funnel.
+    const [totals = { totalAttempts: 0, uniqueCustomers: 0, resubmissions: 0, sameMb: 0, crossFunnel: 0 }] = await this.db
       .select({
         totalAttempts: count(),
         uniqueCustomers: sql<number>`COUNT(DISTINCT ${schema.crossFunnelAttempts.customerPhoneHash})`,
+        resubmissions: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId} AND ${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId})`,
+        sameMb: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId} AND ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId})`,
+        crossFunnel: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId} OR ${schema.crossFunnelAttempts.originalMediaBuyerId} IS NULL)`,
       })
       .from(schema.crossFunnelAttempts)
+      .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
       .where(whereClause);
 
     const productAlias = alias(schema.products, 'cfa_product');
@@ -4024,6 +4088,9 @@ export class MarketingService {
     return {
       totalAttempts: Number(totals.totalAttempts),
       uniqueCustomers: Number(totals.uniqueCustomers),
+      resubmissions: Number(totals.resubmissions),
+      sameMb: Number(totals.sameMb),
+      crossFunnel: Number(totals.crossFunnel),
       perProduct: perProduct.map((row) => ({
         productId: row.productId,
         productName: row.productName,

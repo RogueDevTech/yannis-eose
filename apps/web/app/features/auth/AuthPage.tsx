@@ -41,13 +41,18 @@ export function AuthPage({ needsSetup, redirectTo }: AuthPageProps) {
       {/* Right panel — form (app theme canvas / elevated) */}
       <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-app-canvas lg:bg-app-elevated">
         <div className="w-full max-w-sm space-y-8">
-          {/* Mobile logo */}
+          {/* Mobile logo — blue on light, white on dark */}
           <div className="lg:hidden text-center">
             <div className="flex items-center justify-center mb-2">
               <img
+                src="/assets/yannis-logo-white-bg.png"
+                alt="Yannis"
+                className="h-10 w-auto max-w-full object-contain dark:hidden"
+              />
+              <img
                 src="/assets/yannis-logo1.png"
                 alt="Yannis"
-                className="h-10 w-auto max-w-full object-contain"
+                className="h-10 w-auto max-w-full object-contain hidden dark:block"
               />
             </div>
             <p className="text-app-fg-muted text-sm">Enterprise Operations & Sales Engine</p>

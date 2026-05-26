@@ -50,6 +50,7 @@ export interface CSTeamPageProps {
   q?: string;
   activityFilter?: string;
   backlogFilter?: string;
+  sort?: string;
   /** Date filter from URL — controls the leaderboard window for order counts. */
   dateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
 }
@@ -64,6 +65,22 @@ const CS_BACKLOG_OPTIONS = [
   { value: 'ALL', label: 'All backlog' },
   { value: 'HAS_PENDING', label: 'Has pending' },
   { value: 'NO_PENDING', label: 'No pending' },
+];
+
+const CS_SORT_OPTIONS = [
+  { value: 'total-desc', label: 'Sort: Total orders (high)' },
+  { value: 'total-asc', label: 'Sort: Total orders (low)' },
+  { value: 'confirmed-desc', label: 'Sort: Confirmed (high)' },
+  { value: 'delivered-desc', label: 'Sort: Delivered (high)' },
+  { value: 'cancelled-desc', label: 'Sort: Cancelled (high)' },
+  { value: 'calls-desc', label: 'Sort: Calls (high)' },
+  { value: 'conf-rate-desc', label: 'Sort: Conf. rate (high)' },
+  { value: 'conf-rate-asc', label: 'Sort: Conf. rate (low)' },
+  { value: 'delivery-rate-desc', label: 'Sort: Delivery rate (high)' },
+  { value: 'delivery-rate-asc', label: 'Sort: Delivery rate (low)' },
+  { value: 'backlog-desc', label: 'Sort: Backlog (high)' },
+  { value: 'backlog-asc', label: 'Sort: Backlog (low)' },
+  { value: 'name', label: 'Sort: Name (A-Z)' },
 ];
 
 function formatLastActive(lastActionAt: string | null): string {
@@ -239,6 +256,7 @@ export function CSTeamPage({
   q = '',
   activityFilter = 'ALL',
   backlogFilter = 'ALL',
+  sort = 'total-desc',
   dateFilters,
 }: CSTeamPageProps) {
   const [showExportModal, setShowExportModal] = useState(false);
@@ -254,6 +272,7 @@ export function CSTeamPage({
     q?: string;
     activity?: string;
     backlog?: string;
+    sort?: string;
     page?: number;
   }) => {
     setSearchParams(
@@ -271,6 +290,10 @@ export function CSTeamPage({
         if (overrides.backlog !== undefined) {
           if (overrides.backlog === 'ALL') params.delete('backlog');
           else params.set('backlog', overrides.backlog);
+        }
+        if (overrides.sort !== undefined) {
+          if (overrides.sort === 'total-desc') params.delete('sort');
+          else params.set('sort', overrides.sort);
         }
         if (overrides.page !== undefined) {
           if (overrides.page <= 1) params.delete('page');
@@ -310,8 +333,9 @@ export function CSTeamPage({
     let count = 0;
     if (activityFilter !== 'ALL') count += 1;
     if (backlogFilter !== 'ALL') count += 1;
+    if (sort !== 'total-desc') count += 1;
     return count;
-  }, [activityFilter, backlogFilter]);
+  }, [activityFilter, backlogFilter, sort]);
 
   const showFilteredEmpty = unfilteredCount > 0 && totalCount === 0;
   const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL';
@@ -504,6 +528,15 @@ export function CSTeamPage({
                       wrapperClassName="w-full"
                     />
                   </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
+                    <FormSelect
+                      value={sort}
+                      onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
+                      options={CS_SORT_OPTIONS}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 </>
               }
               desktop={
@@ -670,6 +703,12 @@ export function CSTeamPage({
                 options={CS_BACKLOG_OPTIONS}
                 wrapperClassName="w-full min-w-0 sm:w-44"
               />
+              <FormSelect
+                value={sort}
+                onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
+                options={CS_SORT_OPTIONS}
+                wrapperClassName="w-full min-w-0 sm:w-52"
+              />
             </>
           }
           sheetFilterBody={
@@ -689,6 +728,15 @@ export function CSTeamPage({
                   value={backlogFilter}
                   onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
                   options={CS_BACKLOG_OPTIONS}
+                  wrapperClassName="w-full"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
+                <FormSelect
+                  value={sort}
+                  onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
+                  options={CS_SORT_OPTIONS}
                   wrapperClassName="w-full"
                 />
               </div>

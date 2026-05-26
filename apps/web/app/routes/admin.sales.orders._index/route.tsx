@@ -182,10 +182,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const productIdParam = url.searchParams.get('productId') || undefined;
 
+  // For CS/Marketing, DELIVERED and REMITTED are the same outcome ("delivered").
+  // When the user filters by DELIVERED, expand to include REMITTED so those orders
+  // aren't invisible. Finance sees them separately.
+  const expandDeliveredFilter = status === 'DELIVERED';
   const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
-    status: status || undefined,
+    ...(expandDeliveredFilter
+      ? { statuses: ['DELIVERED', 'REMITTED'] }
+      : { status: status || undefined }),
     search: search || undefined,
     ...(assignedCsId && { assignedCsId }),
     ...(productIdParam && { productId: productIdParam }),
@@ -207,7 +213,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const input = encodeURIComponent(JSON.stringify(listInput));
 
-  const showCSCloserColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const showCSCloserColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
 
   const csOrdersShell = {
     filters: {
@@ -268,7 +274,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let total = 0;
   let totalPages = 0;
   if (fromCart) {
-    const cartsInput = encodeURIComponent(JSON.stringify({ page, limit: ORDERS_PER_PAGE }));
+    // Cart abandonment view shows the full open backlog — no date filter.
+    // Only search narrows the results.
+    const cartsInput = encodeURIComponent(JSON.stringify({
+      page,
+      limit: ORDERS_PER_PAGE,
+      ...(search && { search }),
+    }));
     const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
       method: 'GET',
       cookie,

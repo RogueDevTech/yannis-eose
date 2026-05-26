@@ -13,8 +13,9 @@ export const STANDARD_FIELD_LABELS: Record<StandardFieldKey, string> = {
 /**
  * Fields that are always present and required on every form — not toggleable.
  * CEO 2026-05-25: deliveryAddress is a basic required field like fullName/phoneNumber.
+ * CEO 2026-05-26: deliveryState is now also fixed-required — buyers must select their state.
  */
-export const FIXED_STANDARD_FIELD_KEYS: readonly StandardFieldKey[] = ['deliveryAddress'];
+export const FIXED_STANDARD_FIELD_KEYS: readonly StandardFieldKey[] = ['deliveryAddress', 'deliveryState'];
 
 export const STANDARD_FIELD_ORDER: StandardFieldKey[] = [
   'gender',

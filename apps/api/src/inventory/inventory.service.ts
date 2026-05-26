@@ -1738,6 +1738,33 @@ export class InventoryService {
   }
 
   /**
+   * Aggregated stock per (product, location) — no batches, no pagination.
+   * Used by the transfer form to show "X units in stock" per location without
+   * being affected by FIFO batch count × page-size limits.
+   */
+  async listLevelsSummary(): Promise<
+    Array<{
+      productId: string;
+      locationId: string;
+      stockCount: number;
+      reservedCount: number;
+    }>
+  > {
+    const rows = await this.db
+      .select({
+        productId: schema.inventoryLevels.productId,
+        locationId: schema.inventoryLevels.locationId,
+        stockCount:
+          sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`.mapWith(Number),
+        reservedCount:
+          sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(Number),
+      })
+      .from(schema.inventoryLevels)
+      .groupBy(schema.inventoryLevels.productId, schema.inventoryLevels.locationId);
+    return rows;
+  }
+
+  /**
    * Detail payload for a single inventory row by its inventory_levels.id.
    * Convenience wrapper around `levelDetail` that also resolves product/location names
    * so a full-page view only needs one round-trip.

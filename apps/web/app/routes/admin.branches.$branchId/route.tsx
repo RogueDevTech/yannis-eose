@@ -1323,8 +1323,8 @@ function BranchMembersPanel({
             </div>
           </div>
 
-          <div className="card p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-app-fg-muted">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-app-fg-muted">
               Showing {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)}{' '}
               of {filtered.length}
             </p>

@@ -37,9 +37,10 @@ function parseStats(res: { ok: boolean; data: unknown }): CrossFunnelStats {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, {
+  const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
     permission: 'marketing.read',
+    orMarketingTeamSupervisorOnBranch: true,
   });
   const cookie = getSessionCookie(request);
 
@@ -59,6 +60,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10) || 1);
   const productId = url.searchParams.get('productId') || undefined;
+  const campaignId = url.searchParams.get('campaignId') || undefined;
+  const mediaBuyerId = url.searchParams.get('mediaBuyerId') || undefined;
+  const search = url.searchParams.get('search') || undefined;
+  const duplicateType = url.searchParams.get('duplicateType') || undefined;
 
   const listInput = {
     page,
@@ -66,6 +71,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(productId && { productId }),
+    ...(campaignId && { campaignId }),
+    ...(mediaBuyerId && { mediaBuyerId: mediaBuyerId }),
+    ...(search && { search }),
+    ...(duplicateType && { duplicateType }),
   };
   const statsInput = {
     ...(startDate && { startDate }),
@@ -77,16 +86,57 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate: endDate ?? '',
     periodAllTime,
     productId: productId ?? '',
+    campaignId: campaignId ?? '',
+    mediaBuyerId: mediaBuyerId ?? '',
+    search: search ?? '',
+    duplicateType: duplicateType ?? '',
   };
 
   const crossFunnelShell = { filters };
 
+  // Show MB filter for admin-class, HoM, and marketing supervisors
+  const showMbFilter =
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT' ||
+    user.role === 'HEAD_OF_MARKETING' ||
+    (user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true);
+
   const listData = (async () => {
-    const listRes = await apiRequest<unknown>(
-      `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
-      { method: 'GET', cookie },
-    );
-    return { list: parseList(listRes) };
+    const [listRes, productsRes, campaignsRes, buyersRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 200 }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/marketing.listCampaigns?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 200, status: 'ACTIVE' }))}`,
+        { method: 'GET', cookie },
+      ),
+      showMbFilter
+        ? apiRequest<unknown>(
+            `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 200, role: 'MEDIA_BUYER', status: 'ACTIVE' }))}`,
+            { method: 'GET', cookie },
+          )
+        : Promise.resolve({ ok: false, data: {} } as { ok: boolean; data: unknown }),
+    ]);
+    let productsForFilter: Array<{ id: string; name: string }> = [];
+    if (productsRes.ok) {
+      const pData = productsRes.data as { result?: { data?: { products?: Array<{ id: string; name: string }> } } };
+      productsForFilter = (pData?.result?.data?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
+    }
+    let campaignsForFilter: Array<{ id: string; name: string }> = [];
+    if (campaignsRes.ok) {
+      const cData = campaignsRes.data as { result?: { data?: { campaigns?: Array<{ id: string; name: string }> } } };
+      campaignsForFilter = (cData?.result?.data?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name }));
+    }
+    let mediaBuyersForFilter: Array<{ id: string; name: string }> = [];
+    if (buyersRes.ok) {
+      const bData = buyersRes.data as { result?: { data?: { users?: Array<{ id: string; name: string }> } } };
+      mediaBuyersForFilter = (bData?.result?.data?.users ?? []).map((u) => ({ id: u.id, name: u.name }));
+    }
+    return { list: parseList(listRes), productsForFilter, campaignsForFilter, mediaBuyersForFilter, showMbFilter };
   })();
 
   const statsPromise = (async (): Promise<CrossFunnelStats> => {
@@ -120,7 +170,15 @@ export default function CrossFunnelRoute() {
   return (
     <CachedAwait resolve={listData} fallback={<MarketingCrossFunnelLoadingShell {...crossFunnelShell} />}>
       {(d) => (
-        <MarketingCrossFunnelPage list={d.list} secondary={statsPromise} filters={crossFunnelShell.filters} />
+        <MarketingCrossFunnelPage
+          list={d.list}
+          secondary={statsPromise}
+          filters={crossFunnelShell.filters}
+          productsForFilter={d.productsForFilter}
+          campaignsForFilter={d.campaignsForFilter}
+          mediaBuyersForFilter={d.mediaBuyersForFilter}
+          showMbFilter={d.showMbFilter}
+        />
       )}
     </CachedAwait>
   );

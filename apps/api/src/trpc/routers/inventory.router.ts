@@ -78,6 +78,11 @@ export const inventoryRouter = router({
       return getInventoryService().listLevels(input);
     }),
 
+  /** Aggregated stock per (product, location) — no batch rows, no pagination. */
+  levelsSummary: authedProcedure.query(async () => {
+    return getInventoryService().listLevelsSummary();
+  }),
+
   /**
    * Get available stock for a product (with virtual buffer).
    */

@@ -289,7 +289,12 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
         </CardBody>
 
         {data.totalPages > 1 ? (
-          <div className="border-t border-app-border p-4">
+          <div className="border-t border-app-border p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-app-fg-muted">
+              {data.total > 0
+                ? `Showing ${(data.page - 1) * data.limit + 1}–${Math.min(data.page * data.limit, data.total)} of ${data.total} ${data.total === 1 ? 'shipment' : 'shipments'}`
+                : 'No shipments'}
+            </p>
             <Pagination page={data.page} totalPages={data.totalPages} pageSize={data.limit} />
           </div>
         ) : null}

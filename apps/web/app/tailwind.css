@@ -306,7 +306,7 @@
 
   /* Badge variants */
   .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center px-1.5 py-px rounded-full text-xs font-medium leading-tight;
   }
 
   .badge-success {
@@ -379,7 +379,7 @@
   }
 
   .btn-ghost {
-    @apply btn bg-transparent text-app-fg-muted hover:bg-app-hover focus:ring-surface-400;
+    @apply btn bg-transparent border-transparent hover:border-transparent text-app-fg-muted hover:bg-app-hover focus:ring-surface-400;
   }
 
   .btn-sm {
@@ -488,7 +488,7 @@
 
   /* Status dot indicators */
   .status-dot {
-    @apply w-2 h-2 rounded-full inline-block mr-2;
+    @apply w-1.5 h-1.5 rounded-full inline-block mr-1.5;
   }
 }
 

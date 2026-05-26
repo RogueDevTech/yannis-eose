@@ -251,3 +251,64 @@ TURNSTILE_SECRET_KEY = "0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw"
 
 
 
+
+Here's the exact test steps:
+
+  Step 1: Submit the first order (this
+  creates the real order)
+
+  Go to your form: http://localhost:8787/form/019e63a5-1c4d-78a8-bb84-d06149b3e10e
+
+  Fill in:
+  - Name: Test CrossFunnel
+  - Phone: 08099999999 (use a fresh number
+  you haven't used before)
+  - Select any offer (e.g. "Buy 1 Get 1 free
+   Nebulizer Filling")
+  - Delivery Address: 123 Test Street
+  - Delivery State: select Lagos
+  - Submit
+
+  Step 2: Verify the order was created
+
+  Go to: http://localhost:4003/admin/marketing/orders
+
+  You should see "Test CrossFunnel" as a new
+   order with status "Unassigned".
+
+  Step 3: Submit the same phone + same
+  product again (this should be blocked)
+
+  Go back to the form: http://localhost:8787
+  /form/019e63a5-1c4d-78a8-bb84-d06149b3e10e
+
+  Fill in:
+  - Name: Test CrossFunnel Again
+  - Phone: 08099999999 (same phone as step
+  1)
+  - Select the same offer (same product)
+  - Delivery Address: 456 Different Street
+  - Delivery State: select Abuja (FCT)
+  - Submit
+
+  Customer should see success (not "already
+  submitted").
+
+  Step 4: Check orders page
+
+  Go to: http://localhost:4003/admin/marketi
+  ng/orders
+
+  You should see only ONE order for "Test
+  CrossFunnel" — the second submission
+  should NOT appear.
+
+  Step 5: Check cross-funnel page
+
+  Go to: http://localhost:4003/admin/marketi
+  ng/cross-funnel?period=all_time
+
+  You should see the duplicate attempt
+  listed — "Te
+
+
