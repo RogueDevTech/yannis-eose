@@ -701,7 +701,7 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
   const allocated = counts['AGENT_ASSIGNED'] ?? 0;
   const dispatched = counts['DISPATCHED'] ?? 0;
   const inTransit = counts['IN_TRANSIT'] ?? 0;
-  const delivered = counts['DELIVERED'] ?? 0;
+  const delivered = (counts['DELIVERED'] ?? 0) + (counts['REMITTED'] ?? 0);
 
   return (
     <>
@@ -776,7 +776,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
               { label: 'Total Orders', value: data.totalOrders.toString(), valueClassName: 'text-app-fg' },
               {
                 label: 'Delivered',
-                value: ((data.orderCounts as Record<string, number>)['DELIVERED'] ?? 0).toString(),
+                value: (((data.orderCounts as Record<string, number>)['DELIVERED'] ?? 0) + ((data.orderCounts as Record<string, number>)['REMITTED'] ?? 0)).toString(),
                 valueClassName: 'text-success-600 dark:text-success-400',
               },
               {

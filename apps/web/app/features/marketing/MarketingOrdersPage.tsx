@@ -861,7 +861,7 @@ export function MarketingOrdersPage({
             // aggregate), never from `total` (the filtered list count).
             const deliveryRate =
               ordersInPeriodTotal > 0
-                ? (((statusCounts['DELIVERED'] ?? 0) / ordersInPeriodTotal) * 100).toFixed(1)
+                ? ((((statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)) / ordersInPeriodTotal) * 100).toFixed(1)
                 : '0';
             // CR = confirmed-or-beyond / total orders in period (DELETED already excluded
             // from ordersInPeriodTotal). DELETED is an editorial "this order shouldn't

@@ -289,7 +289,11 @@ export function MarketingCrossFunnelPage({
         }
       />
 
-      <MobileDateFilterRow />
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+      />
 
       {/* Stats */}
       <Suspense

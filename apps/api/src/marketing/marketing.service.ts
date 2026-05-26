@@ -3495,7 +3495,7 @@ export class MarketingService {
             : undefined;
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
-      eq(schema.orders.status, 'DELIVERED'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
     appendMetricsOrderScope(deliveredConditions);
     if (periodStart) deliveredConditions.push(gte(schema.orders.deliveredAt, periodStart));
