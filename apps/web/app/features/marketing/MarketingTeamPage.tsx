@@ -739,7 +739,14 @@ export function MarketingTeamPage({
             />
 
             {totalPages > 1 && (
-              <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} align="end" />
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <p className="text-sm text-app-fg-muted">
+                  {totalCount > 0
+                    ? `Showing ${(page - 1) * (limit ?? 0) + 1}–${Math.min(page * (limit ?? totalCount), totalCount)} of ${totalCount} ${totalCount === 1 ? 'member' : 'members'}`
+                    : 'No members'}
+                </p>
+                <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+              </div>
             )}
           </>
         )}

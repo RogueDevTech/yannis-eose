@@ -358,11 +358,10 @@ export function MonthlyPayrolls({
       </TableLoadingOverlay>
 
       {monthlyPayrolls.length > 0 && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border pt-4">
           <p className="text-sm text-app-fg-muted">
             Showing {(safePage - 1) * pageSize + 1}–
             {Math.min(safePage * pageSize, monthlyPayrolls.length)} of {monthlyPayrolls.length}
-            <span className="text-app-fg-muted/90"> · {pageSize} per page</span>
           </p>
           <Pagination
             page={safePage}
@@ -373,7 +372,6 @@ export function MonthlyPayrolls({
               setPageSize(n);
               setPage(1);
             }}
-            className="sm:justify-end"
           />
         </div>
       )}

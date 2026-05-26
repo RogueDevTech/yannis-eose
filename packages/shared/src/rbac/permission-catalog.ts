@@ -72,6 +72,18 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'transfers.read', resource: 'transfers', action: 'read', description: 'View transfers' },
   { code: 'returns.read', resource: 'returns', action: 'read', description: 'View returns' },
   { code: 'logistics.read', resource: 'logistics', action: 'read', description: 'View logistics' },
+  {
+    code: 'logistics.providers.view',
+    resource: 'logistics.providers',
+    action: 'view',
+    description: 'View the Logistics companies page (3PL partner directory) — page-scoped slice of logistics.read.',
+  },
+  {
+    code: 'logistics.partner_transfers.view',
+    resource: 'logistics.partner_transfers',
+    action: 'view',
+    description: 'View the Partner stock transfers page (3PL transfer ledger) — page-scoped slice of transfers.read.',
+  },
   { code: 'logistics.write', resource: 'logistics', action: 'write', description: 'Create/update logistics companies and locations' },
   { code: 'logistics.remit', resource: 'logistics', action: 'remit', description: 'Submit transfer remittance to warehouse (3PL)' },
   { code: 'logistics.teamOverview', resource: 'logistics', action: 'teamOverview', description: 'View Logistics Team Analysis (provider performance rollup)' },
@@ -252,6 +264,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'audit.export',
     'hr.export',
     'marketing.export',
+    // Page-scoped slice of logistics.read so Branch Admin keeps Logistics
+    // companies visibility after the 2026-05 split. Branch Admin never had
+    // transfers.read, so partner transfers remains out of scope.
+    'logistics.providers.view',
   ],
   HEAD_OF_MARKETING: [
     'marketing.read',
@@ -403,6 +419,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'finance.read',
     'orders.export',
     'inventory.export',
+    // Page-scoped slices of logistics.read / transfers.read — preserves
+    // visibility after the 2026-05 split into per-page codes.
+    'logistics.providers.view',
+    'logistics.partner_transfers.view',
   ],
   STOCK_MANAGER: [
     'inventory.read',
@@ -428,6 +448,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'categories.read',
     'categories.write',
     'inventory.export',
+    // Page-scoped slices of logistics.read / transfers.read — preserves
+    // visibility after the 2026-05 split into per-page codes.
+    'logistics.providers.view',
+    'logistics.partner_transfers.view',
   ],
   TPL_MANAGER: [
     'inventory.read',
@@ -443,6 +467,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'transfers.read',
     'returns.read',
     'logistics.deliveryConfirmation.submit',
+    // Page-scoped slices of logistics.read / transfers.read — preserves
+    // visibility after the 2026-05 split into per-page codes.
+    'logistics.providers.view',
+    'logistics.partner_transfers.view',
   ],
   TPL_RIDER: [
     'rider.dashboard',

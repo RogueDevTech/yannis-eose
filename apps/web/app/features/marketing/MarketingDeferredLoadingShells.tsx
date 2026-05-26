@@ -210,12 +210,41 @@ const CROSS_FUNNEL_SHELL_ROW_DATA = crossFunnelShellPlaceholderRows();
 
 function crossFunnelLoadingShellTableColumns(): CompactTableColumn<{ id: string }>[] {
   return [
-    { key: 'when', header: 'When', render: () => <TableCellTextPulse className="w-[9rem]" /> },
+    { key: 'orderId', header: 'Order ID', render: () => <TableCellTextPulse className="w-[5rem]" /> },
     { key: 'customer', header: 'Customer', render: () => <TableCellTextPulse className="w-[8rem]" /> },
-    { key: 'product', header: 'Product', render: () => <TableCellTextPulse className="w-[8rem]" /> },
-    { key: 'funnel', header: 'Your funnel', render: () => <TableCellTextPulse className="w-[7rem]" /> },
-    { key: 'credited', header: 'Credited to', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    { key: 'mediaBuyer', header: 'Media buyer', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    { key: 'product', header: 'Product', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    { key: 'amount', header: 'Amount', align: 'right', render: () => <TableCellTextPulse className="w-[4rem] ml-auto" /> },
+    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5rem]" /> },
+    { key: 'created', header: 'Created', render: () => <TableCellTextPulse className="w-[5rem]" /> },
+    { key: 'actions', header: '', tight: true, render: () => <TableCellTextPulse className="w-[4rem]" /> },
   ];
+}
+
+function CrossFunnelMobileCardPulse() {
+  return (
+    <div className="space-y-2 py-1" aria-hidden>
+      <div className="flex items-center justify-between gap-2">
+        <TableCellTextPulse className="w-[8rem]" />
+        <TableCellTextPulse className="w-[5rem]" />
+      </div>
+      <div className="flex items-center gap-2">
+        <TableCellTextPulse className="w-[4rem]" />
+        <TableCellTextPulse className="w-[5rem]" />
+        <TableCellTextPulse className="w-[4rem] ml-auto" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <TableCellTextPulse className="w-[2.5rem]" />
+          <TableCellTextPulse className="w-[6rem]" />
+        </div>
+        <div className="space-y-1">
+          <TableCellTextPulse className="w-[3rem]" />
+          <TableCellTextPulse className="w-[5rem]" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Funding — static header, date filter, real (disabled) CTAs when allowed; metrics + ledger pulse. */
@@ -1198,9 +1227,9 @@ export function MarketingCrossFunnelLoadingShell({
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="Cross-funnel attempts"
+        title="Duplicate Attempts"
         mobileInlineActions
-        description="Review duplicate funnel attempts."
+        description="All duplicate order submissions across your funnels."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Cross-funnel tools"
@@ -1293,6 +1322,7 @@ export function MarketingCrossFunnelLoadingShell({
             columns={crossFunnelCols}
             rows={CROSS_FUNNEL_SHELL_ROW_DATA}
             rowKey={(row) => row.id}
+            renderMobileCard={() => <CrossFunnelMobileCardPulse />}
             emptyTitle="No cross-funnel attempts in this range"
             emptyDescription="Try widening the date range or clearing the product filter"
           />

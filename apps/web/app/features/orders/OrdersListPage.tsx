@@ -658,12 +658,18 @@ function OrdersListPageImpl({
   // Sales (which excludes REMITTED — cash remittance is accountant-only) doesn't get
   // a "Cash Remitted" tile the closer can't act on.
   // Pipeline statuses (excluding DELETED — it goes after CR/DR).
+  // When REMITTED is excluded (CS/Marketing view), merge its count into DELIVERED
+  // so the "Delivered" pill shows the combined total.
+  const remittedMergedIntoDelivered = excludeStatuses?.includes('REMITTED') ?? false;
   const PIPELINE_KEYS = STATUS_OPTIONS.filter(
     (s) => s !== 'ALL' && !excludeStatuses?.includes(s),
   );
   const pipelineItems = PIPELINE_KEYS.map((status) => ({
     label: STATUS_LABELS[status] ?? formatStatus(status),
-    value: statusCounts[status] ?? 0,
+    value:
+      status === 'DELIVERED' && remittedMergedIntoDelivered
+        ? (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)
+        : statusCounts[status] ?? 0,
     valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
     active: selectedStatus === status,
     onClick: () => handleStatusSelect(status),
@@ -695,8 +701,10 @@ function OrdersListPageImpl({
     (statusCounts['RESTOCKED'] ?? 0) +
     (statusCounts['WRITTEN_OFF'] ?? 0);
   const deliveredPlus = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+  // Exclude DELETED (editorial) and CART (abandoned carts never entered the pipeline)
+  // from rate denominators — they're not business outcomes.
   const periodTotalExclDeleted = Object.entries(statusCounts)
-    .filter(([k]) => k !== 'DELETED')
+    .filter(([k]) => k !== 'DELETED' && k !== 'CART')
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
   const confirmationRate =
     periodTotalExclDeleted > 0 ? (confirmedPlus / periodTotalExclDeleted) * 100 : 0;
@@ -1026,12 +1034,6 @@ function OrdersListPageImpl({
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
-              {order.isDuplicate === 'FLAGGED' && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">Duplicate</span>
-              )}
-              {order.isDuplicate === 'POSSIBLY_DUPLICATE' && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Possible dup</span>
-              )}
             </span>
             {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
             {isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ? <OverdueTag /> : null}
@@ -1202,12 +1204,6 @@ function OrdersListPageImpl({
               {order.customerName || '—'}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
-              )}
-              {order.isDuplicate === 'FLAGGED' && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">Duplicate</span>
-              )}
-              {order.isDuplicate === 'POSSIBLY_DUPLICATE' && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Possible dup</span>
               )}
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
@@ -1649,7 +1645,7 @@ function OrdersListPageImpl({
               // Always derive from statusCounts (the source of truth) so
               // search/filter changes don't make the overview strip fluctuate.
               value: Object.entries(statusCounts)
-                .filter(([k]) => k !== 'DELETED')
+                .filter(([k]) => k !== 'DELETED' && k !== 'CART')
                 .reduce((sum, [, n]) => sum + (n || 0), 0),
               valueClassName: 'text-app-fg',
               active: selectedStatus === 'ALL',

@@ -409,7 +409,7 @@ export function CompactTable<T>({
   function renderHeaderSelection(): ReactNode {
     if (!selection?.onToggleAll) return null;
     return (
-      <th scope="col" className="w-px px-2 py-2">
+      <th scope="col" className="w-px px-2 py-[5px]">
         <Checkbox
           checked={allSelectableSelected}
           onChange={(e) => selection.onToggleAll!(e.target.checked)}
@@ -540,7 +540,7 @@ export function CompactTable<T>({
                 <th
                   key={col.key}
                   className={[
-                    'px-3 py-2 font-semibold text-xs text-app-fg-muted uppercase tracking-wide whitespace-nowrap',
+                    'px-3 py-[5px] font-semibold text-xs text-app-fg-muted uppercase tracking-wide whitespace-nowrap',
                     alignClass,
                     col.tight ? 'w-px' : '',
                     col.hideOnMobile ? 'hidden sm:table-cell' : '',
@@ -565,7 +565,7 @@ export function CompactTable<T>({
               <Fragment key={String(rowKey(row, i))}>
                 <tr className={['bg-transparent transition-colors', rowExtra].filter(Boolean).join(' ')}>
                   {selection ? (
-                    <td className="px-2 py-2 align-middle">{renderSelectionCell(row, i)}</td>
+                    <td className="px-2 py-[5px] align-middle">{renderSelectionCell(row, i)}</td>
                   ) : null}
                   {columns.map((col) => {
                     const alignClass = ALIGN_CLASS[col.align ?? 'left'];
@@ -581,7 +581,7 @@ export function CompactTable<T>({
                       <td
                         key={col.key}
                         className={[
-                          'px-3 py-2',
+                          'px-3 py-[5px]',
                           alignClass,
                           col.nowrap || col.tight ? 'whitespace-nowrap' : '',
                           col.hideOnMobile ? 'hidden sm:table-cell' : '',
@@ -600,7 +600,7 @@ export function CompactTable<T>({
                 </tr>
                 {detailContent != null && detailContent !== false ? (
                   <tr className="border-t border-app-border bg-app-hover/40">
-                    <td colSpan={colCount} className="px-3 py-2 text-sm text-app-fg">
+                    <td colSpan={colCount} className="px-3 py-[5px] text-sm text-app-fg">
                       {detailContent}
                     </td>
                   </tr>
@@ -612,7 +612,7 @@ export function CompactTable<T>({
         {footer ? (
           <tfoot>
             <tr className="border-t border-app-border-strong bg-app-elevated">
-              <td colSpan={colCount} className="px-3 py-2 text-sm">
+              <td colSpan={colCount} className="px-3 py-[5px] text-sm">
                 {footer}
               </td>
             </tr>

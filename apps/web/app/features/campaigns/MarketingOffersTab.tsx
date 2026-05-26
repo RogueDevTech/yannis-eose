@@ -320,12 +320,11 @@ export function MarketingOffersTab({
       )}
 
       {!offersLoading && filteredGroups.length > 0 && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border pt-4">
           <p className="text-sm text-app-fg-muted">
             Showing {(safeOffersPage - 1) * offersPageSize + 1}–
             {Math.min(safeOffersPage * offersPageSize, filteredGroups.length)} of{' '}
             {filteredGroups.length}
-            <span className="text-app-fg-muted/90"> · {offersPageSize} per page</span>
           </p>
           <Pagination
             page={safeOffersPage}
@@ -336,7 +335,6 @@ export function MarketingOffersTab({
               setOffersPageSize(n);
               setOffersPage(1);
             }}
-            className="sm:justify-end"
           />
         </div>
       )}

@@ -532,6 +532,30 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'editOrderDetails') {
+    const body: Record<string, unknown> = { orderId, ...branchIdFromForm(formData) };
+    const customerName = formData.get('customerName')?.toString()?.trim();
+    const deliveryAddress = formData.get('deliveryAddress')?.toString()?.trim();
+    const deliveryState = formData.get('deliveryState')?.toString()?.trim();
+    const deliveryNotes = formData.get('deliveryNotes')?.toString()?.trim();
+    const customerEmail = formData.get('customerEmail')?.toString()?.trim();
+    if (customerName !== undefined && customerName !== '') body.customerName = customerName;
+    if (deliveryAddress !== undefined) body.deliveryAddress = deliveryAddress;
+    if (deliveryState !== undefined) body.deliveryState = deliveryState;
+    if (deliveryNotes !== undefined) body.deliveryNotes = deliveryNotes;
+    if (customerEmail !== undefined && customerEmail !== '') body.customerEmail = customerEmail;
+    const res = await apiRequest<unknown>('/trpc/orders.update', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to update order details');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'adjustOrderItems') {
     const allowedRoles = [
       'CS_CLOSER',

@@ -33,19 +33,15 @@ import type { LinkProps } from '@remix-run/react';
 export type TableActionVariant = 'primary' | 'neutral' | 'danger';
 
 const SHARED_BASE =
-  'inline-flex min-h-10 items-center justify-center px-3 py-2 rounded-lg border text-sm font-medium leading-none transition-colors focus:outline-none focus-visible:ring-1 disabled:opacity-50 disabled:cursor-not-allowed md:min-h-0 md:px-2 md:py-0.5 md:rounded md:text-xs';
+  'inline-flex min-h-10 items-center justify-center px-3 py-2 rounded-lg text-sm font-medium leading-none transition-colors focus:outline-none focus-visible:ring-1 disabled:opacity-50 disabled:cursor-not-allowed md:min-h-0 md:px-0 md:py-0 md:rounded md:text-xs';
 
 const VARIANT_CLASSES: Record<TableActionVariant, string> = {
-  // Brand blue — primary affordance. Hovers slightly deeper, dark-mode
-  // tinted background, focus ring matches.
   primary:
-    'border-brand-500/45 text-brand-600 hover:text-brand-700 hover:border-brand-500 hover:bg-brand-50 focus-visible:ring-brand-500 dark:text-brand-400 dark:hover:text-brand-300 dark:hover:bg-brand-900/20',
-  // Muted grey — secondary action paired with a primary.
+    'text-brand-600 hover:text-brand-700 hover:bg-brand-50 focus-visible:ring-brand-500 dark:text-brand-400 dark:hover:text-brand-300 dark:hover:bg-brand-900/20',
   neutral:
-    'border-app-border text-app-fg-muted hover:text-app-fg hover:bg-app-hover focus-visible:ring-surface-400',
-  // Red — destructive / negative.
+    'text-app-fg-muted hover:text-app-fg hover:bg-app-hover focus-visible:ring-surface-400',
   danger:
-    'border-danger-500/40 text-danger-600 hover:text-danger-700 hover:border-danger-500 hover:bg-danger-50 focus-visible:ring-danger-500 dark:text-danger-400 dark:hover:text-danger-300 dark:hover:bg-danger-900/20',
+    'text-danger-600 hover:text-danger-700 hover:bg-danger-50 focus-visible:ring-danger-500 dark:text-danger-400 dark:hover:text-danger-300 dark:hover:bg-danger-900/20',
 };
 
 export function tableActionClass(variant: TableActionVariant, extra?: string): string {

@@ -5,8 +5,14 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import type { Location, Transfer } from '~/features/transfers/types';
 import { parseTransfersShellDateFilters } from '~/lib/transfers-shell-filters';
 
-export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'transfers.read');
+export async function loadTransfersRouteData(
+  { request }: LoaderFunctionArgs,
+  // Per-route permission code so the partner-transfers page can gate on its
+  // page-scoped slice (`logistics.partner_transfers.view`) while the internal
+  // `/admin/transfers` page keeps using the broader `transfers.read`.
+  permissionCode: string = 'transfers.read',
+) {
+  await requirePermission(request, permissionCode);
   const cookie = getSessionCookie(request);
   const transfersShell = {
     filters: parseTransfersShellDateFilters(new URL(request.url).searchParams),

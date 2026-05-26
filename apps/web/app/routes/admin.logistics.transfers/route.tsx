@@ -10,7 +10,7 @@ import { LogisticsTransfersLoadingShell } from '~/features/logistics/LogisticsDe
 export const meta: MetaFunction = () => [{ title: 'Partner Stock Transfers — Yannis EOSE' }];
 
 export async function loader(args: LoaderFunctionArgs) {
-  return loadTransfersRouteData(args);
+  return loadTransfersRouteData(args, 'logistics.partner_transfers.view');
 }
 
 export const clientLoader = cachedClientLoader;

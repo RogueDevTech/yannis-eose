@@ -962,12 +962,37 @@ export class BranchTeamsService {
   async attachTeamSupervisorSessionFlags(user: SessionUser): Promise<SessionUser> {
     const branchId = user.currentBranchId;
     if (!branchId) {
-      const {
-        isMarketingTeamSupervisorOnActiveBranch: _drop1,
-        isCsTeamSupervisorOnActiveBranch: _drop2,
-        ...rest
-      } = user;
-      return rest;
+      // "All Branches" — no single branch to resolve against. Instead of
+      // dropping both flags entirely (which hid Team Analysis / Team Orders
+      // for MBs on "All Branches"), check if the user is a supervisor on ANY
+      // branch. The `users.is_team_supervisor` denormalized flag tells us.
+      const isGlobalSupervisor = user.isTeamSupervisor === true || user.scopeTeamSupervisor === true;
+      if (!isGlobalSupervisor) {
+        const {
+          isMarketingTeamSupervisorOnActiveBranch: _drop1,
+          isCsTeamSupervisorOnActiveBranch: _drop2,
+          ...rest
+        } = user;
+        return rest;
+      }
+      // Supervisor somewhere — resolve which departments. One query to check
+      // if they supervise any marketing and/or CS team across all branches.
+      const rows = await this.db
+        .select({ department: schema.branchTeams.department })
+        .from(schema.branchTeamMembers)
+        .innerJoin(schema.branchTeams, eq(schema.branchTeams.id, schema.branchTeamMembers.teamId))
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, user.id),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+          ),
+        );
+      const depts = new Set(rows.map((r) => r.department));
+      return {
+        ...user,
+        isMarketingTeamSupervisorOnActiveBranch: depts.has('MARKETING') ? true : undefined,
+        isCsTeamSupervisorOnActiveBranch: depts.has('CS') ? true : undefined,
+      } as SessionUser;
     }
     const { marketing, cs } = await this.getSupervisorFlagsForBranch(user.id, branchId);
     // Consumers check `=== true`, so `undefined` is equivalent to "absent".
