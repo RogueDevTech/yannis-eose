@@ -1022,6 +1022,7 @@ function OrdersListPageImpl({
       {
         key: 'orderId',
         header: 'Order ID',
+        nowrap: true,
         render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />,
       },
       {
