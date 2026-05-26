@@ -873,17 +873,18 @@ export class CartService {
     branchId?: string | null,
   ): Promise<{ pending: number; abandonedOpen: number }> {
     const branchCond = branchId ? eq(schema.campaigns.branchId, branchId) : undefined;
-    const countByStatus = (status: 'PENDING' | 'ABANDONED') =>
-      this.db
-        .select({ count: count() })
-        .from(schema.cartAbandonments)
-        .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-        .where(and(eq(schema.cartAbandonments.status, status), branchCond));
+    const pendingRes = await this.db
+      .select({ count: count() })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(and(eq(schema.cartAbandonments.status, 'PENDING'), branchCond));
 
-    const [pendingRes, abandonedRes] = await Promise.all([
-      countByStatus('PENDING'),
-      countByStatus('ABANDONED'),
-    ]);
+    // Use the same openCartConditions as listAbandoned so the count matches the list.
+    const abandonedRes = await this.db
+      .select({ count: count() })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(and(...this.openCartConditions({ branchId })));
 
     return {
       pending: pendingRes[0]?.count ?? 0,
