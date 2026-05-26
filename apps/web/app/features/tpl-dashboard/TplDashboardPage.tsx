@@ -28,7 +28,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
   const allocated = counts['AGENT_ASSIGNED'] ?? 0;
   const dispatched = counts['DISPATCHED'] ?? 0;
   const inTransit = counts['IN_TRANSIT'] ?? 0;
-  const delivered = counts['DELIVERED'] ?? 0;
+  const delivered = (counts['DELIVERED'] ?? 0) + (counts['REMITTED'] ?? 0);
   const returned = counts['RETURNED'] ?? 0;
   const cancelled = counts['CANCELLED'] ?? 0;
 

@@ -624,7 +624,7 @@ export function CSTeamPage({
             {
               label: 'Delivered',
               value: summary.deliveredTotal.toString(),
-              valueClassName: 'text-app-fg',
+              valueClassName: 'text-success-600 dark:text-success-400',
               title: 'Total orders attributed to the team that were delivered',
             },
             {

@@ -18,7 +18,9 @@ export interface OrderStatusBadgeProps {
 const COLLAPSED_TO_CONFIRMED = new Set(['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT']);
 
 export function OrderStatusBadge({ status, showDot = true, className, expanded = false }: OrderStatusBadgeProps) {
-  const effectiveStatus = !expanded && COLLAPSED_TO_CONFIRMED.has(status) ? 'CONFIRMED' : status;
+  let effectiveStatus = !expanded && COLLAPSED_TO_CONFIRMED.has(status) ? 'CONFIRMED' : status;
+  // CS/Sales surfaces: REMITTED shows as "Delivered" — cash remittance is accountant-only detail.
+  if (!expanded && effectiveStatus === 'REMITTED') effectiveStatus = 'DELIVERED';
   const badgeClass = STATUS_COLORS[effectiveStatus] ?? 'badge';
   const dotClass = STATUS_DOT_CLASS[effectiveStatus] ?? 'bg-surface-400';
   const label = STATUS_LABELS[effectiveStatus] ?? formatStatus(effectiveStatus);
