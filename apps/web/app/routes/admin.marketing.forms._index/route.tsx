@@ -127,6 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'HEAD_OF_MARKETING' ||
       user.role === 'SUPER_ADMIN' ||
       user.role === 'ADMIN' ||
+      user.role === 'SUPPORT' ||
       isMarketingSupervisor,
     currentUserId: user.id,
     currentUserName: user.name,

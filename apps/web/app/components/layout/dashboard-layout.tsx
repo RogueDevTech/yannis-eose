@@ -222,13 +222,13 @@ const navStructure: NavGroupDef[] = [
         label: 'Logistics companies',
         href: '/admin/logistics/partners',
         icon: SidebarIcons.logistics,
-        permission: 'logistics.read',
+        permission: 'logistics.providers.view',
       },
       {
         label: 'Partner stock transfers',
         href: '/admin/logistics/transfers',
         icon: SidebarIcons.transfers,
-        permission: 'transfers.read',
+        permission: 'logistics.partner_transfers.view',
       },
       {
         label: 'Orders',
@@ -814,10 +814,33 @@ function DashboardLayoutInner({
       }
     };
     window.addEventListener('yannis:sw-update-ready', handler);
-    return () => window.removeEventListener('yannis:sw-update-ready', handler);
+
+    // When the new SW activates and claims this tab, reload on next navigation
+    // so the user gets fresh bundles without interrupting their current work.
+    const msgHandler = (event: MessageEvent) => {
+      if (event.data?.type === 'SW_UPDATED') {
+        // Mark that a reload is needed — the next Remix navigation will trigger it.
+        window.__yannisSwUpdated = true;
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', msgHandler);
+
+    return () => {
+      window.removeEventListener('yannis:sw-update-ready', handler);
+      navigator.serviceWorker?.removeEventListener('message', msgHandler);
+    };
   }, []);
 
   useEffect(() => {
+    // If the SW updated while the user was on the previous page, do a hard
+    // reload so the fresh bundles are picked up. This fires once per SW update
+    // cycle — not on every navigation.
+    if ((window as unknown as Record<string, unknown>).__yannisSwUpdated) {
+      delete (window as unknown as Record<string, unknown>).__yannisSwUpdated;
+      window.location.reload();
+      return;
+    }
+
     let cancelled = false;
     notificationsPromise.then(({ unreadCount }) => {
       if (!cancelled) setServerUnreadCount(unreadCount);

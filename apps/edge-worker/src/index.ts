@@ -351,6 +351,16 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
     unitPrice: String(item['unitPrice']),
   }));
 
+  // Delivery address and state are always required (CEO directive 2026-05-26).
+  const deliveryAddress = typeof b['deliveryAddress'] === 'string' ? (b['deliveryAddress'] as string).trim() : '';
+  if (!deliveryAddress) {
+    return { valid: false, error: 'Delivery address is required.' };
+  }
+  const deliveryState = typeof b['deliveryState'] === 'string' ? (b['deliveryState'] as string).trim() : '';
+  if (!deliveryState) {
+    return { valid: false, error: 'Delivery state is required.' };
+  }
+
   const paymentMethod = typeof b['paymentMethod'] === 'string' && (b['paymentMethod'] === 'PAY_ON_DELIVERY' || b['paymentMethod'] === 'PAY_ONLINE')
     ? b['paymentMethod']
     : 'PAY_ON_DELIVERY';
@@ -1059,7 +1069,7 @@ function getFormScript(
       var cartSaveTimeout = null;
       var cartSaveInflight = null; // Promise of the in-flight cart save
       var cartSaveDisabled = false; // kill switch — set after successful submit
-      var CART_DEBOUNCE_MS = 600;
+      var CART_DEBOUNCE_MS = 10000;
       function isValidNgPhone(value) {
         return NG_PHONE_RE.test((value || '').trim());
       }
@@ -1106,7 +1116,11 @@ function getFormScript(
           return count > 0 ? out : undefined;
         }
         clearTimeout(cartSaveTimeout);
+        // Skip if a cart save is already in flight — the next debounce
+        // tick after it completes will pick up the latest field values.
+        if (cartSaveInflight) return;
         cartSaveTimeout = setTimeout(function() {
+          if (cartSaveInflight) return; // double-check at fire time
           var payload = {
             campaignId: '${campaignId}',
             mediaBuyerId: ${mediaBuyerIdJson},
@@ -1147,6 +1161,8 @@ function getFormScript(
           }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.id) savedCartId = d.id;
             cartSaveInflight = null;
+            // Fields may have changed while in-flight — schedule one more save.
+            maybeSaveCart();
           }).catch(function() { cartSaveInflight = null; });
         }, CART_DEBOUNCE_MS);
       }
@@ -1323,7 +1339,8 @@ function getFormScript(
 
       form.addEventListener('submit', function(e) {
         e.preventDefault();
-        // Cancel any pending debounced cart save — we're about to submit.
+        // Kill cart saves immediately — no more /cart calls after submit is clicked.
+        cartSaveDisabled = true;
         clearTimeout(cartSaveTimeout);
         btn.disabled = true;
         btn.textContent = 'Submitting...';
@@ -1420,6 +1437,29 @@ function getFormScript(
             btn.disabled = false;
             btn.textContent = form.dataset.btnText || 'Submit Order';
             cfPh.focus();
+            return;
+          }
+        }
+
+        // Validate required standard fields (hidden inputs from custom dropdowns
+        // bypass native browser validation since we use e.preventDefault).
+        var reqInputs = form.querySelectorAll('input[required], textarea[required], select[required]');
+        for (var ri = 0; ri < reqInputs.length; ri++) {
+          var reqEl = reqInputs[ri];
+          var reqVal = (reqEl.value || '').trim();
+          if (!reqVal) {
+            var fieldLabel = reqEl.name || 'field';
+            // Find label text for user-friendly message
+            var assocLabel = form.querySelector('label[for="' + reqEl.id + '"]');
+            if (assocLabel) fieldLabel = assocLabel.textContent.replace(/\\s*\\*\\s*$/, '').trim();
+            msg.className = 'msg msg-error';
+            msg.textContent = fieldLabel + ' is required.';
+            btn.disabled = false;
+            btn.textContent = form.dataset.btnText || 'Submit Order';
+            // Try to focus the visible trigger (custom dropdown) or the input itself
+            var ydParent = reqEl.closest('[data-yd]');
+            if (ydParent) { var trig = ydParent.querySelector('.yd-trigger'); if (trig) trig.focus(); }
+            else reqEl.focus();
             return;
           }
         }
@@ -1607,22 +1647,22 @@ function getFormInnerHTML(config: CampaignConfig): string {
     | 'customerEmail'
     | 'paymentMethod';
   const showField = (key: StdFieldKey) => {
-    // Delivery address is always shown — basic required field (CEO 2026-05-25).
+    // Delivery address + state are always shown — basic required fields.
     if (key === 'deliveryAddress') return true;
+    if (key === 'deliveryState') return true;
     if (hasStandard) return standard.has(key);
     if (key === 'deliveryNotes') return fc.showDeliveryNotes === true;
-    if (key === 'deliveryState') return fc.showDeliveryState === true;
     if (key === 'gender') return fc.showGender === true;
     if (key === 'preferredDeliveryDate') return fc.showPreferredDeliveryDate === true;
     if (key === 'customerEmail') return fc.showCustomerEmail === true;
     return fc.showPaymentMethod === true;
   };
   const requiredField = (key: StdFieldKey) => {
-    // Delivery address is always required — basic required field (CEO 2026-05-25).
+    // Delivery address + state are always required — basic required fields.
     if (key === 'deliveryAddress') return true;
+    if (key === 'deliveryState') return true;
     if (hasStandard) return standard.get(key)?.required === true;
     if (key === 'deliveryNotes') return fc.requireDeliveryNotes === true;
-    if (key === 'deliveryState') return fc.requireDeliveryState === true;
     if (key === 'gender') return fc.requireGender === true;
     if (key === 'preferredDeliveryDate') return fc.requirePreferredDeliveryDate === true;
     if (key === 'customerEmail') return fc.requireCustomerEmail === true;
@@ -2499,21 +2539,21 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
   if (apiResult.ok) {
     const resultData = apiResult.data as {
       result?: {
-        data?: { id?: string; authorizationUrl?: string; reference?: string; crossFunnelAttempt?: true };
+        data?: { id?: string; authorizationUrl?: string; reference?: string; duplicateRecorded?: true };
       };
     };
     const orderId = resultData?.result?.data?.id;
     const authorizationUrl = resultData?.result?.data?.authorizationUrl;
-    const crossFunnelAttempt = resultData?.result?.data?.crossFunnelAttempt === true;
+    const duplicateRecorded = resultData?.result?.data?.duplicateRecorded === true;
 
-    if (crossFunnelAttempt) {
-      // Original MB already won attribution — surface the same "already submitted"
-      // UX as a same-MB duplicate. The DB row in cross_funnel_attempts is the only
-      // place this collision is recorded; CS / metrics never see it.
+    // Universal dedup (CEO 2026-05-26): duplicate submissions see the normal
+    // success flow — pixel fires, successCallbackUrl redirect works. The
+    // customer never knows it was a duplicate. The cross_funnel_attempts row
+    // is recorded server-side for MB visibility.
+    if (duplicateRecorded) {
       return corsResponse({
         success: true,
-        message: 'Your order has already been submitted. No need to submit again.',
-        alreadySubmitted: true,
+        orderId: 'queued',
       });
     }
 

@@ -13,20 +13,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'transfers.read');
   const cookie = getSessionCookie(request);
 
-  const levelsInput = JSON.stringify({ limit: 100 });
   const opt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
   try {
+    // Use `levelsSummary` — aggregated (product × location) totals, no batch
+    // rows, no pagination. The old `inventory.levels` endpoint paginates by
+    // batch, so a warehouse with many FIFO shipments silently truncated and
+    // the dropdown showed "0 units in stock".
     const [productsRes, levelsRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`, opt),
-      apiRequest<unknown>(`/trpc/inventory.levels?input=${encodeURIComponent(levelsInput)}`, opt),
+      apiRequest<unknown>('/trpc/inventory.levelsSummary', opt),
     ]);
 
     const products = productsRes.ok
       ? (((productsRes.data as { result?: { data?: Product[] } })?.result?.data ?? []) as Product[])
       : [];
     const levels = levelsRes.ok
-      ? ((levelsRes.data as { result?: { data?: { levels?: InventoryLevel[] } } })?.result?.data?.levels ?? [])
+      ? ((levelsRes.data as { result?: { data?: InventoryLevel[] } })?.result?.data ?? [])
       : [];
 
     const okBoth = productsRes.ok && levelsRes.ok;
@@ -42,4 +45,3 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return json({ ok: false as const, products: [] as Product[], levels: [] as InventoryLevel[], error: msg });
   }
 }
-

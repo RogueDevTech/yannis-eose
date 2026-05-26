@@ -1107,7 +1107,7 @@ export class OrdersService {
     input: CreateOrderInput & { cartId?: string },
     actorId: string | null,
     orderSource?: 'edge-form' | null,
-  ): Promise<{ id?: string; authorizationUrl?: string; crossFunnelAttempt?: true }> {
+  ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -1175,64 +1175,27 @@ export class OrdersService {
       const hashHex = orderInput.customerPhoneHash.slice(0, 16);
       advisoryLockKey1 = parseInt(hashHex.slice(0, 8), 16) | 0;
       advisoryLockKey2 = parseInt(hashHex.slice(8, 16), 16) | 0;
-      await this.db.execute(sql`SELECT pg_advisory_lock(${advisoryLockKey1}, ${advisoryLockKey2})`);
-      advisoryLockAcquired = true;
+      // Use try_advisory_lock (non-blocking) instead of advisory_lock (blocking).
+      // A blocking lock can hang forever if a previous request crashed mid-lock
+      // (the lock stays held on that pooled DB connection until it's recycled).
+      const lockResult = await this.db.execute<{ acquired: boolean }>(
+        sql`SELECT pg_try_advisory_lock(${advisoryLockKey1}, ${advisoryLockKey2}) AS acquired`,
+      );
+      const lockRows = Array.isArray(lockResult) ? lockResult : (lockResult as unknown as { rows: Array<{ acquired: boolean }> })?.rows ?? [];
+      advisoryLockAcquired = lockRows[0]?.acquired === true;
+      // If lock not acquired, another request for the same phone is in-flight.
+      // Proceed without the lock — the dedup check + DB uniqueness constraints
+      // still prevent true duplicates; the lock was just a serialization optimization.
     }
     try {
-    if (orderSource === 'edge-form') {
-      const existingIdentical = await this.findRecentIdenticalOrder(orderInput);
-      if (existingIdentical) {
-        // If the duplicate came from a different MB/form, record a cross-funnel
-        // attempt so the runner-up MB still sees it in their analytics. The
-        // first order is the real one — CS only sees that one.
-        const isCrossMb =
-          orderInput.mediaBuyerId &&
-          existingIdentical.mediaBuyerId &&
-          existingIdentical.mediaBuyerId !== orderInput.mediaBuyerId;
-        if (isCrossMb && orderInput.customerPhoneHash) {
-          const productIds = orderInput.items.map((i) => i.productId);
-          await this.db.insert(schema.crossFunnelAttempts).values(
-            productIds.map((productId) => ({
-              customerPhoneHash: orderInput.customerPhoneHash!,
-              customerPhone: orderInput.customerPhone ?? null,
-              customerName: orderInput.customerName,
-              productId,
-              mediaBuyerId: orderInput.mediaBuyerId!,
-              campaignId: orderInput.campaignId ?? null,
-              branchId: null as string | null,
-              originalOrderId: existingIdentical.id,
-              originalMediaBuyerId: existingIdentical.mediaBuyerId,
-            })),
-          ).catch((err) => {
-            this.logger.warn({ err }, 'cross-funnel attempt insert on idempotency hit failed');
-          });
-        }
-        this.logger.warn(
-          {
-            existingOrderId: existingIdentical.id,
-            phoneHash: orderInput.customerPhoneHash,
-            crossFunnel: !!isCrossMb,
-          },
-          'edge-form idempotency: identical order within 24h window — returning existing, not creating a duplicate',
-        );
-        return { id: existingIdentical.id };
-      }
-    }
-
     // MARKETING branch — the campaign/form branch this order is attributed to.
-    // Set once here, never changes. Drives MB / HoM / Team Analysis reporting.
     const branchId = await this.resolveBranchIdForNewOrder({
       campaignId: orderInput.campaignId ?? null,
       mediaBuyerId: orderInput.mediaBuyerId ?? null,
       fallbackBranchId: null,
     });
 
-    // CS SERVICING branch — which branch's CS team works this order. CS order
-    // routing may map the product to a different branch; if so the order is
-    // SERVICED there while staying ATTRIBUTED to its marketing branch above.
-    // When no routing rule matches, CS services it in the marketing branch.
-    // NOTE: routing must NEVER overwrite `branchId` — that was the cross-branch
-    // leak fixed in migration 0150.
+    // CS SERVICING branch — which branch's CS team works this order.
     servicingBranchId = branchId;
     if (branchId) {
       const primaryProductId = orderInput.items[0]?.productId ?? null;
@@ -1245,67 +1208,69 @@ export class OrdersService {
       }
     }
 
-    // Cross-funnel attempt detection (Pillar 2 / attribution truth):
-    // When a different MB's funnel already captured this phone+product within
-    // 24h, the runner-up is BLOCKED — no duplicate order is created. A
-    // cross_funnel_attempts row is inserted so the runner-up MB can see traction
-    // on the cross-funnel page.
-    //
-    // Uses `findCrossFunnelCandidates` (not `detectDuplicates`) because the
-    // dedupe filter excludes already-flagged winners — and the post-create
-    // flagging hook stamps FLAGGED on any prior same-phone order within ms,
-    // silently masking cross-funnel hits (2026-05-24 incident).
-    if (orderSource === 'edge-form' && orderInput.mediaBuyerId && orderInput.customerPhoneHash) {
+    // Universal 7-day dedup (CEO directive 2026-05-26):
+    // Same phone + any overlapping product within 7 days = duplicate.
+    // Any MB, any campaign, any offer. One order per customer×product per week.
+    // Duplicates are recorded in cross_funnel_attempts for MB visibility.
+    // Customer always sees success (pixel fires, redirect works).
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const productIds = orderInput.items.map((i) => i.productId);
-      const candidates = await this.findCrossFunnelCandidates(
+      const winner = await this.findExistingOrderForDedup(
         orderInput.customerPhoneHash,
         productIds,
-        orderInput.mediaBuyerId,
       );
-      const winner = candidates[0]; // most-recent match
+      this.logger.log(
+        { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', productIds, winnerFound: !!winner, winnerId: winner?.id },
+        'universal dedup check result',
+      );
       if (winner) {
-        await this.recordCrossFunnelAttempt({
-          customerPhoneHash: orderInput.customerPhoneHash,
-          customerPhone: orderInput.customerPhone ?? null,
-          customerName: orderInput.customerName,
-          productIds,
-          mediaBuyerId: orderInput.mediaBuyerId,
-          campaignId: orderInput.campaignId ?? null,
-          branchId: branchId ?? null,
-          winner,
-        });
+        // Always record the cross-funnel attempt — even without mediaBuyerId.
+        // Use the winner's MB as fallback so the CFA row is never orphaned.
+        const cfaMbId = orderInput.mediaBuyerId ?? winner.mediaBuyerId ?? null;
+        if (cfaMbId) {
+          try {
+            await this.recordCrossFunnelAttempt({
+              customerPhoneHash: orderInput.customerPhoneHash,
+              customerPhone: orderInput.customerPhone ?? null,
+              customerName: orderInput.customerName,
+              productIds,
+              mediaBuyerId: cfaMbId,
+              campaignId: orderInput.campaignId ?? null,
+              branchId: branchId ?? null,
+              winner: { id: winner.id, mediaBuyerId: winner.mediaBuyerId ?? '' },
+            });
+          } catch (cfaErr) {
+            this.logger.error(
+              { err: cfaErr instanceof Error ? cfaErr.message : String(cfaErr) },
+              'cross-funnel attempt insert failed — dedup still blocks the order',
+            );
+          }
+        }
+        // Convert the cart so it doesn't linger as an abandonment — the customer
+        // did submit, even though the order was a duplicate.
+        if (cartId) {
+          await this.cartService.convert(cartId, winner.id, actorId ?? undefined).catch(() => {});
+        } else if (orderInput.campaignId && orderInput.customerPhoneHash && productIds[0]) {
+          await this.cartService.convertByPhoneAndProduct(
+            orderInput.campaignId,
+            orderInput.customerPhoneHash,
+            productIds[0],
+            winner.id,
+            actorId ?? undefined,
+          ).catch(() => {});
+        }
         this.logger.log(
           {
-            runnerUpMbId: orderInput.mediaBuyerId,
-            winnerMbId: winner.mediaBuyerId,
-            winnerOrderId: winner.id,
+            winnerId: winner.id,
+            winnerStatus: winner.status,
+            submittingMbId: orderInput.mediaBuyerId,
             phoneHash: orderInput.customerPhoneHash,
           },
-          'cross-funnel: blocked duplicate order — runner-up MB recorded',
+          'universal dedup: duplicate blocked — recorded in cross_funnel_attempts, cart converted',
         );
-        return { crossFunnelAttempt: true as const };
+        return { duplicateRecorded: true as const };
       }
     }
-    // Two-tier duplicate flagging:
-    //   24h match with same product → 'FLAGGED' (hard, fresh — likely accidental resubmission)
-    //   24h–30d match with same product → 'POSSIBLY_DUPLICATE' (soft, historical — repeat)
-    //   Same phone + different product → null (legitimate new order, not a duplicate)
-    //   else → null (clean)
-    const incomingProductIds = orderInput.items.map((i) => i.productId);
-    const recentSamePhoneOrder = orderInput.customerPhoneHash
-      ? await this.findRecentPhoneOrder(orderInput.customerPhoneHash, incomingProductIds)
-      : null;
-    const historicalSamePhoneOrder =
-      !recentSamePhoneOrder && orderInput.customerPhoneHash
-        ? await this.findHistoricalSamePhoneOrder(orderInput.customerPhoneHash, incomingProductIds)
-        : null;
-    const duplicateFlag: 'FLAGGED' | 'POSSIBLY_DUPLICATE' | null = recentSamePhoneOrder
-      ? 'FLAGGED'
-      : historicalSamePhoneOrder
-        ? 'POSSIBLY_DUPLICATE'
-        : null;
-    const duplicateOfId =
-      recentSamePhoneOrder?.id ?? historicalSamePhoneOrder?.id ?? null;
 
     const insertOrder = async (
       dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
@@ -1335,8 +1300,6 @@ export class OrdersService {
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
           customFields: orderInput.customFields ?? null,
-          isDuplicate: duplicateFlag,
-          duplicateOfId,
           // Back-link to the originating cart so HoCS can filter "Recovered from
           // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
           cartId: cartId ?? null,
@@ -1582,24 +1545,8 @@ export class OrdersService {
       }
     }
 
-    // Same two-tier flagging as the edge-form create path. The strict
-    // `detectDuplicates` check above already blocks offline creation when a
-    // 24h match exists, so `findRecentPhoneOrder` will normally be null
-    // here — `findHistoricalSamePhoneOrder` still tags week-old repeats as
-    // POSSIBLY_DUPLICATE for HoCS visibility.
-    // Product-aware: same phone + different product = legitimate, not a duplicate.
-    const offlineProductIds = (input.items ?? []).map((i: { productId: string }) => i.productId);
-    const recentSamePhoneOrder = await this.findRecentPhoneOrder(customerPhoneHash, offlineProductIds);
-    const historicalSamePhoneOrder = !recentSamePhoneOrder
-      ? await this.findHistoricalSamePhoneOrder(customerPhoneHash, offlineProductIds)
-      : null;
-    const offlineDuplicateFlag: 'FLAGGED' | 'POSSIBLY_DUPLICATE' | null = recentSamePhoneOrder
-      ? 'FLAGGED'
-      : historicalSamePhoneOrder
-        ? 'POSSIBLY_DUPLICATE'
-        : null;
-    const offlineDuplicateOfId =
-      recentSamePhoneOrder?.id ?? historicalSamePhoneOrder?.id ?? null;
+    // Universal 7-day dedup applies to offline orders too (CEO 2026-05-26).
+    // Duplicate flagging removed — duplicates are cleaned by the purge cron.
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
@@ -1627,8 +1574,6 @@ export class OrdersService {
           totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
-          isDuplicate: offlineDuplicateFlag,
-          duplicateOfId: offlineDuplicateOfId,
           // Back-link to the cart when this offline order was created from a
           // recovered cart (Assign-from-Modal flow). NULL for direct offline orders.
           cartId: input.cartId ?? null,
@@ -6995,65 +6940,6 @@ export class OrdersService {
     });
   }
 
-  /**
-   * Find candidate "winner" orders for cross-funnel attribution analysis.
-   *
-   * Returns orders with the same phone+product in the last 24h attributed to a
-   * DIFFERENT media buyer than the caller. Intentionally separate from
-   * `detectDuplicates`:
-   *   - Does NOT filter on `is_duplicate`. The dedupe path excludes FLAGGED /
-   *     POSSIBLY_DUPLICATE / MERGED winners — and the post-create flagging hook
-   *     stamps `FLAGGED` on any prior same-phone order within ms. Reusing that
-   *     filter here was silently skipping cross-funnel hits because the winner
-   *     was already flagged by the time the runner-up's check ran (2026-05-24
-   *     incident — two edge-form orders from different MBs, zero cross-funnel
-   *     rows recorded).
-   *   - Excludes CANCELLED, DELETED, and soft-deleted rows (winners must be
-   *     live orders, not editorial removals).
-   *   - Requires the winner's `media_buyer_id` to be set AND different from
-   *     `requestingMbId` (attribution requires a contested MB on both sides).
-   *
-   * Returns the most-recent matches first, capped at 5.
-   */
-  private async findCrossFunnelCandidates(
-    phoneHash: string,
-    productIds: string[],
-    requestingMbId: string,
-  ): Promise<Array<{ id: string; mediaBuyerId: string; createdAt: Date }>> {
-    if (productIds.length === 0) return [];
-    const rows = await this.db
-      .select({
-        id: schema.orders.id,
-        mediaBuyerId: schema.orders.mediaBuyerId,
-        createdAt: schema.orders.createdAt,
-      })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.customerPhoneHash, phoneHash),
-          exists(
-            this.db
-              .select({ one: sql`1` })
-              .from(schema.orderItems)
-              .where(
-                and(
-                  eq(schema.orderItems.orderId, schema.orders.id),
-                  inArray(schema.orderItems.productId, productIds),
-                ),
-              ),
-          ),
-          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
-          notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
-          isNull(schema.orders.deletedAt),
-          sql`${schema.orders.mediaBuyerId} IS NOT NULL`,
-          sql`${schema.orders.mediaBuyerId} <> ${requestingMbId}`,
-        ),
-      )
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(5);
-    // Narrow the type — the SQL guard guarantees mediaBuyerId is non-null.
-    return rows.map((r) => ({ id: r.id, mediaBuyerId: r.mediaBuyerId!, createdAt: r.createdAt }));
-  }
 
   /**
    * Record one `cross_funnel_attempts` row per product when the new order
@@ -7064,6 +6950,84 @@ export class OrdersService {
    * are the audit trail for Pillar 2 / attribution truth, and a silent drop
    * is exactly what masked the 2026-05-24 incident.
    */
+
+  /**
+   * Universal 7-day dedup: same phone + any overlapping product within 7 days.
+   * Ignores MB, campaign, offer label, quantity — pure phone×product match.
+   * Winner: highest lifecycle status, ties → oldest createdAt.
+   */
+  private async findExistingOrderForDedup(
+    phoneHash: string,
+    productIds: string[],
+  ): Promise<{ id: string; mediaBuyerId: string | null; status: string; createdAt: Date } | null> {
+    if (!phoneHash || productIds.length === 0) return null;
+
+    // Use Drizzle query builder (not raw SQL) for reliable parameter binding.
+    // Step 1: find orders with same phone hash in last 7 days (index-backed, fast).
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const candidates = await this.db
+      .select({
+        id: schema.orders.id,
+        mediaBuyerId: schema.orders.mediaBuyerId,
+        status: schema.orders.status,
+        createdAt: schema.orders.createdAt,
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.customerPhoneHash, phoneHash),
+          gte(schema.orders.createdAt, sevenDaysAgo),
+          notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .orderBy(desc(schema.orders.createdAt))
+      .limit(20);
+
+    if (candidates.length === 0) return null;
+
+    // Step 2: check which candidates have overlapping products.
+    const candidateIds = candidates.map((c) => c.id);
+    const matchingItems = await this.db
+      .select({ orderId: schema.orderItems.orderId })
+      .from(schema.orderItems)
+      .where(
+        and(
+          inArray(schema.orderItems.orderId, candidateIds),
+          inArray(schema.orderItems.productId, productIds),
+        ),
+      )
+      .limit(1);
+
+    if (matchingItems.length === 0) return null;
+
+    // Step 3: pick the winner — the candidate whose order ID matched.
+    // Since candidates are sorted by createdAt DESC, find the best one
+    // (highest lifecycle status, then oldest).
+    const matchingOrderIds = new Set(matchingItems.map((m) => m.orderId));
+    const STATUS_RANK: Record<string, number> = {
+      REMITTED: 10, DELIVERED: 9, PARTIALLY_DELIVERED: 8, IN_TRANSIT: 7,
+      DISPATCHED: 6, AGENT_ASSIGNED: 5, CONFIRMED: 4, CS_ENGAGED: 3,
+      CS_ASSIGNED: 2, UNPROCESSED: 1,
+    };
+    const matches = candidates
+      .filter((c) => matchingOrderIds.has(c.id))
+      .sort((a, b) => {
+        const rankDiff = (STATUS_RANK[b.status] ?? 0) - (STATUS_RANK[a.status] ?? 0);
+        if (rankDiff !== 0) return rankDiff;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+
+    const winner = matches[0];
+    if (!winner) return null;
+    return {
+      id: winner.id,
+      mediaBuyerId: winner.mediaBuyerId,
+      status: winner.status,
+      createdAt: winner.createdAt,
+    };
+  }
+
   private async recordCrossFunnelAttempt(args: {
     customerPhoneHash: string;
     customerPhone: string | null;
@@ -7113,144 +7077,7 @@ export class OrdersService {
     }
   }
 
-  private async findRecentPhoneOrder(phoneHash: string, productIds?: string[]) {
-    const conditions = [
-      eq(schema.orders.customerPhoneHash, phoneHash),
-      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
-      sql`${schema.orders.status} != 'CANCELLED'`,
-      sql`${schema.orders.status} != 'DELETED'`,
-    ];
-    // Only flag as duplicate when at least one product overlaps.
-    // Same customer + different product = legitimate new order.
-    if (productIds && productIds.length > 0) {
-      conditions.push(
-        exists(
-          this.db
-            .select({ one: sql`1` })
-            .from(schema.orderItems)
-            .where(
-              and(
-                eq(schema.orderItems.orderId, schema.orders.id),
-                inArray(schema.orderItems.productId, productIds),
-              ),
-            ),
-        ),
-      );
-    }
-    const [recent] = await this.db
-      .select({ id: schema.orders.id })
-      .from(schema.orders)
-      .where(and(...conditions))
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(1);
-    return recent ?? null;
-  }
 
-  /**
-   * Soft-duplicate detection: same phone, non-cancelled order older than the
-   * 24h hard-flag window but within the past 30 days. Lets HoCS still spot
-   * "this customer ordered something a week ago, is this a real new order or
-   * a confused resubmission?" without the rapid-fire urgency of FLAGGED.
-   */
-  private async findHistoricalSamePhoneOrder(phoneHash: string, productIds?: string[]) {
-    const conditions = [
-      eq(schema.orders.customerPhoneHash, phoneHash),
-      sql`${schema.orders.createdAt} < NOW() - INTERVAL '24 hours'`,
-      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '30 days'`,
-      sql`${schema.orders.status} != 'CANCELLED'`,
-      sql`${schema.orders.status} != 'DELETED'`,
-    ];
-    // Only flag as possibly-duplicate when at least one product overlaps.
-    if (productIds && productIds.length > 0) {
-      conditions.push(
-        exists(
-          this.db
-            .select({ one: sql`1` })
-            .from(schema.orderItems)
-            .where(
-              and(
-                eq(schema.orderItems.orderId, schema.orders.id),
-                inArray(schema.orderItems.productId, productIds),
-              ),
-            ),
-        ),
-      );
-    }
-    const [recent] = await this.db
-      .select({ id: schema.orders.id })
-      .from(schema.orders)
-      .where(and(...conditions))
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(1);
-    return recent ?? null;
-  }
-
-  /**
-   * Idempotency guard for edge-form submissions. Finds a non-cancelled order
-   * placed in the last 15 minutes with the EXACT same customer phone, campaign,
-   * media buyer AND line items as `input`.
-   *
-   * This is the SOLE duplicate-order guard for edge-form submissions — the edge
-   * worker no longer keeps its own KV dedup. A double-tap / refresh / retry /
-   * QStash replay can deliver the identical submission more than once; without
-   * this, each delivery creates a separate order.
-   *
-   * The match is EXACT — a different product, quantity, or offer is a genuinely
-   * different order and is allowed straight through. The 15-minute window is
-   * deliberately tight: it covers every realistic re-submission path while
-   * staying far short of a customer legitimately re-ordering the same thing
-   * later in the day. The item fingerprint mirrors the edge worker's `dedupKey`
-   * (productId + quantity + offerLabel).
-   */
-  private async findRecentIdenticalOrder(input: {
-    customerPhoneHash?: string;
-    campaignId?: string | null;
-    mediaBuyerId?: string | null;
-    items: Array<{ productId: string; quantity?: number; offerLabel?: string }>;
-  }): Promise<{ id: string; mediaBuyerId: string | null } | null> {
-    if (!input.customerPhoneHash || input.items.length === 0) return null;
-
-    // Match on phone + items fingerprint only — intentionally ignores campaignId
-    // and mediaBuyerId so the same customer submitting the same product via a
-    // different form/MB within 24h is caught as a duplicate. The runner-up MB
-    // still gets a crossFunnelAttempts row for attribution visibility.
-    const conditions = [
-      eq(schema.orders.customerPhoneHash, input.customerPhoneHash),
-      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
-      sql`${schema.orders.status} != 'CANCELLED'`,
-      sql`${schema.orders.status} != 'DELETED'`,
-    ];
-
-    const candidates = await this.db
-      .select({
-        id: schema.orders.id,
-        items: schema.orders.items,
-        mediaBuyerId: schema.orders.mediaBuyerId,
-      })
-      .from(schema.orders)
-      .where(and(...conditions))
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(10);
-
-    const fingerprint = (
-      items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
-    ): string =>
-      items
-        .map((i) => `${i.productId}:${i.quantity ?? 1}:${i.offerLabel ?? ''}`)
-        .sort()
-        .join('|');
-
-    const target = fingerprint(input.items);
-    for (const candidate of candidates) {
-      const candidateItems = Array.isArray(candidate.items)
-        ? (candidate.items as Array<{ productId: string; quantity?: number; offerLabel?: string }>)
-        : [];
-      if (candidateItems.length > 0 && fingerprint(candidateItems) === target) {
-        return { id: candidate.id, mediaBuyerId: candidate.mediaBuyerId };
-      }
-    }
-    return null;
-  }
 
   /**
    * Bulk transition multiple orders to a new status.

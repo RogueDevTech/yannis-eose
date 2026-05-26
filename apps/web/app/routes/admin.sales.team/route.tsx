@@ -49,6 +49,11 @@ function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): A
 
 const CS_ACTIVITY_FILTERS = new Set(['ALL', 'ACTIVE', 'IDLE']);
 const CS_BACKLOG_FILTERS = new Set(['ALL', 'HAS_PENDING', 'NO_PENDING']);
+const CS_SORT_OPTIONS = new Set([
+  'name', 'total-desc', 'total-asc', 'confirmed-desc', 'delivered-desc',
+  'cancelled-desc', 'calls-desc', 'conf-rate-desc', 'conf-rate-asc',
+  'delivery-rate-desc', 'delivery-rate-asc', 'backlog-desc', 'backlog-asc',
+]);
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
@@ -67,12 +72,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const backlogRaw = url.searchParams.get('backlog') ?? 'ALL';
   const activityFilterSync = CS_ACTIVITY_FILTERS.has(activityRaw) ? activityRaw : 'ALL';
   const backlogFilterSync = CS_BACKLOG_FILTERS.has(backlogRaw) ? backlogRaw : 'ALL';
+  const sortRaw = url.searchParams.get('sort') ?? 'total-desc';
+  const sortSync = CS_SORT_OPTIONS.has(sortRaw) ? sortRaw : 'total-desc';
 
   const teamShell = {
     dateFilters: filters,
     q: qSync,
     activityFilter: activityFilterSync,
     backlogFilter: backlogFilterSync,
+    sort: sortSync,
   };
 
   const pageData = (async () => {
@@ -152,6 +160,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
       filteredMembers = filteredMembers.filter((member) => (member.workload?.pendingCount ?? 0) === 0);
     }
 
+    // Sort
+    const sortKey = url.searchParams.get('sort') ?? 'total-desc';
+    filteredMembers = [...filteredMembers].sort((a, b) => {
+      const aLb = a.leaderboardEntry;
+      const bLb = b.leaderboardEntry;
+      switch (sortKey) {
+        case 'name':
+          return a.name.localeCompare(b.name);
+        case 'total-desc':
+          return (bLb?.ordersEngaged ?? 0) - (aLb?.ordersEngaged ?? 0);
+        case 'total-asc':
+          return (aLb?.ordersEngaged ?? 0) - (bLb?.ordersEngaged ?? 0);
+        case 'confirmed-desc':
+          return (bLb?.ordersConfirmed ?? 0) - (aLb?.ordersConfirmed ?? 0);
+        case 'delivered-desc':
+          return (bLb?.ordersDelivered ?? 0) - (aLb?.ordersDelivered ?? 0);
+        case 'cancelled-desc':
+          return (bLb?.ordersCancelled ?? 0) - (aLb?.ordersCancelled ?? 0);
+        case 'calls-desc':
+          return (bLb?.callsMade ?? 0) - (aLb?.callsMade ?? 0);
+        case 'conf-rate-desc':
+          return (bLb?.confirmationRate ?? 0) - (aLb?.confirmationRate ?? 0);
+        case 'conf-rate-asc':
+          return (aLb?.confirmationRate ?? 0) - (bLb?.confirmationRate ?? 0);
+        case 'delivery-rate-desc':
+          return (bLb?.deliveryRate ?? 0) - (aLb?.deliveryRate ?? 0);
+        case 'delivery-rate-asc':
+          return (aLb?.deliveryRate ?? 0) - (bLb?.deliveryRate ?? 0);
+        case 'backlog-desc':
+          return (b.workload?.pendingCount ?? 0) - (a.workload?.pendingCount ?? 0);
+        case 'backlog-asc':
+          return (a.workload?.pendingCount ?? 0) - (b.workload?.pendingCount ?? 0);
+        default:
+          return (bLb?.ordersEngaged ?? 0) - (aLb?.ordersEngaged ?? 0);
+      }
+    });
+
     const totalPending = filteredMembers.reduce((sum, member) => sum + (member.workload?.pendingCount ?? 0), 0);
 
     // Team-level totals from the full leaderboard (not the filtered subset)
@@ -205,6 +250,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       q,
       activityFilter,
       backlogFilter,
+      sort: sortKey,
       dateFilters: filters,
     };
   })();
@@ -233,6 +279,7 @@ export default function CSTeamRoute() {
             q={data.q}
             activityFilter={data.activityFilter}
             backlogFilter={data.backlogFilter}
+            sort={data.sort}
             dateFilters={data.dateFilters}
           />
         )}

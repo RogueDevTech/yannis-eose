@@ -294,8 +294,8 @@ export function SettingsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const installAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  // Treat SUPER_ADMIN and ADMIN identically for settings visibility (System + OrgEmails tabs).
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  // Treat SUPER_ADMIN, ADMIN, and SUPPORT identically for settings visibility (System + OrgEmails tabs).
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT';
 
   const allowedTabs = useMemo((): SettingsTabId[] => {
     return isSuperAdmin

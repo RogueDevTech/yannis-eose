@@ -67,15 +67,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'HEAD_OF_MARKETING' ||
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
+    user.role === 'SUPPORT' ||
     isMarketingSupervisor;
   const loadMarketingExportPicklists = showMediaBuyerColumn && !isMediaBuyer;
 
   const productIdParam = url.searchParams.get('productId') || undefined;
   const campaignIdParam = url.searchParams.get('campaignId') || undefined;
+  // For marketing, DELIVERED and REMITTED are the same outcome — merge them.
+  const expandDeliveredFilter = status === 'DELIVERED';
   const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
-    status: status || undefined,
+    ...(expandDeliveredFilter
+      ? { statuses: ['DELIVERED', 'REMITTED'] }
+      : { status: status || undefined }),
     search: search || undefined,
     mediaBuyerId,
     productId: productIdParam,
@@ -231,6 +236,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       );
 
+      if (!bundleRes.ok) {
+        console.error('[marketing.ordersPageBundle] Bundle request failed:', bundleRes.status, JSON.stringify(bundleRes.data).slice(0, 500));
+      }
       const data = bundleRes.ok
         ? (bundleRes.data as {
             result?: {
@@ -274,7 +282,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         campaignsForFilter,
         abandonedCartCount: data?.abandonedCartCount ?? 0,
       };
-    } catch {
+    } catch (err) {
+      console.error('[marketing.ordersPageBundle] Secondary bundle failed:', err instanceof Error ? err.message : err);
       return {
         statusCounts: {},
         cpa: null,

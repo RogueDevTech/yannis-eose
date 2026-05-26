@@ -115,8 +115,8 @@ export function UserDetailActivityTabContent({ entries }: { entries: UserAuditEn
             ))}
           </div>
           {totalPages > 1 && (
-            <div className="pt-2 border-t border-app-border flex items-center justify-between">
-              <p className="text-mini text-app-fg-muted">
+            <div className="pt-2 border-t border-app-border flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-app-fg-muted">
                 Showing {startIdx + 1}–{Math.min(startIdx + pageSize, entries.length)} of {entries.length}
               </p>
               <Pagination

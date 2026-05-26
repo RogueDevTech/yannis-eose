@@ -305,10 +305,11 @@ export function PermissionRequestsPage({
       </div>
 
       {total > 0 && totalPages > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-app-fg-muted tabular-nums">
-            {total} {total === 1 ? 'request' : 'requests'}
-            {totalPages > 1 ? ` · page ${page} of ${totalPages}` : null}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {total > 0
+              ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} ${total === 1 ? 'request' : 'requests'}`
+              : 'No requests'}
           </p>
           <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
         </div>

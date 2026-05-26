@@ -48,27 +48,27 @@ export class HeadOfMarketingPermissionRestampService implements OnApplicationBoo
     // returns NULL when the relation is missing, so we don't pollute the boot
     // log with a scary ERROR before the next-boot retry succeeds.
     try {
-      const probe = (await this.db.execute(
-        sql`SELECT
-              to_regclass('public._yannis_hom_branch_scope_applied') AS marker_rel,
-              CASE
-                WHEN to_regclass('public._yannis_hom_branch_scope_applied') IS NULL THEN 0
-                ELSE (SELECT COUNT(*)::int FROM _yannis_hom_branch_scope_applied)
-              END AS n`,
+      // Step 1: check if the marker table exists (non-throwing).
+      const existsProbe = (await this.db.execute(
+        sql`SELECT to_regclass('public._yannis_hom_branch_scope_applied') AS marker_rel`,
       )) as unknown;
-      const rows = Array.isArray(probe)
-        ? (probe as Array<{ marker_rel?: string | null; n?: number }>)
-        : ((probe as { rows?: Array<{ marker_rel?: string | null; n?: number }> })?.rows ?? []);
-      const markerExists = rows[0]?.marker_rel != null;
-      if (!markerExists) {
-        // Migration 0140 hasn't run on this DB yet — next boot will pick it up.
+      const existsRows = Array.isArray(existsProbe)
+        ? (existsProbe as Array<{ marker_rel?: string | null }>)
+        : ((existsProbe as { rows?: Array<{ marker_rel?: string | null }> })?.rows ?? []);
+      if (existsRows[0]?.marker_rel == null) {
         this.logger.debug(
           'HoM restamp marker table missing — migration 0140 not yet applied; skipping until next boot.',
         );
         return;
       }
-      const count = Number(rows[0]?.n ?? 0);
-      if (count > 0) {
+      // Step 2: table exists — check if it has a row (already applied).
+      const countProbe = (await this.db.execute(
+        sql`SELECT COUNT(*)::int AS n FROM _yannis_hom_branch_scope_applied`,
+      )) as unknown;
+      const countRows = Array.isArray(countProbe)
+        ? (countProbe as Array<{ n?: number }>)
+        : ((countProbe as { rows?: Array<{ n?: number }> })?.rows ?? []);
+      if (Number(countRows[0]?.n ?? 0) > 0) {
         return;
       }
     } catch (err) {

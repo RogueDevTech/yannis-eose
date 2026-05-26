@@ -104,10 +104,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     };
 
     await drain('test-orders', this.purgeTestOrders);
-    await pause();
-    await drain('exact-duplicates', this.purgeDuplicateOrders);
-    await pause();
-    await drain('cross-funnel-duplicates', this.purgeCrossFunnelDuplicates);
+    // Universal dedup sweep skipped on boot — migration 0159 handles the
+    // historical cleanup, and the 2-hour cron with a 48h window catches
+    // ongoing slips. The full-table self-join is too heavy to run on every
+    // API restart without blocking the connection pool.
 
     this.logger.log('Boot sweep complete');
   }
@@ -121,14 +121,9 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       this.logger.error(`Test-order purge run failed: ${(err as Error)?.message ?? err}`);
     }
     try {
-      await this.purgeDuplicateOrders();
+      await this.purgeUniversalDuplicates();
     } catch (err) {
-      this.logger.error(`Duplicate-order purge run failed: ${(err as Error)?.message ?? err}`);
-    }
-    try {
-      await this.purgeCrossFunnelDuplicates();
-    } catch (err) {
-      this.logger.error(`Cross-funnel duplicate purge run failed: ${(err as Error)?.message ?? err}`);
+      this.logger.error(`Universal duplicate purge run failed: ${(err as Error)?.message ?? err}`);
     }
   }
 
@@ -248,146 +243,41 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
   }
 
   /**
-   * Exact-duplicate purge — finds orders with identical phone hash + items
-   * fingerprint + same campaign submitted within 24 hours of each other,
-   * keeps the earliest, and DELETES the rest. Only touches stock-neutral
-   * statuses (same safety as test-order purge).
-   *
-   * Orders that arrive >24h apart are treated as legitimate repeat customers
-   * and are NOT purged — only rapid-fire duplicates from the race condition
-   * window (before the advisory-lock fix of 2026-05-24) are cleaned up.
+   * Universal 7-day dedup purge (CEO directive 2026-05-26):
+   * Same phone + any overlapping product within 7 days = duplicate.
+   * Winner: highest lifecycle status, ties → oldest created_at.
+   * Loser: soft-deleted regardless of status, CFA row recorded.
    */
-  async purgeDuplicateOrders(
-    allDates = false,
-  ): Promise<{ deleted: number; skipped: number }> {
-    const dateFilter = allDates
-      ? sql`TRUE`
-      : sql`o1.created_at >= NOW() - INTERVAL '48 hours'`;
-
-    // Find duplicate groups: same phone hash, same campaign, same items JSONB,
-    // created within 24 hours of each other, both in stock-neutral statuses.
-    // For each group, keep the earliest (min id by created_at) and mark the
-    // rest for deletion. >24h apart = legitimate repeat order, leave it alone.
-    const duplicateIds = await this.db.execute<{ id: string; customer_name: string; status: string; branch_id: string | null }>(sql`
-      WITH ranked AS (
-        SELECT
-          o1.id,
-          o1.customer_name,
-          o1.status,
-          o1.branch_id,
-          o1.created_at,
-          ROW_NUMBER() OVER (
-            PARTITION BY o1.customer_phone_hash, o1.campaign_id, o1.items::text
-            ORDER BY o1.created_at ASC
-          ) AS rn
-        FROM orders o1
-        WHERE o1.customer_phone_hash IS NOT NULL
-          AND o1.status IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED')
-          AND o1.deleted_at IS NULL
-          AND ${dateFilter}
-          AND EXISTS (
-            SELECT 1 FROM orders o2
-            WHERE o2.customer_phone_hash = o1.customer_phone_hash
-              AND o2.campaign_id IS NOT DISTINCT FROM o1.campaign_id
-              AND o2.items::text = o1.items::text
-              AND o2.id != o1.id
-              AND o2.deleted_at IS NULL
-              AND o2.status NOT IN ('CANCELLED', 'DELETED')
-              AND o2.created_at < o1.created_at
-              AND o1.created_at - o2.created_at < INTERVAL '24 hours'
-          )
-      )
-      SELECT id, customer_name, status, branch_id
-      FROM ranked
-      WHERE rn > 1
-      LIMIT ${MAX_PER_RUN}
-    `);
-
-    if (duplicateIds.length === 0) {
-      return { deleted: 0, skipped: 0 };
-    }
-
-    const ids = duplicateIds.map((r) => r.id);
-    const preview = duplicateIds
-      .slice(0, 20)
-      .map((r) => `${r.id} (${r.customer_name} · ${r.status})`)
-      .join('; ');
-
-    const now = new Date();
-    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      await tx
-        .update(schema.orders)
-        .set({
-          status: 'DELETED',
-          deletedAt: now,
-          updatedAt: now,
-          isDuplicate: 'FLAGGED',
-        })
-        .where(
-          and(
-            inArray(schema.orders.id, ids),
-            inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
-            isNull(schema.orders.deletedAt),
-          ),
-        );
-      await tx.insert(schema.orderTimelineEvents).values(
-        duplicateIds.map((r) => ({
-          orderId: r.id,
-          eventType: 'ORDER_DELETED' as const,
-          actorId: null,
-          actorName: 'System' as const,
-          description: 'Auto-deleted: exact duplicate order (same customer, form, and items within 24 hours)',
-          branchId: r.branch_id ?? null,
-        })),
-      );
-    });
-
-    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
-
-    this.logger.log(
-      `Deleted ${ids.length} duplicate order(s) → Deleted tab. Targets: ${preview}` +
-        (ids.length > 20 ? ` … +${ids.length - 20} more` : ''),
-    );
-    return { deleted: ids.length, skipped: 0 };
-  }
-
-  /**
-   * Cross-funnel duplicate purge — catches orders that slipped past the
-   * creation-time cross-funnel block (race conditions, advisory lock edge
-   * cases, or orders created before the blocking fix of 2026-05-25).
-   *
-   * Finds orders where the same phone hash + overlapping product exists from
-   * a DIFFERENT media buyer within 24 hours. Keeps the earliest order
-   * (winner), soft-deletes the runner-ups to DELETED, and records
-   * `cross_funnel_attempts` rows so the runner-up MB retains visibility.
-   *
-   * Only touches stock-neutral statuses — if a cross-funnel duplicate has
-   * already moved past confirmation, it's logged for manual review.
-   */
-  async purgeCrossFunnelDuplicates(
+  async purgeUniversalDuplicates(
     allDates = false,
   ): Promise<{ deleted: number; skipped: number }> {
     const dateFilter = allDates
       ? sql`TRUE`
       : sql`loser.created_at >= NOW() - INTERVAL '48 hours'`;
 
-    // Find cross-funnel duplicates: same phone hash, overlapping product in
-    // order_items, different media_buyer_id, within 24h of each other.
-    // The "winner" is the earliest order; "losers" are later orders from
-    // different MBs. Only touch losers in stock-neutral pre-delete statuses.
+    // Find losers: orders that have a better match (higher lifecycle rank or
+    // older at same rank) on same phone + overlapping product within 7 days.
     const losers = await this.db.execute<{
       loser_id: string;
       loser_customer_name: string;
       loser_customer_phone: string | null;
       loser_customer_phone_hash: string;
-      loser_mb_id: string;
+      loser_mb_id: string | null;
       loser_campaign_id: string | null;
       loser_branch_id: string | null;
       loser_status: string;
       winner_id: string;
-      winner_mb_id: string;
+      winner_mb_id: string | null;
       product_id: string;
     }>(sql`
+      WITH status_rank AS (
+        SELECT unnest(ARRAY[
+          'REMITTED', 'DELIVERED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT',
+          'DISPATCHED', 'AGENT_ASSIGNED', 'CONFIRMED', 'CS_ENGAGED',
+          'CS_ASSIGNED', 'UNPROCESSED'
+        ]::order_status[]) AS status,
+        unnest(ARRAY[10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) AS rank
+      )
       SELECT DISTINCT ON (loser.id)
         loser.id              AS loser_id,
         loser.customer_name   AS loser_customer_name,
@@ -404,27 +294,31 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       JOIN order_items oi_loser ON oi_loser.order_id = loser.id
       JOIN order_items oi_winner ON oi_winner.product_id = oi_loser.product_id
       JOIN orders winner ON winner.id = oi_winner.order_id
+      LEFT JOIN status_rank sr_loser ON sr_loser.status = loser.status
+      LEFT JOIN status_rank sr_winner ON sr_winner.status = winner.status
       WHERE loser.customer_phone_hash IS NOT NULL
-        AND loser.media_buyer_id IS NOT NULL
-        AND winner.media_buyer_id IS NOT NULL
-        AND loser.media_buyer_id != winner.media_buyer_id
         AND loser.customer_phone_hash = winner.customer_phone_hash
-        AND winner.created_at < loser.created_at
-        AND loser.created_at - winner.created_at < INTERVAL '24 hours'
-        AND loser.status IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED')
+        AND loser.id != winner.id
+        AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) < 604800
+        AND loser.status NOT IN ('CANCELLED', 'DELETED')
         AND loser.deleted_at IS NULL
         AND winner.status NOT IN ('CANCELLED', 'DELETED')
         AND winner.deleted_at IS NULL
+        AND (
+          COALESCE(sr_winner.rank, 0) > COALESCE(sr_loser.rank, 0)
+          OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at < loser.created_at)
+          OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at = loser.created_at AND winner.id < loser.id)
+        )
         AND ${dateFilter}
         -- Skip orders that already have a cross_funnel_attempts row recorded
         AND NOT EXISTS (
           SELECT 1 FROM cross_funnel_attempts cfa
           WHERE cfa.customer_phone_hash = loser.customer_phone_hash
-            AND cfa.media_buyer_id = loser.media_buyer_id
             AND cfa.original_order_id = winner.id
             AND cfa.product_id = oi_loser.product_id
+            AND cfa.media_buyer_id = loser.media_buyer_id
         )
-      ORDER BY loser.id, winner.created_at ASC
+      ORDER BY loser.id, COALESCE(sr_winner.rank, 0) DESC, winner.created_at ASC
       LIMIT ${MAX_PER_RUN}
     `);
 
@@ -438,12 +332,12 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       customerName: string;
       customerPhone: string | null;
       customerPhoneHash: string;
-      mbId: string;
+      mbId: string | null;
       campaignId: string | null;
       branchId: string | null;
       status: string;
       winnerId: string;
-      winnerMbId: string;
+      winnerMbId: string | null;
       productIds: string[];
     }>();
     for (const row of losers) {
@@ -473,12 +367,12 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     const loserIds = loserEntries.map((e) => e.loserId);
     const preview = loserEntries
       .slice(0, 20)
-      .map((e) => `${e.loserId} (${e.customerName} · MB ${e.mbId.slice(0, 8)}… → winner ${e.winnerId.slice(0, 8)}…)`)
+      .map((e) => `${e.loserId} (${e.customerName} · ${e.status} → winner ${e.winnerId.slice(0, 8)}…)`)
       .join('; ');
 
     const now = new Date();
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      // 1. Soft-delete the loser orders
+      // 1. Soft-delete all loser orders (regardless of status)
       await tx
         .update(schema.orders)
         .set({
@@ -490,25 +384,26 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         .where(
           and(
             inArray(schema.orders.id, loserIds),
-            inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
             isNull(schema.orders.deletedAt),
           ),
         );
 
-      // 2. Record cross_funnel_attempts rows for each loser+product
-      const cfaRows = loserEntries.flatMap((e) =>
-        e.productIds.map((productId) => ({
-          customerPhoneHash: e.customerPhoneHash,
-          customerPhone: e.customerPhone,
-          customerName: e.customerName,
-          productId,
-          mediaBuyerId: e.mbId,
-          campaignId: e.campaignId,
-          branchId: e.branchId,
-          originalOrderId: e.winnerId,
-          originalMediaBuyerId: e.winnerMbId,
-        })),
-      );
+      // 2. Record cross_funnel_attempts rows for losers that have an MB
+      const cfaRows = loserEntries
+        .filter((e) => e.mbId)
+        .flatMap((e) =>
+          e.productIds.map((productId) => ({
+            customerPhoneHash: e.customerPhoneHash,
+            customerPhone: e.customerPhone,
+            customerName: e.customerName,
+            productId,
+            mediaBuyerId: e.mbId!,
+            campaignId: e.campaignId,
+            branchId: e.branchId,
+            originalOrderId: e.winnerId,
+            originalMediaBuyerId: e.winnerMbId,
+          })),
+        );
       if (cfaRows.length > 0) {
         await tx.insert(schema.crossFunnelAttempts).values(cfaRows);
       }
@@ -520,7 +415,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           eventType: 'ORDER_DELETED' as const,
           actorId: null,
           actorName: 'System' as const,
-          description: `Auto-deleted: cross-funnel duplicate (same customer, different MB, within 24h — winner: ${e.winnerId.slice(0, 8)}…)`,
+          description: `Auto-deleted: universal dedup (same phone + product within 7 days — winner: ${e.winnerId.slice(0, 8)}…)`,
           branchId: e.branchId ?? null,
         })),
       );
@@ -529,9 +424,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
-      `Deleted ${loserIds.length} cross-funnel duplicate(s) → Deleted tab + cross_funnel_attempts recorded. Targets: ${preview}` +
+      `Deleted ${loserIds.length} universal duplicate(s) → Deleted tab + cross_funnel_attempts recorded. Targets: ${preview}` +
         (loserIds.length > 20 ? ` … +${loserIds.length - 20} more` : ''),
     );
     return { deleted: loserIds.length, skipped: 0 };
   }
 }
+

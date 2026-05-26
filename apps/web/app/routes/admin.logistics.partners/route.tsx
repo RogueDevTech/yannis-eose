@@ -14,7 +14,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'logistics.read');
+  await requirePermission(request, 'logistics.providers.view');
   const cookie = getSessionCookie(request);
 
   const pageData = (async (): Promise<LogisticsStreamData> => {

@@ -199,8 +199,8 @@ export function MarketingLeaderboardPage({
                   );
                 })}
               </div>
-              <div className="border-t border-app-border px-4 py-3 flex items-center justify-between">
-                <p className="text-xs text-app-fg-muted">
+              <div className="border-t border-app-border px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <p className="text-sm text-app-fg-muted">
                   Showing {startIdx + 1}–{Math.min(startIdx + pageSize, lb.length)} of {lb.length}
                 </p>
                 <Pagination

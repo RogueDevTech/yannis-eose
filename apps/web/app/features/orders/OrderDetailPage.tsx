@@ -1011,6 +1011,7 @@ export function OrderDetailPage({
     CALLBACK_DELAY_MAX_MINUTES / callbackCustomUnitMultiplier(scheduleCustomUnit),
   );
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
+  const [editDetailsModalOpen, setEditDetailsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number; offerLabel: string | null }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
@@ -2124,6 +2125,17 @@ export function OrderDetailPage({
                     Adjust order items
                   </Button>
 
+                  {/* Edit order details — address, state, name, notes */}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setEditDetailsModalOpen(true)}
+                    disabled={!canPerformCSActionsOnOrder}
+                  >
+                    Edit order details
+                  </Button>
+
                   {/* Confirm order / Schedule callback — CS_ENGAGED */}
                   {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && (
                     <div className="flex flex-col gap-2 sm:flex-row">
@@ -2320,6 +2332,14 @@ export function OrderDetailPage({
                     disabled={order.orderItems.length === 0}
                   >
                     Adjust order items
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setEditDetailsModalOpen(true)}
+                  >
+                    Edit order details
                   </Button>
                 </div>
               )}
@@ -3487,6 +3507,15 @@ export function OrderDetailPage({
         </Modal>
       )}
 
+      {/* Edit order details modal */}
+      {editDetailsModalOpen && (
+        <EditOrderDetailsModal
+          order={order}
+          fetcher={fetcher}
+          onClose={() => setEditDetailsModalOpen(false)}
+        />
+      )}
+
       {/* Adjust order items modal */}
       {adjustItemsModalOpen && (
         <Modal
@@ -3761,6 +3790,113 @@ export function OrderDetailPage({
  * Hidden entirely when there are no defs OR no answered fields — empty cards add visual
  * noise without information.
  */
+const NIGERIAN_STATES = [
+  'Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun',
+  'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo',
+  'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue',
+  'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe',
+  'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi',
+];
+
+function EditOrderDetailsModal({
+  order,
+  fetcher,
+  onClose,
+}: {
+  order: OrderDetail;
+  fetcher: ReturnType<typeof useFetcher>;
+  onClose: () => void;
+}) {
+  const [customerName, setCustomerName] = useState(order.customerName ?? '');
+  const [deliveryAddress, setDeliveryAddress] = useState(order.deliveryAddress ?? '');
+  const [deliveryState, setDeliveryState] = useState(order.deliveryState ?? '');
+  const [deliveryNotes, setDeliveryNotes] = useState(order.deliveryNotes ?? '');
+  const [customerEmail, setCustomerEmail] = useState(order.customerEmail ?? '');
+
+  useCloseOnFetcherSuccess(fetcher, onClose);
+
+  const isSubmitting = fetcher.state === 'submitting';
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-md"
+      contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+    >
+      <h3 className="text-lg font-semibold text-app-fg mb-1">Edit order details</h3>
+      <p className="text-sm text-app-fg-muted mb-4">
+        Update customer info, delivery address, or state.
+      </p>
+      <fetcher.Form method="post" className="space-y-4">
+        <input type="hidden" name="intent" value="editOrderDetails" />
+        {order.branchId && <input type="hidden" name="branchId" value={order.branchId} />}
+
+        <TextInput
+          label="Customer name"
+          name="customerName"
+          value={customerName}
+          onChange={(e) => setCustomerName(e.target.value)}
+          required
+          minLength={1}
+        />
+
+        <Textarea
+          label="Delivery address"
+          name="deliveryAddress"
+          value={deliveryAddress}
+          onChange={(e) => setDeliveryAddress(e.target.value)}
+          rows={2}
+          placeholder="Delivery address"
+        />
+
+        <FormSelect
+          label="Delivery state"
+          name="deliveryState"
+          value={deliveryState}
+          onChange={(e) => setDeliveryState(e.target.value)}
+          options={[
+            { value: '', label: 'Select state' },
+            ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
+          ]}
+        />
+
+        <Textarea
+          label="Delivery notes"
+          name="deliveryNotes"
+          value={deliveryNotes}
+          onChange={(e) => setDeliveryNotes(e.target.value)}
+          rows={2}
+          placeholder="Special instructions"
+        />
+
+        <TextInput
+          label="Customer email"
+          name="customerEmail"
+          type="email"
+          value={customerEmail}
+          onChange={(e) => setCustomerEmail(e.target.value)}
+          placeholder="Optional"
+        />
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            loading={isSubmitting}
+            loadingText="Saving..."
+          >
+            Save changes
+          </Button>
+        </div>
+      </fetcher.Form>
+    </Modal>
+  );
+}
+
 function CustomFieldsCard({
   defs,
   responses,

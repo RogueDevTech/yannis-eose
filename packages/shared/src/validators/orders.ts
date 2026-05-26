@@ -163,6 +163,7 @@ export type TransitionOrderInput = z.infer<typeof transitionOrderSchema>;
  */
 export const updateOrderSchema = z.object({
   orderId: z.string().uuid(),
+  customerName: z.string().min(1).max(255).optional(),
   customerAddress: z.string().optional(),
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),

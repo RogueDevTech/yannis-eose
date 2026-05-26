@@ -62,6 +62,14 @@ self.addEventListener('activate', (event) => {
           .filter((name) => name !== CACHE_NAME)
           .map((name) => caches.delete(name))
       );
+    }).then(() => self.clients.claim()).then(() => {
+      // After claiming, tell all controlled clients that a new version is active.
+      // The client can decide to reload on next navigation.
+      return self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({ type: 'SW_UPDATED', buildId: BUILD_ID });
+        });
+      });
     })
   );
 });

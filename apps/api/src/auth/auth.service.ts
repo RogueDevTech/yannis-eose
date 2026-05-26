@@ -195,11 +195,13 @@ export class AuthService {
           'Your account has not been assigned to a branch. Contact your administrator.',
         );
       }
-      // Media Buyers default to "All Branches" so they see all their orders
-      // across every branch they have a footprint in. They can narrow via the
-      // header branch switcher if needed.
+      // Media Buyers with a single branch default to that branch so supervisor
+      // features and branch-scoped pages work immediately. Multi-branch MBs
+      // default to "All Branches" and can narrow via the header switcher.
       if (user.role === 'MEDIA_BUYER') {
-        currentBranchId = null;
+        currentBranchId = memberships.length === 1
+          ? memberships[0]!.branchId as string
+          : null;
       } else {
         currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
       }
