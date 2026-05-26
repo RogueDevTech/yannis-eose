@@ -50,17 +50,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationFilter = url.searchParams.get('location') ?? undefined;
   const sentByFilter = url.searchParams.get('sentBy') ?? undefined;
 
-  // Date filtering — default to all time
-  const hasExplicitDateParams =
-    url.searchParams.has('startDate') ||
-    url.searchParams.has('endDate') ||
-    url.searchParams.has('period');
-  const periodAllTime = !hasExplicitDateParams || url.searchParams.get('period') === 'all_time';
+  // Date filtering — default to this month
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (periodAllTime) {
     startDate = undefined;
     endDate = undefined;
+  } else if (!startDate && !endDate) {
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
 
   const listInput: Record<string, unknown> = {

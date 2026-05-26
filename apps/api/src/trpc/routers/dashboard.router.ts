@@ -146,7 +146,7 @@ async function _ceoOverviewFetch(params: {
     (statusCounts['DISPATCHED'] ?? 0) +
     (statusCounts['IN_TRANSIT'] ?? 0);
 
-  const deliveredOrders = statusCounts['DELIVERED'] ?? 0;
+  const deliveredOrders = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
   const deletedOrders = statusCounts['DELETED'] ?? 0;
   const returnedOrders = statusCounts['RETURNED'] ?? 0;
 
