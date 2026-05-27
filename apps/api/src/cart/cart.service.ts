@@ -952,7 +952,7 @@ export class CartService {
    * number of rows the cart list shows.
    */
   async countAbandoned(
-    opts: { mediaBuyerId?: string | null; branchId?: string | null } = {},
+    opts: { mediaBuyerId?: string | null; branchId?: string | null; startDate?: string | null; endDate?: string | null } = {},
   ): Promise<number> {
     const res = await this.db
       .select({ count: count() })

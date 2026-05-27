@@ -660,20 +660,36 @@ function OrdersListPageImpl({
   // Pipeline statuses (excluding DELETED — it goes after CR/DR).
   // When REMITTED is excluded (CS/Marketing view), merge its count into DELIVERED
   // so the "Delivered" pill shows the combined total.
+  // Six-bucket collapse (CEO 2026-05-10): when the strip uses the default
+  // STATUS_OPTIONS set (no AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT pill), roll
+  // those sub-stages into the Confirmed pill — they're "post-confirmation, in
+  // flight" and the dashboard already counts them under Confirmed. Without the
+  // rollup an order in IN_TRANSIT inflates Total but isn't reflected in any pill,
+  // so the strip looks inconsistent (Total = pill-sum + sub-stage orphans).
   const remittedMergedIntoDelivered = excludeStatuses?.includes('REMITTED') ?? false;
   const PIPELINE_KEYS = STATUS_OPTIONS.filter(
     (s) => s !== 'ALL' && !excludeStatuses?.includes(s),
   );
-  const pipelineItems = PIPELINE_KEYS.map((status) => ({
-    label: STATUS_LABELS[status] ?? formatStatus(status),
-    value:
-      status === 'DELIVERED' && remittedMergedIntoDelivered
-        ? (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)
-        : statusCounts[status] ?? 0,
-    valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
-    active: selectedStatus === status,
-    onClick: () => handleStatusSelect(status),
-  }));
+  const CONFIRMED_SUBSTAGES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'] as const;
+  const confirmedAbsorbsSubstages = !PIPELINE_KEYS.some((s) =>
+    (CONFIRMED_SUBSTAGES as readonly string[]).includes(s),
+  );
+  const pipelineItems = PIPELINE_KEYS.map((status) => {
+    let value = statusCounts[status] ?? 0;
+    if (status === 'DELIVERED' && remittedMergedIntoDelivered) {
+      value += statusCounts['REMITTED'] ?? 0;
+    }
+    if (status === 'CONFIRMED' && confirmedAbsorbsSubstages) {
+      for (const sub of CONFIRMED_SUBSTAGES) value += statusCounts[sub] ?? 0;
+    }
+    return {
+      label: STATUS_LABELS[status] ?? formatStatus(status),
+      value,
+      valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+      active: selectedStatus === status,
+      onClick: () => handleStatusSelect(status),
+    };
+  });
   // Deleted item — placed after rates for logical grouping.
   const deletedItem = !excludeStatuses?.includes('DELETED')
     ? {
@@ -1510,11 +1526,9 @@ function OrdersListPageImpl({
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
                 <PageRefreshButton />
-                {!isCartAbandonmentView && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
-                    {showChartView ? 'View as data' : 'View data in chart'}
-                  </Button>
-                )}
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
                 {canCreateOffline && (
                   <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
                     <span className="hidden sm:inline">Create offline order</span>
@@ -1531,32 +1545,28 @@ function OrdersListPageImpl({
                     Delete all test orders
                   </Button>
                 )}
-                {!isCartAbandonmentView && (
-                  <DateFilterBar
-                      startDate={filters?.startDate ?? ''}
-                      endDate={filters?.endDate ?? ''}
-                      startTime={filters?.startTime ?? ''}
-                      endTime={filters?.endTime ?? ''}
-                      periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                )}
+                <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    startTime={filters?.startTime ?? ''}
+                    endTime={filters?.endTime ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
               </>
             }
             sheet={({ closeSheet }) => (
               <>
-                {!isCartAbandonmentView && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      setShowChartView((v) => !v);
-                    }}
-                  >
-                    {showChartView ? 'View as data' : 'View data in chart'}
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
                 {canCreateOffline && (
                   <Button
                     variant="secondary"
@@ -1617,15 +1627,13 @@ function OrdersListPageImpl({
         }
       />
 
-      {!isCartAbandonmentView && (
-        <MobileDateFilterRow
-          startDate={filters?.startDate ?? ''}
-          endDate={filters?.endDate ?? ''}
-          startTime={filters?.startTime ?? ''}
-          endTime={filters?.endTime ?? ''}
-          periodAllTime={filters?.periodAllTime ?? false}
-        />
-      )}
+      <MobileDateFilterRow
+        startDate={filters?.startDate ?? ''}
+        endDate={filters?.endDate ?? ''}
+        startTime={filters?.startTime ?? ''}
+        endTime={filters?.endTime ?? ''}
+        periodAllTime={filters?.periodAllTime ?? false}
+      />
 
       {/* Status totals — moved above My Workload so the funnel snapshot reads first.
           For HoCS+ the strip leads with a "Cart abandonment" KPI (open un-recovered

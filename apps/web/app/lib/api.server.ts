@@ -546,6 +546,7 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
         currentBranchId: bundle.currentBranchId,
         branchIds: bundle.branchIds,
         appTheme: bundle.appTheme,
+        fontScale: bundle.fontScale,
         mirroredBy: bundle.mirroredBy,
         ...(bundle.staffOnboardingStatus !== undefined
           ? { staffOnboardingStatus: bundle.staffOnboardingStatus }

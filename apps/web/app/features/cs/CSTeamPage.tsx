@@ -21,6 +21,7 @@ import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SortMenu, type SortMenuOption, type SortMenuValue } from '~/components/ui/sort-menu';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import {
@@ -67,21 +68,18 @@ const CS_BACKLOG_OPTIONS = [
   { value: 'NO_PENDING', label: 'No pending' },
 ];
 
-const CS_SORT_OPTIONS = [
-  { value: 'total-desc', label: 'Sort: Total orders (high)' },
-  { value: 'total-asc', label: 'Sort: Total orders (low)' },
-  { value: 'confirmed-desc', label: 'Sort: Confirmed (high)' },
-  { value: 'delivered-desc', label: 'Sort: Delivered (high)' },
-  { value: 'cancelled-desc', label: 'Sort: Cancelled (high)' },
-  { value: 'calls-desc', label: 'Sort: Calls (high)' },
-  { value: 'conf-rate-desc', label: 'Sort: Conf. rate (high)' },
-  { value: 'conf-rate-asc', label: 'Sort: Conf. rate (low)' },
-  { value: 'delivery-rate-desc', label: 'Sort: Delivery rate (high)' },
-  { value: 'delivery-rate-asc', label: 'Sort: Delivery rate (low)' },
-  { value: 'backlog-desc', label: 'Sort: Backlog (high)' },
-  { value: 'backlog-asc', label: 'Sort: Backlog (low)' },
-  { value: 'name', label: 'Sort: Name (A-Z)' },
+const CS_SORT_MENU_OPTIONS: SortMenuOption[] = [
+  { value: 'total', label: 'Total orders', description: 'Orders assigned to the closer.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'confirmed', label: 'Confirmed', description: 'Orders the closer confirmed.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'delivered', label: 'Delivered', description: 'Orders delivered.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'cancelled', label: 'Cancelled', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'calls', label: 'Calls made', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
+  { value: 'conf-rate', label: 'Confirmation rate', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'delivery-rate', label: 'Delivery rate', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'backlog', label: 'Backlog', description: 'Pending orders in queue.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'name', label: 'Name', defaultDir: 'asc', ascLabel: 'A → Z', descLabel: 'Z → A' },
 ];
+const CS_SORT_DEFAULT: SortMenuValue = { sortBy: 'total', sortDir: 'desc' };
 
 function formatLastActive(lastActionAt: string | null): string {
   if (!lastActionAt) return '—';
@@ -259,6 +257,15 @@ export function CSTeamPage({
   sort = 'total-desc',
   dateFilters,
 }: CSTeamPageProps) {
+  // Parse flat sort string (e.g. "total-desc") into SortMenu value
+  const sortMenuValue = useMemo((): SortMenuValue => {
+    if (sort === 'name') return { sortBy: 'name', sortDir: 'asc' };
+    const lastDash = sort.lastIndexOf('-');
+    if (lastDash === -1) return CS_SORT_DEFAULT;
+    const sortBy = sort.substring(0, lastDash);
+    const sortDir = sort.substring(lastDash + 1) as 'asc' | 'desc';
+    return { sortBy, sortDir: sortDir === 'asc' || sortDir === 'desc' ? sortDir : 'desc' };
+  }, [sort]);
   const [showExportModal, setShowExportModal] = useState(false);
   const [peekMember, setPeekMember] = useState<CSTeamMemberOverview | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -308,6 +315,11 @@ export function CSTeamPage({
   const handleSearchSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     mergeListParams({ q: searchQuery, page: 1 });
+  };
+
+  const handleSortChange = (next: SortMenuValue) => {
+    const flat = next.sortBy === 'name' && next.sortDir === 'asc' ? 'name' : `${next.sortBy}-${next.sortDir}`;
+    mergeListParams({ sort: flat, page: 1 });
   };
 
   /** Mirrors `mergeListParams` but returns a `?query` string for `<Link to>`. */
@@ -530,11 +542,11 @@ export function CSTeamPage({
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                    <FormSelect
-                      value={sort}
-                      onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
-                      options={CS_SORT_OPTIONS}
-                      wrapperClassName="w-full"
+                    <SortMenu
+                      value={sortMenuValue}
+                      onChange={handleSortChange}
+                      options={CS_SORT_MENU_OPTIONS}
+                      defaultValue={CS_SORT_DEFAULT}
                     />
                   </div>
                 </>
@@ -703,11 +715,11 @@ export function CSTeamPage({
                 options={CS_BACKLOG_OPTIONS}
                 wrapperClassName="w-full min-w-0 sm:w-44"
               />
-              <FormSelect
-                value={sort}
-                onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
-                options={CS_SORT_OPTIONS}
-                wrapperClassName="w-full min-w-0 sm:w-52"
+              <SortMenu
+                value={sortMenuValue}
+                onChange={handleSortChange}
+                options={CS_SORT_MENU_OPTIONS}
+                defaultValue={CS_SORT_DEFAULT}
               />
             </>
           }
@@ -733,11 +745,11 @@ export function CSTeamPage({
               </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                <FormSelect
-                  value={sort}
-                  onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
-                  options={CS_SORT_OPTIONS}
-                  wrapperClassName="w-full"
+                <SortMenu
+                  value={sortMenuValue}
+                  onChange={handleSortChange}
+                  options={CS_SORT_MENU_OPTIONS}
+                  defaultValue={CS_SORT_DEFAULT}
                 />
               </div>
             </>

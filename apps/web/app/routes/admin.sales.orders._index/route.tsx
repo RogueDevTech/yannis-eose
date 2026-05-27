@@ -759,7 +759,17 @@ export default function CSOrdersRoute() {
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
           // REMITTED is accountant-only. Deleted tab limited to users with
           // orders.delete permission (HoCS / Admin / SuperAdmin by default).
-          excludeStatuses={isHoCSPlus ? ['REMITTED'] : ['REMITTED', 'DELETED']}
+          // UNPROCESSED is hidden for plain CS_CLOSERs — they only ever see
+          // orders already assigned to them, so the Unassigned pill is always 0
+          // and just steals space from the closer's real funnel (Assigned →
+          // Delivered).
+          excludeStatuses={
+            isHoCSPlus
+              ? ['REMITTED']
+              : userRole === 'CS_CLOSER'
+                ? ['REMITTED', 'DELETED', 'UNPROCESSED']
+                : ['REMITTED', 'DELETED']
+          }
           enableFromCartStatusOption={isHoCSPlus}
           enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN'}
         />
