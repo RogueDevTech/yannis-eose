@@ -181,10 +181,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const testOrders = testOrdersParam && canFilterTestOrders;
 
   const productIdParam = url.searchParams.get('productId') || undefined;
+  const sortBy = url.searchParams.get('sortBy') || 'createdAt';
+  const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
   // For CS/Marketing, DELIVERED and REMITTED are the same outcome ("delivered").
-  // When the user filters by DELIVERED, expand to include REMITTED so those orders
-  // aren't invisible. Finance sees them separately.
   const expandDeliveredFilter = status === 'DELIVERED';
   const listInput: Record<string, unknown> = {
     page,
@@ -193,6 +193,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? { statuses: ['DELIVERED', 'REMITTED'] }
       : { status: status || undefined }),
     search: search || undefined,
+    sortBy,
+    sortOrder,
     ...(assignedCsId && { assignedCsId }),
     ...(productIdParam && { productId: productIdParam }),
     ...(fromCart && { fromCart: true }),
@@ -418,6 +420,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search,
+    sortBy,
+    sortOrder,
     isCartAbandonmentView: fromCart,
     isCSCloser,
     showCSCloserColumn,

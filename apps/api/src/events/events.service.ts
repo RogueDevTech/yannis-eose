@@ -22,7 +22,13 @@ export class EventsService {
 
   private safeEmit(room: string, event: string, payload: Record<string, unknown>, branchId?: string | null) {
     try {
-      this.gateway.server.to(this.resolveRoom(room, branchId)).emit(event, payload);
+      const resolved = this.resolveRoom(room, branchId);
+      this.gateway.server.to(resolved).emit(event, payload);
+      // Also emit to the unscoped room so admin-class users (who join the
+      // base room without branch prefix) receive branch-scoped events.
+      if (resolved !== room) {
+        this.gateway.server.to(room).emit(event, payload);
+      }
     } catch {
       // Real-time delivery is best effort. Mutations must remain DB-authoritative.
     }

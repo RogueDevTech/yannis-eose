@@ -7,6 +7,7 @@ import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -323,6 +324,17 @@ export function UsersListPage({
     if (currentBranchParam !== 'ALL') n += 1;
     return n;
   }, [currentStatusParam, currentRoleParam, searchParams, currentBranchParam]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('role')) n += 1;
+    if (searchParams.get('branch')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('probationOnly') === '1') n += 1;
+    if (searchParams.get('supervisorOnly') === '1') n += 1;
+    return n;
+  }, [searchParams]);
 
   const probationOnly = searchParams.get('probationOnly') === '1';
   const handleProbationOnlyToggle = (next: boolean) => {
@@ -805,6 +817,7 @@ export function UsersListPage({
               </>
             }
           />
+          <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2 px-4" />
           {rosterLoading ? (
             <CompactTable<{ id: string }>
               key="staff-skeleton"
@@ -1008,6 +1021,7 @@ export function UsersListPage({
                 </>
               }
             />
+            <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2 px-4" />
           </div>
 
           {rosterLoading ? (

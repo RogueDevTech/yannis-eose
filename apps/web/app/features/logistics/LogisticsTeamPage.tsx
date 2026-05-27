@@ -5,6 +5,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -298,6 +299,16 @@ export function LogisticsTeamPage({
     return n;
   }, [sortByFromLoader, sortDirFromLoader]);
 
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('q')) n += 1;
+    const sb = searchParams.get('sortBy');
+    const sd = searchParams.get('sortDir');
+    if ((sb && sb !== 'deliveryRate') || (sd && sd !== 'desc')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
+
   const showSearchEmpty = unfilteredCount > 0 && providers.length === 0;
 
   // Top-strip rollups across the displayed slice — when sliced by search we
@@ -549,6 +560,7 @@ export function LogisticsTeamPage({
             />
           }
         />
+        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {totalCount > 0 && (q || sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
           <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">

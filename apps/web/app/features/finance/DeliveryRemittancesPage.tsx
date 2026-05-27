@@ -15,6 +15,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -277,6 +278,15 @@ export function DeliveryRemittancesPage({
     if (filters.sentBy) n += 1;
     return n;
   }, [filters.location, filters.sentBy]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('location')) n += 1;
+    if (searchParams.get('sentBy')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const remittanceColumns: CompactTableColumn<DeliveryRemittanceListItem>[] = useMemo(
     () => [
@@ -804,6 +814,7 @@ export function DeliveryRemittancesPage({
               }
             />
           </div>
+          <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
           {/* Status filter pills — narrow the Remitted list to a single
               lifecycle stage. Counts come from the summary (status-agnostic),

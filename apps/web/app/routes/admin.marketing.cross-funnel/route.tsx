@@ -158,7 +158,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       return parseStats(statsRes);
     } catch {
-      return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+      return EMPTY_CROSS_FUNNEL_STATS;
     }
   })();
 

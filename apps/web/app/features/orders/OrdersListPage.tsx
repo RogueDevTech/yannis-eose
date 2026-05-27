@@ -52,6 +52,7 @@ import {
 } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
@@ -225,6 +226,8 @@ export interface OrdersListPageProps {
    */
   excludeStatuses?: string[];
   searchFilter?: string;
+  sortBy?: string;
+  sortOrder?: string;
   filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   userRole?: string;
   /** Permission-driven (orders.bulkAssign) — controls the SmartPick toolbar visibility. */
@@ -337,6 +340,8 @@ function OrdersListPageImpl({
   statusFilter,
   excludeStatuses,
   searchFilter,
+  sortBy: sortByProp = 'createdAt',
+  sortOrder: sortOrderProp = 'desc',
   filters,
   userRole,
   canBulkPick = false,
@@ -1329,6 +1334,17 @@ function OrdersListPageImpl({
     campaignFilter,
   ]);
 
+  const totalActiveFilterCount = useMemo(() => {
+    let n = ordersListToolbarFilterBadge;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('period') === 'all_time') n += 1;
+    else if (searchParams.get('startDate') || searchParams.get('endDate')) n += 1;
+    if (searchParams.get('sortBy') && searchParams.get('sortBy') !== 'createdAt') n += 1;
+    if (searchParams.get('fromCart') === '1') n += 1;
+    if (searchParams.get('testOrders') === '1') n += 1;
+    return n;
+  }, [ordersListToolbarFilterBadge, searchParams]);
+
   // `boxed` → the mobile tools-sheet variant: same boxed/centered/grey chrome
   // as the other sheet filters. Plain inline layout for the desktop filter row.
   function renderScheduleFilter(boxed: boolean) {
@@ -2078,12 +2094,38 @@ function OrdersListPageImpl({
                     searchPlaceholder="Search forms..."
                   />
                 ) : null}
+                <FormSelect
+                  value={`${sortByProp}:${sortOrderProp}`}
+                  onChange={(e) => {
+                    const [newSortBy, newSortOrder] = e.target.value.split(':');
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                      else next.delete('sortBy');
+                      if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                      else next.delete('sortOrder');
+                      return next;
+                    });
+                  }}
+                  options={[
+                    { value: 'createdAt:desc', label: 'Newest first' },
+                    { value: 'createdAt:asc', label: 'Oldest first' },
+                    { value: 'totalAmount:desc', label: 'Highest amount' },
+                    { value: 'totalAmount:asc', label: 'Lowest amount' },
+                    { value: 'updatedAt:desc', label: 'Recently updated' },
+                    { value: 'status:asc', label: 'Status A–Z' },
+                    { value: 'status:desc', label: 'Status Z–A' },
+                  ]}
+                  wrapperClassName="w-full min-w-0 sm:w-44"
+                />
               </div>
             </div>
           }
           desktopInlineFilters={renderScheduleFilter(false)}
           sheetFilterBody={null}
         />
+        <ClearFiltersButton count={totalActiveFilterCount} preserve={['perPage']} className="mt-2" />
       </div>
 
       {/* Smart pick + deep-select. Desktop: inline card under the filters.

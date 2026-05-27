@@ -2442,7 +2442,17 @@ export class OrdersService {
       });
     }
 
-    return results.sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.name.localeCompare(b.name));
+    // Sort: eligible first, then by total available stock descending (locations
+    // with more stock surface first so CS picks the best-stocked hub), then alphabetical.
+    return results.sort((a, b) => {
+      const eligibleDiff = Number(b.eligible) - Number(a.eligible);
+      if (eligibleDiff !== 0) return eligibleDiff;
+      // Sum available stock across all products at each location
+      const aStock = a.availabilityByProduct?.reduce((sum, p) => sum + p.available, 0) ?? 0;
+      const bStock = b.availabilityByProduct?.reduce((sum, p) => sum + p.available, 0) ?? 0;
+      if (bStock !== aStock) return bStock - aStock;
+      return a.name.localeCompare(b.name);
+    });
   }
 
   /**

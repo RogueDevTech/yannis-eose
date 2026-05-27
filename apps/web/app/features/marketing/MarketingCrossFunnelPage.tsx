@@ -11,6 +11,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import {
   CompactTable,
@@ -168,6 +169,17 @@ export function MarketingCrossFunnelPage({
     (searchParams.get('productId') ? 1 : 0) +
     (searchParams.get('campaignId') ? 1 : 0) +
     (searchQuery ? 1 : 0);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('productId')) n += 1;
+    if (searchParams.get('mediaBuyerId')) n += 1;
+    if (searchParams.get('campaignId')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('duplicateType')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = useMemo(() => [
     {
@@ -413,6 +425,7 @@ export function MarketingCrossFunnelPage({
         }
         sheetFilterBody={null}
       />
+      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {/* Table */}
       <CompactTable<CrossFunnelAttemptRow>

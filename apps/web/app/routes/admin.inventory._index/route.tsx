@@ -231,7 +231,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Resolve low-stock threshold from system settings (same selector logic
   // as before, just sourced from the bundled payload).
-  let lowStockThreshold = 10;
+  let lowStockThreshold = 100;
   const settingsRows = bundle?.systemSettings ?? [];
   const lowStockRow = settingsRows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
   const threshold = (lowStockRow?.value as { threshold?: number } | null)?.threshold;

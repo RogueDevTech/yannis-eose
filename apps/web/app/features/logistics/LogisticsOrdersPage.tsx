@@ -19,6 +19,7 @@ import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-return';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
@@ -361,6 +362,15 @@ function LogisticsOrdersPageImpl({
     () => (selectedStatus !== 'ALL' ? 1 : 0),
     [selectedStatus],
   );
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('csCloserId')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
   const allocatedOrders = displayOrders.filter((o) => o.status === 'AGENT_ASSIGNED');
@@ -885,6 +895,7 @@ function LogisticsOrdersPageImpl({
           desktopInlineFilters={null}
           sheetFilterBody={null}
         />
+      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {showChartView ? (
         deferredLoading ? (

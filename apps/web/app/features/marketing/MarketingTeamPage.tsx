@@ -7,6 +7,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -339,6 +340,16 @@ export function MarketingTeamPage({
     return n;
   }, [sortByFromLoader, sortDirFromLoader]);
 
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('q')) n += 1;
+    const sb = searchParams.get('sortBy');
+    const sd = searchParams.get('sortDir');
+    if ((sb && sb !== 'name') || (sd && sd !== 'asc')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
+
   const teamColumns = useMemo((): CompactTableColumn<FundingBalanceRow>[] => {
     return [
       {
@@ -667,6 +678,7 @@ export function MarketingTeamPage({
             </div>
           }
         />
+        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
           <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">

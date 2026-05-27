@@ -13,6 +13,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
@@ -352,6 +353,16 @@ export function CSTeamPage({
     if (sort !== 'total-desc') count += 1;
     return count;
   }, [activityFilter, backlogFilter, sort]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('q')) n += 1;
+    if (searchParams.get('activity')) n += 1;
+    if (searchParams.get('backlog')) n += 1;
+    if (searchParams.get('sort')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const showFilteredEmpty = unfilteredCount > 0 && totalCount === 0;
   const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL';
@@ -757,6 +768,7 @@ export function CSTeamPage({
             </>
           }
         />
+        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {hasActiveFilters && (
           <p className="mb-3 text-xs text-app-fg-muted" aria-live="polite">

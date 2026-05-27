@@ -28,6 +28,7 @@ import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Tabs } from '~/components/ui/tabs';
 import { SearchInput } from '~/components/ui/search-input';
@@ -162,6 +163,15 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
   const isFundingRouteLoading = useLoaderRefetchBusy().busy;
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('entryType') && searchParams.get('entryType') !== 'all') n += 1;
+    if (searchParams.get('entryStatus') && searchParams.get('entryStatus') !== 'ALL') n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const { section: rawDisplaySection, tab: displayTab } = useMemo(() => {
     const pending =
@@ -840,6 +850,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               onTypeChange={(v) => updateSliceParam('entryType', v)}
               onStatusChange={(v) => updateSliceParam('entryStatus', v)}
             />
+            <ClearFiltersButton count={activeFilterCount} preserve={['perPage', 'section', 'tab']} className="mt-2 mx-4" />
             <UnifiedDistributingTable
               slice={unifiedDistributingSlice}
               users={users}
@@ -862,6 +873,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               onTypeChange={(v) => updateSliceParam('entryType', v)}
               onStatusChange={(v) => updateSliceParam('entryStatus', v)}
             />
+            <ClearFiltersButton count={activeFilterCount} preserve={['perPage', 'section', 'tab']} className="mt-2 mx-4" />
             <UnifiedReceivedTable
               slice={unifiedReceivedSlice}
               users={users}

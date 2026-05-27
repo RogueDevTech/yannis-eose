@@ -43,6 +43,7 @@ import type {
   LocationLowStockThreshold,
 } from './types';
 import { REASON_LABELS } from './types';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
 
@@ -179,7 +180,7 @@ export function InventoryPage(props: InventoryStreamData) {
     canAdjust = false,
     canExport = false,
     transfers, returnedOrders, reconciliations, locationsWithLock,
-    lowStockThreshold = 10, canEditLowStock = false, canEditGlobalThreshold = false, lowStockAlerts,
+    lowStockThreshold = 100, canEditLowStock = false, canEditGlobalThreshold = false, lowStockAlerts,
     locationThresholds = [] as LocationLowStockThreshold[],
     shipmentOptions = [] as ShipmentFilterOption[],
     levelsLoadError = null,
@@ -200,6 +201,18 @@ export function InventoryPage(props: InventoryStreamData) {
   // `levelsProductFilter` empty string = no filter (backend default).
   type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const inventoryActiveFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('productId')) n += 1;
+    if (searchParams.get('locationId')) n += 1;
+    if (searchParams.get('shipmentId')) n += 1;
+    const sb = searchParams.get('sortBy');
+    const sd = searchParams.get('sortDir');
+    if ((sb && sb !== 'updatedAt') || (sd && sd !== 'desc')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const updateLevelsParam = (key: 'productId' | 'locationId' | 'shipmentId' | 'sort' | 'search', value: string) => {
     setSearchParams((prev) => {
@@ -1519,6 +1532,7 @@ export function InventoryPage(props: InventoryStreamData) {
             />
           );
         })()}
+        <ClearFiltersButton count={inventoryActiveFilterCount} preserve={['perPage']} className="mt-2" />
         <CompactTable<InventoryLevel>
           columns={levelColumns}
           rows={levels}
