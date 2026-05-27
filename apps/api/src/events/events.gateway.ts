@@ -143,6 +143,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
     switch (user.role) {
       case 'SUPER_ADMIN':
       case 'ADMIN':
+      case 'SUPPORT':
         void client.join('admin');
         void client.join('finance');
         void client.join('cs-all');
@@ -151,25 +152,34 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
         void client.join('hr');
         break;
       case 'HEAD_OF_CS':
+        void client.join('cs-all');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:cs-all`);
         break;
       case 'CS_CLOSER':
         void client.join(`cs-${user.id}`);
+        void client.join('cs-all');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:cs-all`);
         break;
       case 'FINANCE_OFFICER':
+        void client.join('finance');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:finance`);
         break;
       case 'HEAD_OF_LOGISTICS':
+        void client.join('logistics');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'STOCK_MANAGER':
+        void client.join('logistics');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'HEAD_OF_MARKETING':
+        void client.join('marketing-all');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:marketing-all`);
         break;
       case 'MEDIA_BUYER':
         void client.join(`marketing-${user.id}`);
+        void client.join('marketing-all');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:marketing-all`);
         break;
       case 'TPL_MANAGER':
         if (user.logisticsLocationId) {

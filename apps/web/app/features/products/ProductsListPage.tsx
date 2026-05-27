@@ -14,6 +14,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -188,6 +189,14 @@ export function ProductsListPage({
   });
 
   const productsToolbarFilterBadge = useMemo(() => (statusFilter !== 'ACTIVE' ? 1 : 0), [statusFilter]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('category')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const productColumns = useMemo((): CompactTableColumn<Product>[] => {
     const cols: CompactTableColumn<Product>[] = [
@@ -373,6 +382,7 @@ export function ProductsListPage({
           }
         />
       </div>
+      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {productsLoadError && <RouteFetchErrorBanner messages={[productsLoadError]} variant="danger" />}
 

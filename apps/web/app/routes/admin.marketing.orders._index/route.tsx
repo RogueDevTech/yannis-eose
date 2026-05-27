@@ -75,6 +75,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const campaignIdParam = url.searchParams.get('campaignId') || undefined;
   // For marketing, DELIVERED and REMITTED are the same outcome — merge them.
   const expandDeliveredFilter = status === 'DELIVERED';
+  const sortBy = url.searchParams.get('sortBy') || 'createdAt';
+  const sortOrder = url.searchParams.get('sortOrder') || 'desc';
+
   const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
@@ -82,11 +85,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? { statuses: ['DELIVERED', 'REMITTED'] }
       : { status: status || undefined }),
     search: search || undefined,
+    sortBy,
+    sortOrder,
     mediaBuyerId,
     productId: productIdParam,
     campaignId: campaignIdParam,
-    // Marketing orders scope by the marketing branch (`orders.branch_id`), not
-    // the CS servicing branch (`orders.servicing_branch_id`) — see migration 0150.
     branchScope: 'marketing' as const,
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
@@ -126,6 +129,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     perPage: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search,
+    sortBy,
+    sortOrder,
     viewerUserId: user.id,
     activeMediaBuyerFilter: mediaBuyerId ?? null,
     // Everyone who can open this page (gated on `marketing.orders`) may switch

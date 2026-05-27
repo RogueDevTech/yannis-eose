@@ -319,12 +319,13 @@ function CSDashboard({
   if (role === 'CS_CLOSER' && !isCsTeamSupervisor) {
     return (
       <>
-        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={6} />}>
+        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
           {(metrics) => (
             <OverviewStatStrip
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
+                { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
                 {
                   label: 'Pending Queue',
                   value: pendingQueue.toString(),

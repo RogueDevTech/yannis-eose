@@ -23,6 +23,7 @@ import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -754,6 +755,16 @@ export function MarketingAdSpendPage({
     return n;
   }, [selectedProductId, selectedCampaignId, selectedMediaBuyerId, viewMode, mediaBuyersForFilter.length]);
 
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('productId')) n += 1;
+    if (searchParams.get('campaignId')) n += 1;
+    if (searchParams.get('mediaBuyerId')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
+
   const openGroupLineReceiptModal = (line: AdSpendGroupLine) => {
     setAdSpendDetailModal({
       id: line.id,
@@ -1311,6 +1322,7 @@ export function MarketingAdSpendPage({
           }
           sheetFilterBody={null}
         />
+        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
         <TableLoadingOverlay show={isFilterLoading}>
           {expenseListView === 'daily' ? (
             <div className="p-4">

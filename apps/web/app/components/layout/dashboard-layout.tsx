@@ -782,6 +782,36 @@ function DashboardLayoutInner({
   // Must match SSR (no sessionStorage): hydrate first, then read storage in useEffect.
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const { isDarkTheme } = useAppTheme();
+
+  // Seed localStorage from server-persisted preferences on mount so a new
+  // browser/device picks up the user's saved theme + font scale immediately
+  // instead of defaulting until the async fetchClientConfig resolves.
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const serverTheme = (user as { appTheme?: string | null }).appTheme;
+      const serverFontScale = (user as { fontScale?: string | null }).fontScale;
+      if (serverTheme && typeof serverTheme === 'string') {
+        const stored = localStorage.getItem('yannis_app_theme');
+        if (!stored || stored !== serverTheme) {
+          localStorage.setItem('yannis_app_theme', serverTheme);
+        }
+      }
+      if (serverFontScale && typeof serverFontScale === 'string') {
+        const stored = localStorage.getItem('yannis_font_scale');
+        if (!stored || stored !== serverFontScale) {
+          localStorage.setItem('yannis_font_scale', serverFontScale);
+          // Apply immediately to avoid flash
+          const scales: Record<string, number> = { base: 14, large: 15.75, xlarge: 17.5 };
+          if (scales[serverFontScale]) {
+            document.documentElement.style.fontSize = `${scales[serverFontScale]}px`;
+            document.documentElement.dataset.fontScale = serverFontScale;
+          }
+        }
+      }
+    } catch { /* localStorage unavailable */ }
+  }, [user]);
+
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
   // Hard-logout the browser if the server revokes the user's sessions

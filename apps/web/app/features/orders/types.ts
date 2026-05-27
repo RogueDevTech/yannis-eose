@@ -246,6 +246,15 @@ export interface OrderDetailPageExtraProps {
       needed: number;
       available: number;
     }> | null;
+    /**
+     * Coarse stock-band hint for viewers who can't see exact counts (CS_CLOSER).
+     * Server returns `null` when the viewer has exact counts via `availabilityByProduct`.
+     */
+    stockBandByProduct?: Array<{
+      productId: string;
+      productName: string;
+      band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
+    }> | null;
   }>;
   /**
    * Heavy: eligibility + per-product availability per location.
@@ -266,6 +275,11 @@ export interface OrderDetailPageExtraProps {
         productName: string;
         needed: number;
         available: number;
+      }> | null;
+      stockBandByProduct?: Array<{
+        productId: string;
+        productName: string;
+        band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
       }> | null;
     }>
   >;

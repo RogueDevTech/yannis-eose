@@ -53,7 +53,7 @@ export class InventoryService {
   ) {}
 
   /** Default low-stock threshold used when the setting row is missing or malformed. */
-  private static readonly DEFAULT_LOW_STOCK_THRESHOLD = 10;
+  private static readonly DEFAULT_LOW_STOCK_THRESHOLD = 100;
   private static readonly LOW_STOCK_DEDUP_HOURS = 6;
 
   /**

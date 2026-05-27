@@ -203,6 +203,30 @@ function orderListBranchId(_user: { role: string }, sessionBranchId: string | nu
 }
 
 /**
+ * `orders.list` for a CS_CLOSER self-query expands the branch predicate to
+ * `(servicing_branch_id = :branchId OR assigned_cs_id = me)` so the closer
+ * also sees orders assigned to them that were CS-routed to a different
+ * servicing branch (or have a NULL `servicing_branch_id` — possible for older
+ * rows pre-migration 0150). Aggregate queries (`getStatusCounts`,
+ * `getOrdersTimeSeriesByCreated`, `scheduleCalendarHeat`) don't support that
+ * OR-expansion — they AND a single branch filter — so without this carve-out
+ * the strip pill counts would silently disagree with the list rows.
+ *
+ * `assigned_cs_id = me` is already an exact ownership scope, so dropping the
+ * branch filter when the closer is self-querying yields the same row set as
+ * the list's OR-expansion. Returns `null` (no branch filter) in that case;
+ * otherwise returns `branchId` unchanged.
+ */
+function aggregateBranchIdForCloserSelfQuery(
+  user: { id: string; role: string },
+  narrowedAssignedCsId: string | undefined,
+  branchId: string | null,
+): string | null {
+  if (user.role === 'CS_CLOSER' && narrowedAssignedCsId === user.id) return null;
+  return branchId;
+}
+
+/**
  * Branch filter for endpoints that ALSO scope Media Buyers by ownership
  * (`media_buyer_id = me`). A Media Buyer's branch is their header data lens:
  *   - currentBranchId = a branch  → their orders attributed to that branch
@@ -877,6 +901,13 @@ export const ordersRouter = router({
       // every other role scopes by the CS servicing branch.
       const branchScope: 'servicing' | 'marketing' =
         ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
+      // Match `orders.list`'s CS_CLOSER self-query branch expansion so strip
+      // counts agree with list row counts. See `aggregateBranchIdForCloserSelfQuery`.
+      const countsBranchId = aggregateBranchIdForCloserSelfQuery(
+        ctx.user,
+        narrowed.assignedCsId,
+        effectiveBranchId,
+      );
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -885,7 +916,7 @@ export const ordersRouter = router({
           narrowed.endDate,
           narrowed.assignedCsId,
           narrowed.logisticsLocationId,
-          effectiveBranchId,
+          countsBranchId,
           narrowed.statuses,
           narrowed.supervisorScope,
           branchScope,
@@ -895,7 +926,7 @@ export const ordersRouter = router({
       const key =
         'cache:orders:aggregates:statusCounts:' +
         CacheService.hashInput({
-          branchId: effectiveBranchId,
+          branchId: countsBranchId,
           viewerId: ctx.user.id,
           viewerRole: ctx.user.role,
           narrowed,
@@ -908,7 +939,7 @@ export const ordersRouter = router({
           narrowed.endDate,
           narrowed.assignedCsId,
           narrowed.logisticsLocationId,
-          effectiveBranchId,
+          countsBranchId,
           narrowed.statuses,
           narrowed.supervisorScope,
           branchScope,
@@ -1144,6 +1175,13 @@ export const ordersRouter = router({
         startDate: input.countsStartDate,
         endDate: input.countsEndDate,
       });
+      // CS_CLOSER self-query: drop the branch AND so aggregate counts match the
+      // list's branch-OR-assignee expansion. See `aggregateBranchIdForCloserSelfQuery`.
+      const aggregateBranchId = aggregateBranchIdForCloserSelfQuery(
+        ctx.user,
+        scope.assignedCsId,
+        branchId,
+      );
 
       const trendFilters = {
         mediaBuyerId: scope.mediaBuyerId,
@@ -1187,7 +1225,7 @@ export const ordersRouter = router({
           scope.endDate,
           scope.assignedCsId,
           undefined,
-          branchId,
+          aggregateBranchId,
           undefined,
           scope.supervisorScope,
           bundleBranchScope,
@@ -1196,11 +1234,11 @@ export const ordersRouter = router({
         getOrdersService().getOrdersTimeSeriesByCreated(
           scope.startDate,
           scope.endDate,
-          branchId,
+          aggregateBranchId,
           trendFilters,
           bundleBranchScope,
         ),
-        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, branchId),
+        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
         // agent roster.
@@ -1219,7 +1257,7 @@ export const ordersRouter = router({
             )
           : Promise.resolve(null),
         input.includeCartAbandonment
-          ? getCartService().getStats(branchId)
+          ? getCartService().getStats(branchId, input.countsStartDate, input.countsEndDate)
           : Promise.resolve(null),
       ]);
 
