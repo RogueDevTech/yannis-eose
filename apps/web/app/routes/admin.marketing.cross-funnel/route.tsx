@@ -30,10 +30,19 @@ function parseList(res: { ok: boolean; data: unknown }) {
   };
 }
 
+const EMPTY_CROSS_FUNNEL_STATS: CrossFunnelStats = {
+  totalAttempts: 0,
+  uniqueCustomers: 0,
+  perProduct: [],
+  resubmissions: 0,
+  sameMb: 0,
+  crossFunnel: 0,
+};
+
 function parseStats(res: { ok: boolean; data: unknown }): CrossFunnelStats {
-  if (!res.ok) return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+  if (!res.ok) return EMPTY_CROSS_FUNNEL_STATS;
   const data = (res.data as { result?: { data?: CrossFunnelStats } })?.result?.data;
-  return data ?? { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+  return data ?? EMPTY_CROSS_FUNNEL_STATS;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -92,13 +101,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     duplicateType: duplicateType ?? '',
   };
 
-  const crossFunnelShell = { filters };
-
-  // Show MB filter for admin-class, HoM, and marketing supervisors
+  // Show MB filter for admin-class, HoM, and marketing supervisors. Computed
+  // synchronously (not inside the deferred listData promise) so the loading
+  // shell can render the correct number of filter-select placeholders.
   const showMbFilter =
     user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT' ||
     user.role === 'HEAD_OF_MARKETING' ||
     (user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true);
+
+  const crossFunnelShell = { filters, showMbFilter };
 
   const listData = (async () => {
     const [listRes, productsRes, campaignsRes, buyersRes] = await Promise.all([

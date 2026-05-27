@@ -871,20 +871,25 @@ export class CartService {
    */
   async getStats(
     branchId?: string | null,
+    startDate?: string | null,
+    endDate?: string | null,
   ): Promise<{ pending: number; abandonedOpen: number }> {
     const branchCond = branchId ? eq(schema.campaigns.branchId, branchId) : undefined;
+    const dateConds: SQL[] = [];
+    if (startDate) dateConds.push(gte(schema.cartAbandonments.updatedAt, new Date(`${startDate}T00:00:00`)));
+    if (endDate) dateConds.push(lte(schema.cartAbandonments.updatedAt, new Date(`${endDate}T23:59:59`)));
     const pendingRes = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
       .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-      .where(and(eq(schema.cartAbandonments.status, 'PENDING'), branchCond));
+      .where(and(eq(schema.cartAbandonments.status, 'PENDING'), branchCond, ...dateConds));
 
     // Use the same openCartConditions as listAbandoned so the count matches the list.
     const abandonedRes = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
       .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-      .where(and(...this.openCartConditions({ branchId })));
+      .where(and(...this.openCartConditions({ branchId, startDate, endDate })));
 
     return {
       pending: pendingRes[0]?.count ?? 0,

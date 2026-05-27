@@ -546,7 +546,14 @@ function DuplicateCompareOverlay({
             Duplicate Comparison
           </h2>
           <p className="text-xs mt-0.5 text-warning-700 dark:text-warning-400">
-            Same phone + product within 7 days — duplicate submission blocked
+            {(() => {
+              const kind = getDuplicateKind(row);
+              switch (kind) {
+                case 'resubmission': return 'Repeat submission — same customer, same form';
+                case 'same-mb': return 'Same customer ordered through another form by the same Media Buyer';
+                case 'cross-funnel': return 'Same customer already ordered through a different Media Buyer';
+              }
+            })()}
           </p>
         </div>
         <button
@@ -645,7 +652,17 @@ function DuplicateCompareOverlay({
         <div className="px-5 py-4 space-y-3">
           <InlineNotification
             variant="info"
-            message="This submission was blocked because the same customer already ordered this product within the last 7 days. Only one order per customer per product per week is allowed."
+            message={(() => {
+              const kind = getDuplicateKind(row);
+              switch (kind) {
+                case 'resubmission':
+                  return 'Same customer re-submitted the same form. This is a repeat submission — the customer likely clicked submit more than once or revisited the form.';
+                case 'same-mb':
+                  return 'Same customer ordered the same product through a different form by the same Media Buyer. Only one order per customer per product per week is allowed.';
+                case 'cross-funnel':
+                  return 'Same customer already ordered this product through a different Media Buyer\'s form. The original order takes priority — duplicate was blocked to prevent double-selling.';
+              }
+            })()}
           />
 
           {row.originalOrderId && (

@@ -1082,6 +1082,7 @@ export function MarketingOrdersPage({
                     total={ordersInPeriodTotal}
                     scopeLabel="Marketing orders"
                     dailyCounts={ins.dailyCounts}
+                    collapseForCS
                   />
                 );
               }}

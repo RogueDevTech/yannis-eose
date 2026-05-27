@@ -1526,18 +1526,24 @@ function OrdersListPageImpl({
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
                 <PageRefreshButton />
+                <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    startTime={filters?.startTime ?? ''}
+                    endTime={filters?.endTime ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
+                {canExport && (
+                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Generate report
+                  </Button>
+                )}
                 {canCreateOffline && (
                   <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
                     <span className="hidden sm:inline">Create offline order</span>
                     <span className="sm:hidden">+ Order</span>
-                  </Button>
-                )}
-                {canExport && (
-                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                    Generate report
                   </Button>
                 )}
                 {isTestOrdersView && (
@@ -1545,12 +1551,6 @@ function OrdersListPageImpl({
                     Delete all test orders
                   </Button>
                 )}
-                <DateFilterBar
-                    startDate={filters?.startDate ?? ''}
-                    endDate={filters?.endDate ?? ''}
-                    startTime={filters?.startTime ?? ''}
-                    endTime={filters?.endTime ?? ''}
-                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
               </>
             }
             sheet={({ closeSheet }) => (
@@ -1673,11 +1673,11 @@ function OrdersListPageImpl({
               valueClassName: deliveryRateColorClass(deliveryRate),
               title: 'Delivery Rate — delivered / confirmed',
             },
-            ...(enableFromCartStatusOption
+            ...(enableFromCartStatusOption && !searchParams.get('csCloserId') && cartAbandonmentCount != null
               ? [
                   {
                     label: 'Cart abandonment',
-                    value: cartAbandonmentCount ?? 0,
+                    value: cartAbandonmentCount,
                     valueClassName:
                       (cartAbandonmentCount ?? 0) > 0
                         ? 'text-amber-600 dark:text-amber-400'
@@ -2242,6 +2242,7 @@ function OrdersListPageImpl({
             total={total}
             scopeLabel="Sales orders"
             dailyCounts={dailyCounts}
+            collapseForCS
           />
         )
       ) : (

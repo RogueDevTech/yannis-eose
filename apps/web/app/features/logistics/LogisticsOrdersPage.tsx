@@ -616,6 +616,10 @@ function LogisticsOrdersPageImpl({
               desktop={
                 <>
                   <PageRefreshButton />
+                  <DateFilterBar
+                      startDate={filters.startDate}
+                      endDate={filters.endDate}
+                      periodAllTime={filters.periodAllTime} chrome="pill" />
                   <button
                     type="button"
                     className="btn-secondary btn-sm"
@@ -623,10 +627,6 @@ function LogisticsOrdersPageImpl({
                   >
                     {showChartView ? 'View as data' : 'View data in chart'}
                   </button>
-                  <DateFilterBar
-                      startDate={filters.startDate}
-                      endDate={filters.endDate}
-                      periodAllTime={filters.periodAllTime} chrome="pill" />
                 </>
               }
               filters={

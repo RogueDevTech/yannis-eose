@@ -765,7 +765,7 @@ export default function CSOrdersRoute() {
           // Delivered).
           excludeStatuses={
             isHoCSPlus
-              ? ['REMITTED']
+              ? ['REMITTED', 'DELETED']
               : userRole === 'CS_CLOSER'
                 ? ['REMITTED', 'DELETED', 'UNPROCESSED']
                 : ['REMITTED', 'DELETED']

@@ -72,7 +72,6 @@ const CS_SORT_MENU_OPTIONS: SortMenuOption[] = [
   { value: 'total', label: 'Total orders', description: 'Orders assigned to the closer.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
   { value: 'confirmed', label: 'Confirmed', description: 'Orders the closer confirmed.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
   { value: 'delivered', label: 'Delivered', description: 'Orders delivered.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
-  { value: 'cancelled', label: 'Cancelled', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
   { value: 'calls', label: 'Calls made', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
   { value: 'conf-rate', label: 'Confirmation rate', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
   { value: 'delivery-rate', label: 'Delivery rate', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
@@ -192,24 +191,29 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
               />
             </div>
           </div>
-          {leaderboard && (
-            <div className="grid grid-cols-3 gap-2">
-              <CSTeamCompactStat label="Total" value={leaderboard.ordersEngaged} valueClassName="text-brand-600 dark:text-brand-400" />
-              <CSTeamCompactStat label="Confirmed" value={leaderboard.ordersConfirmed} />
-              <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
-            </div>
-          )}
-          {leaderboard && (
-            <div className="grid grid-cols-3 gap-2">
-              <CSTeamCompactStat
-                label="Cancelled"
-                value={leaderboard.ordersCancelled}
-                valueClassName={leaderboard.ordersCancelled > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}
-              />
-              <CSTeamCompactStat label="Calls" value={leaderboard.callsMade} />
-              <CSTeamCompactStat label="Avg call" value={formatCallDuration(leaderboard.avgCallDurationSeconds)} />
-            </div>
-          )}
+          {leaderboard && (() => {
+            const pending = Math.max(0, leaderboard.ordersEngaged - leaderboard.ordersConfirmed);
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <CSTeamCompactStat label="Total" value={leaderboard.ordersEngaged} valueClassName="text-brand-600 dark:text-brand-400" />
+                  <CSTeamCompactStat
+                    label="Pending"
+                    value={pending}
+                    valueClassName={pending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <CSTeamCompactStat label="Confirmed" value={leaderboard.ordersConfirmed} />
+                  <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <CSTeamCompactStat label="Calls" value={leaderboard.callsMade} />
+                  <CSTeamCompactStat label="Avg call" value={formatCallDuration(leaderboard.avgCallDurationSeconds)} />
+                </div>
+              </>
+            );
+          })()}
           {leaderboard && (
             <div className="grid grid-cols-2 gap-2">
               <CSTeamCompactStat
@@ -402,6 +406,25 @@ export function CSTeamPage({
         },
       },
       {
+        key: 'pending',
+        header: 'Pending',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          if (!lb) return '\u2014';
+          // engaged = all orders assigned (DELETED excluded); confirmed = confirmed-or-beyond.
+          // Pending is the unworked-or-in-conversation backlog (UNPROCESSED + CS_ASSIGNED + CS_ENGAGED).
+          // Surfacing it here makes Total = Pending + Confirmed visible at a glance.
+          const pending = Math.max(0, lb.ordersEngaged - lb.ordersConfirmed);
+          return (
+            <span className={`text-sm font-medium tabular-nums ${pending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}`}>
+              {pending}
+            </span>
+          );
+        },
+      },
+      {
         key: 'confirmed',
         header: 'Confirmed',
         align: 'right',
@@ -426,21 +449,6 @@ export function CSTeamPage({
             <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersDelivered}</span>
           ) : (
             '\u2014'
-          );
-        },
-      },
-      {
-        key: 'cancelled',
-        header: 'Cancelled',
-        align: 'right',
-        nowrap: true,
-        render: (member) => {
-          const lb = member.leaderboardEntry;
-          if (!lb) return '\u2014';
-          return (
-            <span className={`text-sm font-medium tabular-nums ${lb.ordersCancelled > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
-              {lb.ordersCancelled}
-            </span>
           );
         },
       },
@@ -628,6 +636,12 @@ export function CSTeamPage({
               title: 'Total orders assigned to the team in this period',
             },
             {
+              label: 'Backlog (unworked)',
+              value: summary.totalPending.toString(),
+              valueClassName: summary.totalPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              title: 'Orders assigned to closers but not yet engaged or confirmed',
+            },
+            {
               label: 'Confirmed',
               value: summary.confirmedTotal.toString(),
               valueClassName: 'text-app-fg',
@@ -638,12 +652,6 @@ export function CSTeamPage({
               value: summary.deliveredTotal.toString(),
               valueClassName: 'text-success-600 dark:text-success-400',
               title: 'Total orders attributed to the team that were delivered',
-            },
-            {
-              label: 'Cancelled',
-              value: summary.cancelledTotal.toString(),
-              valueClassName: summary.cancelledTotal > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
-              title: 'Total orders cancelled/deleted in this period',
             },
             {
               label: 'Confirm rate',
@@ -668,12 +676,6 @@ export function CSTeamPage({
               value: formatCallDuration(summary.avgCallDuration),
               valueClassName: 'text-app-fg',
               title: 'Average call duration across the team',
-            },
-            {
-              label: 'Pending',
-              value: summary.totalPending.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'Open orders currently sitting in closer queues',
             },
           ]}
         />

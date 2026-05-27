@@ -2175,6 +2175,14 @@ export class OrdersService {
     return out;
   }
 
+  /**
+   * Stock-band threshold for the CS_CLOSER allocate dropdown — they're not
+   * allowed to see exact counts (CEO directive), but a coarse "Above 50 /
+   * Below 50" hint is enough for them to spot hubs that are running low
+   * before they assign.
+   */
+  private static readonly CS_STOCK_BAND_THRESHOLD = 50;
+
   async listAllocatableLocations(
     orderId: string,
     viewerRole?: string | null,
@@ -2193,6 +2201,16 @@ export class OrdersService {
       productName: string;
       needed: number;
       available: number;
+    }> | null;
+    /**
+     * Coarse stock-level hint for viewers who aren't allowed to see exact
+     * counts (CS_CLOSER). `null` for everyone else — they get exact numbers
+     * via `availabilityByProduct`. Band threshold lives in `CS_STOCK_BAND_THRESHOLD`.
+     */
+    stockBandByProduct: Array<{
+      productId: string;
+      productName: string;
+      band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
     }> | null;
   }>> {
     const [orderRow] = await this.db
@@ -2313,6 +2331,11 @@ export class OrdersService {
         needed: number;
         available: number;
       }> | null;
+      stockBandByProduct: Array<{
+        productId: string;
+        productName: string;
+        band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
+      }> | null;
     };
     const results: LocationResult[] = [];
     const productIds = [...needsByProduct.keys()];
@@ -2358,6 +2381,7 @@ export class OrdersService {
           eligible: false,
           reason: 'Dispatch locked at this location. Resolve stock reconciliations first.',
           availabilityByProduct: null,
+          stockBandByProduct: null,
         });
         continue;
       }
@@ -2391,6 +2415,19 @@ export class OrdersService {
         }
       }
 
+      // CS_CLOSER gets a coarse band per product instead of exact counts — enough
+      // signal to spot a hub that's running low, no precise leakage.
+      const stockBandByProduct = hideStockCounts
+        ? availabilityByProduct.map((p) => ({
+            productId: p.productId,
+            productName: p.productName,
+            band:
+              p.available >= OrdersService.CS_STOCK_BAND_THRESHOLD
+                ? ('ABOVE_THRESHOLD' as const)
+                : ('BELOW_THRESHOLD' as const),
+          }))
+        : null;
+
       results.push({
         id: location.id,
         name: location.name,
@@ -2401,6 +2438,7 @@ export class OrdersService {
         eligible: detailedReason == null,
         reason: hideStockCounts ? genericReason : detailedReason,
         availabilityByProduct: hideStockCounts ? null : availabilityByProduct,
+        stockBandByProduct,
       });
     }
 

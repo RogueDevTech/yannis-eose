@@ -1257,7 +1257,7 @@ export const ordersRouter = router({
             )
           : Promise.resolve(null),
         input.includeCartAbandonment
-          ? getCartService().getStats(branchId)
+          ? getCartService().getStats(branchId, input.countsStartDate, input.countsEndDate)
           : Promise.resolve(null),
       ]);
 

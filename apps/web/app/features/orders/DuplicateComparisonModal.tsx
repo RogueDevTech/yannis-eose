@@ -69,25 +69,24 @@ interface FieldRow {
 function CompareRow({ label, newValue, origValue, newStr, origStr }: FieldRow) {
   const isDiff =
     newStr != null && origStr != null && newStr !== origStr && newStr !== '—' && origStr !== '—';
-  const bg = isDiff ? 'bg-warning-50/60 dark:bg-warning-900/15' : '';
   return (
-    <div className={bg}>
+    <div className={isDiff ? 'bg-danger-100 dark:bg-danger-900/40 border-l-4 border-l-danger-500' : ''}>
       {/* Desktop */}
       <div className="hidden md:grid grid-cols-[140px_1fr_1fr] gap-x-3 px-3 py-2">
-        <dt className="text-xs font-medium text-app-fg-muted truncate self-center">{label}</dt>
-        <dd className="text-sm text-app-fg min-w-0 break-words">{newValue}</dd>
-        <dd className="text-sm text-app-fg min-w-0 break-words">{origValue}</dd>
+        <dt className={`text-xs font-medium truncate self-center ${isDiff ? 'text-danger-700 dark:text-danger-300 font-semibold' : 'text-app-fg-muted'}`}>{label} {isDiff && <span className="text-danger-500">≠</span>}</dt>
+        <dd className={`text-sm min-w-0 break-words ${isDiff ? 'text-danger-700 dark:text-danger-300 font-semibold' : 'text-app-fg'}`}>{newValue}</dd>
+        <dd className={`text-sm min-w-0 break-words ${isDiff ? 'text-danger-700 dark:text-danger-300 font-semibold' : 'text-app-fg'}`}>{origValue}</dd>
       </div>
       {/* Mobile: stacked — label, original, new */}
       <div className="md:hidden px-3 py-2.5 space-y-1">
-        <dt className="text-micro font-semibold text-app-fg-muted uppercase tracking-wider">{label}</dt>
+        <dt className={`text-micro font-semibold uppercase tracking-wider ${isDiff ? 'text-danger-700 dark:text-danger-300' : 'text-app-fg-muted'}`}>{label} {isDiff && <span className="text-danger-500">≠</span>}</dt>
         <dd className="flex items-start gap-2 text-sm text-app-fg min-w-0">
           <span className="inline-flex shrink-0 items-center rounded bg-brand-100 dark:bg-brand-900/30 px-1.5 py-0.5 text-micro font-bold text-brand-700 dark:text-brand-300">OLD</span>
-          <span className="min-w-0 break-words">{origValue}</span>
+          <span className={`min-w-0 break-words ${isDiff ? 'font-semibold' : ''}`}>{origValue}</span>
         </dd>
         <dd className="flex items-start gap-2 text-sm text-app-fg min-w-0">
-          <span className="inline-flex shrink-0 items-center rounded bg-warning-100 dark:bg-warning-900/40 px-1.5 py-0.5 text-micro font-bold text-warning-700 dark:text-warning-300">NEW</span>
-          <span className="min-w-0 break-words">{newValue}</span>
+          <span className="inline-flex shrink-0 items-center rounded bg-danger-100 dark:bg-danger-900/40 px-1.5 py-0.5 text-micro font-bold text-danger-700 dark:text-danger-300">NEW</span>
+          <span className={`min-w-0 break-words ${isDiff ? 'font-semibold' : ''}`}>{newValue}</span>
         </dd>
       </div>
     </div>

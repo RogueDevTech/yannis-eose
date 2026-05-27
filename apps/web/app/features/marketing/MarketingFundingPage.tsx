@@ -649,6 +649,18 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     const includeDateFilter = opts?.includeDateFilter !== false;
     return (
       <>
+        {showRefresh && (
+          <div className="flex w-full justify-center md:inline-flex md:w-auto">
+            <PageRefreshButton className="justify-center py-2 md:py-1" />
+          </div>
+        )}
+        {includeDateFilter && (
+          <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime}
+              triggerLayout={dateTriggerLayout} chrome="pill" />
+        )}
         {canRequestFunding && (
           <Button
             variant={canSendFunding ? 'secondary' : 'primary'}
@@ -674,18 +686,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           >
             + Send Funding
           </Button>
-        )}
-        {includeDateFilter && (
-          <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime}
-              triggerLayout={dateTriggerLayout} chrome="pill" />
-        )}
-        {showRefresh && (
-          <div className="flex w-full justify-center md:inline-flex md:w-auto">
-            <PageRefreshButton className="justify-center py-2 md:py-1" />
-          </div>
         )}
       </>
     );
