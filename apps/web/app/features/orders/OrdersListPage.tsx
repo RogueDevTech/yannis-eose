@@ -52,6 +52,7 @@ import {
 } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
@@ -225,6 +226,8 @@ export interface OrdersListPageProps {
    */
   excludeStatuses?: string[];
   searchFilter?: string;
+  sortBy?: string;
+  sortOrder?: string;
   filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   userRole?: string;
   /** Permission-driven (orders.bulkAssign) — controls the SmartPick toolbar visibility. */
@@ -337,6 +340,8 @@ function OrdersListPageImpl({
   statusFilter,
   excludeStatuses,
   searchFilter,
+  sortBy: sortByProp = 'createdAt',
+  sortOrder: sortOrderProp = 'desc',
   filters,
   userRole,
   canBulkPick = false,
@@ -660,20 +665,36 @@ function OrdersListPageImpl({
   // Pipeline statuses (excluding DELETED — it goes after CR/DR).
   // When REMITTED is excluded (CS/Marketing view), merge its count into DELIVERED
   // so the "Delivered" pill shows the combined total.
+  // Six-bucket collapse (CEO 2026-05-10): when the strip uses the default
+  // STATUS_OPTIONS set (no AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT pill), roll
+  // those sub-stages into the Confirmed pill — they're "post-confirmation, in
+  // flight" and the dashboard already counts them under Confirmed. Without the
+  // rollup an order in IN_TRANSIT inflates Total but isn't reflected in any pill,
+  // so the strip looks inconsistent (Total = pill-sum + sub-stage orphans).
   const remittedMergedIntoDelivered = excludeStatuses?.includes('REMITTED') ?? false;
   const PIPELINE_KEYS = STATUS_OPTIONS.filter(
     (s) => s !== 'ALL' && !excludeStatuses?.includes(s),
   );
-  const pipelineItems = PIPELINE_KEYS.map((status) => ({
-    label: STATUS_LABELS[status] ?? formatStatus(status),
-    value:
-      status === 'DELIVERED' && remittedMergedIntoDelivered
-        ? (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)
-        : statusCounts[status] ?? 0,
-    valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
-    active: selectedStatus === status,
-    onClick: () => handleStatusSelect(status),
-  }));
+  const CONFIRMED_SUBSTAGES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'] as const;
+  const confirmedAbsorbsSubstages = !PIPELINE_KEYS.some((s) =>
+    (CONFIRMED_SUBSTAGES as readonly string[]).includes(s),
+  );
+  const pipelineItems = PIPELINE_KEYS.map((status) => {
+    let value = statusCounts[status] ?? 0;
+    if (status === 'DELIVERED' && remittedMergedIntoDelivered) {
+      value += statusCounts['REMITTED'] ?? 0;
+    }
+    if (status === 'CONFIRMED' && confirmedAbsorbsSubstages) {
+      for (const sub of CONFIRMED_SUBSTAGES) value += statusCounts[sub] ?? 0;
+    }
+    return {
+      label: STATUS_LABELS[status] ?? formatStatus(status),
+      value,
+      valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+      active: selectedStatus === status,
+      onClick: () => handleStatusSelect(status),
+    };
+  });
   // Deleted item — placed after rates for logical grouping.
   const deletedItem = !excludeStatuses?.includes('DELETED')
     ? {
@@ -1313,6 +1334,17 @@ function OrdersListPageImpl({
     campaignFilter,
   ]);
 
+  const totalActiveFilterCount = useMemo(() => {
+    let n = ordersListToolbarFilterBadge;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('period') === 'all_time') n += 1;
+    else if (searchParams.get('startDate') || searchParams.get('endDate')) n += 1;
+    if (searchParams.get('sortBy') && searchParams.get('sortBy') !== 'createdAt') n += 1;
+    if (searchParams.get('fromCart') === '1') n += 1;
+    if (searchParams.get('testOrders') === '1') n += 1;
+    return n;
+  }, [ordersListToolbarFilterBadge, searchParams]);
+
   // `boxed` → the mobile tools-sheet variant: same boxed/centered/grey chrome
   // as the other sheet filters. Plain inline layout for the desktop filter row.
   function renderScheduleFilter(boxed: boolean) {
@@ -1510,9 +1542,18 @@ function OrdersListPageImpl({
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
                 <PageRefreshButton />
-                {!isCartAbandonmentView && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
-                    {showChartView ? 'View as data' : 'View data in chart'}
+                <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    startTime={filters?.startTime ?? ''}
+                    endTime={filters?.endTime ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                {canExport && (
+                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Generate report
                   </Button>
                 )}
                 {canCreateOffline && (
@@ -1521,42 +1562,27 @@ function OrdersListPageImpl({
                     <span className="sm:hidden">+ Order</span>
                   </Button>
                 )}
-                {canExport && (
-                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                    Generate report
-                  </Button>
-                )}
                 {isTestOrdersView && (
                   <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
                     Delete all test orders
                   </Button>
                 )}
-                {!isCartAbandonmentView && (
-                  <DateFilterBar
-                      startDate={filters?.startDate ?? ''}
-                      endDate={filters?.endDate ?? ''}
-                      startTime={filters?.startTime ?? ''}
-                      endTime={filters?.endTime ?? ''}
-                      periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                )}
               </>
             }
             sheet={({ closeSheet }) => (
               <>
-                {!isCartAbandonmentView && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      setShowChartView((v) => !v);
-                    }}
-                  >
-                    {showChartView ? 'View as data' : 'View data in chart'}
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
                 {canCreateOffline && (
                   <Button
                     variant="secondary"
@@ -1617,15 +1643,13 @@ function OrdersListPageImpl({
         }
       />
 
-      {!isCartAbandonmentView && (
-        <MobileDateFilterRow
-          startDate={filters?.startDate ?? ''}
-          endDate={filters?.endDate ?? ''}
-          startTime={filters?.startTime ?? ''}
-          endTime={filters?.endTime ?? ''}
-          periodAllTime={filters?.periodAllTime ?? false}
-        />
-      )}
+      <MobileDateFilterRow
+        startDate={filters?.startDate ?? ''}
+        endDate={filters?.endDate ?? ''}
+        startTime={filters?.startTime ?? ''}
+        endTime={filters?.endTime ?? ''}
+        periodAllTime={filters?.periodAllTime ?? false}
+      />
 
       {/* Status totals — moved above My Workload so the funnel snapshot reads first.
           For HoCS+ the strip leads with a "Cart abandonment" KPI (open un-recovered
@@ -1665,11 +1689,11 @@ function OrdersListPageImpl({
               valueClassName: deliveryRateColorClass(deliveryRate),
               title: 'Delivery Rate — delivered / confirmed',
             },
-            ...(enableFromCartStatusOption
+            ...(enableFromCartStatusOption && !searchParams.get('csCloserId') && cartAbandonmentCount != null
               ? [
                   {
                     label: 'Cart abandonment',
-                    value: cartAbandonmentCount ?? 0,
+                    value: cartAbandonmentCount,
                     valueClassName:
                       (cartAbandonmentCount ?? 0) > 0
                         ? 'text-amber-600 dark:text-amber-400'
@@ -2070,12 +2094,38 @@ function OrdersListPageImpl({
                     searchPlaceholder="Search forms..."
                   />
                 ) : null}
+                <FormSelect
+                  value={`${sortByProp}:${sortOrderProp}`}
+                  onChange={(e) => {
+                    const [newSortBy, newSortOrder] = e.target.value.split(':');
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                      else next.delete('sortBy');
+                      if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                      else next.delete('sortOrder');
+                      return next;
+                    });
+                  }}
+                  options={[
+                    { value: 'createdAt:desc', label: 'Newest first' },
+                    { value: 'createdAt:asc', label: 'Oldest first' },
+                    { value: 'totalAmount:desc', label: 'Highest amount' },
+                    { value: 'totalAmount:asc', label: 'Lowest amount' },
+                    { value: 'updatedAt:desc', label: 'Recently updated' },
+                    { value: 'status:asc', label: 'Status A–Z' },
+                    { value: 'status:desc', label: 'Status Z–A' },
+                  ]}
+                  wrapperClassName="w-full min-w-0 sm:w-44"
+                />
               </div>
             </div>
           }
           desktopInlineFilters={renderScheduleFilter(false)}
           sheetFilterBody={null}
         />
+        <ClearFiltersButton count={totalActiveFilterCount} preserve={['perPage']} className="mt-2" />
       </div>
 
       {/* Smart pick + deep-select. Desktop: inline card under the filters.
@@ -2234,6 +2284,7 @@ function OrdersListPageImpl({
             total={total}
             scopeLabel="Sales orders"
             dailyCounts={dailyCounts}
+            collapseForCS
           />
         )
       ) : (

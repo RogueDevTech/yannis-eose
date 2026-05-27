@@ -196,6 +196,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         needed: number;
         available: number;
       }> | null;
+      stockBandByProduct: Array<{
+        productId: string;
+        productName: string;
+        band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
+      }> | null;
     }>
   > = apiRequest<unknown>(
     `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
@@ -223,6 +228,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               needed: number;
               available: number;
             }> | null;
+            stockBandByProduct?: Array<{
+              productId: string;
+              productName: string;
+              band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
+            }> | null;
           }>;
         };
       };
@@ -230,6 +240,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         ...loc,
         providerName: loc.providerName ?? null,
         providerKind: loc.providerKind ?? null,
+        stockBandByProduct: loc.stockBandByProduct ?? null,
       }));
     })
     .catch((err) => {

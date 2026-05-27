@@ -34,6 +34,33 @@ import { EmptyState } from './empty-state';
  * pipeline funnel and the order status badges everywhere else.
  */
 
+/**
+ * Collapse map: merge logistics sub-stages and REMITTED into the six CS buckets.
+ * When `collapseForCS` is true, the chart shows the same buckets as the stat strip:
+ * Unassigned, Assigned, Unconfirmed, Confirmed (includes AGENT_ASSIGNED/DISPATCHED/IN_TRANSIT),
+ * Delivered (includes REMITTED). DELETED excluded.
+ */
+const CS_COLLAPSE: Record<string, string> = {
+  AGENT_ASSIGNED: 'CONFIRMED',
+  DISPATCHED: 'CONFIRMED',
+  IN_TRANSIT: 'CONFIRMED',
+  REMITTED: 'DELIVERED',
+  PARTIALLY_DELIVERED: 'DELIVERED',
+  RETURNED: 'CONFIRMED',
+  RESTOCKED: 'CONFIRMED',
+  WRITTEN_OFF: 'CONFIRMED',
+};
+
+function collapseStatusCounts(raw: Record<string, number>, exclude: string[] = []): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [status, count] of Object.entries(raw)) {
+    if (exclude.includes(status)) continue;
+    const target = CS_COLLAPSE[status] ?? status;
+    result[target] = (result[target] ?? 0) + count;
+  }
+  return result;
+}
+
 interface OrdersChartViewProps {
   /** Full-filter-range count per status. NOT paginated — covers the entire date / branch / search scope. */
   statusCounts: Record<string, number>;
@@ -47,6 +74,11 @@ interface OrdersChartViewProps {
    * shows an empty state.
    */
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+  /**
+   * When true, collapse logistics sub-stages into the six CS buckets
+   * (matching the stat strip) and exclude DELETED/CANCELLED from charts.
+   */
+  collapseForCS?: boolean;
 }
 
 /** Render children only after first client paint — Recharts complains about 0×0 dims during SSR. */
@@ -59,11 +91,15 @@ function ClientOnly({ children, fallback }: { children: ReactNode; fallback?: Re
 const CREATED_SERIES_LABEL = 'Orders (created)';
 const DELIVERED_SERIES_LABEL = 'Delivered';
 
-export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', dailyCounts = [] }: OrdersChartViewProps) {
+export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', dailyCounts = [], collapseForCS = false }: OrdersChartViewProps) {
   const chartUid = useId().replace(/:/g, '');
   const deliveredStroke = STATUS_HEX.DELIVERED;
 
-  const data = Object.entries(statusCounts)
+  const chartCounts = collapseForCS
+    ? collapseStatusCounts(statusCounts, ['DELETED', 'CANCELLED'])
+    : statusCounts;
+
+  const data = Object.entries(chartCounts)
     .filter(([, n]) => n > 0)
     .map(([status, n]) => ({
       status,
@@ -215,7 +251,7 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
       </div>
 
       <div className="card">
-        <h3 className="text-sm font-semibold text-app-fg mb-3">Ranked by count</h3>
+        <h3 className="text-sm font-semibold text-app-fg mb-3">{scopeLabel} ranked by volume</h3>
         <ClientOnly fallback={skeleton}>
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>

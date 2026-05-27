@@ -38,6 +38,7 @@ import type { Order } from '~/features/orders/types';
 import type { PendingCart } from '~/features/cs/types';
 import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import { orderDetailHref } from '~/lib/order-detail-return';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { DeferredError } from '~/components/ui/deferred-section';
 import {
   OrdersChartViewShellSkeleton,
@@ -105,6 +106,8 @@ interface MarketingOrdersPageProps {
   secondary: Promise<MarketingOrdersSecondaryPayload>;
   statusFilter?: string;
   searchFilter?: string;
+  sortBy?: string;
+  sortOrder?: string;
   isMediaBuyer: boolean;
   /** True when the viewer is a marketing-team supervisor. */
   isMarketingSupervisor?: boolean;
@@ -151,6 +154,8 @@ export function MarketingOrdersPage({
   secondary,
   statusFilter,
   searchFilter,
+  sortBy: sortByProp = 'createdAt',
+  sortOrder: sortOrderProp = 'desc',
   isMediaBuyer,
   isMarketingSupervisor = false,
   showMediaBuyerColumn = false,
@@ -297,6 +302,23 @@ export function MarketingOrdersPage({
     return n;
   }, [selectedStatus, showMediaBuyerColumn, searchParams]);
 
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('fromCart') === '1') n += 1;
+    if (searchParams.get('testOrders') === '1') n += 1;
+    if (searchParams.get('mediaBuyerId')) n += 1;
+    if (searchParams.get('productId')) n += 1;
+    if (searchParams.get('campaignId')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    const sb = searchParams.get('sortBy');
+    const so = searchParams.get('sortOrder');
+    if (sb && sb !== 'createdAt') n += 1;
+    else if (so && so !== 'desc') n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
+
   const marketingOrderColumns: CompactTableColumn<Order>[] = useMemo(() => {
     const cols: CompactTableColumn<Order>[] = [
       {
@@ -365,17 +387,6 @@ export function MarketingOrdersPage({
                 <span className="text-app-fg-muted">—</span>
               );
             },
-      },
-      {
-        key: 'campaign',
-        header: 'Form',
-        render: showSkeletonRows
-          ? () => <TableCellTextPulse className="w-[8rem]" />
-          : (order) => (
-              <span className="text-sm text-app-fg-muted truncate">
-                {order.campaignName?.trim() ? order.campaignName : '—'}
-              </span>
-            ),
       },
       {
         key: 'amount',
@@ -1058,6 +1069,29 @@ export function MarketingOrdersPage({
                           searchPlaceholder="Search forms…"
                         />
                       ) : null}
+                      <FormSelect
+                        value={`${sortByProp}:${sortOrderProp}`}
+                        onChange={(e) => {
+                          const [newSortBy, newSortOrder] = e.target.value.split(':');
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                            else next.delete('sortBy');
+                            if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                            else next.delete('sortOrder');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'createdAt:desc', label: 'Newest first' },
+                          { value: 'createdAt:asc', label: 'Oldest first' },
+                          { value: 'totalAmount:desc', label: 'Highest amount' },
+                          { value: 'totalAmount:asc', label: 'Lowest amount' },
+                          { value: 'updatedAt:desc', label: 'Recently updated' },
+                        ]}
+                        wrapperClassName="w-full min-w-0 sm:w-44"
+                      />
                     </>
                   }
                   sheetFilterBody={null}
@@ -1067,6 +1101,8 @@ export function MarketingOrdersPage({
           }}
         </Await>
       </Suspense>
+
+      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {showChartView ? (
         showSkeletonRows ? (
@@ -1082,6 +1118,7 @@ export function MarketingOrdersPage({
                     total={ordersInPeriodTotal}
                     scopeLabel="Marketing orders"
                     dailyCounts={ins.dailyCounts}
+                    collapseForCS
                   />
                 );
               }}

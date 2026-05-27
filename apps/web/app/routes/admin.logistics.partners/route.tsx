@@ -49,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? (locationsRes.data as { result?: { data?: { locations: Location[]; pagination: { total: number } } } })?.result?.data
       : null;
 
-    let globalLowStockThreshold = 10;
+    let globalLowStockThreshold = 100;
     if (settingsRes.ok) {
       const rows =
         (settingsRes.data as { result?: { data?: Array<{ key: string; value: unknown }> } })?.result

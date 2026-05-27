@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNo
 import { useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { Button } from '~/components/ui/button';
-import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -1194,34 +1193,85 @@ export function MarketingLeaderboardLoadingShell({
   );
 }
 
-/** Cross-funnel — PageHeader + DateFilterBar; stats + table pulse (secondary still streams inside page). */
+/** Cross-funnel — mirrors `MarketingCrossFunnelPage`'s layout exactly: PageHeader +
+ *  DateFilterBar, 5-tile stats strip, search + (optional MB) + product + form filters,
+ *  and the 8-column attempts table. Keeping these in sync avoids layout shift when
+ *  `listData` resolves. */
 export function MarketingCrossFunnelLoadingShell({
   filters,
+  showMbFilter,
 }: {
-  filters: { startDate: string; endDate: string; periodAllTime: boolean; productId: string };
+  filters: {
+    startDate: string;
+    endDate: string;
+    periodAllTime: boolean;
+    productId: string;
+    campaignId: string;
+    mediaBuyerId: string;
+    search: string;
+  };
+  showMbFilter: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const productIdParam = searchParams.get('productId') || filters.productId || 'ALL';
+  const campaignIdParam = searchParams.get('campaignId') || filters.campaignId || 'ALL';
+  const mediaBuyerIdParam = searchParams.get('mediaBuyerId') || filters.mediaBuyerId || 'ALL';
+  const searchValue = searchParams.get('search') ?? filters.search ?? '';
+  const [searchDraft, setSearchDraft] = useState(searchValue);
 
-  const productOptions = useMemo(() => {
-    const base: { value: string; label: string }[] = [{ value: 'ALL', label: 'All products' }];
-    if (productIdParam !== 'ALL') {
-      base.push({ value: productIdParam, label: 'Selected product' });
-    }
+  // Echo the URL into the input so jumping between deferred and resolved
+  // states doesn't blank the closer's typed query.
+  useEffect(() => {
+    setSearchDraft(searchValue);
+  }, [searchValue]);
+
+  const placeholderOptions = (selected: string, allLabel: string, selectedLabel: string) => {
+    const base: { value: string; label: string }[] = [{ value: 'ALL', label: allLabel }];
+    if (selected !== 'ALL') base.push({ value: selected, label: selectedLabel });
     return base;
-  }, [productIdParam]);
+  };
 
-  const setProductId = (v: string) => {
+  const productOptions = useMemo(
+    () => placeholderOptions(productIdParam, 'All products', 'Selected product'),
+    [productIdParam],
+  );
+  const campaignOptions = useMemo(
+    () => placeholderOptions(campaignIdParam, 'All forms', 'Selected form'),
+    [campaignIdParam],
+  );
+  const mediaBuyerOptions = useMemo(
+    () => placeholderOptions(mediaBuyerIdParam, 'All media buyers', 'Selected buyer'),
+    [mediaBuyerIdParam],
+  );
+
+  const setParam = (key: string, value: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
-      if (!v || v === 'ALL') next.delete('productId');
-      else next.set('productId', v);
+      if (!value || value === 'ALL') next.delete(key);
+      else next.set(key, value);
       return next;
     });
   };
 
-  const productDisabled = productOptions.length <= 1;
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      const trimmed = searchDraft.trim();
+      if (trimmed) next.set('search', trimmed);
+      else next.delete('search');
+      next.set('page', '1');
+      return next;
+    });
+  };
+
+  const filterBadgeCount =
+    (mediaBuyerIdParam !== 'ALL' ? 1 : 0) +
+    (productIdParam !== 'ALL' ? 1 : 0) +
+    (campaignIdParam !== 'ALL' ? 1 : 0) +
+    (searchValue ? 1 : 0);
+
   const crossFunnelCols = useMemo(() => crossFunnelLoadingShellTableColumns(), []);
 
   return (
@@ -1232,9 +1282,9 @@ export function MarketingCrossFunnelLoadingShell({
         description="All duplicate order submissions across your funnels."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Cross-funnel tools"
-            sheetSubtitle={<span>Date range and refresh</span>}
-            triggerAriaLabel="Cross-funnel toolbar and date range"
+            sheetTitle="Duplicate tools"
+            sheetSubtitle={<span>Filters and refresh</span>}
+            triggerAriaLabel="Duplicate attempts toolbar"
             desktop={
               <>
                 <PageRefreshButton />
@@ -1254,93 +1304,94 @@ export function MarketingCrossFunnelLoadingShell({
         periodAllTime={filters.periodAllTime}
       />
 
+      {/* Mirrors the 5-tile stats strip the page renders inside its Suspense fallback. */}
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Attempts', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Resubmissions', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Same MB', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Cross-funnel', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Unique customers', value: <StatValuePulse className="min-w-[2rem]" /> },
-          {
-            label: 'Top product',
-            value: <StatValuePulse className="min-w-[10rem] max-w-[14rem]" />,
-            plainValue: true,
-          },
         ]}
       />
 
-      <Card>
-        <CardHeader title="By product" />
-        <CardBody>
-          <ul className="divide-y divide-app-border">
-            {[1, 2, 3, 4].map((i) => (
-              <li key={i} className="flex items-center justify-between gap-4 py-2">
-                <TableCellTextPulse className="min-w-0 flex-1 max-w-[14rem]" />
-                <TableCellTextPulse className="w-8 shrink-0" />
-              </li>
-            ))}
-          </ul>
-        </CardBody>
-      </Card>
-
       <ToolbarFiltersCollapsible
-        badgeCount={productIdParam !== 'ALL' ? 1 : 0}
-        sheetSubtitle={<span>Product filter applies immediately</span>}
-        searchRow={null}
-        desktopInlineFilters={
-          <SearchableSelect
-            id="cross-funnel-shell-product"
-            value={productIdParam}
-            onChange={setProductId}
-            options={productOptions}
-            disabled={productDisabled}
-            wrapperClassName="w-full min-w-0 sm:w-80"
-            placeholder="All products"
-            searchPlaceholder="Search products…"
-          />
+        hideMobileSheet
+        badgeCount={filterBadgeCount}
+        searchRow={
+          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
+            <SearchInput
+              placeholder="Search by name, phone, or product..."
+              value={searchDraft}
+              onChange={(val) => setSearchDraft(val)}
+              withSubmitButton
+              wrapperClassName="min-w-0 flex-1"
+            />
+          </form>
         }
-        sheetFilterBody={
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-app-fg-muted">Product</span>
+        desktopInlineFilters={
+          <>
+            {showMbFilter ? (
+              <SearchableSelect
+                id="cross-funnel-shell-buyer"
+                value={mediaBuyerIdParam}
+                onChange={(v) => setParam('mediaBuyerId', v)}
+                options={mediaBuyerOptions}
+                disabled={mediaBuyerOptions.length <= 1}
+                wrapperClassName="w-full min-w-0 sm:w-56"
+                placeholder="All media buyers"
+                searchPlaceholder="Search buyers…"
+              />
+            ) : null}
             <SearchableSelect
-              id="cross-funnel-shell-product-sheet"
+              id="cross-funnel-shell-product"
               value={productIdParam}
-              onChange={setProductId}
+              onChange={(v) => setParam('productId', v)}
               options={productOptions}
-              disabled={productDisabled}
-              wrapperClassName="w-full"
+              disabled={productOptions.length <= 1}
+              wrapperClassName="w-full min-w-0 sm:w-48"
               placeholder="All products"
               searchPlaceholder="Search products…"
             />
-          </div>
+            <SearchableSelect
+              id="cross-funnel-shell-form"
+              value={campaignIdParam}
+              onChange={(v) => setParam('campaignId', v)}
+              options={campaignOptions}
+              disabled={campaignOptions.length <= 1}
+              wrapperClassName="w-full min-w-0 sm:w-48"
+              placeholder="All forms"
+              searchPlaceholder="Search forms…"
+            />
+          </>
         }
+        sheetFilterBody={null}
       />
 
-      <Card>
-        <CardHeader title="Attempts" />
-        <CardBody className="p-0">
-          <CompactTable<{ id: string }>
-            withCard={false}
-            columns={crossFunnelCols}
-            rows={CROSS_FUNNEL_SHELL_ROW_DATA}
-            rowKey={(row) => row.id}
-            renderMobileCard={() => <CrossFunnelMobileCardPulse />}
-            emptyTitle="No cross-funnel attempts in this range"
-            emptyDescription="Try widening the date range or clearing the product filter"
+      <CompactTable<{ id: string }>
+        columns={crossFunnelCols}
+        rows={CROSS_FUNNEL_SHELL_ROW_DATA}
+        rowKey={(row) => row.id}
+        renderMobileCard={() => <CrossFunnelMobileCardPulse />}
+        emptyTitle="No duplicate attempts"
+        emptyDescription="When a customer submits an order for a product they've already ordered within the last 7 days, it appears here."
+      />
+
+      {/* Pagination placeholder — matches the page's "Showing N of M" + page buttons. */}
+      <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
+          <span
+            className="inline-block h-4 w-48 max-w-[90vw] animate-pulse rounded-md bg-app-border/75 dark:bg-app-border/60 sm:w-64"
+            aria-hidden
           />
-          <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
-              <span
-                className="inline-block h-4 w-48 max-w-[90vw] animate-pulse rounded-md bg-app-border/75 dark:bg-app-border/60 sm:w-64"
-                aria-hidden
-              />
-            </p>
-            <div className="flex shrink-0 items-center gap-2" aria-hidden>
-              <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-              <span className="inline-block h-8 w-28 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-              <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-            </div>
-          </div>
-        </CardBody>
-      </Card>
+        </p>
+        <div className="flex shrink-0 items-center gap-2" aria-hidden>
+          <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+          <span className="inline-block h-8 w-28 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+          <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+        </div>
+      </div>
     </div>
   );
 }

@@ -614,12 +614,18 @@ export const marketingRouter = router({
           startDate: input.startDate,
           endDate: input.endDate,
         });
+        // CS_CLOSER self-query: the closer's orders list ignores the marketing
+        // branch — they see every order assigned to them across branches. The
+        // metrics must mirror that or the dashboard reports fewer Delivered /
+        // Confirmed than the list shows (see project_closer_self_query_branch_parity).
+        // `assignedCsId = me` is already an exact ownership scope, so dropping
+        // the branch AND here yields the same row set as the list.
         return getMarketingService().getPerformanceMetrics(
           narrowed.mediaBuyerId,
           input.startDate && input.endDate ? 'this_month' : 'all_time',
           input.startDate,
           input.endDate,
-          ctx.currentBranchId,
+          null,
           narrowed.assignedCsId,
           narrowed.supervisorScope,
         );
@@ -1073,8 +1079,8 @@ export const marketingRouter = router({
           null, // Forms are global — never branch-scoped
         ),
         // Open abandoned-cart count for the overview strip — scoped to the same
-        // media buyer / branch the rest of the bundle uses.
-        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId }),
+        // media buyer / branch / date range the rest of the bundle uses.
+        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId, startDate, endDate }),
       ]);
 
       // Slim the picklist payloads down to what the page actually uses (id + name)

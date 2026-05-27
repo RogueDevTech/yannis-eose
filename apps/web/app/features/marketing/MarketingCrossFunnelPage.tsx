@@ -11,6 +11,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import {
   CompactTable,
@@ -168,6 +169,17 @@ export function MarketingCrossFunnelPage({
     (searchParams.get('productId') ? 1 : 0) +
     (searchParams.get('campaignId') ? 1 : 0) +
     (searchQuery ? 1 : 0);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('productId')) n += 1;
+    if (searchParams.get('mediaBuyerId')) n += 1;
+    if (searchParams.get('campaignId')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('duplicateType')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = useMemo(() => [
     {
@@ -413,6 +425,7 @@ export function MarketingCrossFunnelPage({
         }
         sheetFilterBody={null}
       />
+      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {/* Table */}
       <CompactTable<CrossFunnelAttemptRow>
@@ -546,7 +559,14 @@ function DuplicateCompareOverlay({
             Duplicate Comparison
           </h2>
           <p className="text-xs mt-0.5 text-warning-700 dark:text-warning-400">
-            Same phone + product within 7 days — duplicate submission blocked
+            {(() => {
+              const kind = getDuplicateKind(row);
+              switch (kind) {
+                case 'resubmission': return 'Repeat submission — same customer, same form';
+                case 'same-mb': return 'Same customer ordered through another form by the same Media Buyer';
+                case 'cross-funnel': return 'Same customer already ordered through a different Media Buyer';
+              }
+            })()}
           </p>
         </div>
         <button
@@ -645,7 +665,17 @@ function DuplicateCompareOverlay({
         <div className="px-5 py-4 space-y-3">
           <InlineNotification
             variant="info"
-            message="This submission was blocked because the same customer already ordered this product within the last 7 days. Only one order per customer per product per week is allowed."
+            message={(() => {
+              const kind = getDuplicateKind(row);
+              switch (kind) {
+                case 'resubmission':
+                  return 'Same customer re-submitted the same form. This is a repeat submission — the customer likely clicked submit more than once or revisited the form.';
+                case 'same-mb':
+                  return 'Same customer ordered the same product through a different form by the same Media Buyer. Only one order per customer per product per week is allowed.';
+                case 'cross-funnel':
+                  return 'Same customer already ordered this product through a different Media Buyer\'s form. The original order takes priority — duplicate was blocked to prevent double-selling.';
+              }
+            })()}
           />
 
           {row.originalOrderId && (

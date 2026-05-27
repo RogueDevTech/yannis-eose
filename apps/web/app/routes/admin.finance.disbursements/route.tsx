@@ -158,7 +158,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
     : null;
 
-  const recipientBalancesAll = bundle?.balances ?? [];
+  const recipientBalancesAll = (bundle?.balances ?? []).filter(
+    // Only show people who have actually received funding from Finance.
+    (b) => Number(b.totalReceived) > 0,
+  );
   const filteredRecipientBalancesAll = recipientBalancesAll.filter((b) => {
     const roleMatch = !balancesRole || balancesRole === 'ALL' || b.role === balancesRole;
     const searchMatch = !balancesSearch || b.name.toLowerCase().includes(balancesSearch.toLowerCase());

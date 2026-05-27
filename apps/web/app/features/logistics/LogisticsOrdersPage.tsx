@@ -19,6 +19,7 @@ import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-return';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
@@ -362,6 +363,15 @@ function LogisticsOrdersPageImpl({
     [selectedStatus],
   );
 
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('csCloserId')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
+
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
   const allocatedOrders = displayOrders.filter((o) => o.status === 'AGENT_ASSIGNED');
   const selectedOrders = displayOrders.filter((o) => selectedIds.has(o.id));
@@ -616,6 +626,10 @@ function LogisticsOrdersPageImpl({
               desktop={
                 <>
                   <PageRefreshButton />
+                  <DateFilterBar
+                      startDate={filters.startDate}
+                      endDate={filters.endDate}
+                      periodAllTime={filters.periodAllTime} chrome="pill" />
                   <button
                     type="button"
                     className="btn-secondary btn-sm"
@@ -623,10 +637,6 @@ function LogisticsOrdersPageImpl({
                   >
                     {showChartView ? 'View as data' : 'View data in chart'}
                   </button>
-                  <DateFilterBar
-                      startDate={filters.startDate}
-                      endDate={filters.endDate}
-                      periodAllTime={filters.periodAllTime} chrome="pill" />
                 </>
               }
               filters={
@@ -885,6 +895,7 @@ function LogisticsOrdersPageImpl({
           desktopInlineFilters={null}
           sheetFilterBody={null}
         />
+      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {showChartView ? (
         deferredLoading ? (

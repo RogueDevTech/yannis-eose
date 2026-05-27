@@ -13,6 +13,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
@@ -21,6 +22,7 @@ import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SortMenu, type SortMenuOption, type SortMenuValue } from '~/components/ui/sort-menu';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import {
@@ -67,21 +69,17 @@ const CS_BACKLOG_OPTIONS = [
   { value: 'NO_PENDING', label: 'No pending' },
 ];
 
-const CS_SORT_OPTIONS = [
-  { value: 'total-desc', label: 'Sort: Total orders (high)' },
-  { value: 'total-asc', label: 'Sort: Total orders (low)' },
-  { value: 'confirmed-desc', label: 'Sort: Confirmed (high)' },
-  { value: 'delivered-desc', label: 'Sort: Delivered (high)' },
-  { value: 'cancelled-desc', label: 'Sort: Cancelled (high)' },
-  { value: 'calls-desc', label: 'Sort: Calls (high)' },
-  { value: 'conf-rate-desc', label: 'Sort: Conf. rate (high)' },
-  { value: 'conf-rate-asc', label: 'Sort: Conf. rate (low)' },
-  { value: 'delivery-rate-desc', label: 'Sort: Delivery rate (high)' },
-  { value: 'delivery-rate-asc', label: 'Sort: Delivery rate (low)' },
-  { value: 'backlog-desc', label: 'Sort: Backlog (high)' },
-  { value: 'backlog-asc', label: 'Sort: Backlog (low)' },
-  { value: 'name', label: 'Sort: Name (A-Z)' },
+const CS_SORT_MENU_OPTIONS: SortMenuOption[] = [
+  { value: 'total', label: 'Total orders', description: 'Orders assigned to the closer.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'confirmed', label: 'Confirmed', description: 'Orders the closer confirmed.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'delivered', label: 'Delivered', description: 'Orders delivered.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'calls', label: 'Calls made', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
+  { value: 'conf-rate', label: 'Confirmation rate', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'delivery-rate', label: 'Delivery rate', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'backlog', label: 'Backlog', description: 'Pending orders in queue.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+  { value: 'name', label: 'Name', defaultDir: 'asc', ascLabel: 'A → Z', descLabel: 'Z → A' },
 ];
+const CS_SORT_DEFAULT: SortMenuValue = { sortBy: 'total', sortDir: 'desc' };
 
 function formatLastActive(lastActionAt: string | null): string {
   if (!lastActionAt) return '—';
@@ -194,24 +192,29 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
               />
             </div>
           </div>
-          {leaderboard && (
-            <div className="grid grid-cols-3 gap-2">
-              <CSTeamCompactStat label="Total" value={leaderboard.ordersEngaged} valueClassName="text-brand-600 dark:text-brand-400" />
-              <CSTeamCompactStat label="Confirmed" value={leaderboard.ordersConfirmed} />
-              <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
-            </div>
-          )}
-          {leaderboard && (
-            <div className="grid grid-cols-3 gap-2">
-              <CSTeamCompactStat
-                label="Cancelled"
-                value={leaderboard.ordersCancelled}
-                valueClassName={leaderboard.ordersCancelled > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}
-              />
-              <CSTeamCompactStat label="Calls" value={leaderboard.callsMade} />
-              <CSTeamCompactStat label="Avg call" value={formatCallDuration(leaderboard.avgCallDurationSeconds)} />
-            </div>
-          )}
+          {leaderboard && (() => {
+            const pending = Math.max(0, leaderboard.ordersEngaged - leaderboard.ordersConfirmed);
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <CSTeamCompactStat label="Total" value={leaderboard.ordersEngaged} valueClassName="text-brand-600 dark:text-brand-400" />
+                  <CSTeamCompactStat
+                    label="Pending"
+                    value={pending}
+                    valueClassName={pending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <CSTeamCompactStat label="Confirmed" value={leaderboard.ordersConfirmed} />
+                  <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <CSTeamCompactStat label="Calls" value={leaderboard.callsMade} />
+                  <CSTeamCompactStat label="Avg call" value={formatCallDuration(leaderboard.avgCallDurationSeconds)} />
+                </div>
+              </>
+            );
+          })()}
           {leaderboard && (
             <div className="grid grid-cols-2 gap-2">
               <CSTeamCompactStat
@@ -259,6 +262,15 @@ export function CSTeamPage({
   sort = 'total-desc',
   dateFilters,
 }: CSTeamPageProps) {
+  // Parse flat sort string (e.g. "total-desc") into SortMenu value
+  const sortMenuValue = useMemo((): SortMenuValue => {
+    if (sort === 'name') return { sortBy: 'name', sortDir: 'asc' };
+    const lastDash = sort.lastIndexOf('-');
+    if (lastDash === -1) return CS_SORT_DEFAULT;
+    const sortBy = sort.substring(0, lastDash);
+    const sortDir = sort.substring(lastDash + 1) as 'asc' | 'desc';
+    return { sortBy, sortDir: sortDir === 'asc' || sortDir === 'desc' ? sortDir : 'desc' };
+  }, [sort]);
   const [showExportModal, setShowExportModal] = useState(false);
   const [peekMember, setPeekMember] = useState<CSTeamMemberOverview | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -310,6 +322,11 @@ export function CSTeamPage({
     mergeListParams({ q: searchQuery, page: 1 });
   };
 
+  const handleSortChange = (next: SortMenuValue) => {
+    const flat = next.sortBy === 'name' && next.sortDir === 'asc' ? 'name' : `${next.sortBy}-${next.sortDir}`;
+    mergeListParams({ sort: flat, page: 1 });
+  };
+
   /** Mirrors `mergeListParams` but returns a `?query` string for `<Link to>`. */
   const buildListQuery = (overrides: { activity?: string; backlog?: string; page?: number }) => {
     const params = new URLSearchParams(searchParams);
@@ -336,6 +353,16 @@ export function CSTeamPage({
     if (sort !== 'total-desc') count += 1;
     return count;
   }, [activityFilter, backlogFilter, sort]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('q')) n += 1;
+    if (searchParams.get('activity')) n += 1;
+    if (searchParams.get('backlog')) n += 1;
+    if (searchParams.get('sort')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const showFilteredEmpty = unfilteredCount > 0 && totalCount === 0;
   const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL';
@@ -390,6 +417,25 @@ export function CSTeamPage({
         },
       },
       {
+        key: 'pending',
+        header: 'Pending',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          if (!lb) return '\u2014';
+          // engaged = all orders assigned (DELETED excluded); confirmed = confirmed-or-beyond.
+          // Pending is the unworked-or-in-conversation backlog (UNPROCESSED + CS_ASSIGNED + CS_ENGAGED).
+          // Surfacing it here makes Total = Pending + Confirmed visible at a glance.
+          const pending = Math.max(0, lb.ordersEngaged - lb.ordersConfirmed);
+          return (
+            <span className={`text-sm font-medium tabular-nums ${pending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}`}>
+              {pending}
+            </span>
+          );
+        },
+      },
+      {
         key: 'confirmed',
         header: 'Confirmed',
         align: 'right',
@@ -414,21 +460,6 @@ export function CSTeamPage({
             <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersDelivered}</span>
           ) : (
             '\u2014'
-          );
-        },
-      },
-      {
-        key: 'cancelled',
-        header: 'Cancelled',
-        align: 'right',
-        nowrap: true,
-        render: (member) => {
-          const lb = member.leaderboardEntry;
-          if (!lb) return '\u2014';
-          return (
-            <span className={`text-sm font-medium tabular-nums ${lb.ordersCancelled > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
-              {lb.ordersCancelled}
-            </span>
           );
         },
       },
@@ -530,11 +561,11 @@ export function CSTeamPage({
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                    <FormSelect
-                      value={sort}
-                      onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
-                      options={CS_SORT_OPTIONS}
-                      wrapperClassName="w-full"
+                    <SortMenu
+                      value={sortMenuValue}
+                      onChange={handleSortChange}
+                      options={CS_SORT_MENU_OPTIONS}
+                      defaultValue={CS_SORT_DEFAULT}
                     />
                   </div>
                 </>
@@ -616,6 +647,12 @@ export function CSTeamPage({
               title: 'Total orders assigned to the team in this period',
             },
             {
+              label: 'Backlog (unworked)',
+              value: summary.totalPending.toString(),
+              valueClassName: summary.totalPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              title: 'Orders assigned to closers but not yet engaged or confirmed',
+            },
+            {
               label: 'Confirmed',
               value: summary.confirmedTotal.toString(),
               valueClassName: 'text-app-fg',
@@ -626,12 +663,6 @@ export function CSTeamPage({
               value: summary.deliveredTotal.toString(),
               valueClassName: 'text-success-600 dark:text-success-400',
               title: 'Total orders attributed to the team that were delivered',
-            },
-            {
-              label: 'Cancelled',
-              value: summary.cancelledTotal.toString(),
-              valueClassName: summary.cancelledTotal > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
-              title: 'Total orders cancelled/deleted in this period',
             },
             {
               label: 'Confirm rate',
@@ -656,12 +687,6 @@ export function CSTeamPage({
               value: formatCallDuration(summary.avgCallDuration),
               valueClassName: 'text-app-fg',
               title: 'Average call duration across the team',
-            },
-            {
-              label: 'Pending',
-              value: summary.totalPending.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'Open orders currently sitting in closer queues',
             },
           ]}
         />
@@ -703,11 +728,11 @@ export function CSTeamPage({
                 options={CS_BACKLOG_OPTIONS}
                 wrapperClassName="w-full min-w-0 sm:w-44"
               />
-              <FormSelect
-                value={sort}
-                onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
-                options={CS_SORT_OPTIONS}
-                wrapperClassName="w-full min-w-0 sm:w-52"
+              <SortMenu
+                value={sortMenuValue}
+                onChange={handleSortChange}
+                options={CS_SORT_MENU_OPTIONS}
+                defaultValue={CS_SORT_DEFAULT}
               />
             </>
           }
@@ -733,16 +758,17 @@ export function CSTeamPage({
               </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                <FormSelect
-                  value={sort}
-                  onChange={(event) => mergeListParams({ sort: event.target.value, page: 1 })}
-                  options={CS_SORT_OPTIONS}
-                  wrapperClassName="w-full"
+                <SortMenu
+                  value={sortMenuValue}
+                  onChange={handleSortChange}
+                  options={CS_SORT_MENU_OPTIONS}
+                  defaultValue={CS_SORT_DEFAULT}
                 />
               </div>
             </>
           }
         />
+        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {hasActiveFilters && (
           <p className="mb-3 text-xs text-app-fg-muted" aria-live="polite">

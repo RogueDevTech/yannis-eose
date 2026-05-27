@@ -149,6 +149,11 @@ type AllocatableLocationDescriptor = {
     needed: number;
     available: number;
   }> | null;
+  stockBandByProduct?: Array<{
+    productId: string;
+    productName: string;
+    band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
+  }> | null;
 };
 
 // Builds the row description for an entry in the allocate-location dropdown.
@@ -162,6 +167,11 @@ function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string
   if (loc.availabilityByProduct && loc.availabilityByProduct.length > 0) {
     return loc.availabilityByProduct
       .map((p) => `${p.productName}: ${p.available} available`)
+      .join(' \u00b7 ');
+  }
+  if (loc.stockBandByProduct && loc.stockBandByProduct.length > 0) {
+    return loc.stockBandByProduct
+      .map((p) => `${p.productName}: ${p.band === 'ABOVE_THRESHOLD' ? 'Above 50' : 'Below 50'}`)
       .join(' \u00b7 ');
   }
   return loc.address ?? undefined;

@@ -27,6 +27,7 @@ import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -291,6 +292,15 @@ export function WarehousesPage({
     },
   ];
 
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('search')) n += 1;
+    const sb = searchParams.get('sortBy');
+    const sd = searchParams.get('sortDir');
+    if ((sb && sb !== 'createdAt') || (sd && sd !== 'desc')) n += 1;
+    return n;
+  }, [searchParams]);
+
   const updateWarehouseSort = (nextSortBy: 'createdAt' | 'name' | 'available', nextSortDir: 'asc' | 'desc') => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -464,6 +474,7 @@ export function WarehousesPage({
       {/* Card chrome hidden on mobile — listing goes edge-to-edge. Desktop keeps the card wrapper. */}
       <div className="md:card md:p-4">
         <div className="mb-4">{toolbar}</div>
+        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2 px-4" />
         <div>
           <TableLoadingOverlay show={isRefetching} minHeightClassName={display.length === 0 ? 'min-h-[14rem]' : 'min-h-[12rem]'}>
             {display.length === 0 ? (

@@ -31,6 +31,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { Tabs } from '~/components/ui/tabs';
+import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 
@@ -550,6 +551,19 @@ export function DisbursementsPage({
     mainTab === 'disbursements' ? disbursementsFilterBadge
     : mainTab === 'balances' ? balancesFilterBadge
     : 0;
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (searchParams.get('status')) n += 1;
+    if (searchParams.get('selectedReceiver')) n += 1;
+    if (searchParams.get('search')) n += 1;
+    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
+    // Balances tab filters
+    if (searchParams.get('balancesRole') && searchParams.get('balancesRole') !== 'ALL') n += 1;
+    if (searchParams.get('balancesStatus') && searchParams.get('balancesStatus') !== 'ALL') n += 1;
+    if (searchParams.get('balancesSearch')) n += 1;
+    return n;
+  }, [searchParams]);
 
   const nameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -1209,6 +1223,7 @@ export function DisbursementsPage({
                 </>
               }
             />
+            <ClearFiltersButton count={activeFilterCount} preserve={['perPage', 'tab']} className="mt-2 px-4" />
 
             <TableLoadingOverlay show={isFilterLoading}>
               <CompactTable<DisbursementRecord>
@@ -1422,6 +1437,7 @@ export function DisbursementsPage({
                 </>
               }
             />
+            <ClearFiltersButton count={activeFilterCount} preserve={['perPage', 'tab']} className="mt-2 px-4" />
 
             <TableLoadingOverlay show={isFilterLoading}>
               <CompactTable<RecipientBalanceRow>
