@@ -1664,6 +1664,7 @@ function OrdersListPageImpl({
         // any status. The "Cart abandonment" tile is the clickable entry point.
         <OverviewStatStrip
           mobileGrid
+          liveFlash={liveState.showGreen}
           items={[
             {
               label: 'Total',
@@ -2297,7 +2298,11 @@ function OrdersListPageImpl({
             rowKey={(o) => o.id}
             renderMobileCard={renderOrderMobileCard}
             rowClassName={(o) =>
-              [selectedIds.has(o.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '', highlightedIds.has(o.id) ? 'row-new-highlight' : '']
+              [
+                selectedIds.has(o.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '',
+                highlightedIds.has(o.id) ? 'row-new-highlight' : '',
+                liveState.showGreen ? 'animate-live-flash-row' : '',
+              ]
                 .filter(Boolean)
                 .join(' ')
             }

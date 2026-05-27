@@ -908,6 +908,7 @@ export function MarketingOrdersPage({
                 <OverviewStatStrip
                   mobileGrid
                   tileClassName="!py-2.5"
+                  liveFlash={liveState.showGreen}
                   items={[
                     {
                       label: 'Total',
@@ -1133,6 +1134,7 @@ export function MarketingOrdersPage({
           columns={marketingOrderColumns}
           rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
+          rowClassName={() => liveState.showGreen ? 'animate-live-flash-row' : ''}
           renderMobileCard={renderMarketingOrderMobileCard}
           emptyTitle={isCartAbandonmentView ? 'No abandoned carts' : 'No orders match your filters'}
           emptyDescription={

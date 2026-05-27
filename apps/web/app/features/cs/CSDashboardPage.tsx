@@ -1626,7 +1626,7 @@ function CSDashboardPageLoaded({
         />
       )}
 
-      <OverviewStatStrip mobileGrid items={overviewStatItems} />
+      <OverviewStatStrip mobileGrid liveFlash={liveState.showGreen} items={overviewStatItems} />
 
       {/* ── Live Activity Feed ──────────────────────────────── */}
       <div>
@@ -2450,6 +2450,7 @@ function CSDashboardPageLoaded({
                   columns={claimQueueColumns}
                   rows={orders}
                   rowKey={(order) => order.id}
+                  rowClassName={() => liveState.showGreen ? 'animate-live-flash-row' : ''}
                   withCard={false}
                   emptyTitle="No orders in the claim queue right now."
                   renderMobileCard={(order) => {

@@ -439,7 +439,7 @@ export function MarketingOverviewPage({
         periodAllTime={filters?.periodAllTime ?? false}
       />
 
-      <OverviewStatStrip mobileGrid items={statItems} />
+      <OverviewStatStrip mobileGrid liveFlash={liveState.showGreen} items={statItems} />
 
       {/* ── Live Activity strip (browsing / abandoned / order-placed cards) ── */}
       <div>
