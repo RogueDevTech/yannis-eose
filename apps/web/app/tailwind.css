@@ -526,6 +526,50 @@
     50% { opacity: 0.2; }
   }
 
+  /* Live flash: stat strip tile background briefly glows green */
+  .animate-live-flash-tile {
+    animation: liveFlashTile 1.5s ease-out forwards;
+  }
+  @keyframes liveFlashTile {
+    0% { background-color: rgb(34 197 94 / 0.15); }
+    100% { background-color: transparent; }
+  }
+  :is(.dark) .animate-live-flash-tile {
+    animation: liveFlashTileDark 1.5s ease-out forwards;
+  }
+  @keyframes liveFlashTileDark {
+    0% { background-color: rgb(34 197 94 / 0.12); }
+    100% { background-color: transparent; }
+  }
+
+  /* Live flash: up-arrow bounce-in */
+  .animate-live-flash-arrow {
+    animation: liveFlashArrow 1.2s ease-out forwards;
+  }
+  @keyframes liveFlashArrow {
+    0% { opacity: 0; transform: translateY(4px) scale(0.8); }
+    15% { opacity: 1; transform: translateY(-2px) scale(1.1); }
+    30% { opacity: 1; transform: translateY(0) scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Live flash: table row text goes green briefly */
+  .animate-live-flash-row {
+    animation: liveFlashRow 2s ease-out forwards;
+  }
+  @keyframes liveFlashRow {
+    0%, 30% { color: rgb(34 197 94); }
+    100% { color: inherit; }
+  }
+  :is(.dark) .animate-live-flash-row {
+    animation: liveFlashRowDark 2s ease-out forwards;
+  }
+  @keyframes liveFlashRowDark {
+    0%, 30% { color: rgb(74 222 128); }
+    100% { color: inherit; }
+  }
+
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(-4px); }
     to { opacity: 1; transform: translateY(0); }

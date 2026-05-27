@@ -95,7 +95,31 @@ type OverviewStatStripProps = {
    * should see everything at a glance. Desktop layout is unchanged.
    */
   mobileGrid?: boolean;
+  /**
+   * When true, all tiles briefly flash green with an up-arrow indicator to
+   * signal that a real-time update just landed. Driven by the socket
+   * `showGreen` state from `useLiveIndicator`.
+   */
+  liveFlash?: boolean;
 };
+
+/** Tiny green up-arrow shown beside the value during a live flash. */
+function LiveFlashArrow() {
+  return (
+    <svg
+      className="inline-block ml-1 h-3.5 w-3.5 text-success-500 animate-live-flash-arrow"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path
+        fillRule="evenodd"
+        d="M10 17a.75.75 0 01-.75-.75V5.612L5.29 9.573a.75.75 0 01-1.08-1.04l5.25-5.25a.75.75 0 011.08 0l5.25 5.25a.75.75 0 11-1.08 1.04l-3.96-3.961V16.25A.75.75 0 0110 17z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
 
 export function OverviewStatStrip({
   items,
@@ -104,6 +128,7 @@ export function OverviewStatStrip({
   tileClassName = '',
   embedded = false,
   mobileGrid = false,
+  liveFlash = false,
 }: OverviewStatStripProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = useCallback((delta: number) => {
@@ -127,6 +152,8 @@ export function OverviewStatStrip({
 
   const hasHorizontalOverflow = useHasHorizontalOverflow(scrollRef, overflowContentKey);
 
+  const liveFlashTileClass = liveFlash ? 'animate-live-flash-tile' : '';
+
   const tileBase = [
     'shrink-0',
     'rounded-lg',
@@ -137,7 +164,9 @@ export function OverviewStatStrip({
     'md:min-w-[5rem]',
     'text-center',
     tileClassName,
+    liveFlashTileClass,
   ]
+    .filter(Boolean)
     .join(' ');
 
   const scrollButtons = showScrollControls && hasHorizontalOverflow ? (
@@ -184,7 +213,8 @@ export function OverviewStatStrip({
     'min-w-0',
     'overflow-hidden',
     tileClassName,
-  ].join(' ');
+    liveFlashTileClass,
+  ].filter(Boolean).join(' ');
 
   const mobileGridContent = mobileGrid ? (
     <div className="md:hidden">
@@ -193,16 +223,21 @@ export function OverviewStatStrip({
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(8.5rem, 100%), 1fr))' }}
       >
       {items.map((item, i) => {
+        const flashValueClass = liveFlash ? '!text-success-500 dark:!text-success-400 transition-colors duration-300' : '';
         const inner = (
           <>
             <p className="truncate text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
             {item.plainValue ? (
-              <div className="mt-0.5 flex justify-center">{item.value}</div>
+              <div className={`mt-0.5 flex items-center justify-center ${flashValueClass}`}>
+                {item.value}
+                {liveFlash && <LiveFlashArrow />}
+              </div>
             ) : (
               <p
-                className={`mt-0.5 truncate text-lg font-bold leading-tight ${item.valueClassName ?? 'text-app-fg'}`}
+                className={`mt-0.5 truncate text-lg font-bold leading-tight ${flashValueClass || (item.valueClassName ?? 'text-app-fg')}`}
               >
                 {item.value}
+                {liveFlash && <LiveFlashArrow />}
               </p>
             )}
           </>
@@ -230,16 +265,21 @@ export function OverviewStatStrip({
     <div ref={scrollRef} className={`flex-1 min-w-0 overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem] ${mobileGrid ? 'hidden md:block' : ''}`}>
       <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
         {items.map((item, i) => {
+          const flashValueClass = liveFlash ? '!text-success-500 dark:!text-success-400 transition-colors duration-300' : '';
           const inner = (
             <div>
               <p className={`truncate ${labelClass}`}>{item.label}</p>
               {item.plainValue ? (
-                <div className="mt-0.5 flex justify-center">{item.value}</div>
+                <div className={`mt-0.5 flex items-center justify-center ${flashValueClass}`}>
+                  {item.value}
+                  {liveFlash && <LiveFlashArrow />}
+                </div>
               ) : (
                 <p
-                  className={`mt-0.5 ${valueClass} ${item.valueClassName ?? 'text-app-fg'}`}
+                  className={`mt-0.5 ${valueClass} ${flashValueClass || (item.valueClassName ?? 'text-app-fg')}`}
                 >
                   {item.value}
+                  {liveFlash && <LiveFlashArrow />}
                 </p>
               )}
             </div>

@@ -70,10 +70,8 @@ export function LiveActivityCard({
       onClick={() => onOpen(item)}
       className={`
         group relative w-full text-left rounded-xl border transition-all duration-200 cursor-pointer
-        ${isNew
-          ? 'animate-slide-in-up border-success-400 dark:border-success-500 bg-gradient-to-br from-success-50 to-white dark:from-success-900/20 dark:to-surface-800 shadow-md'
-          : `${cfg.cardBg} ${cfg.borderColor} hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700`
-        }
+        ${cfg.cardBg} ${cfg.borderColor} hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700
+        ${isNew ? 'animate-slide-in-up' : ''}
         ${(isNew || isUpdated) ? 'row-new-highlight' : ''}
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
       `}
