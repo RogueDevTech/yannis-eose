@@ -251,3 +251,15 @@ TURNSTILE_SECRET_KEY = "0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw"
 
 
 
+# Fetch the password (it prints to your terminal)
+PASS=$(gcloud secrets versions access latest \
+  --secret=prod-yannis-eose-pg-app-password \
+  --project=project-26c432ec-b4f1-4e21-a6a)
+
+# Build the URL — replace <PUBLIC_IP> with the value from
+# `terraform output cloud_sql_public_ip`
+NEW_URL="postgres://yannis_app:${PASS}@<PUBLIC_IP>:5432/yannis?sslmode=require"
+
+# Echo it so you can copy if needed (don't paste into chat — has the password)
+echo "$NEW_URL"
+

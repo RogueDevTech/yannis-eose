@@ -87,6 +87,48 @@ output "runtime_service_account_email" {
   description = "Service account attached to the dev runtime VM."
 }
 
+output "cloud_sql_instance_name" {
+  value       = local.cloud_sql_enabled ? google_sql_database_instance.prod_pg[0].name : null
+  description = "Cloud SQL instance name (null when enable_cloud_sql=false)."
+}
+
+output "cloud_sql_connection_name" {
+  value       = local.cloud_sql_enabled ? google_sql_database_instance.prod_pg[0].connection_name : null
+  description = "project:region:instance — what the Cloud SQL Auth Proxy / VPC connector takes."
+}
+
+output "cloud_sql_public_ip" {
+  value       = local.cloud_sql_enabled ? google_sql_database_instance.prod_pg[0].public_ip_address : null
+  description = "Public IPv4 the app connects to over SSL. Add to the runtime env's DATABASE_URL host slot."
+}
+
+output "cloud_sql_database_name" {
+  value       = local.cloud_sql_enabled ? google_sql_database.app_db[0].name : null
+  description = "Logical database name to put after the '/' in DATABASE_URL."
+}
+
+output "cloud_sql_user" {
+  value       = local.cloud_sql_enabled ? google_sql_user.app_user[0].name : null
+  description = "Postgres role the app authenticates as."
+}
+
+output "cloud_sql_password_secret_id" {
+  value       = local.cloud_sql_enabled ? google_secret_manager_secret.cloud_sql_password[0].secret_id : null
+  description = "Secret Manager secret holding the app password. Fetch with: gcloud secrets versions access latest --secret=<this>"
+}
+
+output "cloud_sql_database_url_template" {
+  # Template with <password> placeholder so the actual secret value isn't
+  # written to Terraform output (still in state — but at least not echoed).
+  value = local.cloud_sql_enabled ? format(
+    "postgres://%s:<password>@%s:5432/%s?sslmode=require",
+    google_sql_user.app_user[0].name,
+    google_sql_database_instance.prod_pg[0].public_ip_address,
+    google_sql_database.app_db[0].name,
+  ) : null
+  description = "DATABASE_URL with <password> placeholder — substitute the value of cloud_sql_password_secret_id."
+}
+
 output "suggested_runtime_env" {
   value = {
     ASSET_ENV_PREFIX               = var.environment
@@ -102,8 +144,8 @@ output "suggested_runtime_env" {
     # Derived from the public hostnames — for hqyannis.com hostnames the
     # parent cookie domain is `.hqyannis.com`; for roguedevtech.com hosts
     # it's `.roguedevtech.com`. Naive split on dot grabs the right TLD+1.
-    SESSION_COOKIE_DOMAIN          = ".${join(".", slice(split(".", var.public_web_hostname), length(split(".", var.public_web_hostname)) - 2, length(split(".", var.public_web_hostname))))}"
-    DEPLOY_PLATFORM                = "gcp"
+    SESSION_COOKIE_DOMAIN = ".${join(".", slice(split(".", var.public_web_hostname), length(split(".", var.public_web_hostname)) - 2, length(split(".", var.public_web_hostname))))}"
+    DEPLOY_PLATFORM       = "gcp"
   }
   description = "Suggested runtime env keys to store in the Secret Manager .env secret."
 }

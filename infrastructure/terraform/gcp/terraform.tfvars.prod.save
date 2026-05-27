@@ -40,7 +40,7 @@ bucket_cors_origins = [
   "https://office.hqyannis.com",
 ]
 
-# SSH open during initial provisioning so the GitHub Actions runner can land
+	# SSH open during initial provisioning so the GitHub Actions runner can land
 # the deploy. Lock to operator NAT / VPN egress IPs after first deploy:
 #   ssh_source_ranges = ["YOUR_OPERATOR_IP/32"]
 ssh_source_ranges   = [
@@ -54,13 +54,3 @@ ssh_source_ranges   = [
 
 # Reverse proxy + TLS are provisioned by Ansible after Terraform apply.
 # See `infrastructure/ansible/README.md` for the two-stage flow.
-
-# Cloud SQL — minimal-cost prod Postgres (see README "Cloud SQL migration").
-enable_cloud_sql              = true
-cloud_sql_tier                = "db-g1-small"
-cloud_sql_availability        = "ZONAL"
-cloud_sql_postgres_version    = "POSTGRES_18"
-cloud_sql_disk_size_gb        = 10
-cloud_sql_disk_max_size_gb    = 20
-cloud_sql_pitr_enabled        = false
-cloud_sql_deletion_protection = true
