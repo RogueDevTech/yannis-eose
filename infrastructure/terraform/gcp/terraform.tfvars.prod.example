@@ -46,3 +46,44 @@ ssh_source_ranges   = [
 
 # Reverse proxy + TLS are provisioned by Ansible after Terraform apply.
 # See `infrastructure/ansible/README.md` for the two-stage flow.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Cloud SQL (Postgres) — minimal-cost prod sizing.
+#
+# Sized to match the actual measured workload of `yannis-eose-prod` (~1.24 vCPU
+# continuous on Regional, ~5 GB RAM, <2 GB stored data) after dropping the
+# Regional HA standby. db-g1-small is shared-core: GCP can throttle the CPU
+# under noisy-neighbour contention. The Redis read-through cache (CLAUDE.md
+# Pillar 1) absorbs most reads, so the DB rarely needs sustained CPU.
+#
+# Budget: ~$25/mo at the default tier. If CS closers report query lag during
+# peak hours, bump `cloud_sql_tier` to `db-custom-1-3840` (~$52/mo, 1 dedicated
+# vCPU + 3.75 GB RAM) — one-line change + 5-min restart, no schema work.
+#
+# IMPORTANT: enabling this creates a NEW empty instance. The app keeps using
+# whatever DATABASE_URL is currently in the runtime env secret (still points
+# at the legacy `yannis-eose-prod` instance). Migration is a manual
+# `pg_dump | pg_restore` followed by a secret rotation — see the "Cloud SQL
+# migration" section in the README.
+# ──────────────────────────────────────────────────────────────────────────────
+enable_cloud_sql              = true
+cloud_sql_tier                = "db-g1-small"
+cloud_sql_availability        = "ZONAL"
+cloud_sql_postgres_version    = "POSTGRES_18"
+cloud_sql_disk_size_gb        = 10
+cloud_sql_disk_max_size_gb    = 20
+cloud_sql_pitr_enabled        = false
+cloud_sql_deletion_protection = true
+
+# Backups: Cloud SQL takes free daily automated backups (7-day retention) on
+# every instance. For weekly off-instance copies into a GCS bucket, plus an
+# (optional) Drive mirror, follow Option B in the README under "Cloud SQL
+# migration" — not codified in this tfvars yet so you can flip it on after
+# the migration is done.
+
+# Operator IPs that need direct psql access (DBAs, ad-hoc analytics). Stays
+# empty by default — you add CIDRs ad-hoc in the GCP console when you need
+# them, then drop them again. The VM IP is added automatically.
+# cloud_sql_authorized_cidrs = [
+#   "REPLACE-WITH-OPERATOR-IP/32",
+# ]

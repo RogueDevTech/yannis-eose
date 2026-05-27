@@ -75,8 +75,8 @@ Manager with the prod URLs:
 ```dotenv
 DEPLOY_PLATFORM=gcp
 NODE_ENV=production
-DATABASE_URL=postgres://...                # prod Aiven Postgres
-REDIS_URL=redis://...                      # prod Aiven Redis
+DATABASE_URL=postgres://...                # prod Cloud SQL — see "Cloud SQL migration" section
+REDIS_URL=redis://...                      # prod Redis (Aiven or Memorystore)
 SESSION_SECRET=<long random string>
 SESSION_BUNDLE_SECRET=<long random string>
 SESSION_COOKIE_DOMAIN=.hqyannis.com        # parent of office. + api-office.
@@ -128,6 +128,141 @@ There's no `deploy-prod.yml` yet — the equivalent of `deploy-dev.yml`
 needs to be added, triggered on push to `main` (or tagged release), with
 its own set of `PROD_*` secrets pointing at the prod project. Use the dev
 workflow as a template once the prod tfvars + DNS are signed off.
+
+## Cloud SQL migration (replacing the manually-created prod DB)
+
+The live prod instance `yannis-eose-prod` was created in the console at
+Regional HA + dedicated vCPU — sized for the free-trial credit, not for the
+actual ~1.24 vCPU continuous workload. When the credit expired 2026-05-26
+the run-rate jumped to ~$166/mo for that one instance. A second legacy
+instance `yannis-eose-db-prod` was deleted manually on 2026-05-27 (it was
+never connected to the live app).
+
+The Terraform `enable_cloud_sql = true` path creates a **new, separate,
+minimally-sized** instance (`db-g1-small`, Zonal, ~$25/mo) side-by-side
+with the live one, then you do a manual `pg_dump | pg_restore` and swap
+`DATABASE_URL` in Secret Manager. The live instance is never touched by
+Terraform — you delete it manually in the console once the new one is
+verified.
+
+**Shared-core caveat:** `db-g1-small` shares CPU with other Cloud SQL
+tenants on the same physical host. Under noisy-neighbour contention GCP
+can throttle the instance, slowing queries. If CS closers report lag
+during peak hours, bump `cloud_sql_tier` to `db-custom-1-3840` (1
+dedicated vCPU, ~$52/mo) — that's a one-line tfvars change followed by
+a 5-minute restart. No schema work.
+
+1. **Plan first.** Confirm Terraform will only *create* new SQL resources:
+
+   ```bash
+   terraform plan \
+     -state=prod.tfstate \
+     -var-file=terraform.tfvars.prod \
+   | grep -E '(google_sql_|google_secret_manager_secret\.cloud_sql_|random_password\.cloud_sql_)'
+   ```
+
+   All lines should start with `+`. No `-` or `~` against any existing
+   resource. If anything else shows up, stop and investigate.
+
+2. **Apply.** Provisioning the instance takes ~10 minutes.
+
+   ```bash
+   terraform apply -state=prod.tfstate -var-file=terraform.tfvars.prod
+   ```
+
+3. **Capture the connection details.**
+
+   ```bash
+   terraform output -state=prod.tfstate cloud_sql_public_ip
+   terraform output -state=prod.tfstate cloud_sql_database_name
+   terraform output -state=prod.tfstate cloud_sql_user
+   terraform output -state=prod.tfstate cloud_sql_password_secret_id
+
+   # Fetch the generated app password (this is the only secret you don't see
+   # in `terraform output`).
+   gcloud secrets versions access latest \
+     --secret="$(terraform output -raw -state=prod.tfstate cloud_sql_password_secret_id)" \
+     --project="<prod-gcp-project-id>"
+   ```
+
+4. **Migrate the data.** From a machine that can reach the old DB AND the
+   new one (your laptop after adding its IP to
+   `cloud_sql_authorized_cidrs`, or the prod VM itself):
+
+   ```bash
+   OLD_URL='postgres://<old-user>:<old-pw>@<old-host>:5432/<old-db>?sslmode=require'
+   NEW_URL='postgres://<new-user>:<new-pw>@<new-host>:5432/<new-db>?sslmode=require'
+
+   # Dump (uses parallel jobs + custom format → faster restore).
+   pg_dump --format=custom --no-owner --no-privileges \
+     --jobs=4 --file=yannis-prod.dump "$OLD_URL"
+
+   # Verify size before restoring — if this is wildly different from the
+   # old instance's reported storage, something's wrong.
+   ls -lh yannis-prod.dump
+
+   # Restore.
+   pg_restore --no-owner --no-privileges \
+     --jobs=4 --dbname="$NEW_URL" yannis-prod.dump
+   ```
+
+5. **Sanity-check the new instance** before touching the runtime env:
+
+   ```bash
+   psql "$NEW_URL" -c 'SELECT COUNT(*) FROM orders;'
+   psql "$NEW_URL" -c 'SELECT MAX(created_at) FROM orders;'
+   # Compare with the old DB. The counts/timestamps should match (or be
+   # very close, accounting for writes during the dump).
+   ```
+
+6. **Swap `DATABASE_URL` in the runtime env secret.** Grab the current
+   secret, edit the line in place, push a new version:
+
+   ```bash
+   gcloud secrets versions access latest \
+     --secret=prod-yannis-runtime-env \
+     --project=<prod-gcp-project-id> > /tmp/runtime.env
+
+   # Edit /tmp/runtime.env — change DATABASE_URL to the new connection string.
+   # Then:
+   gcloud secrets versions add prod-yannis-runtime-env \
+     --data-file=/tmp/runtime.env \
+     --project=<prod-gcp-project-id>
+   shred -u /tmp/runtime.env   # or `rm -P` on macOS
+   ```
+
+7. **Reload the app.** SSH into the prod VM and restart the containers so
+   the new env is picked up:
+
+   ```bash
+   ssh deployer@<prod-vm-ip>
+   cd /opt/yannis-eose
+   ./scripts/refresh-env.sh   # or whatever script your deploy wrapper uses
+   docker compose restart api web
+   docker compose logs -f api | head -50
+   # Watch for: "Connected to database <new-db> @ <new-host>" or equivalent.
+   ```
+
+8. **Verify in the app.** Hit a read-heavy page (`/admin/sales/orders`), a
+   write path (open + close an order), and the audit trail. Then watch GCP
+   Monitoring on the new instance — CPU, connections, query latency
+   should look normal.
+
+9. **Decommission `yannis-eose-prod`.** Only after 24–48 hours of the new
+   instance running clean:
+
+   - Take a final on-demand backup of `yannis-eose-prod` (Console → Cloud
+     SQL → `yannis-eose-prod` → Backups → Create backup). Export it to
+     GCS for cold storage in case you ever need to roll back further than
+     the new instance's own backup retention covers.
+   - Delete `yannis-eose-prod` in the Console. Cloud SQL quarantines the
+     name for 7 days before it can be reused — that's fine, the new
+     instance has a different name (`prod-yannis-eose-pg`).
+
+If anything goes wrong between steps 6 and 9 — just revert step 6 (push
+the old `DATABASE_URL` back into the runtime env secret + restart the
+containers). `yannis-eose-prod` is still running, untouched, the whole
+time.
 
 ## After `terraform apply`
 
