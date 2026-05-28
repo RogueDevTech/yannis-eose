@@ -57,6 +57,7 @@ import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
 import { useToast } from '~/components/ui/toast';
+import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 
 /** Deferred loader bundle for `/admin/sales/orders` (counts, chart series, heat, picklists). */
 export type CsOrdersDeferredSecondary = {
@@ -135,43 +136,7 @@ function CallbackDueTag() {
 /** Comment icon shown before customer name when the order has a CS comment.
  *  Desktop: hovering shows the comment in a tooltip-style popup.
  *  The icon itself is always small (14×14) and inline. */
-function CsCommentIcon({ comment, actorName }: { comment: string; actorName: string | null }) {
-  const [show, setShow] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-
-  // Close on outside click (desktop popup).
-  useEffect(() => {
-    if (!show) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setShow(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [show]);
-
-  return (
-    <span
-      ref={ref}
-      className="relative inline-flex shrink-0 cursor-pointer rounded-full bg-amber-100 p-1 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShow((p) => !p); }}
-      aria-label="CS comment"
-      title="CS comment"
-    >
-      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-        <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97zM6.75 8.25a.75.75 0 01.75-.75h9a.75.75 0 010 1.5h-9a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H7.5z" clipRule="evenodd" />
-      </svg>
-      {show && (
-        <span className="absolute bottom-full right-0 z-50 mb-2 whitespace-normal rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-lg text-left dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-          style={{ minWidth: '12rem', maxWidth: '18rem' }}
-        >
-          <span className="block leading-relaxed">{comment}</span>
-        </span>
-      )}
-    </span>
-  );
-}
+// CsCommentIcon + MobileCommentPreview imported from ~/components/ui/cs-comment-icon
 
 function addMonthsYm(ym: string, delta: number): string {
   const [ys, ms] = ym.split('-');
@@ -1243,12 +1208,7 @@ function OrdersListPageImpl({
             </span>
           </div>
           {order.lastCsComment && (
-            <div className="flex items-start gap-2 rounded-lg bg-app-hover/60 px-2.5 py-1.5 text-xs border border-app-border">
-              <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-app-fg-muted" viewBox="0 0 24 24" fill="currentColor">
-                <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97zM6.75 8.25a.75.75 0 01.75-.75h9a.75.75 0 010 1.5h-9a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H7.5z" clipRule="evenodd" />
-              </svg>
-              <span className="min-w-0 flex-1 line-clamp-2 text-app-fg">{order.lastCsComment.comment}</span>
-            </div>
+            <MobileCommentPreview comment={order.lastCsComment.comment} />
           )}
           {hasTags ? (
             <div className="flex flex-wrap items-center gap-1.5">

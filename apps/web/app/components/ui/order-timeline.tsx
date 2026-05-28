@@ -196,6 +196,24 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
     }
   }
 
+  // Universal dedup auto-delete — make the winner order a clickable link.
+  if (event.eventType === 'ORDER_DELETED') {
+    const winnerId = strMeta(m, 'winnerId');
+    if (winnerId && isUuid(winnerId)) {
+      // Extract the YNS-XXXXX label from the description, or fall back.
+      const ynsMatch = /winner:\s*(YNS-\d+)/.exec(event.description);
+      const label = ynsMatch?.[1] ?? winnerId.slice(0, 8);
+      const prefix = event.description.replace(/winner:\s*(?:YNS-\d+|[0-9a-f]{8}).*$/, 'winner: ');
+      return (
+        <>
+          {prefix}
+          <TimelineLink to={`/admin/orders/${winnerId}`}>{label}</TimelineLink>
+          )
+        </>
+      );
+    }
+  }
+
   if (RIDER_METADATA_EVENT_TYPES.has(event.eventType)) {
     const riderId = strMeta(m, 'riderId');
     if (riderId && isLinkableUserId(riderId)) {

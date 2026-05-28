@@ -119,8 +119,14 @@ export function SearchableSelect({
     };
   }, [open, isMobile]);
 
+  // Reset search only when the dropdown opens — NOT when `firstEnabled` changes
+  // mid-session (parent re-renders with a new options reference would recalculate
+  // `filtered` → shift `firstEnabled` → wipe the user's in-progress query).
+  const prevOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    const justOpened = open && !prevOpenRef.current;
+    prevOpenRef.current = open;
+    if (!justOpened) return;
     setQuery('');
     setActiveIndex(firstEnabled);
     suppressCloseUntilRef.current =
