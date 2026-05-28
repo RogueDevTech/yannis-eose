@@ -660,7 +660,8 @@ export async function requireRole(request: Request, allowedRoles: string[]) {
 
 /**
  * Require the current user to have at least one of the required permissions.
- * SuperAdmin bypasses all checks.
+ * SuperAdmin and Support bypass all checks (matches `permissionProcedure` in apps/api/src/trpc/trpc.ts).
+ * Writes are still blocked for Support by the read-only check on the API side.
  */
 export async function requirePermission(
   request: Request,
@@ -685,7 +686,7 @@ export async function requirePermission(
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN') return user;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return user;
   const codes = (Array.isArray(permissionCode) ? permissionCode : [permissionCode]).map((c) =>
     canonicalPermissionCode(c),
   );
@@ -750,7 +751,7 @@ export async function requirePermissionOrRoles(
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN') return user;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return user;
   if (options.roles.includes(user.role)) return user;
   const codes = (Array.isArray(options.permission) ? options.permission : [options.permission]).map((c) =>
     canonicalPermissionCode(c),

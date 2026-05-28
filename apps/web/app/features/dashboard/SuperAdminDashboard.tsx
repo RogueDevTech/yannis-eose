@@ -1,6 +1,7 @@
 import { Link } from '@remix-run/react';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -44,6 +45,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
   };
   const orderPipeline = {
     total: data?.orderPipeline?.total ?? 0,
+    statusCounts: data?.orderPipeline?.statusCounts ?? {},
   };
   const revenueByPeriod = data?.revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 };
   // Deliveries per Brand + Stock Available per Product removed 2026-05-19 per
@@ -158,6 +160,87 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           />
         </div>
       </div>
+
+      {/* ── Order Funnel: full pipeline at a glance ── */}
+      {(() => {
+        const sc = orderPipeline.statusCounts;
+        const ordersTotal = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
+        const unassigned = sc['UNPROCESSED'] ?? 0;
+        const assigned = sc['CS_ASSIGNED'] ?? 0;
+        const unconfirmed = sc['CS_ENGAGED'] ?? 0;
+        const confirmed =
+          (sc['CONFIRMED'] ?? 0) +
+          (sc['AGENT_ASSIGNED'] ?? 0) +
+          (sc['DISPATCHED'] ?? 0) +
+          (sc['IN_TRANSIT'] ?? 0);
+        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const deleted = sc['DELETED'] ?? 0;
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Order Funnel
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="!py-2.5"
+              items={[
+                {
+                  label: 'Total',
+                  value: ordersTotal,
+                  valueClassName: 'text-app-fg',
+                  to: '/admin/marketing/orders',
+                },
+                {
+                  label: 'Unassigned',
+                  value: unassigned,
+                  valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                  to: '/admin/marketing/orders?status=UNPROCESSED',
+                },
+                {
+                  label: 'Assigned',
+                  value: assigned,
+                  valueClassName: 'text-info-600 dark:text-info-400',
+                  to: '/admin/marketing/orders?status=CS_ASSIGNED',
+                },
+                {
+                  label: 'Unconfirmed',
+                  value: unconfirmed,
+                  valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                  to: '/admin/marketing/orders?status=CS_ENGAGED',
+                },
+                {
+                  label: 'Confirmed',
+                  value: confirmed,
+                  valueClassName: 'text-brand-600 dark:text-brand-400',
+                  to: '/admin/marketing/orders?status=CONFIRMED',
+                },
+                {
+                  label: 'Delivered',
+                  value: delivered,
+                  valueClassName: 'text-success-600 dark:text-success-400',
+                  to: '/admin/marketing/orders?status=DELIVERED',
+                },
+                {
+                  label: 'CR',
+                  value: pct(marketingSafe.confirmationRate),
+                  valueClassName: confirmationRateColorClass(marketingSafe.confirmationRate),
+                },
+                {
+                  label: 'DR',
+                  value: pct(marketingSafe.deliveryRate),
+                  valueClassName: deliveryRateColorClass(marketingSafe.deliveryRate),
+                },
+                {
+                  label: 'Deleted',
+                  value: deleted,
+                  valueClassName: deleted > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
+                  to: '/admin/marketing/orders?status=DELETED',
+                },
+              ]}
+            />
+          </div>
+        );
+      })()}
 
       {/* ── Revenue Generated: stacked column ── */}
       <div>

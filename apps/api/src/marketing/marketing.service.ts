@@ -3677,7 +3677,7 @@ export class MarketingService {
     if (periodStart) inDeliveredPeriod.push(gte(schema.orders.deliveredAt, periodStart));
     if (periodEnd) inDeliveredPeriod.push(lte(schema.orders.deliveredAt, periodEnd));
 
-    const isDelivered = eq(schema.orders.status, 'DELIVERED');
+    const isDelivered = inArray(schema.orders.status, ['DELIVERED', 'REMITTED']);
     const isConfirmedOrBeyond = inArray(schema.orders.status, [
       ...MarketingService.CONFIRMED_OR_BEYOND_STATUSES,
     ]);
