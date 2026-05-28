@@ -8,6 +8,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
+import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -455,6 +456,9 @@ function LogisticsOrdersPageImpl({
         render: (order) => {
           return (
             <CompactTableActions className="inline-flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+              {order.lastCsComment && (
+                <CsCommentIcon comment={order.lastCsComment.comment} actorName={order.lastCsComment.actorName} />
+              )}
               <TableActionButton to={toOrderDetail(order.id)} variant="primary">
                 View
               </TableActionButton>
@@ -607,6 +611,9 @@ function LogisticsOrdersPageImpl({
             {formatOrderTimestamp(order.createdAt)}
           </span>
         </div>
+        {order.lastCsComment && (
+          <MobileCommentPreview comment={order.lastCsComment.comment} />
+        )}
       </button>
     );
   };
