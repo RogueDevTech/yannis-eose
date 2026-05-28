@@ -290,8 +290,22 @@ function corsResponse(body: unknown, status = 200): Response {
 
 // ── Crypto Helpers ─────────────────────────────────────────────
 
+/**
+ * Normalize a phone number to a canonical digit string before hashing.
+ * Handles Nigerian local (0…) → international (234…) so the same physical
+ * phone always produces the same hash regardless of how the customer typed it.
+ */
+function normalizePhoneDigits(phone: string): string {
+  let digits = phone.replace(/\D/g, '');
+  // Nigerian local: 0XXXXXXXXXX (11 digits) → 234XXXXXXXXXX
+  if (digits.length === 11 && digits.startsWith('0')) {
+    digits = '234' + digits.slice(1);
+  }
+  return digits;
+}
+
 async function hashPhone(phone: string): Promise<string> {
-  const normalized = phone.replace(/\D/g, '');
+  const normalized = normalizePhoneDigits(phone);
   const encoder = new TextEncoder();
   const data = encoder.encode(`yannis:phone:${normalized}`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);

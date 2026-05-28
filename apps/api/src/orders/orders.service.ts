@@ -1495,14 +1495,27 @@ export class OrdersService {
       });
     }
 
-    // Optional dedup: warn/block if same phone + product in 6h
+    // Universal 7-day dedup — same phone + overlapping product within 7 days
+    // blocks the offline order outright (CEO 2026-05-26). Previously only
+    // edge-form orders were blocked; offline relied on a 2h cron, which let
+    // duplicates slip through to logistics before being caught.
     const productIds = input.items.map((i) => i.productId);
-    const duplicates = await this.detectDuplicates(customerPhoneHash, productIds);
-    if (duplicates.length > 0) {
+    const existingWinner = await this.findExistingOrderForDedup(customerPhoneHash, productIds);
+    if (existingWinner) {
+      await this.recordCrossFunnelAttempt({
+        customerPhoneHash,
+        customerPhone: input.customerPhone,
+        customerName: input.customerName,
+        productIds,
+        mediaBuyerId: input.mediaBuyerId ?? actorId,
+        campaignId: input.campaignId ?? null,
+        branchId: null,
+        winner: { id: existingWinner.id, mediaBuyerId: existingWinner.mediaBuyerId ?? actorId },
+      });
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message:
-          'Possible duplicate: order(s) with same customer phone in the last 24 hours. Merge or dismiss existing before creating an offline order.',
+          `Duplicate: an order for this customer and product already exists (${existingWinner.id.slice(0, 8)}…, status: ${existingWinner.status}). Please check existing orders before creating a new one.`,
       });
     }
 
@@ -1544,9 +1557,6 @@ export class OrdersService {
         servicingBranchId = servicingBranch;
       }
     }
-
-    // Universal 7-day dedup applies to offline orders too (CEO 2026-05-26).
-    // Duplicate flagging removed — duplicates are cleaned by the purge cron.
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
@@ -1743,8 +1753,20 @@ export class OrdersService {
   }
 
   /** SHA-256 hash of phone for offline order creation (server-side only). */
+  /**
+   * Hash a phone number for dedup / cross-funnel matching.
+   * Must produce the SAME hash as the edge-worker's `hashPhone()`:
+   *   sha256("yannis:phone:" + normalizedDigits)
+   * Nigerian local format (0XXXXXXXXXX) is normalized to international (234XXXXXXXXXX)
+   * so the same physical phone always matches regardless of how the customer typed it.
+   */
   private hashPhone(phone: string): string {
-    return createHash('sha256').update(phone.trim()).digest('hex');
+    let digits = phone.replace(/\D/g, '');
+    // Nigerian local: 0XXXXXXXXXX (11 digits) → 234XXXXXXXXXX
+    if (digits.length === 11 && digits.startsWith('0')) {
+      digits = '234' + digits.slice(1);
+    }
+    return createHash('sha256').update(`yannis:phone:${digits}`).digest('hex');
   }
 
   /**
@@ -5491,11 +5513,11 @@ export class OrdersService {
       const ordersDelivered = deliveredByAgent.get(agent.id) ?? 0;
       const callAgg = callsByAgent.get(agent.id) ?? { callsMade: 0, avgDurationSeconds: 0 };
 
-      // CR = confirmed / total real workload (DELETED already excluded from
-      // `engaged`). DR = delivered / confirmed — measures the post-confirmation
-      // landing rate without conflating CS quality with rider performance.
+      // CR = confirmed (includes delivered+remitted) / total real workload
+      // (DELETED already excluded from `engaged`).
+      // DR = delivered / total — same denominator as CR for consistency.
       const confirmationRate = ord.engaged > 0 ? (ord.confirmed / ord.engaged) * 100 : 0;
-      const deliveryRate = ord.confirmed > 0 ? (ordersDelivered / ord.confirmed) * 100 : 0;
+      const deliveryRate = ord.engaged > 0 ? (ordersDelivered / ord.engaged) * 100 : 0;
 
       return {
         agentId: agent.id,
