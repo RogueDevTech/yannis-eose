@@ -39,6 +39,7 @@ import type { PendingCart } from '~/features/cs/types';
 import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import { orderDetailHref } from '~/lib/order-detail-return';
 import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { DeferredError } from '~/components/ui/deferred-section';
 import {
   OrdersChartViewShellSkeleton,
@@ -447,7 +448,12 @@ export function MarketingOrdersPage({
                   View cart
                 </CompactTableActionButton>
               ) : (
-                <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
+                <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+                  {order.lastCsComment && (
+                    <CsCommentIcon comment={order.lastCsComment.comment} actorName={order.lastCsComment.actorName} />
+                  )}
+                  <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
+                </div>
               ),
       },
     );
@@ -504,6 +510,9 @@ export function MarketingOrdersPage({
               {formatOrderTimestamp(order.createdAt)}
             </span>
           </div>
+          {order.lastCsComment && (
+            <MobileCommentPreview comment={order.lastCsComment.comment} />
+          )}
         </>
       );
 

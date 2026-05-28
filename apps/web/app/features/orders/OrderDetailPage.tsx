@@ -977,6 +977,10 @@ export function OrderDetailPage({
   const [cancelReason, setCancelReason] = useState('');
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [assignToId, setAssignToId] = useState('');
+  const csCloserOptions = useMemo(
+    () => (csClosersForAssign ?? []).map((a) => ({ value: a.id, label: a.name })),
+    [csClosersForAssign],
+  );
   const [callCustomerModalOpen, setCallCustomerModalOpen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   // After the first Copy/Call, the unmasked phone stays visible in the order header.
@@ -2260,7 +2264,7 @@ export function OrderDetailPage({
                           value={assignToId}
                           onChange={setAssignToId}
                           placeholder="Pick a closer to assign…"
-                          options={csClosersForAssign.map((a) => ({ value: a.id, label: a.name }))}
+                          options={csCloserOptions}
                           wrapperClassName="flex-1 min-w-0"
                           searchPlaceholder="Search closers..."
                           controlSize="lg"

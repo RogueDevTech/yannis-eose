@@ -268,6 +268,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       loser_status: string;
       winner_id: string;
       winner_mb_id: string | null;
+      winner_order_number: number | null;
       product_id: string;
     }>(sql`
       WITH status_rank AS (
@@ -289,6 +290,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         loser.status          AS loser_status,
         winner.id             AS winner_id,
         winner.media_buyer_id AS winner_mb_id,
+        winner.order_number   AS winner_order_number,
         oi_loser.product_id   AS product_id
       FROM orders loser
       JOIN order_items oi_loser ON oi_loser.order_id = loser.id
@@ -338,6 +340,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       status: string;
       winnerId: string;
       winnerMbId: string | null;
+      winnerOrderNumber: number | null;
       productIds: string[];
     }>();
     for (const row of losers) {
@@ -358,6 +361,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           status: row.loser_status,
           winnerId: row.winner_id,
           winnerMbId: row.winner_mb_id,
+          winnerOrderNumber: row.winner_order_number,
           productIds: [row.product_id],
         });
       }
@@ -410,14 +414,20 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
       // 3. Timeline events for audit trail
       await tx.insert(schema.orderTimelineEvents).values(
-        loserEntries.map((e) => ({
-          orderId: e.loserId,
-          eventType: 'ORDER_DELETED' as const,
-          actorId: null,
-          actorName: 'System' as const,
-          description: `Auto-deleted: universal dedup (same phone + product within 7 days — winner: ${e.winnerId.slice(0, 8)}…)`,
-          branchId: e.branchId ?? null,
-        })),
+        loserEntries.map((e) => {
+          const winnerLabel = e.winnerOrderNumber
+            ? `YNS-${e.winnerOrderNumber}`
+            : e.winnerId.slice(0, 8);
+          return {
+            orderId: e.loserId,
+            eventType: 'ORDER_DELETED' as const,
+            actorId: null,
+            actorName: 'System' as const,
+            description: `Auto-deleted: universal dedup (same phone + product within 7 days — winner: ${winnerLabel})`,
+            metadata: { winnerId: e.winnerId },
+            branchId: e.branchId ?? null,
+          };
+        }),
       );
     });
 
