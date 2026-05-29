@@ -390,6 +390,13 @@ export function MarketingTeamPage({
         render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalSpend))}</span>,
       },
       {
+        key: 'cpa',
+        header: 'CPA',
+        align: 'right',
+        nowrap: true,
+        render: (m) => (m.cpa != null ? <NairaPrice amount={m.cpa} /> : '\u2014'),
+      },
+      {
         key: 'orders',
         header: 'Orders',
         align: 'right',
@@ -407,11 +414,29 @@ export function MarketingTeamPage({
           ),
       },
       {
-        key: 'cpa',
-        header: 'CPA',
+        key: 'confirmed',
+        header: 'Confirmed',
         align: 'right',
         nowrap: true,
-        render: (m) => (m.cpa != null ? <NairaPrice amount={m.cpa} /> : '\u2014'),
+        // confirmedOrders from the API is "confirmed or beyond" (includes delivered).
+        // Display only the in-pipeline portion so the column doesn't overlap with Delivered.
+        render: (m) => {
+          if (m.confirmedOrders == null) return '\u2014';
+          const inPipeline = m.confirmedOrders - (m.deliveredOrders ?? 0);
+          return <span className="tabular-nums text-brand-600 dark:text-brand-400">{Math.max(0, inPipeline).toLocaleString()}</span>;
+        },
+      },
+      {
+        key: 'delivered',
+        header: 'Delivered',
+        align: 'right',
+        nowrap: true,
+        render: (m) =>
+          m.deliveredOrders != null ? (
+            <span className="tabular-nums text-success-600 dark:text-success-400">{m.deliveredOrders.toLocaleString()}</span>
+          ) : (
+            '\u2014'
+          ),
       },
       {
         key: 'profitability',
@@ -731,9 +756,11 @@ export function MarketingTeamPage({
                         {formatNaira(Number(m.balance))}
                       </span>
                     </div>
-                    {/* Row 2: orders + CR% + DR% */}
-                    <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums pl-[calc(1.75rem+0.625rem)]">
+                    {/* Row 2: orders + confirmed + delivered + CR% + DR% */}
+                    <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums pl-[calc(1.75rem+0.625rem)] flex-wrap">
                       {m.totalOrders != null && <span>{m.totalOrders.toLocaleString()} orders</span>}
+                      {m.confirmedOrders != null && <span>{m.confirmedOrders.toLocaleString()} conf</span>}
+                      {m.deliveredOrders != null && <span>{m.deliveredOrders.toLocaleString()} del</span>}
                       {m.confirmationRate != null && (
                         <span className={confirmationRateColorClass(m.confirmationRate)}>
                           CR {Math.round(m.confirmationRate)}%

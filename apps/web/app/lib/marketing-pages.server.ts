@@ -403,17 +403,24 @@ export function getMarketingRoleFlags(
     !!user.currentBranchId;
 
   const isMediaBuyer = role === 'MEDIA_BUYER' && !isMarketingSupervisorOnBranch;
-  // SuperAdmin sees funding read-only — they should not approve/send funding
-  // that is not meant for them. Only HoM, Finance, Admin, or explicit permission holders.
+  // SuperAdmin sees funding read-only — they should not approve/send/request
+  // funding. They have all permission codes via snapshot but the funding
+  // actions are not meant for them. Only HoM, Finance, Admin, or explicit
+  // permission holders (excluding SuperAdmin).
+  const isSuperAdmin = role === 'SUPER_ADMIN';
   const isFundingAdmin =
-    ['ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role) ||
-    has('marketing.funding.approve') ||
-    isMarketingSupervisorOnBranch;
+    !isSuperAdmin && (
+      ['ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role) ||
+      has('marketing.funding.approve') ||
+      isMarketingSupervisorOnBranch
+    );
   const canRequestFunding =
-    role === 'MEDIA_BUYER' ||
-    role === 'HEAD_OF_MARKETING' ||
-    has('marketing.funding.request') ||
-    isMarketingSupervisorOnBranch;
+    !isSuperAdmin && (
+      role === 'MEDIA_BUYER' ||
+      role === 'HEAD_OF_MARKETING' ||
+      has('marketing.funding.request') ||
+      isMarketingSupervisorOnBranch
+    );
   const canApproveAdSpend =
     ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'].includes(role) ||
     has('marketing.adSpend.approve') ||
@@ -425,17 +432,14 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'createFunding') {
-    const receiptUrl = formData.get('receiptUrl')?.toString() ?? '';
-    if (!receiptUrl) {
-      return json({ error: 'Receipt URL is mandatory' }, { status: 400 });
-    }
+    const receiptUrl = formData.get('receiptUrl')?.toString() || undefined;
     const res = await apiRequest<unknown>('/trpc/marketing.createFunding', {
       method: 'POST',
       cookie,
       body: {
         receiverId: formData.get('receiverId')?.toString() ?? '',
         amount: formData.get('amount')?.toString() ?? '',
-        receiptUrl,
+        ...(receiptUrl ? { receiptUrl } : {}),
       },
     });
     if (!res.ok) {

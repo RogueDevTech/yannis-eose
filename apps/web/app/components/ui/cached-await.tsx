@@ -81,6 +81,26 @@ export function CachedAwait<T>({
   );
   const [error, setError] = useState<Error | null>(null);
 
+  // Track the cacheKey the current `resolved` belongs to. When the URL changes
+  // (pagination, filter) and there's no cache hit for the new key, clear
+  // `resolved` so the fallback skeleton shows instead of stale data from the
+  // previous page. Without this, clicking "Next" renders page 1 data under
+  // page 2 props while the promise resolves — and `isLoaderRefetchBusy` keeps
+  // the skeleton overlay stuck because navigation already completed.
+  const resolvedForKeyRef = useRef(cacheKey);
+  if (cacheKey !== resolvedForKeyRef.current) {
+    resolvedForKeyRef.current = cacheKey;
+    const freshCache = getCachedLoaderEntry(cacheKey);
+    cachedRef.current = freshCache;
+    if (freshCache) {
+      // Cache hit for the new URL — show it immediately (stale-while-revalidate).
+      setResolved(freshCache.data as T);
+    } else {
+      // No cache — clear stale data so fallback renders.
+      setResolved(null);
+    }
+  }
+
   // Resolve the live deferred promise; on settle, snapshot into cache and
   // swap to fresh data. The dependency on `resolve` re-runs this effect when
   // the loader produces a new promise (e.g. after revalidation or filter
@@ -92,18 +112,14 @@ export function CachedAwait<T>({
       .then((data) => {
         if (cancelled) return;
         setCachedLoaderEntry(cacheKey, data);
-        // When the route opted into full-loader caching, write the full
-        // useLoaderData() shape too so `clientLoader` can serve it instantly
-        // on revisit (skipping the server roundtrip).
         if (loaderShell && deferredKey) {
           setFullLoaderEntry(cacheKey, { ...loaderShell, [deferredKey]: data });
         }
         setResolved(data);
+        resolvedForKeyRef.current = cacheKey;
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        // Surface the rejection so the user gets a recoverable error UI.
-        // Without this the fallback skeleton renders forever (silent failure).
         setError(err instanceof Error ? err : new Error(String(err)));
       });
     return () => {

@@ -68,9 +68,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' ? { assignedCsId: user.id } : {};
-  const isSupervisor = (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
+  const isSupervisor =
+    role === 'HEAD_OF_MARKETING' ||
+    (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
   const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
-  // For supervisors, also fetch personal-only metrics (without team expansion)
+  // For supervisors + HoM, also fetch personal-only metrics (scoped to own mediaBuyerId)
   const personalMetricsInput = isSupervisor
     ? JSON.stringify({ startDate, endDate, mediaBuyerId: user.id, personalOnly: true })
     : null;

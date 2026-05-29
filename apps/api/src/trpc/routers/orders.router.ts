@@ -1783,6 +1783,27 @@ export const ordersRouter = router({
       return res;
     }),
 
+  /** Reopen closed/stuck orders for follow-up — resets to UNPROCESSED, optional branch move. */
+  reopenForFollowUp: permissionProcedure('orders.followUp')
+    .input(
+      z.object({
+        orderIds: z.array(z.string().uuid()).min(1).max(100),
+        targetBranchId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().reopenForFollowUp(
+        input.orderIds,
+        ctx.user,
+        { targetBranchId: input.targetBranchId },
+      );
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
+    }),
+
   /**
    * Bulk assign multiple orders to a Sales closer (same gates as assignToCS).
    */

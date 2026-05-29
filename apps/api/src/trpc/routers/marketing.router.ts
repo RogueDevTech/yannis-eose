@@ -772,7 +772,7 @@ export const marketingRouter = router({
         getMarketingService().listFundingBalances(ctx.user, branchId),
         getOrdersService().list(recentOrdersInput, branchId, buildOrdersListOpts(ctx.user)),
         fetchLiveActivity(),
-        getCartService().countAbandoned({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined }),
+        getCartService().countAbandoned({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined, startDate: input.startDate, endDate: input.endDate }),
       ]);
 
       return {

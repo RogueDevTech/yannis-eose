@@ -132,6 +132,7 @@ export default function AdminDashboard() {
   const role = parentData?.user?.role ?? null;
   const userName = parentData?.user?.name ?? 'User';
   const isMarketingTeamSupervisor =
+    role === 'HEAD_OF_MARKETING' ||
     parentData?.user?.isMarketingTeamSupervisorOnActiveBranch === true;
   const isCsTeamSupervisor =
     parentData?.user?.isCsTeamSupervisorOnActiveBranch === true;

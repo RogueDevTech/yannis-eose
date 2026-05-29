@@ -10,7 +10,6 @@ import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Modal } from '~/components/ui/modal';
-import { FileUpload } from '~/components/ui/file-upload';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -19,7 +18,6 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ExportModal } from '~/components/ui/export-modal';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
-import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { formatRole } from '~/features/users/types';
 import { PageHeader } from '~/components/ui/page-header';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -33,7 +31,6 @@ import { SearchInput } from '~/components/ui/search-input';
 import { Tabs } from '~/components/ui/tabs';
 import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import type { FileUploadUploadState } from '~/components/ui/file-upload';
 
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
 
@@ -143,96 +140,6 @@ export interface DisbursementsPageData {
   requestersList?: Array<{ id: string; name: string; email: string; role: string }>;
 }
 
-/** Receipt preview modal — shows image inline with disbursement amount */
-function ReceiptModal({
-  open,
-  onClose,
-  receiptUrl,
-  amount,
-  senderName,
-  receiverName,
-  sentAt,
-  status,
-}: {
-  open: boolean;
-  onClose: () => void;
-  receiptUrl: string;
-  amount: string;
-  senderName: string;
-  receiverName: string;
-  sentAt: string;
-  status: string;
-}) {
-  if (!open) return null;
-
-  return (
-    <Modal open onClose={onClose} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-          <h3 className="text-lg font-semibold text-app-fg">Disbursement receipt</h3>
-          <button type="button" onClick={onClose} className="text-app-fg-muted hover:text-app-fg">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
-          {/* Amount highlight */}
-          <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
-            <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Disbursement amount</p>
-            <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-              <NairaPrice amount={Number(amount)} />
-            </p>
-            <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
-              <span>{senderName} &rarr; {receiverName}</span>
-              <span>&middot;</span>
-              <span>{new Date(sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-              <span>&middot;</span>
-              <StatusBadge status={status} />
-            </div>
-          </div>
-
-          {/* Receipt image */}
-          <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
-            <img
-              src={receiptUrl}
-              alt="Payment receipt"
-              className="w-full max-h-[400px] object-contain"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-                const fallback = (e.target as HTMLImageElement).nextElementSibling;
-                if (fallback) (fallback as HTMLElement).style.display = 'flex';
-              }}
-            />
-            <div className="items-center justify-center gap-2 p-8 hidden">
-              <svg className="w-5 h-5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-              </svg>
-              <span className="text-sm text-app-fg-muted">Receipt is not an image file</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <a
-            href={receiptUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-secondary btn-sm inline-flex items-center gap-1.5"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
-            Open in new tab
-          </a>
-          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
-        </div>
-    </Modal>
-  );
-}
 
 /** Create disbursement modal */
 function CreateDisbursementModal({
@@ -251,8 +158,6 @@ function CreateDisbursementModal({
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
-  const [receiptUrl, setReceiptUrl] = useState('');
-  const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
   const [receiverId, setReceiverId] = useState(preselectedReceiverId ?? '');
 
   useFetcherToast(fetcher.data, {
@@ -264,8 +169,6 @@ function CreateDisbursementModal({
 
   useEffect(() => {
     if (!open) {
-      setReceiptUrl('');
-      setUploadState('idle');
       setReceiverId(preselectedReceiverId ?? '');
     }
   }, [open, preselectedReceiverId]);
@@ -277,18 +180,16 @@ function CreateDisbursementModal({
     const parsed = createFundingSchema.safeParse({
       receiverId: fdRead.get('receiverId')?.toString() ?? '',
       amount: fdRead.get('amount')?.toString() ?? '',
-      receiptUrl: receiptUrl.trim(),
     });
     if (!parsed.success) {
       toast.error('Cannot send disbursement', parsed.error.issues[0]?.message ?? 'Check the form.');
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     fetcher.submit(fd, { method: 'post' });
   };
 
-  const submitDisabled = uploadState === 'uploading' || !receiptUrl.trim();
+  const submitDisabled = false;
 
   if (!open) return null;
 
@@ -339,16 +240,6 @@ function CreateDisbursementModal({
           <div>
             <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
             <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input w-full" />
-          </div>
-
-          <div>
-            <FileUpload
-              folder={ASSET_FOLDERS.RECEIPTS}
-              name="receiptUrl"
-              label="Payment receipt"
-              onUpload={(url) => setReceiptUrl(url)}
-              onUploadStateChange={setUploadState}
-            />
           </div>
 
           <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('createFunding')} />
@@ -426,12 +317,8 @@ export function DisbursementsPage({
     return new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   }, [navigation.state, navigation.location, location.search]);
   const mainTab = mainTabFromSearchParams(pendingTabParams);
-  const [receiptModal, setReceiptModal] = useState<DisbursementRecord | null>(null);
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
-  const [requestReceiptModal, setRequestReceiptModal] = useState<FundingRequestRecord | null>(null);
-  const [approveRequestReceiptUrl, setApproveRequestReceiptUrl] = useState('');
-  const [approveRequestUploadState, setApproveRequestUploadState] = useState<FileUploadUploadState>('idle');
 
   const requestActionFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const requestActionSurface = useFetcherActionSurface(requestActionFetcher);
@@ -451,10 +338,7 @@ export function DisbursementsPage({
   useCloseOnFetcherSuccess(requestActionFetcher, handleRequestActionSuccess);
 
   useEffect(() => {
-    if (!approvingRequestId) {
-      setApproveRequestReceiptUrl('');
-      setApproveRequestUploadState('idle');
-    }
+    // reset on close — no-op now that receipt is removed
   }, [approvingRequestId]);
 
   const approvingRequestRow = useMemo(
@@ -480,20 +364,17 @@ export function DisbursementsPage({
     const parsed = approveFundingRequestSchema.safeParse({
       requestId: approvingRequestId,
       amount: approvedAmt,
-      receiptUrl: approveRequestReceiptUrl.trim(),
     });
     if (!parsed.success) {
-      toast.error('Cannot approve request', parsed.error.issues[0]?.message ?? 'Attach a valid receipt image.');
+      toast.error('Cannot approve request', parsed.error.issues[0]?.message ?? 'Check the form.');
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     fd.set('amount', String(parsed.data.amount));
     requestActionFetcher.submit(fd, { method: 'post' });
   };
 
-  const approveRequestSubmitDisabled =
-    approveRequestUploadState === 'uploading' || !approveRequestReceiptUrl.trim();
+  const approveRequestSubmitDisabled = false;
 
   const getRequesterName = useCallback(
     (requesterId: string) => requestersList.find((u) => u.id === requesterId)?.name ?? 'Unknown user',
@@ -732,20 +613,6 @@ export function DisbursementsPage({
           </span>
         ),
       },
-      {
-        key: 'receipt',
-        header: 'Receipt',
-        align: 'center',
-        headerClassName: 'text-center',
-        render: (f) =>
-          f.receiptUrl ? (
-            <TableActionButton type="button" variant="primary" title="View" onClick={() => setReceiptModal(f)}>
-              View
-            </TableActionButton>
-          ) : (
-            <span className="text-xs text-surface-400">—</span>
-          ),
-      },
     ];
   }, [getName]);
 
@@ -804,18 +671,6 @@ export function DisbursementsPage({
             {r.resolvedAt ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
           </span>
         ),
-      },
-      {
-        key: 'receipt',
-        header: 'Receipt',
-        render: (r) =>
-          r.receiptUrl ? (
-            <TableActionButton type="button" variant="primary" title="View" onClick={() => setRequestReceiptModal(r)}>
-              View
-            </TableActionButton>
-          ) : (
-            <span className="text-app-fg-muted">—</span>
-          ),
       },
       {
         key: 'actions',
@@ -1085,20 +940,6 @@ export function DisbursementsPage({
         preselectedReceiverId={preselectedReceiverId}
       />
 
-      {/* Receipt preview modal */}
-      {receiptModal?.receiptUrl && (
-        <ReceiptModal
-          open={!!receiptModal}
-          onClose={() => setReceiptModal(null)}
-          receiptUrl={receiptModal.receiptUrl}
-          amount={receiptModal.amount}
-          senderName={getName(receiptModal.senderId)}
-          receiverName={getName(receiptModal.receiverId)}
-          sentAt={receiptModal.sentAt}
-          status={receiptModal.status}
-        />
-      )}
-
       <OverviewStatStrip
         mobileGrid
         items={[
@@ -1255,11 +1096,6 @@ export function DisbursementsPage({
                     </div>
                     <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                       <span>{new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                      {f.receiptUrl ? (
-                        <Button type="button" variant="ghost" size="sm" onClick={() => setReceiptModal(f)}>
-                          View receipt
-                        </Button>
-                      ) : null}
                     </div>
                   </div>
                 )}
@@ -1287,7 +1123,7 @@ export function DisbursementsPage({
                   <div className="border-b border-app-border px-4 py-3">
                     <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
                     <p className="mt-0.5 text-xs text-app-fg-muted">
-                      Send the money to the requester manually, then approve with a receipt image. They will be notified.
+                      Send the money to the requester manually, then approve. They will be notified.
                     </p>
                   </div>
                   <CompactTable<FundingRequestRecord>
@@ -1314,17 +1150,6 @@ export function DisbursementsPage({
                             ? ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`
                             : null}
                         </p>
-                        {r.receiptUrl ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="text-sm text-brand-500 hover:text-brand-600"
-                            onClick={() => setRequestReceiptModal(r)}
-                          >
-                            View receipt
-                          </Button>
-                        ) : null}
                         {r.status === 'PENDING' ? (
                           <div className="inline-flex gap-1.5 pt-1">
                             <TableActionButton variant="primary" onClick={() => setApprovingRequestId(r.id)}>
@@ -1512,68 +1337,13 @@ export function DisbursementsPage({
         </>
       )}
 
-      {/* Funding request receipt modal */}
-      {requestReceiptModal?.receiptUrl && (
-        <Modal open onClose={() => setRequestReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
-          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-            <h3 className="text-lg font-semibold text-app-fg">Funding request receipt</h3>
-            <button type="button" onClick={() => setRequestReceiptModal(null)} className="text-app-fg-muted hover:text-app-fg">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
-            <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
-              <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
-              <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-                <NairaPrice amount={Number(requestReceiptModal.amount)} />
-              </p>
-              <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
-                <span>{requestReceiptModal.requesterName ?? getRequesterName(requestReceiptModal.requesterId)}</span>
-                <span>&middot;</span>
-                <span>{new Date(requestReceiptModal.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                <span>&middot;</span>
-                <StatusBadge status={requestReceiptModal.status} />
-              </div>
-            </div>
-            <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
-              <img
-                src={requestReceiptModal.receiptUrl}
-                alt="Funding request receipt"
-                className="w-full max-h-[400px] object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                  const fallback = (e.target as HTMLImageElement).nextElementSibling;
-                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
-                }}
-              />
-              <div className="items-center justify-center gap-2 p-8 hidden">
-                <span className="text-sm text-app-fg-muted">Receipt image could not be loaded</span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-4">
-            <a
-              href={requestReceiptModal.receiptUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-secondary btn-sm inline-flex items-center gap-1.5"
-            >
-              Open in new tab
-            </a>
-            <Button variant="secondary" size="sm" onClick={() => setRequestReceiptModal(null)}>Close</Button>
-          </div>
-        </Modal>
-      )}
-
       {/* Approve funding request modal */}
       {approvingRequestId && approvingRequestRow && (
         <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
           <ModalFetcherInlineError message={requestActionSurface.errorMatchingIntent('approveFundingRequest')} />
           <h3 className="text-lg font-semibold text-app-fg">Approve funding request</h3>
           <p className="text-sm text-app-fg-muted">
-            Send the money to the requester manually (e.g. bank transfer), then attach the receipt image below. They will be notified and can preview the receipt.
+            Send the money to the requester manually (e.g. bank transfer), then approve below. They will be notified.
           </p>
           <RequestActionForm
             method="post"
@@ -1597,13 +1367,6 @@ export function DisbursementsPage({
                 className="input w-full"
               />
             </div>
-            <FileUpload
-              folder={ASSET_FOLDERS.RECEIPTS}
-              name="receiptUrl"
-              label="Receipt image"
-              onUpload={(url) => setApproveRequestReceiptUrl(url)}
-              onUploadStateChange={setApproveRequestUploadState}
-            />
             <div className="flex gap-2">
               <Button
                 type="submit"
