@@ -796,13 +796,19 @@ export const ordersRouter = router({
 
   /**
    * Assign an order to a Sales closer.
-   * `orders.reassign` (HoCS / Admin) or branch Sales team supervisor for in-team agents (UNPROCESSED / CS_ASSIGNED only).
+   * - Pre-engagement statuses (UNPROCESSED / CS_ASSIGNED / CS_ENGAGED): allowed for
+   *   `orders.reassign` (HoCS / Admin) or a branch Sales team supervisor.
+   * - Post-engagement (CONFIRMED → REMITTED, plus RETURNED / PARTIALLY_DELIVERED):
+   *   requires `orders.cs.transfer_any_status` (HoCS / Admin by default). Status is
+   *   preserved on the order; reason is mandatory for the audit trail.
    */
   assignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(assignOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      const res = await getOrdersService().assignToCS(input.orderId, input.csCloserId, ctx.user);
+      const res = await getOrdersService().assignToCS(input.orderId, input.csCloserId, ctx.user, {
+        reason: input.reason,
+      });
       await Promise.all([
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCache(input.orderId),

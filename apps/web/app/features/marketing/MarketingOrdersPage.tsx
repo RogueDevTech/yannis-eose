@@ -1,5 +1,5 @@
-import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
-import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
@@ -38,7 +38,6 @@ import type { Order } from '~/features/orders/types';
 import type { PendingCart } from '~/features/cs/types';
 import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import { orderDetailHref } from '~/lib/order-detail-return';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
 import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { DeferredError } from '~/components/ui/deferred-section';
 import {
@@ -46,6 +45,22 @@ import {
   StatValuePulse,
   TableCellTextPulse,
 } from '~/components/ui/deferred-skeletons';
+
+/** Floating dismiss badge at the top-right edge of a filter control. */
+function FilterDismiss({ onClear }: { onClear: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClear(); }}
+      className="absolute -top-1.5 -right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-danger-500 text-white shadow-sm transition-colors hover:bg-danger-600 dark:bg-danger-600 dark:hover:bg-danger-500"
+      title="Clear filter"
+    >
+      <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  );
+}
 
 const DEFERRED_PLACEHOLDER_ROW_COUNT = 10;
 const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
@@ -82,11 +97,27 @@ const MARKETING_ORDERS_STATUS_OPTIONS_BASE = MARKETING_ORDERS_STATUSES.map((stat
 const FROM_CART_STATUS_VALUE = '__from_cart__';
 const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
 
+/** Marketing performance metrics — same shape as `marketing.metrics` / dashboard. */
+export interface MarketingMetrics {
+  totalOrders: number;
+  deliveredOrders: number;
+  deliveredRevenue: number;
+  confirmedOrders: number;
+  confirmationRate: number;
+  cpa: number;
+  trueRoas: number;
+  deliveryRate: number;
+  totalSpend: number;
+}
+
 /** Streamed after `orders.list`: counts, metrics, chart series, export picklists + buyer filter options. */
 export type MarketingOrdersSecondaryPayload = {
   statusCounts: Record<string, number>;
   cpa: number | null;
   totalAdSpend: number | null;
+  /** Full marketing KPIs from `getPerformanceMetrics` — used for the stat strip
+   *  so Total Orders / Delivered / CR / DR match the dashboard, not raw statusCounts. */
+  metrics: MarketingMetrics;
   dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
   marketingExportPicklists?: Partial<ExportModalPicklists>;
   mediaBuyersForFilter: Array<{ id: string; name: string }>;
@@ -104,7 +135,7 @@ interface MarketingOrdersPageProps {
   totalPages: number;
   page: number;
   limit: number;
-  secondary: Promise<MarketingOrdersSecondaryPayload>;
+  secondary: MarketingOrdersSecondaryPayload;
   statusFilter?: string;
   searchFilter?: string;
   sortBy?: string;
@@ -112,6 +143,10 @@ interface MarketingOrdersPageProps {
   isMediaBuyer: boolean;
   /** True when the viewer is a marketing-team supervisor. */
   isMarketingSupervisor?: boolean;
+  /** Pre-fetched personal stats for the supervisor's "My Performance" tab.
+   *  When present, the stat strip toggles between team (secondary) and personal
+   *  (this) data instantly — no network round-trip on tab switch. */
+  personalSecondary?: MarketingOrdersSecondaryPayload;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
@@ -153,6 +188,7 @@ export function MarketingOrdersPage({
   page,
   limit,
   secondary,
+  personalSecondary,
   statusFilter,
   searchFilter,
   sortBy: sortByProp = 'createdAt',
@@ -309,23 +345,6 @@ export function MarketingOrdersPage({
     return n;
   }, [selectedStatus, showMediaBuyerColumn, searchParams]);
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('status')) n += 1;
-    if (searchParams.get('fromCart') === '1') n += 1;
-    if (searchParams.get('testOrders') === '1') n += 1;
-    if (searchParams.get('mediaBuyerId')) n += 1;
-    if (searchParams.get('productId')) n += 1;
-    if (searchParams.get('campaignId')) n += 1;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('orderSource')) n += 1;
-    const sb = searchParams.get('sortBy');
-    const so = searchParams.get('sortOrder');
-    if (sb && sb !== 'createdAt') n += 1;
-    else if (so && so !== 'desc') n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    return n;
-  }, [searchParams]);
 
   const marketingOrderColumns: CompactTableColumn<Order>[] = useMemo(() => {
     const cols: CompactTableColumn<Order>[] = [
@@ -367,7 +386,7 @@ export function MarketingOrdersPage({
               order.mediaBuyerId ? (
                 <Link
                   to={`/hr/users/${order.mediaBuyerId}`}
-                  className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
+                  className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-semibold hover:underline"
                 >
                   {order.mediaBuyerName ?? 'View user'}
                 </Link>
@@ -505,6 +524,13 @@ export function MarketingOrdersPage({
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
           </div>
+          {showMediaBuyerColumn && order.mediaBuyerName && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="font-semibold text-brand-600 dark:text-brand-400 truncate">
+                {order.mediaBuyerName}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2">
             {order.status === 'CART' ? (
               <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
@@ -586,21 +612,9 @@ export function MarketingOrdersPage({
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
                 {canExport && (
-                  <Suspense
-                    fallback={
-                      <Button type="button" variant="secondary" size="sm" disabled>
-                        Generate report…
-                      </Button>
-                    }
-                  >
-                    <Await resolve={secondary}>
-                      {() => (
-                        <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
-                          Generate report
-                        </Button>
-                      )}
-                    </Await>
-                  </Suspense>
+                  <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
+                    Generate report
+                  </Button>
                 )}
                 {isTestOrdersView && (
                   <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
@@ -620,89 +634,99 @@ export function MarketingOrdersPage({
                   className="!bg-app-hover text-center"
                   wrapperClassName="w-full"
                 />
-                <Suspense fallback={null}>
-                  <Await resolve={secondary}>
-                    {(ins) => {
-                      const mediaBuyerFilterOptions = [
+                {showMediaBuyerColumn && secondary.mediaBuyersForFilter.length > 0 ? (
+                  <div className="relative">
+                    {(searchParams.get('mediaBuyerId') || 'ALL') !== 'ALL' && (
+                      <FilterDismiss onClear={() => {
+                        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
+                      }} />
+                    )}
+                    <SearchableSelect
+                      id="marketing-orders-filter-buyer-sheet"
+                      value={searchParams.get('mediaBuyerId') || 'ALL'}
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                          else next.delete('mediaBuyerId');
+                          return next;
+                        });
+                      }}
+                      options={[
                         { value: 'ALL', label: 'All media buyers' },
-                        ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-                      ];
-                      return (
-                        <>
-                          {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
-                            <SearchableSelect
-                              id="marketing-orders-filter-buyer-sheet"
-                              value={searchParams.get('mediaBuyerId') || 'ALL'}
-                              onChange={(v) => {
-                                setSearchParams((p) => {
-                                  const next = new URLSearchParams(p);
-                                  next.set('page', '1');
-                                  if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                                  else next.delete('mediaBuyerId');
-                                  return next;
-                                });
-                              }}
-                              options={mediaBuyerFilterOptions}
-                              controlSize="lg"
-                              triggerClassName="!bg-app-hover text-center"
-                              wrapperClassName="w-full"
-                              placeholder="All media buyers"
-                              searchPlaceholder="Search buyers…"
-                            />
-                          ) : null}
-                          {ins.productsForFilter.length > 0 ? (
-                            <SearchableSelect
-                              id="marketing-orders-filter-product-sheet"
-                              value={searchParams.get('productId') || 'ALL'}
-                              onChange={(v) => {
-                                setSearchParams((p) => {
-                                  const next = new URLSearchParams(p);
-                                  next.set('page', '1');
-                                  if (v && v !== 'ALL') next.set('productId', v);
-                                  else next.delete('productId');
-                                  return next;
-                                });
-                              }}
-                              options={[
-                                { value: 'ALL', label: 'All products' },
-                                ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                              ]}
-                              controlSize="lg"
-                              triggerClassName="!bg-app-hover text-center"
-                              wrapperClassName="w-full"
-                              placeholder="All products"
-                              searchPlaceholder="Search products…"
-                            />
-                          ) : null}
-                          {ins.campaignsForFilter.length > 0 ? (
-                            <SearchableSelect
-                              id="marketing-orders-filter-form-sheet"
-                              value={searchParams.get('campaignId') || 'ALL'}
-                              onChange={(v) => {
-                                setSearchParams((p) => {
-                                  const next = new URLSearchParams(p);
-                                  next.set('page', '1');
-                                  if (v && v !== 'ALL') next.set('campaignId', v);
-                                  else next.delete('campaignId');
-                                  return next;
-                                });
-                              }}
-                              options={[
-                                { value: 'ALL', label: 'All forms' },
-                                ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                              ]}
-                              controlSize="lg"
-                              triggerClassName="!bg-app-hover text-center"
-                              wrapperClassName="w-full"
-                              placeholder="All forms"
-                              searchPlaceholder="Search forms…"
-                            />
-                          ) : null}
-                        </>
-                      );
-                    }}
-                  </Await>
-                </Suspense>
+                        ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                      ]}
+                      controlSize="lg"
+                      triggerClassName="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      placeholder="All media buyers"
+                      searchPlaceholder="Search buyers…"
+                    />
+                  </div>
+                ) : null}
+                {secondary.productsForFilter.length > 0 ? (
+                  <div className="relative">
+                    {(searchParams.get('productId') || 'ALL') !== 'ALL' && (
+                      <FilterDismiss onClear={() => {
+                        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
+                      }} />
+                    )}
+                    <SearchableSelect
+                      id="marketing-orders-filter-product-sheet"
+                      value={searchParams.get('productId') || 'ALL'}
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('productId', v);
+                          else next.delete('productId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All products' },
+                        ...secondary.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                      ]}
+                      controlSize="lg"
+                      triggerClassName="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      placeholder="All products"
+                      searchPlaceholder="Search products…"
+                    />
+                  </div>
+                ) : null}
+                {secondary.campaignsForFilter.length > 0 ? (
+                  <div className="relative">
+                    {(searchParams.get('campaignId') || 'ALL') !== 'ALL' && (
+                      <FilterDismiss onClear={() => {
+                        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
+                      }} />
+                    )}
+                    <SearchableSelect
+                      id="marketing-orders-filter-form-sheet"
+                      value={searchParams.get('campaignId') || 'ALL'}
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('campaignId', v);
+                          else next.delete('campaignId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All forms' },
+                        ...secondary.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                      ]}
+                      controlSize="lg"
+                      triggerClassName="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      placeholder="All forms"
+                      searchPlaceholder="Search forms…"
+                    />
+                  </div>
+                ) : null}
               </>
             }
             sheet={({ closeSheet }) => (
@@ -720,29 +744,17 @@ export function MarketingOrdersPage({
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
                 {canExport && (
-                  <Suspense
-                    fallback={
-                      <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
-                        Generate report…
-                      </Button>
-                    }
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExportModal(true);
+                    }}
                   >
-                    <Await resolve={secondary}>
-                      {() => (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="w-full justify-center"
-                          onClick={() => {
-                            closeSheet();
-                            setShowExportModal(true);
-                          }}
-                        >
-                          Generate report
-                        </Button>
-                      )}
-                    </Await>
-                  </Suspense>
+                    Generate report
+                  </Button>
                 )}
               </>
             )}
@@ -780,136 +792,41 @@ export function MarketingOrdersPage({
         />
       )}
 
-      <Suspense
-        fallback={
-          <>
-            <OverviewStatStrip
-              mobileGrid
-              tileClassName="!py-2.5"
-              items={[
-                { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
-                { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
-                { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
-                { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
-                { label: 'Delivery Rate', value: <StatValuePulse className="min-w-[3rem]" /> },
-                { label: 'Cancelled', value: <StatValuePulse className="min-w-[2rem]" /> },
-              ]}
-            />
-
-            <ToolbarFiltersCollapsible
-              hideMobileSheet
-              badgeCount={ordersToolbarFilterBadge}
-              sheetSubtitle={<span>Status and media buyer apply immediately</span>}
-              searchRow={
-                <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-                  <SearchInput
-                    placeholder="Search by name, order number, or ID..."
-                    value={searchQuery}
-                    onChange={(val) => setSearchQuery(val)}
-                    withSubmitButton
-                    wrapperClassName="min-w-0 flex-1"
-                  />
-                </form>
-              }
-              desktopInlineFilters={
-                <>
-                  <FormSelect
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={statusOptionsBase}
-                    wrapperClassName="w-auto min-w-[11rem]"
-                  />
-                  {showMediaBuyerColumn ? (
-                    <Suspense
-                      fallback={
-                        <div
-                          className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
-                          aria-hidden
-                        />
-                      }
-                    >
-                      <Await resolve={secondary}>
-                        {(ins) =>
-                          ins.mediaBuyersForFilter.length > 0 ? (
-                            <SearchableSelect
-                              id="marketing-orders-filter-buyer-desktop"
-                              value={searchParams.get('mediaBuyerId') || 'ALL'}
-                              onChange={(v) => {
-                                setSearchParams((p) => {
-                                  const next = new URLSearchParams(p);
-                                  next.set('page', '1');
-                                  if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                                  else next.delete('mediaBuyerId');
-                                  return next;
-                                });
-                              }}
-                              options={[
-                                { value: 'ALL', label: 'All media buyers' },
-                                ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-                              ]}
-                              wrapperClassName="w-auto min-w-[12rem] sm:w-56"
-                              placeholder="All media buyers"
-                              searchPlaceholder="Search buyers…"
-                            />
-                          ) : null
-                        }
-                      </Await>
-                    </Suspense>
-                  ) : null}
-                </>
-              }
-              sheetFilterBody={null}
-            />
-          </>
-        }
-      >
-        <Await resolve={secondary} errorElement={<DeferredError />}>
-          {(ins) => {
+      {(() => {
+            const ins = secondary;
+            // When the supervisor/HoM toggles to "My Performance", use the
+            // pre-fetched personal stats for the stat strip instead of the
+            // team stats. Picklists + chart always come from the team bundle.
+            const activeSecondary =
+              myTeamTab === 'personal' && personalSecondary ? personalSecondary : ins;
             const mediaBuyerFilterOptions = [
               { value: 'ALL', label: 'All media buyers' },
               ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
             ];
+            // KPI tiles use `metrics` from `getPerformanceMetrics` so Total /
+            // Delivered / CR / DR match the dashboard (which uses the same source).
+            // `statusCounts` is still used for the status filter dropdown and for
+            // per-status click-through counts (Unassigned, Assigned, etc.).
+            const defaultMetrics: MarketingMetrics = { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 };
+            const m = activeSecondary.metrics ?? defaultMetrics;
+            // statusCounts always from team bundle — drives status dropdown + per-status pills
             const statusCounts = ins.statusCounts;
-            const ordersInPeriodTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
+            const statusTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
             const unconfirmedCount = statusCounts['CS_ENGAGED'] ?? 0;
-            // "Confirmed" rolls up the full post-confirmation in-flight pipeline
-            // so this count matches the OrderStatusBadge default.
             const confirmedCount =
               (statusCounts['CONFIRMED'] ?? 0) +
               (statusCounts['AGENT_ASSIGNED'] ?? 0) +
               (statusCounts['DISPATCHED'] ?? 0) +
               (statusCounts['IN_TRANSIT'] ?? 0);
-            const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
             const deletedCount = statusCounts['DELETED'] ?? 0;
-            // Overview strip is a fixed snapshot of the period — it must not
-            // shift when the table's status filter (or the cart view) changes.
-            // Everything here is derived from `statusCounts` (the period
-            // aggregate), never from `total` (the filtered list count).
-            const deliveryRate =
-              ordersInPeriodTotal > 0
-                ? ((((statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)) / ordersInPeriodTotal) * 100).toFixed(1)
-                : '0';
-            // CR = confirmed-or-beyond / total orders in period (DELETED already excluded
-            // from ordersInPeriodTotal). DELETED is an editorial "this order shouldn't
-            // exist" action, not a business outcome — it never enters any rate calc.
-            const confirmedPlus =
-              confirmedCount +
-              (statusCounts['DELIVERED'] ?? 0) +
-              (statusCounts['PARTIALLY_DELIVERED'] ?? 0) +
-              (statusCounts['REMITTED'] ?? 0) +
-              (statusCounts['RETURNED'] ?? 0) +
-              (statusCounts['RESTOCKED'] ?? 0) +
-              (statusCounts['WRITTEN_OFF'] ?? 0);
-            const confirmationRate =
-              ordersInPeriodTotal > 0 ? (confirmedPlus / ordersInPeriodTotal) * 100 : 0;
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
                 value: status,
                 label:
                   status === 'ALL'
-                    ? `All Statuses (${ordersInPeriodTotal})`
+                    ? `All Statuses (${statusTotal})`
                     : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
               })),
               ...(enableFromCartStatusOption
@@ -928,8 +845,8 @@ export function MarketingOrdersPage({
                   liveFlash={liveState.showGreen}
                   items={[
                     {
-                      label: 'Total',
-                      value: ordersInPeriodTotal,
+                      label: 'Total Orders',
+                      value: m.totalOrders,
                       valueClassName: 'text-app-fg',
                       active: selectedStatus === 'ALL',
                       onClick: () => handleStatusChange('ALL'),
@@ -957,30 +874,30 @@ export function MarketingOrdersPage({
                     },
                     {
                       label: 'Confirmed',
-                      value: confirmedCount,
+                      value: m.confirmedOrders,
                       valueClassName: 'text-brand-600 dark:text-brand-400',
                       active: selectedStatus === 'CONFIRMED',
                       onClick: () => handleStatusChange('CONFIRMED'),
                     },
                     {
                       label: 'Delivered',
-                      value: deliveredCount,
-                      valueClassName: 'text-success-600 dark:text-success-400',
+                      value: m.deliveredOrders,
+                      valueClassName: m.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
                       active: selectedStatus === 'DELIVERED',
                       onClick: () => handleStatusChange('DELIVERED'),
                     },
                     {
                       label: 'CR',
-                      value: `${confirmationRate.toFixed(1)}%`,
-                      valueClassName: confirmationRateColorClass(confirmationRate),
+                      value: `${m.confirmationRate.toFixed(1)}%`,
+                      valueClassName: confirmationRateColorClass(m.confirmationRate),
                       title: 'Confirmation Rate — confirmed / total in period (DELETED excluded)',
                     },
-                    { label: 'DR', value: <>{deliveryRate}%</>, valueClassName: deliveryRateColorClass(Number(deliveryRate)), title: 'Delivery Rate — delivered / confirmed' },
+                    { label: 'DR', value: <>{m.deliveryRate.toFixed(1)}%</>, valueClassName: deliveryRateColorClass(m.deliveryRate), title: 'Delivery Rate — delivered / confirmed' },
                     {
                       label: 'Open carts',
-                      value: ins.abandonedCartCount,
+                      value: activeSecondary.abandonedCartCount,
                       valueClassName:
-                        ins.abandonedCartCount > 0
+                        activeSecondary.abandonedCartCount > 0
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-app-fg',
                       title: 'Captured carts not yet recovered — tap to view the cart backlog',
@@ -1025,141 +942,163 @@ export function MarketingOrdersPage({
                         wrapperClassName="w-auto min-w-[11rem]"
                       />
                       {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
-                        <SearchableSelect
-                          id="marketing-orders-filter-buyer"
-                          value={searchParams.get('mediaBuyerId') || 'ALL'}
-                          onChange={(v) => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('page', '1');
-                              if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                              else next.delete('mediaBuyerId');
-                              return next;
-                            });
-                          }}
-                          options={mediaBuyerFilterOptions}
-                          wrapperClassName="w-full min-w-0 sm:w-56"
-                          placeholder="All media buyers"
-                          searchPlaceholder="Search buyers…"
-                        />
+                        <div className="relative">
+                          {(searchParams.get('mediaBuyerId') || 'ALL') !== 'ALL' && (
+                            <FilterDismiss onClear={() => {
+                              setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
+                            }} />
+                          )}
+                          <SearchableSelect
+                            id="marketing-orders-filter-buyer"
+                            value={searchParams.get('mediaBuyerId') || 'ALL'}
+                            onChange={(v) => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('page', '1');
+                                if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                                else next.delete('mediaBuyerId');
+                                return next;
+                              });
+                            }}
+                            options={mediaBuyerFilterOptions}
+                            wrapperClassName="w-full min-w-0 sm:w-56"
+                            placeholder="All media buyers"
+                            searchPlaceholder="Search buyers…"
+                          />
+                        </div>
                       ) : null}
                       {ins.productsForFilter.length > 0 ? (
-                        <SearchableSelect
-                          id="marketing-orders-filter-product"
-                          value={searchParams.get('productId') || 'ALL'}
-                          onChange={(v) => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('page', '1');
-                              if (v && v !== 'ALL') next.set('productId', v);
-                              else next.delete('productId');
-                              return next;
-                            });
-                          }}
-                          options={[
-                            { value: 'ALL', label: 'All products' },
-                            ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                          ]}
-                          wrapperClassName="w-full min-w-0 sm:w-48"
-                          placeholder="All products"
-                          searchPlaceholder="Search products…"
-                        />
+                        <div className="relative">
+                          {(searchParams.get('productId') || 'ALL') !== 'ALL' && (
+                            <FilterDismiss onClear={() => {
+                              setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
+                            }} />
+                          )}
+                          <SearchableSelect
+                            id="marketing-orders-filter-product"
+                            value={searchParams.get('productId') || 'ALL'}
+                            onChange={(v) => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('page', '1');
+                                if (v && v !== 'ALL') next.set('productId', v);
+                                else next.delete('productId');
+                                return next;
+                              });
+                            }}
+                            options={[
+                              { value: 'ALL', label: 'All products' },
+                              ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                            ]}
+                            wrapperClassName="w-full min-w-0 sm:w-48"
+                            placeholder="All products"
+                            searchPlaceholder="Search products…"
+                          />
+                        </div>
                       ) : null}
                       {ins.campaignsForFilter.length > 0 ? (
-                        <SearchableSelect
-                          id="marketing-orders-filter-form"
-                          value={searchParams.get('campaignId') || 'ALL'}
-                          onChange={(v) => {
+                        <div className="relative">
+                          {(searchParams.get('campaignId') || 'ALL') !== 'ALL' && (
+                            <FilterDismiss onClear={() => {
+                              setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
+                            }} />
+                          )}
+                          <SearchableSelect
+                            id="marketing-orders-filter-form"
+                            value={searchParams.get('campaignId') || 'ALL'}
+                            onChange={(v) => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('page', '1');
+                                if (v && v !== 'ALL') next.set('campaignId', v);
+                                else next.delete('campaignId');
+                                return next;
+                              });
+                            }}
+                            options={[
+                              { value: 'ALL', label: 'All forms' },
+                              ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                            ]}
+                            wrapperClassName="w-full min-w-0 sm:w-48"
+                            placeholder="All forms"
+                            searchPlaceholder="Search forms…"
+                          />
+                        </div>
+                      ) : null}
+                      <div className="relative">
+                        {(sortByProp !== 'createdAt' || sortOrderProp !== 'desc') && (
+                          <FilterDismiss onClear={() => {
+                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('sortBy'); n.delete('sortOrder'); n.set('page', '1'); return n; });
+                          }} />
+                        )}
+                        <FormSelect
+                          value={`${sortByProp}:${sortOrderProp}`}
+                          onChange={(e) => {
+                            const [newSortBy, newSortOrder] = e.target.value.split(':');
                             setSearchParams((p) => {
                               const next = new URLSearchParams(p);
                               next.set('page', '1');
-                              if (v && v !== 'ALL') next.set('campaignId', v);
-                              else next.delete('campaignId');
+                              if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                              else next.delete('sortBy');
+                              if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                              else next.delete('sortOrder');
                               return next;
                             });
                           }}
                           options={[
-                            { value: 'ALL', label: 'All forms' },
-                            ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                            { value: 'createdAt:desc', label: 'Newest first' },
+                            { value: 'createdAt:asc', label: 'Oldest first' },
+                            { value: 'totalAmount:desc', label: 'Highest amount' },
+                            { value: 'totalAmount:asc', label: 'Lowest amount' },
+                            { value: 'updatedAt:desc', label: 'Recently updated' },
                           ]}
-                          wrapperClassName="w-full min-w-0 sm:w-48"
-                          placeholder="All forms"
-                          searchPlaceholder="Search forms…"
+                          wrapperClassName="w-full min-w-0 sm:w-44"
                         />
-                      ) : null}
-                      <FormSelect
-                        value={`${sortByProp}:${sortOrderProp}`}
-                        onChange={(e) => {
-                          const [newSortBy, newSortOrder] = e.target.value.split(':');
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
-                            else next.delete('sortBy');
-                            if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
-                            else next.delete('sortOrder');
-                            return next;
-                          });
-                        }}
-                        options={[
-                          { value: 'createdAt:desc', label: 'Newest first' },
-                          { value: 'createdAt:asc', label: 'Oldest first' },
-                          { value: 'totalAmount:desc', label: 'Highest amount' },
-                          { value: 'totalAmount:asc', label: 'Lowest amount' },
-                          { value: 'updatedAt:desc', label: 'Recently updated' },
-                        ]}
-                        wrapperClassName="w-full min-w-0 sm:w-44"
-                      />
-                      <FormSelect
-                        value={searchParams.get('orderSource') || ''}
-                        onChange={(e) => {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            if (e.target.value) next.set('orderSource', e.target.value);
-                            else next.delete('orderSource');
-                            return next;
-                          });
-                        }}
-                        options={[
-                          { value: '', label: 'All sources' },
-                          { value: 'edge-form', label: 'Online orders' },
-                          { value: 'offline', label: 'Offline orders' },
-                        ]}
-                        wrapperClassName="w-full min-w-0 sm:w-40"
-                      />
+                      </div>
+                      <div className="relative">
+                        {(searchParams.get('orderSource') || '') !== '' && (
+                          <FilterDismiss onClear={() => {
+                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('orderSource'); n.set('page', '1'); return n; });
+                          }} />
+                        )}
+                        <FormSelect
+                          value={searchParams.get('orderSource') || ''}
+                          onChange={(e) => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (e.target.value) next.set('orderSource', e.target.value);
+                              else next.delete('orderSource');
+                              return next;
+                            });
+                          }}
+                          options={[
+                            { value: '', label: 'All sources' },
+                            { value: 'edge-form', label: 'Online orders' },
+                            { value: 'offline', label: 'Offline orders' },
+                          ]}
+                          wrapperClassName="w-full min-w-0 sm:w-40"
+                        />
+                      </div>
                     </>
                   }
                   sheetFilterBody={null}
                 />
               </>
             );
-          }}
-        </Await>
-      </Suspense>
-
-      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
+      })()}
 
       {showChartView ? (
         showSkeletonRows ? (
           <OrdersChartViewShellSkeleton />
         ) : (
-          <Suspense fallback={<OrdersChartViewShellSkeleton />}>
-            <Await resolve={secondary} errorElement={<DeferredError />}>
-              {(ins) => {
-                const ordersInPeriodTotal = Object.values(ins.statusCounts).reduce((sum, n) => sum + n, 0);
-                return (
-                  <OrdersChartView
-                    statusCounts={ins.statusCounts}
-                    total={ordersInPeriodTotal}
-                    scopeLabel="Marketing orders"
-                    dailyCounts={ins.dailyCounts}
-                    collapseForCS
-                  />
-                );
-              }}
-            </Await>
-          </Suspense>
+          <OrdersChartView
+            statusCounts={secondary.statusCounts}
+            total={Object.values(secondary.statusCounts).reduce((sum, n) => sum + n, 0)}
+            scopeLabel="Marketing orders"
+            dailyCounts={secondary.dailyCounts}
+            collapseForCS
+          />
         )
       ) : (
       <>
@@ -1219,28 +1158,22 @@ export function MarketingOrdersPage({
       </>
       )}
 
-      <Suspense fallback={null}>
-        <Await resolve={secondary}>
-          {(s) => (
-            <ExportModal
-              open={showExportModal}
-              onClose={() => setShowExportModal(false)}
-              config={EXPORT_CONFIGS.marketing_orders}
-              picklists={s.marketingExportPicklists}
-              initialFilters={{
-                status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
-                search: searchQuery || undefined,
-                mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
-                ...(dateFilters.periodAllTime
-                  ? { periodAllTime: true as const }
-                  : dateFilters.startDate && dateFilters.endDate
-                    ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
-                    : {}),
-              }}
-            />
-          )}
-        </Await>
-      </Suspense>
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.marketing_orders}
+        picklists={secondary.marketingExportPicklists}
+        initialFilters={{
+          status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
+          search: searchQuery || undefined,
+          mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
+          ...(dateFilters.periodAllTime
+            ? { periodAllTime: true as const }
+            : dateFilters.startDate && dateFilters.endDate
+              ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
+              : {}),
+        }}
+      />
 
       {/* Quick-detail modal for an abandoned cart row (read-only on the Marketing
           page — recover / clear / phone-reveal stay CS-side). */}

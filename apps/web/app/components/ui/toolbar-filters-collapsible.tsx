@@ -30,6 +30,9 @@ export interface ToolbarFiltersCollapsibleProps {
   sheetSubtitle?: ReactNode;
   /** Shown next to “Filters” when &gt; 0. */
   badgeCount?: number;
+  /** Callback to clear all active filters. When provided with `badgeCount > 0`,
+   *  a floating dismiss button renders at the top-right edge of the toolbar. */
+  onClearAll?: () => void;
   filtersButtonLabel?: string;
   sheetDoneLabel?: string;
   breakpoint?: ToolbarFiltersBreakpoint;
@@ -50,9 +53,11 @@ function hideFiltersBtn(bp: ToolbarFiltersBreakpoint): string {
 }
 
 function showInlineFilters(bp: ToolbarFiltersBreakpoint): string {
+  // `contents` makes children direct participants in the parent flex row,
+  // so search + filters all share the same wrapping context.
   return bp === 'lg'
-    ? 'hidden flex-col gap-3 lg:flex lg:flex-row lg:items-center lg:gap-3'
-    : 'hidden flex-col gap-3 md:flex md:flex-row md:items-center md:gap-3';
+    ? 'hidden lg:contents'
+    : 'hidden md:contents';
 }
 
 /**
@@ -69,6 +74,7 @@ export function ToolbarFiltersCollapsible({
   sheetTitle = 'Filters',
   sheetSubtitle,
   badgeCount = 0,
+  onClearAll,
   filtersButtonLabel = 'Filters',
   sheetDoneLabel = 'Done',
   breakpoint = 'md',
@@ -81,7 +87,21 @@ export function ToolbarFiltersCollapsible({
 
   return (
     <>
-      <div className={['border-b border-app-border py-3 md:px-4', className].filter(Boolean).join(' ')}>
+      <div className={['relative border-b border-app-border py-3 md:px-4', className].filter(Boolean).join(' ')}>
+        {/* Floating clear-all badge at top-right edge of the toolbar */}
+        {badgeCount > 0 && onClearAll && (
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="absolute -top-2.5 -right-1 md:right-2 z-10 flex items-center gap-1 rounded-full bg-danger-500 pl-2 pr-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:bg-danger-600 dark:bg-danger-600 dark:hover:bg-danger-500"
+            title="Clear all filters"
+          >
+            Clear
+            <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
         <div className={rowClasses(bp)}>
           {hideMobileSheet ? null : (
             <Button
@@ -104,7 +124,7 @@ export function ToolbarFiltersCollapsible({
           )}
 
           {searchRow != null && searchRow !== false ? (
-            <div className="min-w-0 flex-1">{searchRow}</div>
+            <div className="min-w-0 flex-1 md:basis-[44%] md:shrink-0">{searchRow}</div>
           ) : null}
 
           <div className={showInlineFilters(bp)}>{desktopInlineFilters}</div>

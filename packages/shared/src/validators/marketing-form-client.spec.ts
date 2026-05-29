@@ -123,7 +123,7 @@ describe('createAdSpendBatchSchema', () => {
     expect(r.success).toBe(true);
   });
 
-  it('rejects a line without adUrl (ad URL is required)', () => {
+  it('accepts a line without adUrl (ad URL is now optional)', () => {
     const { adUrl: _adUrl, ...lineWithoutAdUrl } = lineBase;
     const r = createAdSpendBatchSchema.safeParse({
       ...batchBase,
@@ -135,7 +135,7 @@ describe('createAdSpendBatchSchema', () => {
         },
       ],
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
   });
 
   it('rejects a line with a non-URL adUrl', () => {

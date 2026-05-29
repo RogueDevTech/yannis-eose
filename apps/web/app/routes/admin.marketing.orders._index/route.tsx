@@ -104,6 +104,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // marketing.listCampaigns). Same data, one HTTP request → one auth-middleware
   // pass → one session lookup, with the 6 service calls fanned out in parallel
   // server-side. See `marketing.ordersPageBundle` for the rationale.
+  // The "team" bundle always shows the team-wide aggregate — when a supervisor
+  // selects "My Performance" the URL gains `mediaBuyerId=self` which scopes the
+  // table rows, but the stat strip reads from the pre-fetched personal bundle
+  // instead. Non-supervisors (plain MB, admin) keep the URL-driven mediaBuyerId
+  // so their single stat strip matches the table.
+  const teamBundleMedioBuyerId = isMarketingSupervisor ? undefined : mediaBuyerId;
   const bundleInput: {
     mediaBuyerId?: string;
     status?: string;
@@ -111,11 +117,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate?: string;
     includeMarketingExportPicklists: boolean;
   } = { includeMarketingExportPicklists: loadMarketingExportPicklists };
-  if (mediaBuyerId) bundleInput.mediaBuyerId = mediaBuyerId;
+  if (teamBundleMedioBuyerId) bundleInput.mediaBuyerId = teamBundleMedioBuyerId;
   if (status) bundleInput.status = status;
   if (startDate) bundleInput.startDate = startDate;
   if (endDate) bundleInput.endDate = endDate;
   const bundleInputStr = encodeURIComponent(JSON.stringify(bundleInput));
+
+  // Supervisors + HoM get both team stats AND personal stats pre-fetched so
+  // the My/Team toggle can switch the stat strip instantly (no network round-trip).
+  // The personal bundle scopes to mediaBuyerId=self (orders they placed as a buyer).
+  const personalBundleInput = isMarketingSupervisor
+    ? {
+        mediaBuyerId: user.id,
+        includeMarketingExportPicklists: false,
+        ...(status ? { status } : {}),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      }
+    : null;
+  const personalBundleInputStr = personalBundleInput
+    ? encodeURIComponent(JSON.stringify(personalBundleInput))
+    : null;
 
   const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const canExport =
@@ -251,7 +273,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
             result?: {
               data?: {
                 statusCounts: Record<string, number>;
-                metrics: { cpa: number; totalSpend: number };
+                metrics: {
+                  cpa: number;
+                  totalSpend: number;
+                  totalOrders: number;
+                  deliveredOrders: number;
+                  deliveredRevenue: number;
+                  confirmedOrders: number;
+                  confirmationRate: number;
+                  trueRoas: number;
+                  deliveryRate: number;
+                };
                 dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
                 mediaBuyersForFilter: Array<{ id: string; name: string }>;
                 productsForFilter: Array<{ id: string; name: string }>;
@@ -278,10 +310,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
             }
           : undefined;
 
+      const defaultMetrics = { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 };
+      const m = data?.metrics ?? defaultMetrics;
       return {
         statusCounts: data?.statusCounts ?? {},
-        cpa: data?.metrics?.cpa ?? null,
-        totalAdSpend: data?.metrics?.totalSpend ?? null,
+        cpa: m.cpa ?? null,
+        totalAdSpend: m.totalSpend ?? null,
+        metrics: m,
         dailyCounts: data?.dailyCounts ?? [],
         marketingExportPicklists,
         mediaBuyersForFilter,
@@ -295,6 +330,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statusCounts: {},
         cpa: null,
         totalAdSpend: null,
+        metrics: { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 },
         dailyCounts: [],
         marketingExportPicklists: undefined,
         mediaBuyersForFilter: [],
@@ -305,16 +341,74 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   })();
 
-  // Run list + bundle in parallel, await both. The secondary bundle must be
-  // resolved synchronously so overview stats always reflect the current filter
-  // (My/Team toggle, date, mediaBuyer). Deferring it caused stale stats
-  // because Remix's <Await> doesn't re-resolve on SPA navigations.
-  const [listResult, secondaryResult] = await Promise.all([listPromise, secondaryPromise]);
+  // Personal bundle for the supervisor's "My Performance" stat strip — scoped
+  // to their own mediaBuyerId so stats switch instantly on tab toggle.
+  const personalSecondaryPromise: Promise<MarketingOrdersSecondaryPayload | null> = personalBundleInputStr
+    ? (async () => {
+        try {
+          const res = await apiRequest<unknown>(
+            `/trpc/marketing.ordersPageBundle?input=${personalBundleInputStr}`,
+            { method: 'GET', cookie },
+          );
+          const data = res.ok
+            ? (res.data as {
+                result?: {
+                  data?: {
+                    statusCounts: Record<string, number>;
+                    metrics: {
+                      cpa: number;
+                      totalSpend: number;
+                      totalOrders: number;
+                      deliveredOrders: number;
+                      deliveredRevenue: number;
+                      confirmedOrders: number;
+                      confirmationRate: number;
+                      trueRoas: number;
+                      deliveryRate: number;
+                    };
+                    dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+                    mediaBuyersForFilter: Array<{ id: string; name: string }>;
+                    productsForFilter: Array<{ id: string; name: string }>;
+                    campaignsForFilter: Array<{ id: string; name: string }>;
+                    abandonedCartCount: number;
+                  };
+                };
+              })?.result?.data
+            : null;
+          const defaultM = { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 };
+          const m = data?.metrics ?? defaultM;
+          return {
+            statusCounts: data?.statusCounts ?? {},
+            cpa: m.cpa ?? null,
+            totalAdSpend: m.totalSpend ?? null,
+            metrics: m,
+            dailyCounts: data?.dailyCounts ?? [],
+            mediaBuyersForFilter: [],
+            productsForFilter: [],
+            campaignsForFilter: [],
+            abandonedCartCount: data?.abandonedCartCount ?? 0,
+          };
+        } catch {
+          return null;
+        }
+      })()
+    : Promise.resolve(null);
+
+  // Run list + team bundle + personal bundle in parallel, await all. The
+  // secondary bundles must be resolved synchronously so overview stats always
+  // reflect the current filter (date, mediaBuyer). Deferring them caused stale
+  // stats because Remix's <Await> doesn't re-resolve on SPA navigations.
+  const [listResult, secondaryResult, personalSecondaryResult] = await Promise.all([
+    listPromise,
+    secondaryPromise,
+    personalSecondaryPromise,
+  ]);
 
   return {
     ordersShell,
     listResult,
     secondaryResult,
+    personalSecondaryResult,
   };
 }
 
@@ -358,13 +452,14 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function MarketingOrdersRoute() {
-  const { ordersShell, listResult, secondaryResult } = useLoaderData<typeof loader>();
+  const { ordersShell, listResult, secondaryResult, personalSecondaryResult } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
   return (
     <MarketingOrdersPage
       page={ordersShell.page}
       limit={ordersShell.perPage}
-      secondary={Promise.resolve(secondaryResult) as Promise<MarketingOrdersSecondaryPayload>}
+      secondary={secondaryResult as MarketingOrdersSecondaryPayload}
+      personalSecondary={personalSecondaryResult ?? undefined}
       statusFilter={ordersShell.statusFilter}
       searchFilter={ordersShell.searchFilter}
       sortBy={ordersShell.sortBy}
