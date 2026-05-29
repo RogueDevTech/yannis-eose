@@ -1691,12 +1691,12 @@ export function MarketingOrdersLoadingShell({
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Total', value: <StatValuePulse className="min-w-[2.25rem]" /> },
-          { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Total Orders', value: <StatValuePulse className="min-w-[2.25rem]" /> },
+          { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Delivery Rate', value: <StatValuePulse className="min-w-[3rem]" /> },
-          { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'CR', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'DR', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
 

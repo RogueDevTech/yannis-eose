@@ -3559,7 +3559,11 @@ export class MarketingService {
       confirmationRate,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
       trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
-      deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
+      // DR = delivered / confirmed (same definition as CS team page).
+      // `deliveredOrders` counts by `deliveredAt` while `confirmedOrders`
+      // counts by `createdAt`, so using totalOrders as denominator produced
+      // rates > 100% when old orders got delivered in the current period.
+      deliveryRate: confirmedOrders > 0 ? (deliveredOrders / confirmedOrders) * 100 : 0,
     };
   }
 
@@ -3602,7 +3606,8 @@ export class MarketingService {
       confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
       trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
-      deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
+      // DR = delivered / confirmed (consistent with getPerformanceMetrics).
+      deliveryRate: confirmedOrders > 0 ? (deliveredOrders / confirmedOrders) * 100 : 0,
     };
   }
 

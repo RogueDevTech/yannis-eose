@@ -492,8 +492,8 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     const receiptUrl = formData.get('receiptUrl')?.toString() ?? '';
     const amountRaw = formData.get('amount')?.toString() ?? '';
     const amount = Number(amountRaw);
-    if (!requestId || !receiptUrl) {
-      return json({ error: 'Request ID and receipt image are required' }, { status: 400 });
+    if (!requestId) {
+      return json({ error: 'Request ID is required' }, { status: 400 });
     }
     if (!Number.isFinite(amount) || amount <= 0) {
       return json({ error: 'Valid approved amount is required' }, { status: 400 });
@@ -501,7 +501,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     const res = await apiRequest<unknown>('/trpc/marketing.approveFundingRequest', {
       method: 'POST',
       cookie,
-      body: { requestId, receiptUrl, amount },
+      body: { requestId, amount, ...(receiptUrl ? { receiptUrl } : {}) },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });

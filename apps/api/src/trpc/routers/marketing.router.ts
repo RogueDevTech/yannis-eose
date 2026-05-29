@@ -1120,10 +1120,7 @@ export const marketingRouter = router({
 
       return {
         statusCounts,
-        metrics: {
-          cpa: metrics.cpa,
-          totalSpend: metrics.totalSpend,
-        },
+        metrics,
         dailyCounts: timeSeries,
         mediaBuyersForFilter,
         productsForFilter,

@@ -153,27 +153,68 @@ export class OrdersService {
   private static readonly ORDER_DETAIL_CACHE_TTL_SECONDS = 60;
 
   /** HoCS / Admin / `orders.reassign`, or Sales team supervisor for same-branch team (supervisor: UNPROCESSED / CS_ASSIGNED only). */
+  /**
+   * Order statuses that block any CS-reassignment regardless of permission —
+   * the row is administratively done (cancelled, soft-deleted, written off,
+   * restocked back to inventory). Reattributing these would lie about who
+   * owns work that no longer counts.
+   */
+  private static readonly CS_REASSIGN_TERMINAL_BLOCK = new Set([
+    'CANCELLED',
+    'DELETED',
+    'RESTOCKED',
+    'WRITTEN_OFF',
+  ]);
+
+  /**
+   * Statuses where a `assignToCS` call should ALSO flip `status` to CS_ASSIGNED.
+   * Past these, an assignee swap is a late-stage credit-attribution fix and the
+   * existing status MUST be preserved.
+   */
+  private static readonly CS_REASSIGN_PRE_ENGAGEMENT = new Set([
+    'UNPROCESSED',
+    'CS_ASSIGNED',
+    'CS_ENGAGED',
+  ]);
+
   private async assertCanManualAssignToCs(
     actor: SessionUser,
     csCloserId: string,
     orderBranchId: string,
     orderStatus: string,
   ): Promise<void> {
-    const hasReassign =
-      (actor.permissions ?? [])
-        .map((p) => canonicalPermissionCode(p))
-        .includes(canonicalPermissionCode('orders.reassign'));
-    if (actor.role === 'SUPER_ADMIN' || hasReassign) return;
+    if (OrdersService.CS_REASSIGN_TERMINAL_BLOCK.has(orderStatus)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Orders in ${orderStatus} state cannot be reassigned — they are administratively closed.`,
+      });
+    }
+
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasReassign = perms.includes(canonicalPermissionCode('orders.reassign'));
+    const hasLateStageTransfer = perms.includes(canonicalPermissionCode('orders.cs.transfer_any_status'));
+    const isLateStage = !OrdersService.CS_REASSIGN_PRE_ENGAGEMENT.has(orderStatus);
+
+    if (actor.role === 'SUPER_ADMIN') return;
+
+    // Late-stage transfers (post-CS_ENGAGED) require the dedicated capability.
+    // HoCS / SuperAdmin hold it by default; Admin inherits via snapshot.
+    if (isLateStage) {
+      if (!hasLateStageTransfer) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Only Head of CS or Super Admin may transfer an order to a different Sales closer at this status.',
+        });
+      }
+      return;
+    }
+
+    if (hasReassign) return;
     if (!actor.currentBranchId || actor.currentBranchId !== orderBranchId) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'You cannot assign orders outside your active branch.',
-      });
-    }
-    if (orderStatus !== 'UNPROCESSED' && orderStatus !== 'CS_ASSIGNED') {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Team supervisors may only assign orders that are unprocessed or CS-assigned.',
       });
     }
     const ok = await this.branchTeams.isCsSupervisorOf(actor.id, csCloserId, orderBranchId);
@@ -4157,7 +4198,12 @@ export class OrdersService {
    * Callers with `orders.reassign` (HoCS / Admin), or a branch Sales team supervisor for in-team agents
    * on orders in UNPROCESSED or CS_ASSIGNED (supervisors only).
    */
-  async assignToCS(orderId: string, csCloserId: string, actor: SessionUser) {
+  async assignToCS(
+    orderId: string,
+    csCloserId: string,
+    actor: SessionUser,
+    options?: { reason?: string },
+  ) {
     const existingRows = await this.db
       .select()
       .from(schema.orders)
@@ -4183,14 +4229,32 @@ export class OrdersService {
     }
     await this.assertCanManualAssignToCs(actor, csCloserId, ob, orderRow.status);
 
+    const isLateStageTransfer = !OrdersService.CS_REASSIGN_PRE_ENGAGEMENT.has(orderRow.status);
+    const trimmedReason = options?.reason?.trim() ?? '';
+
+    // Late-stage transfers must carry an audit reason — the CEO directive
+    // requires "Absolute Accountability" for any change after engagement.
+    if (isLateStageTransfer && trimmedReason.length === 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'A short reason is required when transferring an order at this status.',
+      });
+    }
+
     const updated = await withActor(this.db, actor, async (tx) => {
+      // Preserve status when this is a late-stage credit-attribution transfer.
+      // Resetting a DELIVERED/REMITTED order back to CS_ASSIGNED would corrupt
+      // the financial timeline and re-trigger downstream events.
+      const patch: Partial<typeof schema.orders.$inferInsert> = {
+        assignedCsId: csCloserId,
+        updatedAt: new Date(),
+      };
+      if (!isLateStageTransfer) {
+        patch.status = 'CS_ASSIGNED';
+      }
       const updatedRows = await tx
         .update(schema.orders)
-        .set({
-          assignedCsId: csCloserId,
-          status: 'CS_ASSIGNED',
-          updatedAt: new Date(),
-        })
+        .set(patch)
         .where(eq(schema.orders.id, orderId))
         .returning();
 
@@ -4227,7 +4291,13 @@ export class OrdersService {
       },
     });
 
-    // Timeline event: manually assigned (or reassigned if a previous owner existed)
+    // Timeline event: manually assigned (or reassigned if a previous owner existed).
+    // Late-stage reassignments reuse the existing `ORDER_REASSIGNED` enum value
+    // (the timeline_event_type pgEnum doesn't include a dedicated marker, and
+    // inserting one without a migration silently fails inside writeTimelineEvent).
+    // We differentiate via metadata (`lateStage: true`, `statusAtTransfer`,
+    // `reason`) and a distinct description format that the timeline renderer
+    // falls through to as plain text — preserving the reason in the visible row.
     const previousCsAgentId = orderRow.assignedCsId;
     const isReassignment = !!previousCsAgentId && previousCsAgentId !== csCloserId;
     const namesNeeded = isReassignment ? [csCloserId, previousCsAgentId!] : [csCloserId];
@@ -4238,17 +4308,37 @@ export class OrdersService {
     const nameById = new Map(nameRows.map((r) => [r.id, r.name]));
     const agentName = nameById.get(csCloserId) ?? null;
     const previousAgentName = previousCsAgentId ? nameById.get(previousCsAgentId) ?? null : null;
-    const verb = isReassignment ? 'Reassigned' : 'Assigned';
-    const fromClause = isReassignment ? ` from ${previousAgentName ?? previousCsAgentId}` : '';
+    const actorName = actor.name ?? 'Head of CS';
+
+    let description: string;
+    if (isLateStageTransfer) {
+      // Distinct shape — does NOT match the timeline renderer's
+      // `^Reassigned to (.+?) by (.+)$` regex, so it falls back to plain-text
+      // rendering and the reason stays visible on the order timeline panel.
+      const fromClause = previousAgentName ?? previousCsAgentId
+        ? ` from ${previousAgentName ?? previousCsAgentId}`
+        : '';
+      description = `Closer reassigned${fromClause} to ${agentName ?? csCloserId} by ${actorName} at status ${orderRow.status} — ${trimmedReason}`;
+    } else {
+      const verb = isReassignment ? 'Reassigned' : 'Assigned';
+      const fromClause = isReassignment ? ` from ${previousAgentName ?? previousCsAgentId}` : '';
+      description = `${verb} to ${agentName ?? csCloserId}${fromClause} by ${actorName}`;
+    }
+
+    const eventType = isReassignment || isLateStageTransfer ? 'ORDER_REASSIGNED' : 'ORDER_MANUALLY_ASSIGNED';
     void this.writeTimelineEvent({
       orderId,
-      eventType: isReassignment ? 'ORDER_REASSIGNED' : 'ORDER_MANUALLY_ASSIGNED',
+      eventType,
       actorId: actor.id,
       actorName: actor.name ?? null,
-      description: `${verb} to ${agentName ?? csCloserId}${fromClause} by ${actor.name ?? 'Head of CS'}`,
-      metadata: isReassignment
-        ? { csCloserId, fromAgentId: previousCsAgentId, toAgentId: csCloserId }
-        : { csCloserId },
+      description,
+      metadata: {
+        csCloserId,
+        toAgentId: csCloserId,
+        ...(previousCsAgentId ? { fromAgentId: previousCsAgentId } : {}),
+        statusAtTransfer: orderRow.status,
+        ...(isLateStageTransfer ? { reason: trimmedReason, lateStage: true } : {}),
+      },
       branchId: updated.branchId ?? null,
     });
 

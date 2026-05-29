@@ -977,6 +977,7 @@ export function OrderDetailPage({
   const [cancelReason, setCancelReason] = useState('');
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [assignToId, setAssignToId] = useState('');
+  const [lateStageTransferReason, setLateStageTransferReason] = useState('');
   const csCloserOptions = useMemo(
     () => (csClosersForAssign ?? []).map((a) => ({ value: a.id, label: a.name })),
     [csClosersForAssign],
@@ -1181,6 +1182,26 @@ export function OrderDetailPage({
     successMessage: 'Order updated',
     skipErrorToast: mainFetcherActionModalOpen,
   });
+
+  // Clear the inline assignToCS form once the server confirms the swap, so the
+  // user sees a fresh state for the next action rather than stale picks. We
+  // remember the intent of the last submission so a different fetcher action
+  // (status transition, comment, etc.) doesn't accidentally wipe the picker.
+  const lastFetcherIntentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (fetcher.state === 'submitting' && fetcher.formData) {
+      const submittedIntent = fetcher.formData.get('intent');
+      lastFetcherIntentRef.current = typeof submittedIntent === 'string' ? submittedIntent : null;
+    } else if (
+      fetcher.state === 'idle' &&
+      lastFetcherIntentRef.current === 'assignToCS' &&
+      (fetcher.data as { success?: boolean })?.success === true
+    ) {
+      setAssignToId('');
+      setLateStageTransferReason('');
+      lastFetcherIntentRef.current = null;
+    }
+  }, [fetcher.state, fetcher.formData, fetcher.data]);
   useFetcherToast(scheduleFetcher.data, {
     successMessage: 'Callback scheduled',
     skipErrorToast: scheduleCallbackModalOpen,
@@ -1320,6 +1341,30 @@ export function OrderDetailPage({
     permissions.includes('orders.reassign') ||
     isAdminLevel({ role: userRole }) ||
     viewerIsCsTeamSupervisor;
+  // Late-stage credit-attribution transfer — HoCS / SuperAdmin only, governed
+  // by `orders.cs.transfer_any_status`. Lets them swap the assigned closer on
+  // a CONFIRMED / DISPATCHED / DELIVERED / REMITTED order without resetting
+  // the status (used when the wrong closer was attributed by mistake).
+  const canTransferCsAnyStatus =
+    permissions.includes('orders.cs.transfer_any_status') ||
+    isAdminLevel({ role: userRole });
+  // Pre-engagement statuses keep the normal "Assign / Reassign closer" flow.
+  // Anything past CS_ENGAGED is a late-stage transfer.
+  const csReassignPreEngagement =
+    order.status === 'UNPROCESSED' ||
+    order.status === 'CS_ASSIGNED' ||
+    order.status === 'CS_ENGAGED';
+  // Terminal-administrative statuses where reassignment is meaningless.
+  const csReassignBlocked =
+    order.status === 'CANCELLED' ||
+    order.status === 'DELETED' ||
+    order.status === 'RESTOCKED' ||
+    order.status === 'WRITTEN_OFF';
+  const showCsAssignForm =
+    !csReassignBlocked &&
+    ((csReassignPreEngagement && canAssignToCS) ||
+      (!csReassignPreEngagement && canTransferCsAnyStatus));
+  const isLateStageCsTransfer = showCsAssignForm && !csReassignPreEngagement;
 
   const orderAllowsLineItemEdits =
     order.status === 'UNPROCESSED' ||
@@ -2250,45 +2295,56 @@ export function OrderDetailPage({
                     </Button>
                   )}
 
-                  {/* Assign to closer — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED.
-                      The Sales closer (closer) drives the order from queue → call → confirm; assignment
-                      happens BEFORE confirmation per the locked Order Lifecycle (CLAUDE.md). */}
-                  {(order.status === 'UNPROCESSED' ||
-                    order.status === 'CS_ASSIGNED' ||
-                    order.status === 'CS_ENGAGED') &&
-                    canAssignToCS &&
-                    csClosersForAssign &&
-                    csClosersForAssign.length > 0 && (
+                  {/* Assign / Reassign closer. Same UI everywhere — picker + button on
+                      one row. Past CS_ENGAGED (credit-attribution fixes for HoCS /
+                      SuperAdmin) the order's status is preserved and an audit reason
+                      is required, shown as a textarea below the picker. */}
+                  {showCsAssignForm && csClosersForAssign && csClosersForAssign.length > 0 && (
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-app-fg-muted">
                         {order.assignedCsId ? 'Reassign closer' : 'Assign closer (Sales closer)'}
                       </p>
-                      <div className="flex items-stretch gap-2">
-                        <SearchableSelect
-                          id="order-assign-cs"
-                          value={assignToId}
-                          onChange={setAssignToId}
-                          placeholder="Pick a closer to assign…"
-                          options={csCloserOptions}
-                          wrapperClassName="flex-1 min-w-0"
-                          searchPlaceholder="Search closers..."
-                          controlSize="lg"
-                        />
-                        <fetcher.Form method="post" className="flex-shrink-0">
-                          <input type="hidden" name="intent" value="assignToCS" />
-                          {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-                          <input type="hidden" name="toCsAgentId" value={assignToId} />
+                      <fetcher.Form method="post" className="space-y-2">
+                        <input type="hidden" name="intent" value="assignToCS" />
+                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                        <input type="hidden" name="toCsAgentId" value={assignToId} />
+                        <div className="flex items-stretch gap-2">
+                          <SearchableSelect
+                            id="order-assign-cs"
+                            value={assignToId}
+                            onChange={setAssignToId}
+                            placeholder="Pick a closer to assign…"
+                            options={csCloserOptions}
+                            wrapperClassName="flex-1 min-w-0"
+                            searchPlaceholder="Search closers..."
+                            controlSize="lg"
+                          />
                           <Button
                             type="submit"
                             variant="primary"
-                            disabled={!assignToId || fetcher.state === 'submitting'}
+                            disabled={
+                              !assignToId ||
+                              (isLateStageCsTransfer && lateStageTransferReason.trim().length === 0) ||
+                              fetcher.state === 'submitting'
+                            }
                             loading={fetcher.state === 'submitting'}
-                            loadingText="Assigning..."
+                            loadingText={order.assignedCsId ? 'Reassigning…' : 'Assigning…'}
                           >
-                            Assign
+                            {order.assignedCsId ? 'Reassign' : 'Assign'}
                           </Button>
-                        </fetcher.Form>
-                      </div>
+                        </div>
+                        {isLateStageCsTransfer && (
+                          <Textarea
+                            name="reason"
+                            rows={2}
+                            maxLength={280}
+                            required
+                            placeholder="Reason for reassignment (e.g. wrong closer credited at confirm)"
+                            value={lateStageTransferReason}
+                            onChange={(e) => setLateStageTransferReason(e.target.value)}
+                          />
+                        )}
+                      </fetcher.Form>
                     </div>
                   )}
                 </div>
@@ -2975,78 +3031,11 @@ export function OrderDetailPage({
                 </div>
               </>
             );
-          })() : allocatableLocationsDeferred ? (
-            <DeferredSection resolve={allocatableLocationsDeferred} skeleton="card">
-              {(rows) => {
-                const rawList = Array.isArray(rows) ? rows : [];
-                const list = filterAllocatableLocationsForOrderHandoff(
-                  rawList,
-                  mayIncludeInternalWarehousesForHandoff,
-                );
-                // Only show eligible locations (with enough stock).
-                const eligibleList = list.filter((l) =>
-                  l.eligible && !(order.status === 'AGENT_ASSIGNED' && l.id === order.logisticsLocationId),
-                );
-                const selected = allocateLocationId ? eligibleList.find((l) => l.id === allocateLocationId) : undefined;
-
-                if (eligibleList.length === 0) {
-                  return (
-                    <EmptyState
-                      title="No locations with enough stock"
-                      description="No logistics hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Receive stock (intake or verified transfer) and try again."
-                      variant="card"
-                    />
-                  );
-                }
-
-                return (
-                  <>
-                    <SearchableSelect
-                      id="allocate-location-id"
-                      label="Logistics location"
-                      value={allocateLocationId}
-                      onChange={setAllocateLocationId}
-                      placeholder="Select a location..."
-                      searchPlaceholder="Search locations..."
-                      options={eligibleList.map((loc) => ({
-                        value: loc.id,
-                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                        description: describeAllocatableLocation(loc),
-                      }))}
-                    />
-                    <div className="flex gap-2 mt-4 justify-end">
-                      <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
-                        Back
-                      </Button>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="transition" />
-                        <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
-                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-                        <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          disabled={
-                            !allocateLocationId ||
-                            !selected?.eligible ||
-                            fetcher.state === 'submitting'
-                          }
-                          loading={fetcher.state === 'submitting'}
-                          loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
-                        >
-                          {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
-                        </Button>
-                      </fetcher.Form>
-                    </div>
-                  </>
-                );
-              }}
-            </DeferredSection>
-          ) : (
+          })() : (
             <>
               <EmptyState
-                title="Loading locations…"
-                description="Fetching eligible hubs from the server."
+                title="No locations with enough stock"
+                description="No logistics hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Receive stock (intake or verified transfer) and try again."
                 variant="card"
               />
               <div className="flex gap-2 mt-4 justify-end">
@@ -3072,15 +3061,11 @@ export function OrderDetailPage({
             Confirm that the customer received the order. A note and screenshot are optional.
           </p>
           <ModalFetcherInlineError message={fetcherErrorForTransition('DELIVERED')} />
-          {/* Logistics location picker — resolves allocatable-locations data
-              inline (same deferred source the Assign modal uses) so stock
-              counts are always available. Only locations with stock for this
-              order's products are shown; the allocated location is always
-              included and sorted first. */}
-          <DeferredSection resolve={allocatableLocationsDeferred} skeleton="inline">
-            {(rows) => {
-              const allLocs = Array.isArray(rows) ? (rows as typeof resolvedAllocatableLocations) : [];
-              // Only show the allocated location + locations with available stock
+          {/* Logistics location picker — uses pre-resolved allocatable locations.
+              Only locations with stock for this order's products are shown; the
+              allocated location is always included and sorted first. */}
+          {(() => {
+              const allLocs = resolvedAllocatableLocations;
               const options = allLocs
                 .filter((loc) => {
                   if (loc.id === order.logisticsLocationId) return true;
@@ -3131,8 +3116,7 @@ export function OrderDetailPage({
                     )}
                 </div>
               );
-            }}
-          </DeferredSection>
+          })()}
           <div className="mb-4">
             <label htmlFor="delivery-cost" className="block text-sm font-medium text-app-fg mb-1">
               Cost of delivery (optional)
