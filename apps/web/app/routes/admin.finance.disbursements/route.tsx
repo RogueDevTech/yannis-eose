@@ -266,7 +266,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const cookie = getSessionCookie(request);
-  const formData = await request.formData();
+  const formData = await request.clone().formData();
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'createFunding') {

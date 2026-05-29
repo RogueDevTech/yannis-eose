@@ -1162,13 +1162,12 @@ export class OrdersService {
     // caused the 2026-05-19 false-positive incident, and an idempotent return
     // cannot lose a sale. Window extended from 15 min → 24h (CEO 2026-05-24).
     //
-    // RACE CONDITION FIX (2026-05-24): The idempotency SELECT and the order
-    // INSERT were not atomic — two concurrent requests with the same phone could
-    // both pass the SELECT before either INSERT completed. We now acquire a
-    // PostgreSQL session-level advisory lock keyed on the phone hash BEFORE the
-    // idempotency check, so concurrent creates for the same customer are
-    // serialized. The lock is released when the order INSERT finishes.
-    // Advisory locks do NOT block unrelated orders — only same-phone races.
+    // RACE CONDITION FIX (2026-05-24, hardened 2026-05-29):
+    // Concurrent edge-form submissions for the same phone can race past the
+    // dedup SELECT before either INSERT commits. We acquire a PostgreSQL
+    // advisory lock keyed on the phone hash BEFORE the dedup check.
+    // If the lock is contended, we spin-retry up to 5×200ms so the second
+    // request sees the first's INSERT. Advisory locks only affect same-phone.
     let advisoryLockAcquired = false;
     let advisoryLockKey1 = 0;
     let advisoryLockKey2 = 0;
@@ -1180,17 +1179,39 @@ export class OrdersService {
       const hashHex = orderInput.customerPhoneHash.slice(0, 16);
       advisoryLockKey1 = parseInt(hashHex.slice(0, 8), 16) | 0;
       advisoryLockKey2 = parseInt(hashHex.slice(8, 16), 16) | 0;
-      // Use try_advisory_lock (non-blocking) instead of advisory_lock (blocking).
-      // A blocking lock can hang forever if a previous request crashed mid-lock
-      // (the lock stays held on that pooled DB connection until it's recycled).
+      // Spin-retry advisory lock (YNS-12351/12352 fix, 2026-05-29):
+      // The old code used a single try_advisory_lock and proceeded immediately
+      // on failure, letting both concurrent requests race past the dedup SELECT.
+      // Now we retry up to 5×200ms so the second request waits for the first
+      // to INSERT, then the dedup SELECT catches it.
       const lockResult = await this.db.execute<{ acquired: boolean }>(
         sql`SELECT pg_try_advisory_lock(${advisoryLockKey1}, ${advisoryLockKey2}) AS acquired`,
       );
       const lockRows = Array.isArray(lockResult) ? lockResult : (lockResult as unknown as { rows: Array<{ acquired: boolean }> })?.rows ?? [];
       advisoryLockAcquired = lockRows[0]?.acquired === true;
-      // If lock not acquired, another request for the same phone is in-flight.
-      // Proceed without the lock — the dedup check + DB uniqueness constraints
-      // still prevent true duplicates; the lock was just a serialization optimization.
+      if (!advisoryLockAcquired) {
+        // Another request for the same phone is in-flight. Instead of
+        // proceeding immediately (which caused the YNS-12351/12352 race on
+        // 2026-05-29), wait for it to finish its INSERT so our dedup SELECT
+        // will see the row. Retry the lock up to 5 times with 200ms delays.
+        for (let attempt = 0; attempt < 5 && !advisoryLockAcquired; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const retryResult = await this.db.execute<{ acquired: boolean }>(
+            sql`SELECT pg_try_advisory_lock(${advisoryLockKey1}, ${advisoryLockKey2}) AS acquired`,
+          );
+          const retryRows = Array.isArray(retryResult) ? retryResult : (retryResult as unknown as { rows: Array<{ acquired: boolean }> })?.rows ?? [];
+          advisoryLockAcquired = retryRows[0]?.acquired === true;
+        }
+        if (!advisoryLockAcquired) {
+          // Still couldn't acquire after ~1s. The first request should have
+          // committed by now, so our dedup SELECT will likely catch it.
+          // Log for monitoring.
+          this.logger.warn(
+            { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…' },
+            'advisory lock contended after 5 retries — proceeding with dedup SELECT only',
+          );
+        }
+      }
     }
     try {
     // MARKETING branch — the campaign/form branch this order is attributed to.

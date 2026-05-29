@@ -769,7 +769,7 @@ function DashboardLayoutInner({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showPushBanner, setShowPushBanner] = useState(false);
   const [pushEnabling, setPushEnabling] = useState(false);
-  const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription(user?.id ?? null);
+  const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription(user?.id ?? null, { readOnly: user?.role === 'SUPPORT' });
   const pushPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isInstalled } = usePwaInstall();
 
