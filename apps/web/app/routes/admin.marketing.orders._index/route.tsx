@@ -1,8 +1,7 @@
-import { defer, json } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { CachedAwait } from '~/components/ui/cached-await';
-import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultTodayRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -20,7 +19,7 @@ export const meta: MetaFunction = () => [
 // only refreshed on a manual reload.
 const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed', 'cart:updated'] as const;
 
-const getDefaultTodayRange = defaultTodayRange;
+const getDefaultTodayRange = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.orders');
@@ -54,13 +53,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
-  // Marketing team supervisors on the active branch get HoM-like UX here:
-  // they see the MB column, the buyer filter, and don't get auto-pinned to
-  // their own orders. Backend `orders.list` narrows to their team via
-  // `applySupervisorScope` so passing no mediaBuyerId returns team-scoped data
-  // (NOT branch-wide). See orders.router.ts narrowOrdersAggregateFiltersForViewer.
+  // Marketing team supervisors get the My/Team toggle; Head of Marketing gets
+  // the same toggle so they can drill into their own activity vs the full team.
+  // HoM's "My Orders" filters to mediaBuyerId=self (orders they placed when
+  // they were also acting as a buyer — zero if they never did, which is fine).
   const isMarketingSupervisor =
-    user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true;
+    user.role === 'HEAD_OF_MARKETING' ||
+    (user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true);
   const isMediaBuyer = user.role === 'MEDIA_BUYER' && !isMarketingSupervisor;
   const mediaBuyerId = isMediaBuyer ? user.id : mediaBuyerIdParam;
   const showMediaBuyerColumn =
@@ -77,6 +76,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const expandDeliveredFilter = status === 'DELIVERED';
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
+  const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
+  const orderSource = orderSourceParam === 'offline' || orderSourceParam === 'edge-form' ? orderSourceParam : undefined;
 
   const listInput = {
     page,
@@ -94,6 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(testOrders && { testOrders: true }),
+    ...(orderSource && { orderSource }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
@@ -303,11 +305,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   })();
 
-  return defer({
+  // Run list + bundle in parallel, await both. The secondary bundle must be
+  // resolved synchronously so overview stats always reflect the current filter
+  // (My/Team toggle, date, mediaBuyer). Deferring it caused stale stats
+  // because Remix's <Await> doesn't re-resolve on SPA navigations.
+  const [listResult, secondaryResult] = await Promise.all([listPromise, secondaryPromise]);
+
+  return {
     ordersShell,
-    listPromise,
-    secondaryPromise,
-  });
+    listResult,
+    secondaryResult,
+  };
 }
 
 // NOTE: no `clientLoader` / full-loader cache here. This is a live socket page
@@ -350,47 +358,31 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function MarketingOrdersRoute() {
-  const { ordersShell, listPromise, secondaryPromise } = useLoaderData<typeof loader>();
+  const { ordersShell, listResult, secondaryResult } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
-  const sharedProps = {
-    page: ordersShell.page,
-    limit: ordersShell.perPage,
-    secondary: secondaryPromise,
-    statusFilter: ordersShell.statusFilter,
-    searchFilter: ordersShell.searchFilter,
-    isMediaBuyer: ordersShell.isMediaBuyer,
-    isMarketingSupervisor: ordersShell.isMarketingSupervisor,
-    showMediaBuyerColumn: ordersShell.showMediaBuyerColumn,
-    filters: ordersShell.filters,
-    liveEvents: [...MARKETING_ORDERS_LIVE_EVENTS],
-    canExport: ordersShell.canExport,
-    viewerUserId: ordersShell.viewerUserId,
-    activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
-    enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
-    enableTestOrdersOption: ordersShell.enableTestOrdersOption,
-    isCartAbandonmentView: ordersShell.isCartAbandonmentView,
-  };
   return (
-    <CachedAwait
-      resolve={listPromise}
-      fallback={
-        <MarketingOrdersPage
-          {...sharedProps}
-          orders={[]}
-          total={0}
-          totalPages={0}
-          deferredLoading
-        />
-      }
-    >
-      {(d) => (
-        <MarketingOrdersPage
-          {...sharedProps}
-          orders={d.orders}
-          total={d.total}
-          totalPages={d.totalPages}
-        />
-      )}
-    </CachedAwait>
+    <MarketingOrdersPage
+      page={ordersShell.page}
+      limit={ordersShell.perPage}
+      secondary={Promise.resolve(secondaryResult) as Promise<MarketingOrdersSecondaryPayload>}
+      statusFilter={ordersShell.statusFilter}
+      searchFilter={ordersShell.searchFilter}
+      sortBy={ordersShell.sortBy}
+      sortOrder={ordersShell.sortOrder}
+      isMediaBuyer={ordersShell.isMediaBuyer}
+      isMarketingSupervisor={ordersShell.isMarketingSupervisor}
+      showMediaBuyerColumn={ordersShell.showMediaBuyerColumn}
+      filters={ordersShell.filters}
+      liveEvents={[...MARKETING_ORDERS_LIVE_EVENTS]}
+      canExport={ordersShell.canExport}
+      viewerUserId={ordersShell.viewerUserId}
+      activeMediaBuyerFilter={ordersShell.activeMediaBuyerFilter}
+      enableFromCartStatusOption={ordersShell.enableFromCartStatusOption}
+      enableTestOrdersOption={ordersShell.enableTestOrdersOption}
+      isCartAbandonmentView={ordersShell.isCartAbandonmentView}
+      orders={(listResult as { orders: Order[]; total: number; totalPages: number }).orders}
+      total={(listResult as { orders: Order[]; total: number; totalPages: number }).total}
+      totalPages={(listResult as { orders: Order[]; total: number; totalPages: number }).totalPages}
+    />
   );
 }

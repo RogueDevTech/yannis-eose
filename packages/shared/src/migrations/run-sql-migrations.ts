@@ -89,6 +89,16 @@ export async function runSqlMigrations(options: {
     const startedAt = Date.now();
 
     try {
+      // Double-check right before running: if a prior crashed boot already
+      // recorded this filename (outside its transaction), skip entirely.
+      const alreadyApplied = await db.execute<{ filename: string }>(
+        sql`SELECT 1 FROM _yannis_applied_migrations WHERE filename = ${filename} LIMIT 1`,
+      );
+      if ((alreadyApplied as unknown as unknown[]).length > 0) {
+        log.log(`  ↷ ${filename} already recorded — skipping`);
+        continue;
+      }
+
       await db.transaction(async (tx) => {
         await tx.execute(sql.raw(sqlText));
         await tx.execute(sql`INSERT INTO _yannis_applied_migrations (filename) VALUES (${filename})`);
@@ -138,6 +148,34 @@ async function ensureBookkeepingTable(db: PostgresJsDatabase<AppSchema>): Promis
       filename text NOT NULL UNIQUE,
       applied_at timestamptz NOT NULL DEFAULT now()
     )
+  `);
+  // Older DB instances may have the table without the UNIQUE constraint on
+  // filename (CREATE TABLE IF NOT EXISTS won't alter an existing table).
+  // Add it idempotently so ON CONFLICT (filename) works.
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS _yannis_applied_migrations_filename_key
+    ON _yannis_applied_migrations (filename)
+  `);
+  // After a DB restore/dump-import the `id` SERIAL sequence is often left
+  // behind the table's MAX(id), so the next INSERT collides with an existing
+  // row and fails with "duplicate key value violates unique constraint
+  // _yannis_applied_migrations_pkey". A dump can also drop the sequence's
+  // OWNED BY link, so pg_get_serial_sequence() returns NULL even when the
+  // column default still references `_yannis_applied_migrations_id_seq` by
+  // name — fall back to that literal name. Resync idempotently every boot.
+  await db.execute(sql`
+    DO $$
+    DECLARE
+      seq_name regclass := COALESCE(
+        pg_get_serial_sequence('_yannis_applied_migrations', 'id')::regclass,
+        to_regclass('_yannis_applied_migrations_id_seq')
+      );
+      max_id integer;
+    BEGIN
+      IF seq_name IS NULL THEN RETURN; END IF;
+      SELECT MAX(id) INTO max_id FROM _yannis_applied_migrations;
+      PERFORM setval(seq_name, GREATEST(COALESCE(max_id, 0), 1), max_id IS NOT NULL);
+    END $$;
   `);
 }
 

@@ -677,6 +677,7 @@ function CSDashboardPageLoaded({
     criticalFetchErrors,
   } = critical;
   const { isClaimMode, claimCap } = shell;
+  const liveState = useLiveIndicator(liveEvents ?? []);
   const adminRouteData = useRouteLoaderData('routes/admin') as
     | { user?: { currentBranchId?: string | null } }
     | undefined;

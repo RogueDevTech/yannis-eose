@@ -286,6 +286,8 @@ export const listOrdersSchema = z
     fromCart: z.boolean().optional(),
     /** Filter to orders where customer_name starts with "test" (whole word). Admin only. */
     testOrders: z.boolean().optional(),
+    /** Filter by order source: 'offline' (CS manual entry) or 'edge-form' (sales form). */
+    orderSource: z.enum(['offline', 'edge-form']).optional(),
     search: z.string().optional(),
     // Accept either `YYYY-MM-DD` (whole-day default) OR `YYYY-MM-DDTHH:MM[:SS]`
     // (precise moment from the time-aware DateFilterBar). API service detects the

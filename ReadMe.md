@@ -46,6 +46,29 @@ cd packages/shared && pnpm run db:migrate
 cd apps/api && npm run dev
 cd apps/web && npm run dev
 
+terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod                           
+                                 
+
+sed -i '' 's/machine_type = "e2-standard-4"/machine_type = "e2-custom-2-4096"/' terraform.tfvars.prod
+
+
+#  pg_dump --no-owner --no-acl "postgresql://postgres:586686@34.35.38.230:5432/postgres?sslmode=require" > yannis_full_dump.sql  
+
+#   /opt/homebrew/opt/postgresql@18/bin/pg_dump --no-owner --no-acl "postgresql://postgres:586686@34.35.38.230:5432/postgres?sslmode=require" > yannis_full_dump.sql
+
+# Yannis-586686
+#  DB PROD
+# DATABASE_URL=postgresql://postgres:Yannis-eoseprod5866@34.51.148.220:5432/postgres?sslmode=require
+
+# NEW PROD DB
+# DATABASE_URL=postgresql://yannis_app:586686586686@34.39.26.212:5432/yannis?sslmode=require
+
+# export OLD_URL='postgresql://postgres:Yannis-eoseprod5866@34.51.148.220:5432/postgres'
+# export NEW_URL='postgresql://yannis_app:586686586686@34.39.26.212:5432/yannis'
+
+# pg_dump --format=custom --no-owner --no-privileges "$OLD_URL" \
+#   | pg_restore --no-owner --no-privileges --clean --if-exists --dbname="$NEW_URL"
+
 
 
 # Unit tests — no DB needed, runs in ~2 seconds

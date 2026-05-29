@@ -1330,12 +1330,17 @@ export function OrderDetailPage({
     order.status === 'DISPATCHED' ||
     order.status === 'IN_TRANSIT';
 
+  // CS closers who lack direct edit rights must go through approval for ANY
+  // item change — price, offer tier, or quantity (CEO directive 2026-05-28).
   const priceDriftProposing =
     !canEditLinePrices &&
     editedItems.some((row) => {
       const srv = order.orderItems.find((o) => o.productId === row.productId);
       if (!srv) return true;
-      return Math.abs(Number(srv.unitPrice) - row.unitPrice) > 0.0001;
+      if (Math.abs(Number(srv.unitPrice) - row.unitPrice) > 0.0001) return true;
+      if ((row.offerLabel ?? null) !== (srv.offerLabel ?? null)) return true;
+      if (row.quantity !== srv.quantity) return true;
+      return false;
     });
 
   function canTransitionTo(newStatus: string): boolean {
@@ -3663,19 +3668,19 @@ export function OrderDetailPage({
             {!canEditLinePrices && priceDriftProposing && (
               <div className="px-6 pb-2 space-y-2">
                 <label htmlFor="price-approval-reason" className="block text-xs text-app-fg-muted font-medium">
-                  Reason for price change (required, min 10 characters)
+                  Reason for change (required, min 10 characters)
                 </label>
                 <Textarea
                   id="price-approval-reason"
                   rows={3}
                   value={priceApprovalReason}
                   onChange={(e) => setPriceApprovalReason(e.target.value)}
-                  placeholder="Explain why the line prices should change…"
+                  placeholder="Explain why this order's items should be changed (offer, price, quantity)…"
                   className="w-full"
                 />
                 {order.pendingOrderLinePriceRequestId && (
                   <p className="text-xs text-warning-700 dark:text-warning-300">
-                    A price change is already pending approval. Wait for a decision or withdraw it from Permission requests.
+                    A change request is already pending approval. Wait for a decision or withdraw it from Permission Requests.
                   </p>
                 )}
               </div>
@@ -3727,12 +3732,12 @@ export function OrderDetailPage({
                         fd.branchId = order.branchId;
                       }
                       ensureBranchForAction({
-                        actionLabel: 'submitting the price change request',
+                        actionLabel: 'submitting the change request',
                         onProceed: () => priceRequestFetcher.submit(fd, { method: 'post' }),
                       });
                     }}
                   >
-                    Submit price change for approval
+                    Submit change for approval
                   </Button>
                 ) : (
                   <Button

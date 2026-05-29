@@ -73,7 +73,7 @@ export function SmartPick({
       >
         {compactMobile ? (
           <>
-            <span className="inline-flex rounded-md border border-app-border bg-app-hover p-1 md:hidden">{compactIcon}</span>
+            <span className="inline-flex rounded-lg border border-app-border bg-app-hover p-1 md:hidden">{compactIcon}</span>
             <span className="hidden md:inline">Smart pick</span>
           </>
         ) : (
@@ -101,7 +101,7 @@ export function SmartPick({
               }}
               disabled={total === 0}
               aria-pressed={isActive}
-              className={`inline-flex items-center justify-center rounded-md border font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`inline-flex items-center justify-center rounded-lg border font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 compactMobile ? 'h-7 min-w-7 px-1.5 text-micro md:px-2 md:text-mini' : 'px-2 py-0.5 text-mini'
               } ${variant}`}
               title={
@@ -126,7 +126,7 @@ export function SmartPick({
                 onPick(total);
               }}
               aria-pressed={isActive}
-              className={`inline-flex items-center justify-center rounded-md border font-semibold transition-colors ${
+              className={`inline-flex items-center justify-center rounded-lg border font-semibold transition-colors ${
                 compactMobile ? 'h-7 px-1.5 text-micro md:px-2 md:text-mini' : 'px-2 py-0.5 text-mini'
               } ${
                 isActive
@@ -161,7 +161,7 @@ export function SmartPick({
             title={customShortfall ? `Only ${total} ${itemNoun} available — picking all ${total}` : undefined}
             controlSize="sm"
             wrapperClassName={compactMobile ? 'w-14 shrink-0 md:w-24' : 'w-24 shrink-0'}
-            className={`rounded-md ${
+            className={`rounded-lg ${
               customShortfall
                 ? 'border-warning-500 text-warning-700 focus:border-warning-500 focus:ring-warning-500 dark:text-warning-400'
                 : ''
@@ -184,7 +184,7 @@ export function SmartPick({
               }}
               className={`shrink-0 text-app-fg-muted hover:text-app-fg ${
                 compactMobile
-                  ? 'inline-flex h-7 w-7 items-center justify-center rounded-md border border-app-border bg-app-elevated text-mini md:h-auto md:w-auto md:border-0 md:bg-transparent md:text-xs md:underline-offset-2 md:hover:underline'
+                  ? 'inline-flex h-7 w-7 items-center justify-center rounded-lg border border-app-border bg-app-elevated text-mini md:h-auto md:w-auto md:border-0 md:bg-transparent md:text-xs md:underline-offset-2 md:hover:underline'
                   : 'text-xs underline-offset-2 hover:underline'
               }`}
               aria-label="Clear smart pick selection"

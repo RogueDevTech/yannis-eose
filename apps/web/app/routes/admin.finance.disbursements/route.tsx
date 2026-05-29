@@ -207,7 +207,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const requestersList = bundle?.users ?? [];
 
   // Finance can only disburse to Head of Marketing. HoM distributes to Media Buyers via Marketing → Funding.
-  const users = recipientBalancesAll
+  // Include ALL HoM users from the balances list (not just those with totalReceived > 0)
+  // so that first-time recipients appear in the dropdown.
+  const allBalances = bundle?.balances ?? [];
+  const users = allBalances
     .filter((b) => b.role === 'HEAD_OF_MARKETING')
     .map((b) => ({
       id: b.userId,
@@ -267,17 +270,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'createFunding') {
-    const receiptUrl = formData.get('receiptUrl')?.toString() ?? '';
-    if (!receiptUrl) {
-      return json({ error: 'Receipt URL is mandatory' }, { status: 400 });
-    }
+    const receiptUrl = formData.get('receiptUrl')?.toString() || undefined;
     const res = await apiRequest<unknown>('/trpc/marketing.createFunding', {
       method: 'POST',
       cookie,
       body: {
         receiverId: formData.get('receiverId')?.toString() ?? '',
         amount: formData.get('amount')?.toString() ?? '',
-        receiptUrl,
+        ...(receiptUrl ? { receiptUrl } : {}),
       },
     });
     if (!res.ok) {

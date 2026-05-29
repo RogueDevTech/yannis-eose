@@ -55,6 +55,14 @@ export async function applyPermissionCatalog(
 ): Promise<PermissionSeedResult> {
   const log = logger?.log ?? (() => {});
 
+  // ── 0. Ensure required unique indexes exist ────────────
+  // Older DB instances may lack these if early migrations created the tables
+  // without unique constraints. The ON CONFLICT clauses below depend on them.
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS permissions_code_key ON permissions (code)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS role_permissions_role_permission_id_key ON role_permissions (role, permission_id)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS role_templates_key_unique ON role_templates (key)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS role_template_permissions_pkey_idx ON role_template_permissions (role_template_id, permission_id)`;
+
   // ── 1. Bulk-insert any missing permission rows ──────────
   // Single multi-VALUES statement instead of 107 round-trips. `id` uses the
   // table's UUIDv7 default (see `uuidv7Pk()` in db/schema/helpers.ts).
@@ -276,7 +284,26 @@ export async function applyPermissionCatalog(
   const catalogChanged =
     rolePermsInserted > 0 || rolePermsRevoked > 0 ||
     templatePermsInserted > 0 || templatePermsRevoked > 0;
-  if (catalogChanged) {
+
+  // Also detect users with ZERO permission snapshots (created after the
+  // initial backfill — e.g. seeded users). These must be stamped even if the
+  // catalog itself didn't change.
+  const unstampedUsers: Array<{ id: string }> = await sql`
+    SELECT u.id
+    FROM users u
+    WHERE u.role NOT IN ('SUPER_ADMIN', 'SUPPORT')
+      AND u.status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1 FROM user_permissions up
+        WHERE up.user_id = u.id AND up.valid_to IS NULL
+      )
+  `;
+  const hasUnstampedUsers = unstampedUsers.length > 0;
+  if (hasUnstampedUsers) {
+    log(`Found ${unstampedUsers.length} user(s) with no permission snapshot — will restamp.`);
+  }
+
+  if (catalogChanged || hasUnstampedUsers) {
     // Find all non-SuperAdmin/non-Support users (their perms are computed on
     // the fly from the full catalog, never snapshotted).
     const users: Array<{ id: string; role: string; role_template_id: string | null }> = await sql`
@@ -340,12 +367,14 @@ export async function applyPermissionCatalog(
       `;
       if (uniqueCodes.length > 0) {
         // Re-insert the derived effective set from the permission IDs.
+        // The DELETE above already cleared all active rows for this user,
+        // so conflicts are impossible. Plain INSERT avoids requiring a
+        // partial unique index that may not exist on freshly-imported DBs.
         await sql`
           INSERT INTO user_permissions (user_id, permission_id, granted)
           SELECT ${u.id}::uuid, p.id, true
           FROM permissions p
           WHERE p.code = ANY(${uniqueCodes})
-          ON CONFLICT (user_id, permission_id) WHERE valid_to IS NULL DO NOTHING
         `;
       }
       usersRestamped++;

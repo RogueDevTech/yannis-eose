@@ -1,6 +1,5 @@
 import { Link } from '@remix-run/react';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
-import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -127,40 +126,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         </div>
       </div>
 
-      {/* ── Key Metrics: 2-per-row on mobile, 5-per-row from md: up ── */}
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Key Metrics
-        </h2>
-        <div className="card p-3 grid grid-cols-2 md:grid-cols-5 gap-2">
-          <KeyMetricTile
-            label="Ad Spend"
-            value={fmt(marketingSafe.totalSpend)}
-            valueClassName="text-danger-600 dark:text-danger-400"
-            to="/admin/marketing/ad-spend"
-          />
-          <KeyMetricTile label="Order Count" value={orderPipeline.total.toLocaleString()} to="/admin/marketing/orders" />
-          <KeyMetricTile
-            label="CPA"
-            value={fmt(marketingSafe.cpa)}
-            valueClassName={cpaColorClass(marketingSafe.cpa)}
-            to="/admin/marketing/ad-spend"
-          />
-          <KeyMetricTile
-            label="CR"
-            value={pct(marketingSafe.confirmationRate)}
-            valueClassName={confirmationRateColorClass(marketingSafe.confirmationRate)}
-            to="/admin/marketing/orders"
-          />
-          <KeyMetricTile
-            label="DR"
-            value={pct(marketingSafe.deliveryRate)}
-            valueClassName={deliveryRateColorClass(marketingSafe.deliveryRate)}
-            to="/admin/marketing/orders?status=DELIVERED"
-          />
-        </div>
-      </div>
-
       {/* ── Order Funnel: full pipeline at a glance ── */}
       {(() => {
         const sc = orderPipeline.statusCounts;
@@ -242,18 +207,50 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         );
       })()}
 
-      {/* ── Revenue Generated: stacked column ── */}
+      {/* ── Key Metrics + Revenue: single strip ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Revenue Generated
+          Key Metrics
         </h2>
-        <div className="card px-4 py-2">
-          <StatRowGroup divided>
-            <StatRow label="Today" value={fmt(revenueByPeriod.today)} />
-            <StatRow label="This Week" value={fmt(revenueByPeriod.thisWeek)} />
-            <StatRow label="This Month" value={fmt(revenueByPeriod.thisMonth)} variant="highlight" />
-          </StatRowGroup>
-        </div>
+        <OverviewStatStrip
+          mobileGrid
+          tileClassName="!py-2.5"
+          items={[
+            {
+              label: 'Ad Spend',
+              value: fmt(marketingSafe.totalSpend),
+              valueClassName: 'text-danger-600 dark:text-danger-400',
+              to: '/admin/marketing/ad-spend',
+            },
+            {
+              label: 'Orders',
+              value: orderPipeline.total.toLocaleString(),
+              valueClassName: 'text-app-fg',
+              to: '/admin/marketing/orders',
+            },
+            {
+              label: 'CPA',
+              value: fmt(marketingSafe.cpa),
+              valueClassName: cpaColorClass(marketingSafe.cpa),
+              to: '/admin/marketing/ad-spend',
+            },
+            {
+              label: 'Today',
+              value: fmt(revenueByPeriod.today),
+              valueClassName: revenueByPeriod.today > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+            },
+            {
+              label: 'This Week',
+              value: fmt(revenueByPeriod.thisWeek),
+              valueClassName: revenueByPeriod.thisWeek > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+            },
+            {
+              label: 'This Month',
+              value: fmt(revenueByPeriod.thisMonth),
+              valueClassName: revenueByPeriod.thisMonth > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+            },
+          ]}
+        />
       </div>
 
       {/* ── Quick Navigation ─────────────────────────────── */}

@@ -172,6 +172,7 @@ export function MarketingOrdersPage({
 }: MarketingOrdersPageProps) {
   usePersistedFilters('marketing-orders');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
+
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   // Treat both the initial Suspense fallback AND any same-path loader refetch
   // (filter / pagination / status change) as "loading" — the table swaps to
@@ -197,6 +198,9 @@ export function MarketingOrdersPage({
         : statusFilter || 'ALL',
   );
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
+  const [myTeamTab, setMyTeamTab] = useState<'personal' | 'team'>(
+    activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team',
+  );
   const [showChartView, setShowChartView] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [peekOrder, setPeekOrder] = useState<Order | null>(null);
@@ -218,7 +222,8 @@ export function MarketingOrdersPage({
           : statusFilter || 'ALL',
     );
     setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive]);
+    setMyTeamTab(activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team');
+  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, activeMediaBuyerFilter, viewerUserId]);
 
   // Quick-detail modal for an abandoned cart row — fetched on demand from the
   // marketing cart-detail resource route (scoped server-side to the viewer).
@@ -300,6 +305,7 @@ export function MarketingOrdersPage({
     if (showMediaBuyerColumn && mb !== 'ALL') n += 1;
     if ((searchParams.get('productId') || '').length > 0) n += 1;
     if ((searchParams.get('campaignId') || '').length > 0) n += 1;
+    if ((searchParams.get('orderSource') || '').length > 0) n += 1;
     return n;
   }, [selectedStatus, showMediaBuyerColumn, searchParams]);
 
@@ -312,6 +318,7 @@ export function MarketingOrdersPage({
     if (searchParams.get('productId')) n += 1;
     if (searchParams.get('campaignId')) n += 1;
     if (searchParams.get('search')) n += 1;
+    if (searchParams.get('orderSource')) n += 1;
     const sb = searchParams.get('sortBy');
     const so = searchParams.get('sortOrder');
     if (sb && sb !== 'createdAt') n += 1;
@@ -753,11 +760,12 @@ export function MarketingOrdersPage({
         <FilterPills
           variant="tab"
           options={[
-            { label: 'My Orders', value: 'personal' },
-            { label: 'Team Orders', value: 'team' },
+            { label: 'My Performance', value: 'personal' },
+            { label: 'Team Performance', value: 'team' },
           ]}
-          value={activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team'}
+          value={myTeamTab}
           onChange={(v) => {
+            setMyTeamTab(v as 'personal' | 'team');
             setSearchParams((p) => {
               const next = new URLSearchParams(p);
               next.set('page', '1');
@@ -1101,6 +1109,24 @@ export function MarketingOrdersPage({
                           { value: 'updatedAt:desc', label: 'Recently updated' },
                         ]}
                         wrapperClassName="w-full min-w-0 sm:w-44"
+                      />
+                      <FormSelect
+                        value={searchParams.get('orderSource') || ''}
+                        onChange={(e) => {
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (e.target.value) next.set('orderSource', e.target.value);
+                            else next.delete('orderSource');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: '', label: 'All sources' },
+                          { value: 'edge-form', label: 'Online orders' },
+                          { value: 'offline', label: 'Offline orders' },
+                        ]}
+                        wrapperClassName="w-full min-w-0 sm:w-40"
                       />
                     </>
                   }
