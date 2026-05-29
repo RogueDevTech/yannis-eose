@@ -1057,7 +1057,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               {new Date(markReceivedTarget.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
           </div>
-          {markReceivedTarget.receiptUrl ? (
+          {markReceivedTarget.receiptUrl && (
             <div>
               <p className="text-xs font-medium text-app-fg-muted mb-1">Receipt</p>
               <div className="rounded-lg border border-app-border overflow-hidden bg-app-canvas max-h-48">
@@ -1068,8 +1068,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 />
               </div>
             </div>
-          ) : (
-            <p className="text-xs text-app-fg-muted">No receipt image on file for this transfer.</p>
           )}
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => setMarkReceivedTarget(null)}>
@@ -1121,7 +1119,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               {notReceivedTarget.receiverName ?? userNameById(notReceivedTarget.receiverId)}
             </p>
           </div>
-          {notReceivedTarget.receiptUrl ? (
+          {notReceivedTarget.receiptUrl && (
             <div>
               <p className="text-xs font-medium text-app-fg-muted mb-1">Sender receipt (reference)</p>
               <div className="rounded-lg border border-app-border overflow-hidden bg-app-canvas max-h-48">
@@ -1132,8 +1130,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 />
               </div>
             </div>
-          ) : (
-            <p className="text-xs text-app-fg-muted">No receipt image on file.</p>
           )}
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => setNotReceivedTarget(null)}>
@@ -1859,7 +1855,7 @@ function UnifiedDistributingTable({
           const isPendingRequest = entry.entryType === 'request' && entry.status === 'PENDING';
           const entryLabel = entry.entryType === 'request'
             ? (entry.requesterName ?? 'Request')
-            : (users.get(entry.receiverId) ?? 'Transfer');
+            : (entry.receiverName ?? userNameById(entry.receiverId) ?? 'Transfer');
           return (
             <TableRowActionsSheet
               ariaLabel={`Actions for ${entryLabel}`}
@@ -1875,7 +1871,8 @@ function UnifiedDistributingTable({
                   key: 'receipt',
                   kind: 'button',
                   label: 'Receipt',
-                  onClick: () =>
+                  onClick: () => {
+                    if (entry.entryType !== 'transfer') return;
                     onViewReceipt({
                       id: entry.id,
                       senderId: entry.senderId,
@@ -1887,7 +1884,8 @@ function UnifiedDistributingTable({
                       verifiedAt: null,
                       senderName: entry.senderName,
                       receiverName: entry.receiverName,
-                    }),
+                    });
+                  },
                   show: entry.entryType === 'transfer' && !!entry.receiptUrl,
                 },
                 {
@@ -2222,7 +2220,7 @@ function UnifiedReceivedTable({
           const canResend =
             !isTransfer && entry.status === 'PENDING' && entry.requesterId === currentUserId;
           const entryLabel = isTransfer
-            ? (users.get(entry.senderId ?? '') ?? 'Transfer')
+            ? (entry.senderName ?? userNameById(entry.senderId) ?? 'Transfer')
             : (entry.requesterName ?? 'Request');
 
           return (

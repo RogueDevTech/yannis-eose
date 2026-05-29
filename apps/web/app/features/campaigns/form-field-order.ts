@@ -8,7 +8,7 @@ import {
   standardFieldOrderToken,
   type CampaignFieldOrderToken,
 } from '@yannis/shared';
-import { FIXED_STANDARD_FIELD_KEYS, getStandardFieldLabel, STANDARD_FIELD_LABELS } from './standard-fields';
+import { FIXED_STANDARD_FIELD_KEYS, getDefaultStandardFieldLabel, getStandardFieldLabel, STANDARD_FIELD_LABELS } from './standard-fields';
 import type { CustomFormField, StandardFieldConfig, StandardFieldKey } from './types';
 
 export type OrderedPreviewField =
@@ -82,7 +82,12 @@ export function buildOrderedPreviewFields(
     getOrderedCustomFields(customFields, fieldOrder).map((field) => [field.id, field]),
   );
 
-  const fixedStdKeys = new Set<string>(FIXED_STANDARD_FIELD_KEYS);
+  // Only deliveryAddress renders as a plain fixed textarea (same visual as the
+  // hardcoded fullName / phoneNumber fields). Other fixed-required fields like
+  // deliveryState need their standard renderer (dropdown with state options) so
+  // they must stay `kind: 'standard'` — otherwise the fixed-field fallback
+  // renders them as a duplicate "Phone Number" input.
+  const fixedStdKeysRenderedAsFixed = new Set<string>(['deliveryAddress']);
 
   const result = fieldOrder
     .map((token): OrderedPreviewField | null => {
@@ -97,13 +102,18 @@ export function buildOrderedPreviewFields(
       }
       if (token.startsWith('standard.')) {
         const key = token.slice('standard.'.length) as StandardFieldKey;
-        // Fixed standard fields render as fixed (always present, always required).
-        if (fixedStdKeys.has(key)) {
+        // Only deliveryAddress renders as a fixed field. Other fixed-required
+        // fields (deliveryState) need their standard renderer for dropdowns.
+        if (fixedStdKeysRenderedAsFixed.has(key)) {
           return { token, kind: 'fixed', key: key as 'deliveryAddress' };
         }
+        // For fixed-required fields that use their standard renderer, force
+        // required: true even if the standardMap entry says otherwise.
+        const isFixedRequired = (FIXED_STANDARD_FIELD_KEYS as readonly string[]).includes(key);
         const field = standardMap.get(key);
-        if (!field) return null;
-        return { token, kind: 'standard', key, label: getStandardFieldLabel(field), required: field.required === true };
+        if (!field && !isFixedRequired) return null;
+        const label = field ? getStandardFieldLabel(field) : getDefaultStandardFieldLabel(key);
+        return { token, kind: 'standard', key, label, required: isFixedRequired || field?.required === true };
       }
       if (token.startsWith('custom.')) {
         const field = customMap.get(token.slice('custom.'.length));
@@ -116,16 +126,17 @@ export function buildOrderedPreviewFields(
 
   // Ensure fixed standard fields are present even if missing from fieldOrder
   // (backwards compat for forms created before deliveryAddress became fixed).
-  const presentFixedKeys = new Set(result.filter((f) => f.kind === 'fixed').map((f) => f.key));
+  const presentKeys = new Set([
+    ...result.filter((f) => f.kind === 'fixed').map((f) => f.key),
+    ...result.filter((f) => f.kind === 'standard').map((f) => f.key),
+  ]);
   for (const key of FIXED_STANDARD_FIELD_KEYS) {
-    if (!presentFixedKeys.has(key)) {
+    if (!presentKeys.has(key)) {
       // Insert after phoneNumber (or at end if phoneNumber not found).
       const phoneIdx = result.findIndex((f) => f.kind === 'fixed' && f.key === 'phoneNumber');
-      const entry: OrderedPreviewField = {
-        token: standardFieldOrderToken(key) as CampaignFieldOrderToken,
-        kind: 'fixed',
-        key: key as 'deliveryAddress',
-      };
+      const entry: OrderedPreviewField = fixedStdKeysRenderedAsFixed.has(key)
+        ? { token: standardFieldOrderToken(key) as CampaignFieldOrderToken, kind: 'fixed', key: key as 'deliveryAddress' }
+        : { token: standardFieldOrderToken(key) as CampaignFieldOrderToken, kind: 'standard', key: key as StandardFieldKey, label: getDefaultStandardFieldLabel(key as StandardFieldKey), required: true };
       if (phoneIdx >= 0) {
         result.splice(phoneIdx + 1, 0, entry);
       } else {

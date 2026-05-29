@@ -312,14 +312,6 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at = loser.created_at AND winner.id < loser.id)
         )
         AND ${dateFilter}
-        -- Skip orders that already have a cross_funnel_attempts row recorded
-        AND NOT EXISTS (
-          SELECT 1 FROM cross_funnel_attempts cfa
-          WHERE cfa.customer_phone_hash = loser.customer_phone_hash
-            AND cfa.original_order_id = winner.id
-            AND cfa.product_id = oi_loser.product_id
-            AND cfa.media_buyer_id = loser.media_buyer_id
-        )
       ORDER BY loser.id, COALESCE(sr_winner.rank, 0) DESC, winner.created_at ASC
       LIMIT ${MAX_PER_RUN}
     `);
@@ -376,7 +368,9 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
     const now = new Date();
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      // 1. Soft-delete all loser orders (regardless of status)
+      // 1. Soft-delete all loser orders (regardless of status).
+      //    The loser is always the one behind in lifecycle — the winner
+      //    (e.g. DELIVERED) stays, the loser (e.g. CONFIRMED) gets deleted.
       await tx
         .update(schema.orders)
         .set({
@@ -392,27 +386,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           ),
         );
 
-      // 2. Record cross_funnel_attempts rows for losers that have an MB
-      const cfaRows = loserEntries
-        .filter((e) => e.mbId)
-        .flatMap((e) =>
-          e.productIds.map((productId) => ({
-            customerPhoneHash: e.customerPhoneHash,
-            customerPhone: e.customerPhone,
-            customerName: e.customerName,
-            productId,
-            mediaBuyerId: e.mbId!,
-            campaignId: e.campaignId,
-            branchId: e.branchId,
-            originalOrderId: e.winnerId,
-            originalMediaBuyerId: e.winnerMbId,
-          })),
-        );
-      if (cfaRows.length > 0) {
-        await tx.insert(schema.crossFunnelAttempts).values(cfaRows);
-      }
-
-      // 3. Timeline events for audit trail
+      // 2. Timeline events for audit trail
       await tx.insert(schema.orderTimelineEvents).values(
         loserEntries.map((e) => {
           const winnerLabel = e.winnerOrderNumber
@@ -430,6 +404,29 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         }),
       );
     });
+
+    // 3. Record cross_funnel_attempts outside the tx — best-effort for MB
+    //    visibility. A CFA failure must never prevent deletion.
+    const cfaRows = loserEntries
+      .filter((e) => e.mbId)
+      .flatMap((e) =>
+        e.productIds.map((productId) => ({
+          customerPhoneHash: e.customerPhoneHash,
+          customerPhone: e.customerPhone,
+          customerName: e.customerName,
+          productId,
+          mediaBuyerId: e.mbId!,
+          campaignId: e.campaignId,
+          branchId: e.branchId,
+          originalOrderId: e.winnerId,
+          originalMediaBuyerId: e.winnerMbId,
+        })),
+      );
+    if (cfaRows.length > 0) {
+      await this.db.insert(schema.crossFunnelAttempts).values(cfaRows).catch((err) => {
+        this.logger.warn(`CFA insert failed (non-fatal): ${(err as Error)?.message ?? err}`);
+      });
+    }
 
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
