@@ -540,11 +540,13 @@ function MarketingDashboard({
   naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
   isMarketingTeamSupervisor?: boolean;
 }) {
-  const showsTeamManagementCard = role === 'HEAD_OF_MARKETING' || isMarketingTeamSupervisor;
-  const [viewTab, setViewTab] = useState<'personal' | 'team'>(isMarketingTeamSupervisor ? 'personal' : 'team');
+  const isHeadOfMarketing = role === 'HEAD_OF_MARKETING';
+  const showsTeamManagementCard = isHeadOfMarketing || isMarketingTeamSupervisor;
+  const showsSupervisorLayout = isHeadOfMarketing || isMarketingTeamSupervisor;
+  const [viewTab, setViewTab] = useState<'personal' | 'team'>(showsSupervisorLayout ? 'team' : 'team');
 
-  // Supervisor: show My Performance / Team toggle
-  if (isMarketingTeamSupervisor) {
+  // HoM + Supervisor: show My Performance / Team toggle
+  if (showsSupervisorLayout) {
     return (
       <>
         <FilterPills

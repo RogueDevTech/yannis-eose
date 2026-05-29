@@ -30,6 +30,10 @@ export interface FundingBalanceRow {
   deliveryRate?: number;
   /** Orders created in period (`orders.created_at`), when merged from leaderboard — Media Buyers only */
   totalOrders?: number;
+  /** Orders confirmed or beyond (includes delivered/remitted) */
+  confirmedOrders?: number;
+  /** Orders delivered + remitted */
+  deliveredOrders?: number;
   /** Ad spend / total orders (period), when merged from leaderboard */
   cpa?: number;
   trueRoas?: number;

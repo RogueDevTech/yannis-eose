@@ -104,8 +104,20 @@ export function MediaBuyerBalanceCard({
                 <div className="font-semibold tabular-nums text-app-fg">—</div>
               )}
             </div>
+            {row.confirmedOrders != null && (
+              <div className="min-w-0">
+                <div className="text-app-fg-muted">Confirmed</div>
+                <div className="font-medium tabular-nums text-app-fg">{row.confirmedOrders.toLocaleString()}</div>
+              </div>
+            )}
+            {row.deliveredOrders != null && (
+              <div className="min-w-0 text-right">
+                <div className="text-app-fg-muted">Delivered</div>
+                <div className="font-medium tabular-nums text-app-fg">{row.deliveredOrders.toLocaleString()}</div>
+              </div>
+            )}
             <div className="min-w-0">
-              <div className="text-app-fg-muted">{row.confirmationRate != null ? 'Confirm' : 'Received'}</div>
+              <div className="text-app-fg-muted">{row.confirmationRate != null ? 'CR' : 'Received'}</div>
               <div
                 className={
                   row.confirmationRate != null
@@ -117,7 +129,7 @@ export function MediaBuyerBalanceCard({
               </div>
             </div>
             <div className="min-w-0 text-right">
-              <div className="text-app-fg-muted">{row.deliveryRate != null ? 'Delivery' : 'Spent'}</div>
+              <div className="text-app-fg-muted">{row.deliveryRate != null ? 'DR' : 'Spent'}</div>
               <div
                 className={
                   row.deliveryRate != null

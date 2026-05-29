@@ -1934,8 +1934,8 @@ function UnifiedDistributingTable({
           <div className="flex items-center justify-between gap-2">
             <span className="font-medium text-app-fg truncate">
               {entry.entryType === 'transfer'
-                ? userNameById(entry.receiverId)
-                : entry.requesterName ?? 'Unknown'}
+                ? (entry.receiverName ?? userNameById(entry.receiverId))
+                : (entry.requesterName ?? userNameById(entry.requesterId))}
             </span>
             <StatusBadge status={entry.status} />
           </div>
@@ -2306,8 +2306,8 @@ function UnifiedReceivedTable({
           <div className="flex items-center justify-between gap-2">
             <span className="font-medium text-app-fg truncate">
               {entry.entryType === 'transfer'
-                ? userNameById(entry.senderId)
-                : entry.requesterName ?? 'Unknown'}
+                ? (entry.senderName ?? userNameById(entry.senderId))
+                : (entry.requesterName ?? userNameById(entry.requesterId))}
             </span>
             <StatusBadge status={entry.status} />
           </div>

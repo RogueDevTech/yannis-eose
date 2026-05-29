@@ -19,6 +19,7 @@ export const COMMENT_BUBBLE_SVG_SMALL = (
  */
 export function CsCommentIcon({ comment, actorName }: { comment: string; actorName: string | null }) {
   const [show, setShow] = useState(false);
+  const [flipDown, setFlipDown] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -30,19 +31,28 @@ export function CsCommentIcon({ comment, actorName }: { comment: string; actorNa
     return () => document.removeEventListener('mousedown', handler);
   }, [show]);
 
+  const handleShow = () => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      // If less than 80px above the icon, flip tooltip below
+      setFlipDown(rect.top < 80);
+    }
+    setShow(true);
+  };
+
   return (
     <span
       ref={ref}
       className="relative inline-flex shrink-0 cursor-pointer rounded-full bg-amber-100 p-1 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-      onMouseEnter={() => setShow(true)}
+      onMouseEnter={handleShow}
       onMouseLeave={() => setShow(false)}
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShow((p) => !p); }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); show ? setShow(false) : handleShow(); }}
       aria-label="CS comment"
       title="CS comment"
     >
       {COMMENT_BUBBLE_SVG}
       {show && (
-        <span className="absolute bottom-full right-0 z-50 mb-2 whitespace-normal rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-lg text-left dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        <span className={`absolute right-0 z-50 whitespace-normal rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-lg text-left dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 ${flipDown ? 'top-full mt-2' : 'bottom-full mb-2'}`}
           style={{ minWidth: '12rem', maxWidth: '18rem' }}
         >
           <span className="block leading-relaxed">{comment}</span>

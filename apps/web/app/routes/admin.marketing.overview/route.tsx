@@ -1,6 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { defer, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -22,7 +22,7 @@ export const meta: MetaFunction = () => [
   { title: 'Live Activities — Yannis EOSE' },
 ];
 
-const defaultToday = defaultTodayRange;
+const defaultToday = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {

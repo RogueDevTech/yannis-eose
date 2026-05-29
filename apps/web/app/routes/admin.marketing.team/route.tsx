@@ -137,6 +137,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? {
           ...m,
           totalOrders: metrics.totalOrders,
+          confirmedOrders: metrics.confirmedOrders,
+          deliveredOrders: metrics.deliveredOrders,
           confirmationRate: metrics.confirmationRate,
           deliveryRate: metrics.deliveryRate,
           cpa: metrics.cpa,

@@ -371,6 +371,11 @@ export class OrdersService {
       const row = dbRows[idx]!;
       const dbp = parseFloat(String(row.unitPrice));
       if (Number.isNaN(dbp) || Math.abs(dbp - it.unitPrice) > 0.0001) return true;
+      // Also detect offer label or quantity changes — CS closers switching
+      // offer tiers must go through the same approval flow even if the price
+      // happens to remain identical (CEO directive 2026-05-28).
+      if ((it.offerLabel ?? null) !== (row.offerLabel ?? null)) return true;
+      if (it.quantity !== row.quantity) return true;
     }
     return false;
   }
@@ -383,8 +388,8 @@ export class OrdersService {
     excludeUserId: string;
   }): Promise<void> {
     const short = params.orderId.slice(0, 8).toUpperCase();
-    const title = 'Order line price change — approval needed';
-    const body = `${params.requesterName ?? 'A teammate'} requested updated unit prices on order ${short}. Review it under Permission Requests.`;
+    const title = 'Order item change — approval needed';
+    const body = `${params.requesterName ?? 'A teammate'} requested changes to items on order ${short}. Review it under Permission Requests.`;
     const data: Record<string, string> = {
       requestId: params.requestId,
       orderId: params.orderId,
@@ -523,7 +528,7 @@ export class OrdersService {
     if (mayEditPrices) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'You can change line prices directly on this order — no approval request is needed.',
+        message: 'You can change order items directly — no approval request is needed.',
       });
     }
 
@@ -540,7 +545,7 @@ export class OrdersService {
     if (!differs) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'At least one unit price must differ from the current order to submit an approval request.',
+        message: 'At least one item must differ (price, offer, or quantity) from the current order to submit an approval request.',
       });
     }
 
@@ -558,7 +563,7 @@ export class OrdersService {
     if (duplicate) {
       throw new TRPCError({
         code: 'CONFLICT',
-        message: 'A price-change request is already pending for this order.',
+        message: 'An item change request is already pending for this order.',
       });
     }
 
@@ -2756,6 +2761,9 @@ export class OrdersService {
     if (input.testOrders) {
       // Same whole-word "test" match as TestOrderPurgeService.
       conditions.push(sql`btrim(${schema.orders.customerName}) ~* '^test([^[:alpha:]]|$)'`);
+    }
+    if (input.orderSource) {
+      conditions.push(eq(schema.orders.orderSource, input.orderSource));
     }
     if (input.search) {
       const trimmed = input.search.trim();
@@ -7659,6 +7667,94 @@ export class OrdersService {
             clearMediaBuyer: opts?.clearMediaBuyer ?? false,
           },
           branchId: targetBranchId,
+        });
+
+        results.push({ orderId, success: true });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        results.push({ orderId, success: false, error: message });
+      }
+    }
+
+    return {
+      results,
+      succeeded: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      total: orderIds.length,
+    };
+  }
+
+  /**
+   * Reopen closed/stuck orders for follow-up. Always resets to UNPROCESSED,
+   * clears CS assignment, and optionally moves to a new servicing branch.
+   * All order data, timeline, items, and marketing attribution are preserved.
+   */
+  async reopenForFollowUp(
+    orderIds: string[],
+    actor: SessionUser,
+    opts?: { targetBranchId?: string },
+  ) {
+    const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
+
+    for (const orderId of orderIds) {
+      try {
+        const [order] = await this.db
+          .select({
+            id: schema.orders.id,
+            status: schema.orders.status,
+            servicingBranchId: schema.orders.servicingBranchId,
+          })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, orderId))
+          .limit(1);
+
+        if (!order) {
+          results.push({ orderId, success: false, error: 'Order not found' });
+          continue;
+        }
+
+        if (order.status === 'UNPROCESSED') {
+          results.push({ orderId, success: false, error: 'Order is already unprocessed' });
+          continue;
+        }
+
+        const targetBranch = opts?.targetBranchId ?? order.servicingBranchId;
+        const branchChanged = targetBranch !== order.servicingBranchId;
+
+        const updateFields: Record<string, unknown> = {
+          status: 'UNPROCESSED',
+          assignedCsId: null,
+          updatedAt: new Date(),
+          // Clear soft-delete flag so DELETED orders reappear in normal queries.
+          deletedAt: null,
+        };
+        if (branchChanged && targetBranch) {
+          updateFields.servicingBranchId = targetBranch;
+        }
+
+        await withActorAndBranch(
+          this.db,
+          { id: actor.id, currentBranchId: targetBranch ?? actor.currentBranchId },
+          async (tx) => {
+            await tx
+              .update(schema.orders)
+              .set(updateFields)
+              .where(eq(schema.orders.id, orderId));
+          },
+        );
+
+        const branchNote = branchChanged ? ` Moved to branch ${targetBranch}.` : '';
+        await this.writeTimelineEvent({
+          orderId,
+          eventType: 'FOLLOW_UP_REASSIGNED' as 'STATUS_CHANGED',
+          actorId: actor.id,
+          actorName: actor.name ?? null,
+          description: `Reopened for follow-up. Previous status: ${order.status}.${branchNote}`,
+          metadata: {
+            previousStatus: order.status,
+            ...(branchChanged ? { previousServicingBranchId: order.servicingBranchId, targetServicingBranchId: targetBranch } : {}),
+          },
+          branchId: targetBranch ?? order.servicingBranchId,
         });
 
         results.push({ orderId, success: true });

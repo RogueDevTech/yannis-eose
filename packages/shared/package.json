@@ -22,6 +22,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts --",
+    "db:seed:users-orders": "tsx src/db/seed-users-orders.ts",
     "db:seed:boost": "tsx src/db/seed-boost.ts",
     "db:seed:cross-funnel": "tsx src/db/seed-cross-funnel.ts",
     "db:seed:delivery-remittance-disputed": "tsx src/db/seed-delivery-remittance-disputed.ts",
