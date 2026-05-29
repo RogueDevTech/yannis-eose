@@ -95,7 +95,8 @@ function writeLocalStorage(key: string | null, value: string): void {
   }
 }
 
-export function usePushSubscription(userId?: string | null): UsePushSubscriptionResult {
+export function usePushSubscription(userId?: string | null, opts?: { readOnly?: boolean }): UsePushSubscriptionResult {
+  const readOnly = opts?.readOnly ?? false;
   const [isSupported, setIsSupported] = useState(false);
   const [iosDevice, setIosDevice] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -134,7 +135,7 @@ export function usePushSubscription(userId?: string | null): UsePushSubscription
         if (sub) {
           setIsSubscribed(true);
           const mode = detectInstallMode();
-          if (mode !== 'UNKNOWN' && !isMirroring()) {
+          if (mode !== 'UNKNOWN' && !isMirroring() && !readOnly) {
             const key = pushInstallModeLastSentKey(userId);
             const payload = JSON.stringify({ endpoint: sub.endpoint, installMode: mode });
             if (readLocalStorage(key) === payload) return;
@@ -165,7 +166,7 @@ export function usePushSubscription(userId?: string | null): UsePushSubscription
     if (typeof window === 'undefined') return;
     async function pushMode(mode: InstallMode) {
       if (mode === 'UNKNOWN') return;
-      if (isMirroring()) return; // Read-only while mirroring; the next mount will retry.
+      if (isMirroring() || readOnly) return; // Read-only while mirroring or SUPPORT role.
       try {
         const registration = await navigator.serviceWorker.ready;
         const sub = await registration.pushManager.getSubscription();

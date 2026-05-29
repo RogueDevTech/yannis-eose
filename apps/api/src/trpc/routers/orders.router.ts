@@ -382,6 +382,17 @@ export async function narrowOrdersAggregateFiltersForViewer(
     merged.assignedCsId = ctx.user.id;
   }
 
+  // "My Performance" detection: when the caller explicitly passes their own
+  // mediaBuyerId (or assignedCsId), the intent is personal-scope — preserve
+  // the exact ownership filter and skip the supervisor team-scope expansion.
+  // Without this, the supervisor scope would silently replace the personal
+  // filter with the full team list and the stat strip wouldn't change on tab
+  // switch (the "My Performance" / "Team" toggle bug).
+  const isPersonalMediaBuyerScope =
+    partial.mediaBuyerId === ctx.user.id;
+  const isPersonalCsScope =
+    partial.assignedCsId === ctx.user.id;
+
   const withSupervisor = await applySupervisorScope(
     ctx,
     merged as unknown as ListOrdersInput,
@@ -389,9 +400,21 @@ export async function narrowOrdersAggregateFiltersForViewer(
   );
 
   const out = { ...withSupervisor } as Record<string, unknown>;
+
+  // When supervisorScope is present but the caller explicitly asked for their
+  // own data ("My Performance"), drop the team scope and keep the personal
+  // ownership filter instead.
   if (out.supervisorScope && typeof out.supervisorScope === 'object') {
-    delete out.mediaBuyerId;
-    delete out.assignedCsId;
+    if (isPersonalMediaBuyerScope) {
+      delete out.supervisorScope;
+      out.mediaBuyerId = ctx.user.id;
+    } else if (isPersonalCsScope) {
+      delete out.supervisorScope;
+      out.assignedCsId = ctx.user.id;
+    } else {
+      delete out.mediaBuyerId;
+      delete out.assignedCsId;
+    }
   }
 
   const supervisorScope = out.supervisorScope as OrdersAggregateSupervisorScope | undefined;

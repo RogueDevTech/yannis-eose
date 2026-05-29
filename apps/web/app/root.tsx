@@ -1,6 +1,6 @@
 import type { LinksFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import {
   Links,
@@ -150,6 +150,9 @@ export default function App() {
     const id = window.requestAnimationFrame(() => {
       setIsBooting(false);
     });
+    // We rendered successfully — any retry counter from a prior boundary
+    // fire on this tab is now stale.
+    clearAutoRetryAttempt();
 
     return () => {
       window.cancelAnimationFrame(id);
@@ -318,11 +321,138 @@ export default function App() {
   );
 }
 
+/**
+ * Auto-retry config for network-type loader failures. Delays grow so the
+ * server has a chance to recover between attempts; max attempts capped so
+ * we stop hammering after ~21s total if it stays down.
+ */
+const AUTO_RETRY_DELAYS_S = [3, 6, 12] as const;
+const MAX_AUTO_RETRIES = AUTO_RETRY_DELAYS_S.length;
+const AUTO_RETRY_STORAGE_KEY = 'yannis:auto-retry';
+const AUTO_RETRY_STORAGE_WINDOW_MS = 60_000;
+
+function readPriorAutoRetryAttempt(pathname: string): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = window.sessionStorage.getItem(AUTO_RETRY_STORAGE_KEY);
+    if (!raw) return 0;
+    const data = JSON.parse(raw) as { path?: string; count?: number; at?: number };
+    if (data.path !== pathname) return 0;
+    if (typeof data.at !== 'number' || Date.now() - data.at > AUTO_RETRY_STORAGE_WINDOW_MS) {
+      window.sessionStorage.removeItem(AUTO_RETRY_STORAGE_KEY);
+      return 0;
+    }
+    return typeof data.count === 'number' ? Math.max(0, Math.min(MAX_AUTO_RETRIES, data.count)) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function persistAutoRetryAttempt(pathname: string, count: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(
+      AUTO_RETRY_STORAGE_KEY,
+      JSON.stringify({ path: pathname, count, at: Date.now() }),
+    );
+  } catch {}
+}
+
+export function clearAutoRetryAttempt(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(AUTO_RETRY_STORAGE_KEY);
+  } catch {}
+}
+
+/**
+ * Shrink long path segments (typically UUIDs) so the context line stays on
+ * one line on mobile but the user can still recognise which resource failed.
+ */
+function truncatePathSegment(seg: string): string {
+  if (seg.length <= 12) return seg;
+  return `${seg.slice(0, 6)}…${seg.slice(-4)}`;
+}
+
+function formatErrorContextLabel(pathname: string, search: string): string {
+  const parts = pathname.split('/').filter(Boolean);
+  const base = parts.length === 0 ? '/' : `/${parts.map(truncatePathSegment).join('/')}`;
+  return search ? `${base}${search}` : base;
+}
+
+type ErrorIconKind = 'cloud-off' | 'wifi-off' | 'alert' | 'not-found' | 'lock';
+
+function ErrorBoundaryIcon({ kind }: { kind: ErrorIconKind }) {
+  const common = {
+    className: 'w-12 h-12 mx-auto text-app-fg-muted',
+    fill: 'none' as const,
+    viewBox: '0 0 24 24',
+    stroke: 'currentColor',
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  switch (kind) {
+    case 'cloud-off':
+      return (
+        <svg {...common}>
+          <path d="M3 3l18 18" />
+          <path d="M9.41 5.51A6 6 0 0 1 19 11h.5a3.5 3.5 0 0 1 2.39 6.04" />
+          <path d="M16 19H7a4 4 0 0 1-2.4-7.2" />
+        </svg>
+      );
+    case 'wifi-off':
+      return (
+        <svg {...common}>
+          <path d="M3 3l18 18" />
+          <path d="M8.5 16.5a5 5 0 0 1 7 0" />
+          <path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
+          <path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" />
+          <path d="M16.85 11.25a10 10 0 0 0-2.2-1.4" />
+          <path d="M5 12.55a10 10 0 0 1 5.17-2.39" />
+          <circle cx="12" cy="20" r="0.5" />
+        </svg>
+      );
+    case 'not-found':
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m21 21-4.3-4.3" />
+          <path d="m14 8-6 6" />
+          <path d="m8 8 6 6" />
+        </svg>
+      );
+    case 'lock':
+      return (
+        <svg {...common}>
+          <rect x="4" y="11" width="16" height="10" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+      );
+    case 'alert':
+    default:
+      return (
+        <svg {...common}>
+          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <circle cx="12" cy="17" r="0.5" />
+        </svg>
+      );
+  }
+}
+
 export function ErrorBoundary() {
   const error = useRouteError();
   const navigate = useNavigate();
-  const [refreshLoading, setRefreshLoading] = useState(false);
+  const location = useLocation();
+  const [manualRetryLoading, setManualRetryLoading] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [autoRetryAttempt, setAutoRetryAttempt] = useState(0);
+  const [secondsUntilRetry, setSecondsUntilRetry] = useState<number | null>(null);
+  const [detailsCopied, setDetailsCopied] = useState(false);
+
   const isResponse = isRouteErrorResponse(error);
   const status = isResponse ? error.status : 500;
   const is404 = status === 404;
@@ -331,12 +461,75 @@ export function ErrorBoundary() {
   const isNetworkIssue = !is404 && !is401 && isNetworkErrorLike(errorPayload, status);
   const networkCopy = isNetworkIssue ? getNetworkErrorCopy(errorPayload, status) : null;
 
+  // Hydrate online status + restore retry counter from the previous attempt
+  // (a successful render mounts <App> instead, which clears the counter).
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      setIsOnline(navigator.onLine);
+    }
+    setAutoRetryAttempt(readPriorAutoRetryAttempt(location.pathname));
+  }, [location.pathname, error]);
+
+  // React to connectivity changes so the countdown pauses while offline
+  // and resumes the moment the device is back online.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const exhaustedAutoRetries = isNetworkIssue && autoRetryAttempt >= MAX_AUTO_RETRIES;
+  const canAutoRetry =
+    isNetworkIssue &&
+    !exhaustedAutoRetries &&
+    !manualRetryLoading &&
+    !dashboardLoading;
+
+  // Auto-retry countdown — silent fallback on the "we'll retry shortly" copy.
+  useEffect(() => {
+    if (!canAutoRetry || !isOnline) {
+      setSecondsUntilRetry(null);
+      return;
+    }
+    const delay = AUTO_RETRY_DELAYS_S[autoRetryAttempt] ?? AUTO_RETRY_DELAYS_S[MAX_AUTO_RETRIES - 1]!;
+    setSecondsUntilRetry(delay);
+    const tickId = window.setInterval(() => {
+      setSecondsUntilRetry((s) => (s !== null && s > 1 ? s - 1 : 0));
+    }, 1000);
+    const fireId = window.setTimeout(() => {
+      persistAutoRetryAttempt(location.pathname, autoRetryAttempt + 1);
+      navigate(location.pathname + location.search, { replace: true });
+    }, delay * 1000);
+    return () => {
+      window.clearInterval(tickId);
+      window.clearTimeout(fireId);
+    };
+  }, [canAutoRetry, isOnline, autoRetryAttempt, location.pathname, location.search, navigate]);
+
+  const iconKind: ErrorIconKind = is404
+    ? 'not-found'
+    : is401
+      ? 'lock'
+      : isNetworkIssue
+        ? !isOnline
+          ? 'wifi-off'
+          : 'cloud-off'
+        : 'alert';
+
   const title = is404
     ? 'Page Not Found'
     : is401
       ? 'Session Expired'
       : networkCopy
-        ? networkCopy.title
+        ? !isOnline
+          ? "You're offline"
+          : networkCopy.title
         : 'Something Went Wrong';
 
   const description = is404
@@ -344,8 +537,58 @@ export function ErrorBoundary() {
     : is401
       ? 'Your session has expired. Please sign in again.'
       : networkCopy
-        ? networkCopy.description
+        ? !isOnline
+          ? "Your device lost connection. We'll retry as soon as you're back online."
+          : exhaustedAutoRetries
+            ? `${networkCopy.description} Auto-retry stopped — tap Try Again when you're ready.`
+            : networkCopy.description
         : 'An unexpected error occurred. Please try refreshing the page.';
+
+  const contextLabel = useMemo(
+    () => formatErrorContextLabel(location.pathname, location.search),
+    [location.pathname, location.search],
+  );
+
+  const detailsLine = useMemo(() => {
+    const parts: string[] = [];
+    if (networkCopy?.code) parts.push(networkCopy.code);
+    if (networkCopy?.upstreamStatus != null) {
+      parts.push(`HTTP ${networkCopy.upstreamStatus}`);
+    } else if (isResponse) {
+      parts.push(`HTTP ${status}`);
+    }
+    return parts.join(' · ');
+  }, [networkCopy?.code, networkCopy?.upstreamStatus, isResponse, status]);
+
+  const handleCopyDetails = async () => {
+    const lines = [
+      'Yannis EOSE error report',
+      `Path: ${location.pathname}${location.search}`,
+      `Status: ${status}`,
+    ];
+    if (detailsLine) lines.push(`Details: ${detailsLine}`);
+    lines.push(`Time: ${new Date().toISOString()}`);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(lines.join('\n'));
+        setDetailsCopied(true);
+        window.setTimeout(() => setDetailsCopied(false), 2000);
+      }
+    } catch {}
+  };
+
+  const handleManualRetry = () => {
+    setManualRetryLoading(true);
+    persistAutoRetryAttempt(location.pathname, autoRetryAttempt + 1);
+    navigate(location.pathname + location.search, { replace: true });
+  };
+
+  const retryButtonLabel =
+    !isOnline
+      ? 'Waiting for connection'
+      : canAutoRetry && secondsUntilRetry !== null
+        ? `Try Again (${secondsUntilRetry}s)`
+        : 'Try Again';
 
   return (
     <html lang="en" className="h-full" data-app-theme="light" suppressHydrationWarning>
@@ -359,11 +602,16 @@ export function ErrorBoundary() {
         <Links />
       </head>
       <body className="h-full flex items-center justify-center bg-app-canvas">
-        <div className="text-center p-8 max-w-md">
-          <p className="text-6xl font-bold text-app-border mb-4">{status}</p>
-          <h1 className="text-xl font-bold text-app-fg">{title}</h1>
+        <div className="text-center p-6 sm:p-8 max-w-md w-full">
+          <ErrorBoundaryIcon kind={iconKind} />
+          <h1 className="mt-4 text-xl font-bold text-app-fg">{title}</h1>
           <p className="mt-2 text-sm text-app-fg-muted">{description}</p>
-          <div className="mt-6 flex gap-3 justify-center">
+          {isNetworkIssue && !is401 && (
+            <p className="mt-3 text-xs text-app-fg-muted/80 font-mono break-all" aria-live="polite">
+              {contextLabel}
+            </p>
+          )}
+          <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
             {is401 ? (
               <a href="/auth" className="btn-primary">
                 Sign In
@@ -372,21 +620,18 @@ export function ErrorBoundary() {
               <>
                 <Button
                   variant="primary"
-                  loading={refreshLoading}
-                  loadingText="Refreshing…"
-                  disabled={dashboardLoading}
-                  onClick={() => {
-                    setRefreshLoading(true);
-                    window.location.reload();
-                  }}
+                  loading={manualRetryLoading}
+                  loadingText="Retrying…"
+                  disabled={dashboardLoading || !isOnline}
+                  onClick={handleManualRetry}
                 >
-                  Refresh Page
+                  {retryButtonLabel}
                 </Button>
                 <Button
                   variant="secondary"
                   loading={dashboardLoading}
                   loadingText="Opening…"
-                  disabled={refreshLoading}
+                  disabled={manualRetryLoading}
                   onClick={() => {
                     setDashboardLoading(true);
                     navigate('/admin');
@@ -397,6 +642,22 @@ export function ErrorBoundary() {
               </>
             )}
           </div>
+          {isNetworkIssue && (
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-[11px] text-app-fg-muted/70">
+              {detailsLine && (
+                <span className="inline-flex items-center rounded-full border border-app-border/60 px-2 py-0.5">
+                  {detailsLine}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleCopyDetails}
+                className="inline-flex items-center rounded-full border border-app-border/60 px-2 py-0.5 hover:bg-app-border/30 transition-colors"
+              >
+                {detailsCopied ? 'Copied ✓' : 'Copy details'}
+              </button>
+            </div>
+          )}
         </div>
         <Scripts />
       </body>
