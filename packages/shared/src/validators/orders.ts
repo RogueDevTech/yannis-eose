@@ -226,6 +226,12 @@ export type SoftDeleteOrderInput = z.infer<typeof softDeleteOrderSchema>;
 export const assignOrderSchema = z.object({
   orderId: z.string().uuid(),
   csCloserId: z.string().uuid(),
+  /**
+   * Late-stage credit-attribution transfers (post-CS_ENGAGED) require a short
+   * reason for the audit trail. Optional for normal pre-engagement assigns.
+   * Server validates non-empty when the order's status is past CS_ENGAGED.
+   */
+  reason: z.string().trim().min(1).max(280).optional(),
 });
 
 export type AssignOrderInput = z.infer<typeof assignOrderSchema>;

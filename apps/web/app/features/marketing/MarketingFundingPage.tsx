@@ -1179,7 +1179,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
           <h3 className="text-lg font-semibold text-app-fg">Approve funding request</h3>
           <p className="text-sm text-app-fg-muted">
-            Send the money manually (e.g. bank transfer), then attach the receipt below. The requester will be notified and can preview the receipt.
+            Send the money manually (e.g. bank transfer). You can optionally attach a receipt. The requester will be notified.
           </p>
           <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('approveFundingRequest')} />
           <fetcher.Form method="post" className="space-y-3" onSubmit={handleApproveFundingRequestSubmit} noValidate>

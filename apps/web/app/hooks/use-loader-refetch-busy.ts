@@ -65,6 +65,12 @@ export function useLoaderRefetchBusy(options?: UseLoaderRefetchBusyOptions): Loa
     }
   }, [navigation.state]);
 
+  // Detect same-path <a> clicks to arm the overlay. We set `armed` WITHOUT
+  // `flushSync` — the state update batches with React Router's own navigation
+  // state change and paints on the next frame. Using `flushSync` here causes a
+  // synchronous re-render that can shift DOM layout (e.g. skeleton rows replace
+  // real rows), killing the subsequent `click` event and silently swallowing
+  // the navigation (pagination first-click no-op).
   useLayoutEffect(() => {
     const onPointerDownCapture = (ev: PointerEvent) => {
       if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -86,12 +92,13 @@ export function useLoaderRefetchBusy(options?: UseLoaderRefetchBusyOptions): Loa
       if (nextUrl.pathname !== pathname) return;
       if (nextUrl.search === search && nextUrl.hash === location.hash) return;
 
-      primeSamePathRefetch();
+      // DO NOT use flushSync here — let React batch this naturally.
+      setArmed(true);
     };
 
     document.addEventListener('pointerdown', onPointerDownCapture, true);
     return () => document.removeEventListener('pointerdown', onPointerDownCapture, true);
-  }, [pathname, search, location.hash, primeSamePathRefetch]);
+  }, [pathname, search, location.hash]);
 
   const busy = Boolean(armed || isSamePathRefetchNav);
 

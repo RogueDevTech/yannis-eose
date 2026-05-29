@@ -172,6 +172,13 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'orders.delivery.confirm', resource: 'orders.delivery', action: 'confirm', description: 'Mark an order DELIVERED via the Sales / Logistics rider-proxy path' },
   { code: 'orders.update.any_branch', resource: 'orders.update', action: 'any_branch', description: 'Update orders that have no branch context (org-wide heads)' },
   { code: 'orders.assign', resource: 'orders', action: 'assign', description: 'Assign or reassign orders to Sales closers' },
+  {
+    code: 'orders.cs.transfer_any_status',
+    resource: 'orders.cs',
+    action: 'transfer_any_status',
+    description:
+      'Transfer the assigned Sales closer of an order at ANY status (including confirmed, dispatched, delivered, remitted) for credit-attribution fixes. Status is preserved — only the assignee changes. Audited.',
+  },
   { code: 'users.staff.update_supervised', resource: 'users.staff', action: 'update_supervised', description: 'Narrow-edit (capacity / products / visible statuses) on direct reports — Heads use this without holding full users.update' },
   { code: 'voip.toggle', resource: 'voip', action: 'toggle', description: 'Enable or disable VOIP at the system level' },
   { code: 'branches.manage_users', resource: 'branches', action: 'manage_users', description: 'Add or remove users on a branch (Branch Admin scoped to their branch)' },
@@ -339,6 +346,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'orders.delivery.confirm',
     'orders.update.any_branch',
     'orders.assign',
+    'orders.cs.transfer_any_status',
     'users.staff.update_supervised',
     // HoCS approves CS-side order-domain requests (per-order assignee context still
     // applies in the service so they only act on orders for their team).

@@ -7,10 +7,8 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { AmountInput } from '~/components/ui/amount-input';
 import { FormField } from '~/components/ui/form-field';
-import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upload';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
-import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { fetchCampaignOrderTotalForBatch } from '~/lib/trpc-browser';
 import type { Campaign, Product, AdPlatform } from './types';
 import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
@@ -28,9 +26,6 @@ interface ExpenseLine {
   attributedOrderCount: string;
   platform: AdPlatform;
   platformCustomLabel: string;
-  adUrl: string;
-  screenshotUrl: string;
-  uploadState: FileUploadUploadState;
 }
 
 interface FormSection {
@@ -47,25 +42,12 @@ function emptyLine(uid: string): ExpenseLine {
     attributedOrderCount: '',
     platform: 'FACEBOOK',
     platformCustomLabel: '',
-    adUrl: '',
-    screenshotUrl: '',
-    uploadState: 'idle',
   };
 }
 
 function todayYmd(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function isLikelyUrl(value: string): boolean {
-  if (!value) return false;
-  try {
-    const u = new URL(value);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 interface AddExpenseFormProps {
@@ -247,15 +229,8 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
           const amt = Number(l.spendAmount.replace(/,/g, ''));
           const orders = parseInt(l.attributedOrderCount, 10);
           const otherOk = l.platform !== 'OTHER' || l.platformCustomLabel.trim().length > 0;
-          // CEO 2026-05-10: ad URL is the required evidence; screenshot is optional.
-          const adUrlOk = isLikelyUrl(l.adUrl.trim());
-          // If a screenshot was started, wait for the upload to settle — but
-          // an empty screenshot field is now perfectly valid.
-          const uploadOk = l.uploadState !== 'uploading' && l.uploadState !== 'error';
           return (
             l.productId &&
-            adUrlOk &&
-            uploadOk &&
             Number.isFinite(amt) &&
             amt > 0 &&
             Number.isFinite(orders) &&
@@ -294,10 +269,7 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
           productId: l.productId,
           spendAmount: Number(l.spendAmount.replace(/,/g, '')),
           attributedOrderCount: parseInt(l.attributedOrderCount, 10),
-          adUrl: l.adUrl.trim(),
           platform: l.platform,
-          // Screenshot is optional now — only include if uploaded.
-          ...(l.screenshotUrl ? { screenshotUrl: l.screenshotUrl } : {}),
         };
         if (l.platform === 'OTHER' && l.platformCustomLabel.trim()) {
           return { ...base, platformCustomLabel: l.platformCustomLabel.trim() };
@@ -438,7 +410,7 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
             return;
           }
           if (!v.valid) {
-            issues.push(`Form ${idx + 1}: complete required fields (Product, Amount, Ad URL)`);
+            issues.push(`Form ${idx + 1}: complete required fields (Product, Amount)`);
           }
         });
         if (issues.length === 0) return null;
@@ -649,12 +621,6 @@ function FormSectionCard({
               <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[130px]">
                 Platform*
               </th>
-              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[180px]">
-                Ad URL*
-              </th>
-              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[160px]">
-                Screenshot
-              </th>
               <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px] text-right">
                 CPA
               </th>
@@ -724,24 +690,6 @@ function FormSectionCard({
                         required
                       />
                     </td>
-                    <td className="px-1.5 py-1">
-                      <TextInput
-                        id={`${line.uid}-adurl`}
-                        type="url"
-                        value={line.adUrl}
-                        onChange={(e) => onLineChange(line.uid, { adUrl: e.target.value })}
-                        placeholder="https://..."
-                        required
-                      />
-                    </td>
-                    <td className="px-1.5 py-1">
-                      <FileUpload
-                        folder={ASSET_FOLDERS.SCREENSHOTS}
-                        onUpload={(url) => onLineChange(line.uid, { screenshotUrl: url })}
-                        onUploadStateChange={(s) => onLineChange(line.uid, { uploadState: s })}
-                        variant="minimal"
-                      />
-                    </td>
                     <td className="px-1.5 py-1 text-sm font-semibold tabular-nums text-app-fg text-right whitespace-nowrap">
                       {lineCpa != null ? <NairaPrice amount={Math.round(lineCpa)} /> : '—'}
                     </td>
@@ -761,7 +709,7 @@ function FormSectionCard({
                   {showCustomPlatform && (
                     <tr>
                       <td />
-                      <td colSpan={8} className="px-1.5 pb-1">
+                      <td colSpan={6} className="px-1.5 pb-1">
                         <FormField
                           label={`Ad ${lineIdx + 1} platform name`}
                           htmlFor={`${line.uid}-platform-custom`}

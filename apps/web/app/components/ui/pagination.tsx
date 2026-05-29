@@ -179,7 +179,6 @@ export function Pagination({
         className={btnClass}
         aria-current={isActive ? 'page' : undefined}
         prefetch="intent"
-        onClick={() => refetchBusy.primeSamePathRefetch()}
       >
         {content}
       </Link>
@@ -216,7 +215,6 @@ export function Pagination({
         to={buildHref(p)}
         className={btnClass}
         prefetch="intent"
-        onClick={() => refetchBusy.primeSamePathRefetch()}
       >
         {label}
       </Link>
@@ -255,9 +253,10 @@ export function Pagination({
             if (onPageChange) {
               armCallbackNavigating();
               onPageChange(p);
-            } else {
-              refetchBusy.primeSamePathRefetch();
             }
+            // URL-mode: pointerdown capture handler in useLoaderRefetchBusy
+            // already arms the overlay — no need to call primeSamePathRefetch
+            // here (flushSync during a click handler kills the Link navigation).
           }}
           buildHref={onPageChange ? undefined : buildHref}
         />
