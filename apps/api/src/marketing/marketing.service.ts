@@ -3953,9 +3953,12 @@ export class MarketingService {
       confirmationRate,
       cpa: totalOrders > 0 ? approvedSpend / totalOrders : 0,
       trueRoas: approvedSpend > 0 ? deliveredRevenue / approvedSpend : 0,
-      // DR = delivered cohort / confirmed cohort — both counts now filter by
-      // `createdAt` so the rate is always ≤ 100% (no cross-period leakage).
-      deliveryRate: confirmedOrders > 0 ? (deliveredOrders / confirmedOrders) * 100 : 0,
+      // DR = delivered cohort / total cohort (DELETED-excluded) — same
+      // denominator as CR so the two read as a funnel: of every N orders
+      // taken in period, X% reached confirmed-or-beyond and Y% delivered.
+      // (The conditional rate delivered/confirmed lives on the CS Closer
+      // leaderboard's `engaged` denominator, which is also total.)
+      deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
     };
   }
 
@@ -3998,8 +4001,9 @@ export class MarketingService {
       confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
       trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
-      // DR = delivered / confirmed (consistent with getPerformanceMetrics).
-      deliveryRate: confirmedOrders > 0 ? (deliveredOrders / confirmedOrders) * 100 : 0,
+      // DR = delivered / total — same funnel denominator as CR (see
+      // getPerformanceMetrics for full rationale).
+      deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
     };
   }
 
