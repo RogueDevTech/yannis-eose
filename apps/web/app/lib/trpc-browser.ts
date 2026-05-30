@@ -232,6 +232,30 @@ export async function fetchCampaignOrderTotalForBatch(
   }
 }
 
+export type OrderCountForDateResult = {
+  orderCount: number;
+  existingRecord: { id: string; spendAmount: string; status: string; orderCountSnapshot: number | null } | null;
+};
+
+export async function fetchOrderCountForDate(
+  spendDate: string,
+  signal?: AbortSignal,
+): Promise<OrderCountForDateResult | null> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) return null;
+  const url = `${base}/trpc/marketing.orderCountForDate?input=${encodeURIComponent(
+    JSON.stringify({ spendDate }),
+  )}`;
+  try {
+    const res = await fetch(url, { credentials: 'include', signal });
+    if (!res.ok) return null;
+    const json = (await res.json()) as TrpcEnvelope<OrderCountForDateResult>;
+    return json?.result?.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Hard cap for "Select all matching this filter" deep-selects. Matches the
  * server-side bulk-action max (`bulkTransition` / `bulkAssignToCS` cap at 100),

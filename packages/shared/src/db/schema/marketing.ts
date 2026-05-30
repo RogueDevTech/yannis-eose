@@ -134,13 +134,11 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
     .notNull()
     .references(() => users.id),
   productId: uuid('product_id')
-    .notNull()
     .references(() => products.id),
   campaignId: uuid('campaign_id')
-    .notNull()
     .references(() => campaigns.id),
   spendAmount: numeric('spend_amount', { precision: 12, scale: 2 }).notNull(),
-  screenshotUrl: text('screenshot_url').notNull(),
+  screenshotUrl: text('screenshot_url'),
   /** Optional link to the actual ad creative (Meta Ads Manager URL, TikTok Ads URL, etc.). */
   adUrl: text('ad_url'),
   /** Ad platform — defaults to FACEBOOK (vast majority of spend). */
@@ -158,6 +156,8 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
    * interval calc so historical reports stay valid.
    */
   attributedOrderCount: integer('attributed_order_count').default(0).notNull(),
+  /** System-derived order count frozen at log/update time (new daily flow). */
+  orderCountSnapshot: integer('order_count_snapshot'),
   spendDate: timestamp('spend_date', { withTimezone: true }).notNull(),
   status: adSpendStatusEnum('status').default('PENDING').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),

@@ -707,16 +707,14 @@ export function MarketingAdSpendLoadingShell({
       />
 
       <div className="list-panel scroll-mt-4">
-        <div className="border-b border-app-border px-4 py-3">
-          <Tabs value={selectedStatus} onChange={handleStatusChange} tabs={AD_SPEND_STATUS_TAB_OPTIONS} />
-        </div>
         <ToolbarFiltersCollapsible
+          hideMobileSheet
           badgeCount={badgeCount}
-          sheetSubtitle={<span>Product, campaign, and buyer filters apply immediately</span>}
+          sheetSubtitle={<span>Status, product, campaign, and buyer filters apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
-                placeholder="Search buyer, product, campaign, or entry ID..."
+                placeholder="Search ads…"
                 value={searchQuery}
                 onChange={(val) => setSearchQuery(val)}
                 withSubmitButton
@@ -726,25 +724,11 @@ export function MarketingAdSpendLoadingShell({
           }
           desktopInlineFilters={
             <>
-              <SearchableSelect
-                id="marketing-adspend-shell-product"
-                value={selectedProductId}
-                onChange={setProductId}
-                options={productOptions}
-                disabled={productDisabled}
-                wrapperClassName="w-full min-w-0 sm:w-auto sm:min-w-[12rem]"
-                placeholder="All products"
-                searchPlaceholder="Search products…"
-              />
-              <SearchableSelect
-                id="marketing-adspend-shell-campaign"
-                value={selectedCampaignId}
-                onChange={setCampaignId}
-                options={campaignOptions}
-                disabled={campaignDisabled}
-                wrapperClassName="w-full min-w-0 sm:w-auto sm:min-w-[12rem]"
-                placeholder="All campaigns"
-                searchPlaceholder="Search campaigns…"
+              <FormSelect
+                value={selectedStatus}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                options={AD_SPEND_STATUS_TAB_OPTIONS}
+                wrapperClassName="w-auto min-w-[10rem]"
               />
               {!isMb ? (
                 <SearchableSelect
@@ -758,91 +742,69 @@ export function MarketingAdSpendLoadingShell({
                   searchPlaceholder="Search buyers…"
                 />
               ) : null}
-              <AdSpendViewToggleShell />
             </>
           }
-          sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">View</span>
-                <AdSpendViewToggleShell fullWidth />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                <SearchableSelect
-                  id="marketing-adspend-shell-product-sheet"
-                  value={selectedProductId}
-                  onChange={setProductId}
-                  options={productOptions}
-                  disabled={productDisabled}
-                  wrapperClassName="w-full"
-                  placeholder="All products"
-                  searchPlaceholder="Search products…"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Campaign</span>
-                <SearchableSelect
-                  id="marketing-adspend-shell-campaign-sheet"
-                  value={selectedCampaignId}
-                  onChange={setCampaignId}
-                  options={campaignOptions}
-                  disabled={campaignDisabled}
-                  wrapperClassName="w-full"
-                  placeholder="All campaigns"
-                  searchPlaceholder="Search campaigns…"
-                />
-              </div>
-              {!isMb ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                  <SearchableSelect
-                    id="marketing-adspend-shell-buyer-sheet"
-                    value={selectedMediaBuyerId}
-                    onChange={setMediaBuyerId}
-                    options={mediaBuyerOptions}
-                    disabled={buyerDisabled}
-                    wrapperClassName="w-full"
-                    placeholder="All media buyers"
-                    searchPlaceholder="Search buyers…"
-                  />
-                </div>
-              ) : null}
-            </>
-          }
+          sheetFilterBody={null}
         />
 
-        <div className="space-y-3 p-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="rounded-lg border border-app-border bg-app-elevated p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <TableCellTextPulse className="w-[14rem] max-w-[min(90vw,100%)]" />
-                <TableCellTextPulse className="w-[6rem]" />
+        {/* Table skeleton rows — matches CompactTable row layout */}
+        <div className="hidden md:block">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-app-border text-left text-xs font-medium text-app-fg-muted">
+                <th className="px-4 py-2.5">Date</th>
+                {!isMb && <th className="px-4 py-2.5">Media Buyer</th>}
+                <th className="px-4 py-2.5 text-right">Amount</th>
+                <th className="px-4 py-2.5 text-right">Orders</th>
+                <th className="px-4 py-2.5 text-right">CPA</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3, 4, 5].map((i) => (
+                <tr key={i} className="border-b border-app-border last:border-0">
+                  <td className="px-4 py-2.5"><TableCellTextPulse className="w-[6rem]" /></td>
+                  {!isMb && <td className="px-4 py-2.5"><TableCellTextPulse className="w-[8rem]" /></td>}
+                  <td className="px-4 py-2.5 text-right"><TableCellTextPulse className="w-[5rem] ml-auto" /></td>
+                  <td className="px-4 py-2.5 text-right"><TableCellTextPulse className="w-[2.5rem] ml-auto" /></td>
+                  <td className="px-4 py-2.5 text-right"><TableCellTextPulse className="w-[4rem] ml-auto" /></td>
+                  <td className="px-4 py-2.5"><TableCellTextPulse className="w-[4.5rem]" /></td>
+                  <td className="px-4 py-2.5"><TableCellTextPulse className="w-[3rem]" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile skeleton cards */}
+        <div className="md:hidden space-y-2 px-3 py-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="rounded-lg border border-app-border px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <TableCellTextPulse className="w-[5rem]" />
+                <TableCellTextPulse className="w-[4.5rem]" />
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {[1, 2, 3, 4].map((line) => (
-                  <div key={line} className="flex items-center justify-between gap-3 text-sm">
-                    <TableCellTextPulse className="w-[5rem]" />
-                    <TableCellTextPulse className="w-[8rem] max-w-[50%]" />
-                  </div>
-                ))}
+              <div className="flex items-center justify-between gap-2">
+                <TableCellTextPulse className="w-[7rem]" />
+                <TableCellTextPulse className="w-[5rem]" />
               </div>
             </div>
           ))}
         </div>
+      </div>
 
-        <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
-            <span
-              className="inline-block h-4 w-52 max-w-[90vw] animate-pulse rounded-md bg-app-border/75 dark:bg-app-border/60 sm:w-72"
-              aria-hidden
-            />
-          </p>
-          <div className="flex shrink-0 items-center gap-2" aria-hidden>
-            <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-            <span className="inline-block h-8 w-28 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-            <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-          </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
+          <span
+            className="inline-block h-4 w-52 max-w-[90vw] animate-pulse rounded-md bg-app-border/75 dark:bg-app-border/60 sm:w-72"
+            aria-hidden
+          />
+        </p>
+        <div className="flex shrink-0 items-center gap-2" aria-hidden>
+          <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+          <span className="inline-block h-8 w-28 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+          <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
         </div>
       </div>
     </div>

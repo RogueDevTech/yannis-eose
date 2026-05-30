@@ -425,6 +425,7 @@ export class OrdersService {
     requestId: string;
     orderId: string;
     branchId: string | null;
+    servicingBranchId: string | null;
     requesterName: string | null;
     excludeUserId: string;
   }): Promise<void> {
@@ -437,17 +438,20 @@ export class OrdersService {
       permissionRequestKind: 'order_line_price',
     };
 
-    // Three independent recipient lookups — run them in one parallel wave
-    // instead of three sequential round-trips. The Set dedupes, so result
-    // ordering doesn't matter. Org-wide HoLogistics often has no primary_branch
-    // match to the order branch, so notify every active Head of Logistics.
+    // Collect both marketing + servicing branch IDs — HoCS is matched by
+    // servicing branch (where they work), BRANCH_ADMIN by either.
+    const branchIdSet = new Set<string>();
+    if (params.branchId) branchIdSet.add(params.branchId);
+    if (params.servicingBranchId) branchIdSet.add(params.servicingBranchId);
+    const branchIds = [...branchIdSet];
+
     const recipientIds = new Set<string>();
     const [admins, heads, hoLogistics] = await Promise.all([
       this.db
         .select({ id: schema.users.id })
         .from(schema.users)
         .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
-      params.branchId
+      branchIds.length > 0
         ? this.db
             .select({ id: schema.users.id })
             .from(schema.users)
@@ -455,7 +459,7 @@ export class OrdersService {
               and(
                 eq(schema.users.status, 'ACTIVE'),
                 inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
-                eq(schema.users.primaryBranchId, params.branchId),
+                inArray(schema.users.primaryBranchId, branchIds),
               ),
             )
         : Promise.resolve([] as Array<{ id: string }>),
@@ -483,6 +487,7 @@ export class OrdersService {
     requestId: string;
     orderId: string;
     branchId: string | null;
+    servicingBranchId: string | null;
     requesterName: string | null;
     excludeUserId: string;
   }): Promise<void> {
@@ -495,14 +500,18 @@ export class OrdersService {
       permissionRequestKind: 'order_deletion',
     };
 
-    // Three independent recipient lookups in one parallel wave (Set dedupes).
+    const branchIdSet = new Set<string>();
+    if (params.branchId) branchIdSet.add(params.branchId);
+    if (params.servicingBranchId) branchIdSet.add(params.servicingBranchId);
+    const branchIds = [...branchIdSet];
+
     const recipientIds = new Set<string>();
     const [admins, heads, hoLogisticsDeletion] = await Promise.all([
       this.db
         .select({ id: schema.users.id })
         .from(schema.users)
         .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
-      params.branchId
+      branchIds.length > 0
         ? this.db
             .select({ id: schema.users.id })
             .from(schema.users)
@@ -510,7 +519,7 @@ export class OrdersService {
               and(
                 eq(schema.users.status, 'ACTIVE'),
                 inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
-                eq(schema.users.primaryBranchId, params.branchId),
+                inArray(schema.users.primaryBranchId, branchIds),
               ),
             )
         : Promise.resolve([] as Array<{ id: string }>),
@@ -659,6 +668,7 @@ export class OrdersService {
       requestId: req.id,
       orderId: input.orderId,
       branchId: order.branchId ?? null,
+      servicingBranchId: order.servicingBranchId ?? null,
       requesterName: actor.name ?? null,
       excludeUserId: actor.id,
     });
@@ -746,6 +756,7 @@ export class OrdersService {
       requestId: req.id,
       orderId: input.orderId,
       branchId: order.branchId ?? null,
+      servicingBranchId: order.servicingBranchId ?? null,
       requesterName: actor.name ?? null,
       excludeUserId: actor.id,
     });
@@ -4791,7 +4802,7 @@ export class OrdersService {
       unconfirmed: counts['CS_ENGAGED'] ?? 0,
       confirmed: counts['CONFIRMED'] ?? 0,
       logisticsDistributed: (counts['AGENT_ASSIGNED'] ?? 0) + (counts['DISPATCHED'] ?? 0),
-      delivered: counts['DELIVERED'] ?? 0,
+      delivered: (counts['DELIVERED'] ?? 0) + (counts['REMITTED'] ?? 0),
     };
   }
 
@@ -5032,7 +5043,7 @@ export class OrdersService {
    */
   async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string, branchId?: string | null): Promise<{ date: string; revenue: number; orderCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
-      eq(schema.orders.status, 'DELIVERED'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
     ];
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
@@ -5108,7 +5119,7 @@ export class OrdersService {
     const weekIso = weekStartUtc.toISOString();
 
     const conditions: Parameters<typeof and>[0][] = [
-      eq(schema.orders.status, 'DELIVERED'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
     ];
     if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
@@ -5158,7 +5169,7 @@ export class OrdersService {
     const weekIso = weekStartUtc.toISOString();
 
     const conditions: Parameters<typeof and>[0][] = [
-      eq(schema.orders.status, 'DELIVERED'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
     ];
     if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
@@ -5192,7 +5203,7 @@ export class OrdersService {
   ): Promise<{ date: string; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.orders.deletedAt),
-      eq(schema.orders.status, 'DELIVERED'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
     ];
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
@@ -5517,15 +5528,14 @@ export class OrdersService {
     const callCompleted = sql`${schema.callLogs.callStatus} = 'COMPLETED'`;
 
     // Date range conditions reused inside each grouped query's WHERE clause.
+    // Cohort semantics: both engaged and delivered count by `createdAt` so DR
+    // is bounded by 100%. Counting deliveries by `deliveredAt` while engaged
+    // counts by `createdAt` let cross-period deliveries push DR past 100% and
+    // unfairly inflated agents in performance-mode dispatch ranking.
     const orderDateFilter = periodStart
       ? periodEnd
         ? and(gte(schema.orders.createdAt, periodStart), lte(schema.orders.createdAt, periodEnd))
         : gte(schema.orders.createdAt, periodStart)
-      : undefined;
-    const deliveredDateFilter = periodStart
-      ? periodEnd
-        ? and(gte(schema.orders.deliveredAt, periodStart), lte(schema.orders.deliveredAt, periodEnd))
-        : gte(schema.orders.deliveredAt, periodStart)
       : undefined;
     const callLogsDateFilter = periodStart
       ? periodEnd
@@ -5542,7 +5552,7 @@ export class OrdersService {
       inArray(schema.orders.assignedCsId, agentIds),
       deliveredOrRemitted,
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
-      ...(deliveredDateFilter ? [deliveredDateFilter] : []),
+      ...(orderDateFilter ? [orderDateFilter] : []),
     );
 
     const [orderRows, deliveredRows, callRows] = await Promise.all([
@@ -7690,7 +7700,9 @@ export class OrdersService {
         byBranch.set(row.branchId, entry);
       }
       entry.totalOrders += row.orderCount;
-      if (row.status === 'DELIVERED') entry.deliveredOrders += row.orderCount;
+      if (row.status === 'DELIVERED' || row.status === 'REMITTED') {
+        entry.deliveredOrders += row.orderCount;
+      }
       if (ACTIVE_STATUSES.has(row.status)) entry.activeOrders += row.orderCount;
     }
 

@@ -6,7 +6,15 @@ import {
 
 export function computeEarningsFromPlanRules(
   planRules: unknown,
-  metrics: { deliveredCount: number; totalOrders: number; returnedCount: number },
+  metrics: {
+    deliveredCount: number;
+    totalOrders: number;
+    returnedCount: number;
+    /** Orders created in period that have since reached DELIVERED/REMITTED.
+     *  Drives the bonus-threshold rate so it's bounded by 100% (no cross-period
+     *  leakage). Optional — when omitted, falls back to `deliveredCount`. */
+    deliveredCohortCount?: number;
+  },
 ): ReturnType<typeof computeOrderAttributedCommission> {
   const parsed = commissionRulesSchema.safeParse(planRules);
   const rules: CommissionRules = parsed.success ? parsed.data : {};

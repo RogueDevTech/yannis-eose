@@ -134,6 +134,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               adSpendStatusCounts: AdSpendStatusCounts;
               campaigns: Campaign[];
               mediaBuyersForFilter: Array<{ id: string; name: string }>;
+              marketingTeams?: Array<{ id: string; name: string; memberIds: string[] }>;
             };
           };
         }
@@ -142,6 +143,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statusCounts: data?.adSpendStatusCounts ?? AD_SPEND_PICKLISTS_FALLBACK.statusCounts,
         campaigns: data?.campaigns ?? [],
         mediaBuyersForFilter: data?.mediaBuyersForFilter ?? [],
+        marketingTeams: data?.marketingTeams ?? [],
       };
     } catch {
       return AD_SPEND_PICKLISTS_FALLBACK;
@@ -207,18 +209,16 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
-const AD_SPEND_PICKLISTS_FALLBACK: Pick<
-  MarketingAdSpendLoaderData,
-  'statusCounts' | 'campaigns' | 'mediaBuyersForFilter'
-> = {
+const AD_SPEND_PICKLISTS_FALLBACK: AdSpendPicklists = {
   statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
   campaigns: [],
   mediaBuyersForFilter: [],
+  marketingTeams: [],
 };
 
 type AdSpendPicklists = Pick<
   MarketingAdSpendLoaderData,
-  'statusCounts' | 'campaigns' | 'mediaBuyersForFilter'
+  'statusCounts' | 'campaigns' | 'mediaBuyersForFilter' | 'marketingTeams'
 >;
 
 function isResolvedPicklists(v: AdSpendPicklists | Promise<AdSpendPicklists>): v is AdSpendPicklists {

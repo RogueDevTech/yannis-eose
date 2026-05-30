@@ -466,7 +466,8 @@ export const branchesRouter = router({
       for (const row of orderStatRows) {
         const c = Number(row.orderCount);
         totalOrders += c;
-        if (row.status === 'DELIVERED') deliveredOrders += c;
+        // REMITTED is post-delivery — same physical delivery, count it too.
+        if (row.status === 'DELIVERED' || row.status === 'REMITTED') deliveredOrders += c;
         if (row.status && ACTIVE_ORDER_STATUSES.has(row.status)) activeOrders += c;
       }
 
