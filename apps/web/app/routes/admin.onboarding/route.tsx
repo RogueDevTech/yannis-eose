@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getCurrentUser, getSessionCookie, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   StaffOnboardingPage,
   type OnboardingRecord,
@@ -35,6 +36,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isMirroring: !!user.mirroredBy,
   };
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 const PAYROLL_VIEWER_ROLES = [
   'SUPER_ADMIN',
@@ -32,3 +33,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const data = (res.data as { result?: { data?: unknown } })?.result?.data ?? null;
   return json(data);
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;

@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import {
   ABANDONED_CARTS_PAGE_SIZE,
@@ -115,6 +116,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({ activityItems, pendingCarts, abandonedCarts, abandonedPagination });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   // `cart.delete` still gates phone reveal — both remaining intents

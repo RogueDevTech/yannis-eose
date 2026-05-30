@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { Suspense } from 'react';
 import { Await, useLoaderData, useSearchParams } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, parsePerPage } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
 import { TplNotificationsLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
@@ -50,6 +51,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { RiderDashboardPage } from '~/features/rider/RiderDashboardPage';
 import type { Order } from '~/features/rider/types';
 import { RiderLoadingShell } from '~/features/rider/RiderLoadingShell';
@@ -49,6 +50,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermission(request, 'rider.dashboard');

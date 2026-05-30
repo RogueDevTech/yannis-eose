@@ -5,6 +5,7 @@ import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultTodayRange } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type RiderOption } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
@@ -158,6 +159,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ tplOrdersShell, pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
