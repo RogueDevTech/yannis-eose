@@ -1,6 +1,8 @@
-import { json } from '@remix-run/node';
+import { json, defer } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
@@ -409,40 +411,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })()
     : Promise.resolve(null);
 
-  // On page 2+ the secondary bundles are identical to page 1 — they don't
-  // depend on `page`. Skipping them cuts loader time from ~7s to ~5s.
-  // The component re-renders with fresh secondary data from the response
-  // regardless (Remix always passes the full loader return on SPA nav).
+  // On page 2+ skip the secondary bundle (it doesn't depend on `page`).
   const isPaginationOnly = page > 1;
 
-  if (isPaginationOnly) {
-    const listResult = await listPromise;
-    return {
-      ordersShell,
-      listResult,
-      secondaryResult: EMPTY_SECONDARY,
-      personalSecondaryResult: null,
-    };
-  }
+  const pageData = isPaginationOnly
+    ? listPromise.then((listResult) => ({
+        listResult,
+        secondaryResult: EMPTY_SECONDARY,
+        personalSecondaryResult: null as MarketingOrdersSecondaryPayload | null,
+      }))
+    : Promise.all([listPromise, secondaryPromise, personalSecondaryPromise]).then(
+        ([listResult, secondaryResult, personalSecondaryResult]) => ({
+          listResult,
+          secondaryResult,
+          personalSecondaryResult,
+        }),
+      );
 
-  const [listResult, secondaryResult, personalSecondaryResult] = await Promise.all([
-    listPromise,
-    secondaryPromise,
-    personalSecondaryPromise,
-  ]);
-
-  return {
-    ordersShell,
-    listResult,
-    secondaryResult,
-    personalSecondaryResult,
-  };
+  return defer({ ordersShell, pageData });
 }
 
-// NOTE: no `clientLoader` / full-loader cache here. This is a live socket page
-// (live order events + branch switcher) — client-caching the loader payload by
-// URL served stale data after a branch switch ("All branches" showed another
-// branch's numbers). Per CLAUDE.md, live socket pages are not client-cached.
+// Client-side cache for instant revisits. Live socket events
+// (`usePageRefreshOnEvent`) call `invalidateCachedLoader` before
+// revalidating, so stale-after-branch-switch is avoided.
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const exportResponse = await handleExportReportAction(request);
@@ -479,32 +472,55 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function MarketingOrdersRoute() {
-  const { ordersShell, listResult, secondaryResult, personalSecondaryResult } = useLoaderData<typeof loader>();
+  const { ordersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
+
+  const shellProps = {
+    page: ordersShell.page,
+    limit: ordersShell.perPage,
+    statusFilter: ordersShell.statusFilter,
+    searchFilter: ordersShell.searchFilter,
+    sortBy: ordersShell.sortBy,
+    sortOrder: ordersShell.sortOrder,
+    isMediaBuyer: ordersShell.isMediaBuyer,
+    isMarketingSupervisor: ordersShell.isMarketingSupervisor,
+    showMediaBuyerColumn: ordersShell.showMediaBuyerColumn,
+    filters: ordersShell.filters,
+    liveEvents: [...MARKETING_ORDERS_LIVE_EVENTS] as string[],
+    canExport: ordersShell.canExport,
+    viewerUserId: ordersShell.viewerUserId,
+    activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
+    enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
+    enableTestOrdersOption: ordersShell.enableTestOrdersOption,
+    isCartAbandonmentView: ordersShell.isCartAbandonmentView,
+  };
+
   return (
-    <MarketingOrdersPage
-      page={ordersShell.page}
-      limit={ordersShell.perPage}
-      secondary={secondaryResult as MarketingOrdersSecondaryPayload}
-      personalSecondary={personalSecondaryResult ?? undefined}
-      statusFilter={ordersShell.statusFilter}
-      searchFilter={ordersShell.searchFilter}
-      sortBy={ordersShell.sortBy}
-      sortOrder={ordersShell.sortOrder}
-      isMediaBuyer={ordersShell.isMediaBuyer}
-      isMarketingSupervisor={ordersShell.isMarketingSupervisor}
-      showMediaBuyerColumn={ordersShell.showMediaBuyerColumn}
-      filters={ordersShell.filters}
-      liveEvents={[...MARKETING_ORDERS_LIVE_EVENTS]}
-      canExport={ordersShell.canExport}
-      viewerUserId={ordersShell.viewerUserId}
-      activeMediaBuyerFilter={ordersShell.activeMediaBuyerFilter}
-      enableFromCartStatusOption={ordersShell.enableFromCartStatusOption}
-      enableTestOrdersOption={ordersShell.enableTestOrdersOption}
-      isCartAbandonmentView={ordersShell.isCartAbandonmentView}
-      orders={(listResult as { orders: Order[]; total: number; totalPages: number }).orders}
-      total={(listResult as { orders: Order[]; total: number; totalPages: number }).total}
-      totalPages={(listResult as { orders: Order[]; total: number; totalPages: number }).totalPages}
-    />
+    <CachedAwait
+      resolve={pageData}
+      fallback={
+        <MarketingOrdersPage
+          {...shellProps}
+          secondary={EMPTY_SECONDARY}
+          orders={[]}
+          total={0}
+          totalPages={0}
+          deferredLoading
+        />
+      }
+      loaderShell={{ ordersShell }}
+      deferredKey="pageData"
+    >
+      {(data) => (
+        <MarketingOrdersPage
+          {...shellProps}
+          secondary={data.secondaryResult as MarketingOrdersSecondaryPayload}
+          personalSecondary={data.personalSecondaryResult ?? undefined}
+          orders={(data.listResult as { orders: Order[]; total: number; totalPages: number }).orders}
+          total={(data.listResult as { orders: Order[]; total: number; totalPages: number }).total}
+          totalPages={(data.listResult as { orders: Order[]; total: number; totalPages: number }).totalPages}
+        />
+      )}
+    </CachedAwait>
   );
 }

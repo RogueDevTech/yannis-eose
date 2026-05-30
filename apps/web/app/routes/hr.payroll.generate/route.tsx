@@ -10,6 +10,7 @@ import {
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { PayrollGeneratePage } from '~/features/hr/PayrollGeneratePage';
 import { GeneratePayrollLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { BranchOption, ViewerInfo } from '~/features/hr/types';
@@ -85,6 +86,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

@@ -5,6 +5,7 @@ import { Await, useLoaderData } from '@remix-run/react';
 import { Suspense } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { RemittancesAdminPage } from '~/features/remittances/RemittancesAdminPage';
 import { LogisticsRemittancesLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { TransferConfirmationRecord } from '~/features/remittances/RemittancesAdminPage';
@@ -162,6 +163,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { RemitPage } from '~/features/remittances/RemitPage';
 import type {
   RemittanceRecord,
@@ -62,6 +63,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

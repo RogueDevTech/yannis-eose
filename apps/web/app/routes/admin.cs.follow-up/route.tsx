@@ -11,6 +11,7 @@ import {
   BULK_ORDER_MUTATION_TIMEOUT_MS,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { FollowUpPage } from '~/features/cs/FollowUpPage';
 import type { FollowUpPageData } from '~/features/cs/FollowUpPage';
@@ -161,6 +162,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pageData,
   });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermissionOrRoles(request, {
