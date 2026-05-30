@@ -7,7 +7,7 @@ import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -325,17 +325,6 @@ export function UsersListPage({
     return n;
   }, [currentStatusParam, currentRoleParam, searchParams, currentBranchParam]);
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('status')) n += 1;
-    if (searchParams.get('role')) n += 1;
-    if (searchParams.get('branch')) n += 1;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('probationOnly') === '1') n += 1;
-    if (searchParams.get('supervisorOnly') === '1') n += 1;
-    return n;
-  }, [searchParams]);
-
   const probationOnly = searchParams.get('probationOnly') === '1';
   const handleProbationOnlyToggle = (next: boolean) => {
     const params = new URLSearchParams(searchParams);
@@ -553,44 +542,59 @@ export function UsersListPage({
               <>
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                  <FormSelect
-                    value={currentStatusParam}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All Status' },
-                      { value: 'PENDING', label: 'Pending' },
-                      { value: 'ACTIVE', label: 'Active' },
-                      { value: 'INACTIVE', label: 'Inactive' },
-                      { value: 'ARCHIVED', label: 'Archived' },
-                      { value: 'DEACTIVATED', label: 'Deactivated' },
-                    ]}
-                    wrapperClassName="w-full"
-                  />
+                  <div className="relative">
+                    {currentStatusParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      value={currentStatusParam}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All Status' },
+                        { value: 'PENDING', label: 'Pending' },
+                        { value: 'ACTIVE', label: 'Active' },
+                        { value: 'INACTIVE', label: 'Inactive' },
+                        { value: 'ARCHIVED', label: 'Archived' },
+                        { value: 'DEACTIVATED', label: 'Deactivated' },
+                      ]}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Role</span>
-                  <SearchableSelect
-                    id="users-role-filter-kebab"
-                    value={currentRoleParam}
-                    onChange={handleRoleChange}
-                    options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
-                    placeholder="All Roles"
-                    searchPlaceholder="Search roles…"
-                    wrapperClassName="w-full"
-                  />
+                  <div className="relative">
+                    {currentRoleParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleRoleChange('ALL')} />
+                    )}
+                    <SearchableSelect
+                      id="users-role-filter-kebab"
+                      value={currentRoleParam}
+                      onChange={handleRoleChange}
+                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                      placeholder="All Roles"
+                      searchPlaceholder="Search roles…"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 </div>
                 {branchPickerVisible ? (
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Branch</span>
-                    <SearchableSelect
-                      id="users-branch-filter-kebab"
-                      value={currentBranchParam}
-                      onChange={handleBranchChange}
-                      options={branchPickerOptions}
-                      placeholder="All branches"
-                      searchPlaceholder="Search branches…"
-                      wrapperClassName="w-full"
-                    />
+                    <div className="relative">
+                      {currentBranchParam !== 'ALL' && (
+                        <FilterDismiss onClear={() => handleBranchChange('ALL')} />
+                      )}
+                      <SearchableSelect
+                        id="users-branch-filter-kebab"
+                        value={currentBranchParam}
+                        onChange={handleBranchChange}
+                        options={branchPickerOptions}
+                        placeholder="All branches"
+                        searchPlaceholder="Search branches…"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
                   </div>
                 ) : null}
               </>
@@ -735,45 +739,10 @@ export function UsersListPage({
             searchRow={searchRow}
             desktopInlineFilters={
               <>
-                <FormSelect
-                  value={currentStatusParam}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  options={[
-                    { value: 'ALL', label: 'All Status' },
-                    { value: 'PENDING', label: 'Pending' },
-                    { value: 'ACTIVE', label: 'Active' },
-                    { value: 'INACTIVE', label: 'Inactive' },
-                    { value: 'ARCHIVED', label: 'Archived' },
-                    { value: 'DEACTIVATED', label: 'Deactivated' },
-                  ]}
-                  wrapperClassName="w-full min-w-0 sm:w-40"
-                />
-                <SearchableSelect
-                  id="users-role-filter-staff-desktop"
-                  value={currentRoleParam}
-                  onChange={handleRoleChange}
-                  options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
-                  placeholder="All Roles"
-                  searchPlaceholder="Search roles…"
-                  wrapperClassName="w-full min-w-0 sm:w-48"
-                />
-                {branchPickerVisible ? (
-                  <SearchableSelect
-                    id="users-staff-branch-filter"
-                    value={currentBranchParam}
-                    onChange={handleBranchChange}
-                    options={branchPickerOptions}
-                    placeholder="All branches"
-                    searchPlaceholder="Search branches…"
-                    wrapperClassName="w-full min-w-0 sm:w-52"
-                  />
-                ) : null}
-              </>
-            }
-            sheetFilterBody={
-              <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                <div className="relative">
+                  {currentStatusParam !== 'ALL' && (
+                    <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                  )}
                   <FormSelect
                     value={currentStatusParam}
                     onChange={(e) => handleStatusChange(e.target.value)}
@@ -785,39 +754,103 @@ export function UsersListPage({
                       { value: 'ARCHIVED', label: 'Archived' },
                       { value: 'DEACTIVATED', label: 'Deactivated' },
                     ]}
-                    wrapperClassName="w-full"
+                    wrapperClassName="w-full min-w-0 sm:w-40"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Role</span>
+                <div className="relative">
+                  {currentRoleParam !== 'ALL' && (
+                    <FilterDismiss onClear={() => handleRoleChange('ALL')} />
+                  )}
                   <SearchableSelect
-                    id="users-role-filter-staff-sheet"
+                    id="users-role-filter-staff-desktop"
                     value={currentRoleParam}
                     onChange={handleRoleChange}
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                     placeholder="All Roles"
                     searchPlaceholder="Search roles…"
-                    wrapperClassName="w-full"
+                    wrapperClassName="w-full min-w-0 sm:w-48"
                   />
                 </div>
                 {branchPickerVisible ? (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Branch</span>
+                  <div className="relative">
+                    {currentBranchParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBranchChange('ALL')} />
+                    )}
                     <SearchableSelect
-                      id="users-staff-branch-filter-sheet"
+                      id="users-staff-branch-filter"
                       value={currentBranchParam}
                       onChange={handleBranchChange}
                       options={branchPickerOptions}
                       placeholder="All branches"
                       searchPlaceholder="Search branches…"
-                      wrapperClassName="w-full"
+                      wrapperClassName="w-full min-w-0 sm:w-52"
                     />
                   </div>
                 ) : null}
               </>
             }
+            sheetFilterBody={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                  <div className="relative">
+                    {currentStatusParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      value={currentStatusParam}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All Status' },
+                        { value: 'PENDING', label: 'Pending' },
+                        { value: 'ACTIVE', label: 'Active' },
+                        { value: 'INACTIVE', label: 'Inactive' },
+                        { value: 'ARCHIVED', label: 'Archived' },
+                        { value: 'DEACTIVATED', label: 'Deactivated' },
+                      ]}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Role</span>
+                  <div className="relative">
+                    {currentRoleParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleRoleChange('ALL')} />
+                    )}
+                    <SearchableSelect
+                      id="users-role-filter-staff-sheet"
+                      value={currentRoleParam}
+                      onChange={handleRoleChange}
+                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                      placeholder="All Roles"
+                      searchPlaceholder="Search roles…"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                </div>
+                {branchPickerVisible ? (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Branch</span>
+                    <div className="relative">
+                      {currentBranchParam !== 'ALL' && (
+                        <FilterDismiss onClear={() => handleBranchChange('ALL')} />
+                      )}
+                      <SearchableSelect
+                        id="users-staff-branch-filter-sheet"
+                        value={currentBranchParam}
+                        onChange={handleBranchChange}
+                        options={branchPickerOptions}
+                        placeholder="All branches"
+                        searchPlaceholder="Search branches…"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            }
           />
-          <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2 px-4" />
           {rosterLoading ? (
             <CompactTable<{ id: string }>
               key="staff-skeleton"
@@ -903,38 +936,53 @@ export function UsersListPage({
               searchRow={searchRow}
               desktopInlineFilters={
                 <>
-                  <FormSelect
-                    value={currentStatusParam}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All Status' },
-                      { value: 'PENDING', label: 'Pending' },
-                      { value: 'ACTIVE', label: 'Active' },
-                      { value: 'INACTIVE', label: 'Inactive' },
-                      { value: 'ARCHIVED', label: 'Archived' },
-                      { value: 'DEACTIVATED', label: 'Deactivated' },
-                    ]}
-                    wrapperClassName="w-full min-w-0 sm:w-40"
-                  />
-                  <SearchableSelect
-                    id="users-role-filter-hr-desktop"
-                    value={currentRoleParam}
-                    onChange={handleRoleChange}
-                    options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
-                    placeholder="All Roles"
-                    searchPlaceholder="Search roles…"
-                    wrapperClassName="w-full min-w-0 sm:w-48"
-                  />
-                  {branchPickerVisible ? (
-                    <SearchableSelect
-                      id="users-hr-branch-filter"
-                      value={currentBranchParam}
-                      onChange={handleBranchChange}
-                      options={branchPickerOptions}
-                      placeholder="All branches"
-                      searchPlaceholder="Search branches…"
-                      wrapperClassName="w-full min-w-0 sm:w-52"
+                  <div className="relative">
+                    {currentStatusParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      value={currentStatusParam}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All Status' },
+                        { value: 'PENDING', label: 'Pending' },
+                        { value: 'ACTIVE', label: 'Active' },
+                        { value: 'INACTIVE', label: 'Inactive' },
+                        { value: 'ARCHIVED', label: 'Archived' },
+                        { value: 'DEACTIVATED', label: 'Deactivated' },
+                      ]}
+                      wrapperClassName="w-full min-w-0 sm:w-40"
                     />
+                  </div>
+                  <div className="relative">
+                    {currentRoleParam !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleRoleChange('ALL')} />
+                    )}
+                    <SearchableSelect
+                      id="users-role-filter-hr-desktop"
+                      value={currentRoleParam}
+                      onChange={handleRoleChange}
+                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                      placeholder="All Roles"
+                      searchPlaceholder="Search roles…"
+                      wrapperClassName="w-full min-w-0 sm:w-48"
+                    />
+                  </div>
+                  {branchPickerVisible ? (
+                    <div className="relative">
+                      {currentBranchParam !== 'ALL' && (
+                        <FilterDismiss onClear={() => handleBranchChange('ALL')} />
+                      )}
+                      <SearchableSelect
+                        id="users-hr-branch-filter"
+                        value={currentBranchParam}
+                        onChange={handleBranchChange}
+                        options={branchPickerOptions}
+                        placeholder="All branches"
+                        searchPlaceholder="Search branches…"
+                        wrapperClassName="w-full min-w-0 sm:w-52"
+                      />
+                    </div>
                   ) : null}
                   <button
                     type="button"
@@ -964,44 +1012,59 @@ export function UsersListPage({
                 <>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                    <FormSelect
-                      value={currentStatusParam}
-                      onChange={(e) => handleStatusChange(e.target.value)}
-                      options={[
-                        { value: 'ALL', label: 'All Status' },
-                        { value: 'PENDING', label: 'Pending' },
-                        { value: 'ACTIVE', label: 'Active' },
-                        { value: 'INACTIVE', label: 'Inactive' },
-                        { value: 'ARCHIVED', label: 'Archived' },
-                        { value: 'DEACTIVATED', label: 'Deactivated' },
-                      ]}
-                      wrapperClassName="w-full"
-                    />
+                    <div className="relative">
+                      {currentStatusParam !== 'ALL' && (
+                        <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                      )}
+                      <FormSelect
+                        value={currentStatusParam}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        options={[
+                          { value: 'ALL', label: 'All Status' },
+                          { value: 'PENDING', label: 'Pending' },
+                          { value: 'ACTIVE', label: 'Active' },
+                          { value: 'INACTIVE', label: 'Inactive' },
+                          { value: 'ARCHIVED', label: 'Archived' },
+                          { value: 'DEACTIVATED', label: 'Deactivated' },
+                        ]}
+                        wrapperClassName="w-full"
+                      />
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Role</span>
-                    <SearchableSelect
-                      id="users-role-filter-hr-sheet"
-                      value={currentRoleParam}
-                      onChange={handleRoleChange}
-                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
-                      placeholder="All Roles"
-                      searchPlaceholder="Search roles…"
-                      wrapperClassName="w-full"
-                    />
+                    <div className="relative">
+                      {currentRoleParam !== 'ALL' && (
+                        <FilterDismiss onClear={() => handleRoleChange('ALL')} />
+                      )}
+                      <SearchableSelect
+                        id="users-role-filter-hr-sheet"
+                        value={currentRoleParam}
+                        onChange={handleRoleChange}
+                        options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                        placeholder="All Roles"
+                        searchPlaceholder="Search roles…"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
                   </div>
                   {branchPickerVisible ? (
                     <div className="space-y-1.5">
                       <span className="text-xs font-medium text-app-fg-muted">Branch</span>
-                      <SearchableSelect
-                        id="users-hr-branch-filter-sheet"
-                        value={currentBranchParam}
-                        onChange={handleBranchChange}
-                        options={branchPickerOptions}
-                        placeholder="All branches"
-                        searchPlaceholder="Search branches…"
-                        wrapperClassName="w-full"
-                      />
+                      <div className="relative">
+                        {currentBranchParam !== 'ALL' && (
+                          <FilterDismiss onClear={() => handleBranchChange('ALL')} />
+                        )}
+                        <SearchableSelect
+                          id="users-hr-branch-filter-sheet"
+                          value={currentBranchParam}
+                          onChange={handleBranchChange}
+                          options={branchPickerOptions}
+                          placeholder="All branches"
+                          searchPlaceholder="Search branches…"
+                          wrapperClassName="w-full"
+                        />
+                      </div>
                     </div>
                   ) : null}
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -1021,7 +1084,6 @@ export function UsersListPage({
                 </>
               }
             />
-            <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2 px-4" />
           </div>
 
           {rosterLoading ? (

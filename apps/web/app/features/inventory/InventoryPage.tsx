@@ -43,7 +43,7 @@ import type {
   LocationLowStockThreshold,
 } from './types';
 import { REASON_LABELS } from './types';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
 
@@ -201,18 +201,6 @@ export function InventoryPage(props: InventoryStreamData) {
   // `levelsProductFilter` empty string = no filter (backend default).
   type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
   const [searchParams, setSearchParams] = useSearchParams();
-
-  const inventoryActiveFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('productId')) n += 1;
-    if (searchParams.get('locationId')) n += 1;
-    if (searchParams.get('shipmentId')) n += 1;
-    const sb = searchParams.get('sortBy');
-    const sd = searchParams.get('sortDir');
-    if ((sb && sb !== 'updatedAt') || (sd && sd !== 'desc')) n += 1;
-    return n;
-  }, [searchParams]);
 
   const updateLevelsParam = (key: 'productId' | 'locationId' | 'shipmentId' | 'sort' | 'search', value: string) => {
     setSearchParams((prev) => {
@@ -625,73 +613,88 @@ export function InventoryPage(props: InventoryStreamData) {
   /** Toolbar hides entirely when there's no data AND no active filter. */
   const levelsShowToolbar = !(totalLevels === 0 && !levelsHasActiveFilters);
   const levelsProductSelect = (
-    <SearchableSelect
-      id="levels-product-filter"
-      value={currentProductFilter}
-      onChange={(v) => updateLevelsParam('productId', v)}
-      wrapperClassName="w-full md:w-48"
-      placeholder="All products"
-      searchPlaceholder="Search products..."
-      options={[
-        { value: 'ALL', label: 'All products' },
-        ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
-      ]}
-    />
+    <div className="relative">
+      {currentProductFilter !== 'ALL' && (
+        <FilterDismiss onClear={() => updateLevelsParam('productId', '')} />
+      )}
+      <SearchableSelect
+        id="levels-product-filter"
+        value={currentProductFilter}
+        onChange={(v) => updateLevelsParam('productId', v)}
+        wrapperClassName="w-full md:w-48"
+        placeholder="All products"
+        searchPlaceholder="Search products..."
+        options={[
+          { value: 'ALL', label: 'All products' },
+          ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
+        ]}
+      />
+    </div>
   );
   const levelsLocationSelect = (
-    <SearchableSelect
-      id="levels-location-filter"
-      value={currentLocationFilter}
-      onChange={(v) => updateLevelsParam('locationId', v)}
-      wrapperClassName="w-full md:w-48"
-      placeholder="All locations"
-      searchPlaceholder="Search locations..."
-      options={[
-        { value: 'ALL', label: 'All locations' },
-        ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
-          value: l.id,
-          label: l.name,
-          ...(l.providerKind === 'WAREHOUSE'
-            ? {
-                leading: (
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
-                    title="Our warehouse"
-                    aria-label="Our warehouse"
-                  />
-                ),
-              }
-            : l.providerName
+    <div className="relative">
+      {currentLocationFilter !== 'ALL' && (
+        <FilterDismiss onClear={() => updateLevelsParam('locationId', '')} />
+      )}
+      <SearchableSelect
+        id="levels-location-filter"
+        value={currentLocationFilter}
+        onChange={(v) => updateLevelsParam('locationId', v)}
+        wrapperClassName="w-full md:w-48"
+        placeholder="All locations"
+        searchPlaceholder="Search locations..."
+        options={[
+          { value: 'ALL', label: 'All locations' },
+          ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
+            value: l.id,
+            label: l.name,
+            ...(l.providerKind === 'WAREHOUSE'
               ? {
                   leading: (
                     <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
-                    >
-                      {l.providerName}
-                    </span>
+                      className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
+                      title="Our warehouse"
+                      aria-label="Our warehouse"
+                    />
                   ),
                 }
-              : {}),
-        })),
-      ]}
-    />
+              : l.providerName
+                ? {
+                    leading: (
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
+                      >
+                        {l.providerName}
+                      </span>
+                    ),
+                  }
+                : {}),
+          })),
+        ]}
+      />
+    </div>
   );
   const levelsShipmentSelect = (
-    <SearchableSelect
-      id="levels-shipment-filter"
-      value={currentShipmentFilter}
-      onChange={(v) => updateLevelsParam('shipmentId', v)}
-      wrapperClassName="w-full md:w-52"
-      placeholder="All shipments"
-      searchPlaceholder="Search SHIP ref…"
-      options={[
-        { value: 'ALL', label: 'All shipments' },
-        ...shipmentOptions.map((shipment) => ({
-          value: shipment.id,
-          label: shipment.label,
-        })),
-      ]}
-    />
+    <div className="relative">
+      {currentShipmentFilter !== 'ALL' && (
+        <FilterDismiss onClear={() => updateLevelsParam('shipmentId', '')} />
+      )}
+      <SearchableSelect
+        id="levels-shipment-filter"
+        value={currentShipmentFilter}
+        onChange={(v) => updateLevelsParam('shipmentId', v)}
+        wrapperClassName="w-full md:w-52"
+        placeholder="All shipments"
+        searchPlaceholder="Search SHIP ref…"
+        options={[
+          { value: 'ALL', label: 'All shipments' },
+          ...shipmentOptions.map((shipment) => ({
+            value: shipment.id,
+            label: shipment.label,
+          })),
+        ]}
+      />
+    </div>
   );
   const levelsSortMenu = (
     <SortMenu
@@ -1385,73 +1388,88 @@ export function InventoryPage(props: InventoryStreamData) {
           if (totalLevels === 0 && !hasActiveFilters) return null;
 
           const productSelect = (
-            <SearchableSelect
-              id="levels-product-filter"
-              value={currentProductFilter}
-              onChange={(v) => updateLevelsParam('productId', v)}
-              wrapperClassName="w-full md:w-48"
-              placeholder="All products"
-              searchPlaceholder="Search products..."
-              options={[
-                { value: 'ALL', label: 'All products' },
-                ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
-              ]}
-            />
+            <div className="relative">
+              {currentProductFilter !== 'ALL' && (
+                <FilterDismiss onClear={() => updateLevelsParam('productId', '')} />
+              )}
+              <SearchableSelect
+                id="levels-product-filter"
+                value={currentProductFilter}
+                onChange={(v) => updateLevelsParam('productId', v)}
+                wrapperClassName="w-full md:w-48"
+                placeholder="All products"
+                searchPlaceholder="Search products..."
+                options={[
+                  { value: 'ALL', label: 'All products' },
+                  ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
+                ]}
+              />
+            </div>
           );
           const locationSelect = (
-            <SearchableSelect
-              id="levels-location-filter"
-              value={currentLocationFilter}
-              onChange={(v) => updateLevelsParam('locationId', v)}
-              wrapperClassName="w-full md:w-48"
-              placeholder="All locations"
-              searchPlaceholder="Search locations..."
-              options={[
-                { value: 'ALL', label: 'All locations' },
-                ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
-                  value: l.id,
-                  label: l.name,
-                  ...(l.providerKind === 'WAREHOUSE'
-                    ? {
-                        leading: (
-                          <span
-                            className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
-                            title="Our warehouse"
-                            aria-label="Our warehouse"
-                          />
-                        ),
-                      }
-                    : l.providerName
+            <div className="relative">
+              {currentLocationFilter !== 'ALL' && (
+                <FilterDismiss onClear={() => updateLevelsParam('locationId', '')} />
+              )}
+              <SearchableSelect
+                id="levels-location-filter"
+                value={currentLocationFilter}
+                onChange={(v) => updateLevelsParam('locationId', v)}
+                wrapperClassName="w-full md:w-48"
+                placeholder="All locations"
+                searchPlaceholder="Search locations..."
+                options={[
+                  { value: 'ALL', label: 'All locations' },
+                  ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
+                    value: l.id,
+                    label: l.name,
+                    ...(l.providerKind === 'WAREHOUSE'
                       ? {
                           leading: (
                             <span
-                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
-                            >
-                              {l.providerName}
-                            </span>
+                              className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
+                              title="Our warehouse"
+                              aria-label="Our warehouse"
+                            />
                           ),
                         }
-                      : {}),
-                })),
-              ]}
-            />
+                      : l.providerName
+                        ? {
+                            leading: (
+                              <span
+                                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
+                              >
+                                {l.providerName}
+                              </span>
+                            ),
+                          }
+                        : {}),
+                  })),
+                ]}
+              />
+            </div>
           );
           const shipmentSelect = (
-            <SearchableSelect
-              id="levels-shipment-filter"
-              value={currentShipmentFilter}
-              onChange={(v) => updateLevelsParam('shipmentId', v)}
-              wrapperClassName="w-full md:w-52"
-              placeholder="All shipments"
-              searchPlaceholder="Search SHIP ref…"
-              options={[
-                { value: 'ALL', label: 'All shipments' },
-                ...shipmentOptions.map((shipment) => ({
-                  value: shipment.id,
-                  label: shipment.label,
-                })),
-              ]}
-            />
+            <div className="relative">
+              {currentShipmentFilter !== 'ALL' && (
+                <FilterDismiss onClear={() => updateLevelsParam('shipmentId', '')} />
+              )}
+              <SearchableSelect
+                id="levels-shipment-filter"
+                value={currentShipmentFilter}
+                onChange={(v) => updateLevelsParam('shipmentId', v)}
+                wrapperClassName="w-full md:w-52"
+                placeholder="All shipments"
+                searchPlaceholder="Search SHIP ref…"
+                options={[
+                  { value: 'ALL', label: 'All shipments' },
+                  ...shipmentOptions.map((shipment) => ({
+                    value: shipment.id,
+                    label: shipment.label,
+                  })),
+                ]}
+              />
+            </div>
           );
           const sortMenu = (
             <SortMenu
@@ -1532,7 +1550,6 @@ export function InventoryPage(props: InventoryStreamData) {
             />
           );
         })()}
-        <ClearFiltersButton count={inventoryActiveFilterCount} preserve={['perPage']} className="mt-2" />
         <CompactTable<InventoryLevel>
           columns={levelColumns}
           rows={levels}

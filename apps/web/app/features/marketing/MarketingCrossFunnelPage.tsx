@@ -11,7 +11,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import {
   CompactTable,
@@ -169,17 +169,6 @@ export function MarketingCrossFunnelPage({
     (searchParams.get('productId') ? 1 : 0) +
     (searchParams.get('campaignId') ? 1 : 0) +
     (searchQuery ? 1 : 0);
-
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('productId')) n += 1;
-    if (searchParams.get('mediaBuyerId')) n += 1;
-    if (searchParams.get('campaignId')) n += 1;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('duplicateType')) n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    return n;
-  }, [searchParams]);
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = useMemo(() => [
     {
@@ -370,76 +359,117 @@ export function MarketingCrossFunnelPage({
         desktopInlineFilters={
           <>
             {showMbFilter && mediaBuyersForFilter.length > 0 ? (
-              <SearchableSelect
-                id="cf-filter-buyer"
-                value={searchParams.get('mediaBuyerId') || 'ALL'}
-                onChange={(v) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('page', '1');
-                    if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                    else next.delete('mediaBuyerId');
-                    return next;
-                  });
-                }}
-                options={[
-                  { value: 'ALL', label: 'All media buyers' },
-                  ...mediaBuyersForFilter.map((u) => ({ value: u.id, label: u.name })),
-                ]}
-                wrapperClassName="w-full min-w-0 sm:w-56"
-                placeholder="All media buyers"
-                searchPlaceholder="Search buyers…"
-              />
+              <div className="relative">
+                {!!searchParams.get('mediaBuyerId') && (
+                  <FilterDismiss
+                    onClear={() => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.delete('mediaBuyerId');
+                        next.set('page', '1');
+                        return next;
+                      });
+                    }}
+                  />
+                )}
+                <SearchableSelect
+                  id="cf-filter-buyer"
+                  value={searchParams.get('mediaBuyerId') || 'ALL'}
+                  onChange={(v) => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                      else next.delete('mediaBuyerId');
+                      return next;
+                    });
+                  }}
+                  options={[
+                    { value: 'ALL', label: 'All media buyers' },
+                    ...mediaBuyersForFilter.map((u) => ({ value: u.id, label: u.name })),
+                  ]}
+                  wrapperClassName="w-full min-w-0 sm:w-56"
+                  placeholder="All media buyers"
+                  searchPlaceholder="Search buyers…"
+                />
+              </div>
             ) : null}
             {productsForFilter.length > 0 ? (
-              <SearchableSelect
-                id="cf-filter-product"
-                value={searchParams.get('productId') || 'ALL'}
-                onChange={(v) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('page', '1');
-                    if (v && v !== 'ALL') next.set('productId', v);
-                    else next.delete('productId');
-                    return next;
-                  });
-                }}
-                options={[
-                  { value: 'ALL', label: 'All products' },
-                  ...productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-                wrapperClassName="w-full min-w-0 sm:w-48"
-                placeholder="All products"
-                searchPlaceholder="Search products…"
-              />
+              <div className="relative">
+                {!!searchParams.get('productId') && (
+                  <FilterDismiss
+                    onClear={() => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.delete('productId');
+                        next.set('page', '1');
+                        return next;
+                      });
+                    }}
+                  />
+                )}
+                <SearchableSelect
+                  id="cf-filter-product"
+                  value={searchParams.get('productId') || 'ALL'}
+                  onChange={(v) => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v && v !== 'ALL') next.set('productId', v);
+                      else next.delete('productId');
+                      return next;
+                    });
+                  }}
+                  options={[
+                    { value: 'ALL', label: 'All products' },
+                    ...productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                  ]}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
+                  placeholder="All products"
+                  searchPlaceholder="Search products…"
+                />
+              </div>
             ) : null}
             {campaignsForFilter.length > 0 ? (
-              <SearchableSelect
-                id="cf-filter-form"
-                value={searchParams.get('campaignId') || 'ALL'}
-                onChange={(v) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('page', '1');
-                    if (v && v !== 'ALL') next.set('campaignId', v);
-                    else next.delete('campaignId');
-                    return next;
-                  });
-                }}
-                options={[
-                  { value: 'ALL', label: 'All forms' },
-                  ...campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                ]}
-                wrapperClassName="w-full min-w-0 sm:w-48"
-                placeholder="All forms"
-                searchPlaceholder="Search forms…"
-              />
+              <div className="relative">
+                {!!searchParams.get('campaignId') && (
+                  <FilterDismiss
+                    onClear={() => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.delete('campaignId');
+                        next.set('page', '1');
+                        return next;
+                      });
+                    }}
+                  />
+                )}
+                <SearchableSelect
+                  id="cf-filter-form"
+                  value={searchParams.get('campaignId') || 'ALL'}
+                  onChange={(v) => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v && v !== 'ALL') next.set('campaignId', v);
+                      else next.delete('campaignId');
+                      return next;
+                    });
+                  }}
+                  options={[
+                    { value: 'ALL', label: 'All forms' },
+                    ...campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
+                  placeholder="All forms"
+                  searchPlaceholder="Search forms…"
+                />
+              </div>
             ) : null}
           </>
         }
         sheetFilterBody={null}
       />
-      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {/* Table */}
       <CompactTable<CrossFunnelAttemptRow>
