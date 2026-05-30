@@ -15,7 +15,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -148,7 +148,7 @@ export function DeliveryRemittancesPage({
   summary,
   canCreateRemittance,
 }: DeliveryRemittancesPageProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
@@ -278,15 +278,6 @@ export function DeliveryRemittancesPage({
     if (filters.sentBy) n += 1;
     return n;
   }, [filters.location, filters.sentBy]);
-
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('status')) n += 1;
-    if (searchParams.get('location')) n += 1;
-    if (searchParams.get('sentBy')) n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    return n;
-  }, [searchParams]);
 
   const remittanceColumns: CompactTableColumn<DeliveryRemittanceListItem>[] = useMemo(
     () => [
@@ -547,37 +538,47 @@ export function DeliveryRemittancesPage({
               <>
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Location</span>
-                  <SearchableSelect
-                    id="delivery-remittance-location-filter-kebab"
-                    value={filters.location}
-                    onChange={handleLocationChange}
-                    wrapperClassName="w-full"
-                    placeholder="All locations"
-                    searchPlaceholder="Search locations..."
-                    options={[
-                      { value: '', label: 'All locations' },
-                      ...locations.map((loc) => ({
-                        value: loc.id,
-                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                      })),
-                    ]}
-                  />
+                  <div className="relative">
+                    {!!filters.location && (
+                      <FilterDismiss onClear={() => handleLocationChange('')} />
+                    )}
+                    <SearchableSelect
+                      id="delivery-remittance-location-filter-kebab"
+                      value={filters.location}
+                      onChange={handleLocationChange}
+                      wrapperClassName="w-full"
+                      placeholder="All locations"
+                      searchPlaceholder="Search locations..."
+                      options={[
+                        { value: '', label: 'All locations' },
+                        ...locations.map((loc) => ({
+                          value: loc.id,
+                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        })),
+                      ]}
+                    />
+                  </div>
                 </div>
                 {viewTab === 'remittances' && (
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
-                    <SearchableSelect
-                      id="delivery-remittance-sent-by-filter-kebab"
-                      value={filters.sentBy}
-                      onChange={handleSentByChange}
-                      wrapperClassName="w-full"
-                      placeholder="Sent by anyone"
-                      searchPlaceholder="Search accountants..."
-                      options={[
-                        { value: '', label: 'Sent by anyone' },
-                        ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                      ]}
-                    />
+                    <div className="relative">
+                      {!!filters.sentBy && (
+                        <FilterDismiss onClear={() => handleSentByChange('')} />
+                      )}
+                      <SearchableSelect
+                        id="delivery-remittance-sent-by-filter-kebab"
+                        value={filters.sentBy}
+                        onChange={handleSentByChange}
+                        wrapperClassName="w-full"
+                        placeholder="Sent by anyone"
+                        searchPlaceholder="Search accountants..."
+                        options={[
+                          { value: '', label: 'Sent by anyone' },
+                          ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                        ]}
+                      />
+                    </div>
                   </div>
                 )}
               </>
@@ -746,44 +747,15 @@ export function DeliveryRemittancesPage({
               sheetSubtitle={<span>Location and sent-by apply immediately</span>}
               desktopInlineFilters={
                 <>
-                  <SearchableSelect
-                    id="delivery-remittance-location-filter"
-                    value={filters.location}
-                    onChange={handleLocationChange}
-                    wrapperClassName="w-full min-w-0 sm:w-52"
-                    placeholder="All locations"
-                    searchPlaceholder="Search locations..."
-                    options={[
-                      { value: '', label: 'All locations' },
-                      ...locations.map((loc) => ({
-                        value: loc.id,
-                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                      })),
-                    ]}
-                  />
-                  <SearchableSelect
-                    id="delivery-remittance-sent-by-filter"
-                    value={filters.sentBy}
-                    onChange={handleSentByChange}
-                    wrapperClassName="w-full min-w-0 sm:w-56"
-                    placeholder="Sent by anyone"
-                    searchPlaceholder="Search accountants..."
-                    options={[
-                      { value: '', label: 'Sent by anyone' },
-                      ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                  />
-                </>
-              }
-              sheetFilterBody={
-                <>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                  <div className="relative">
+                    {!!filters.location && (
+                      <FilterDismiss onClear={() => handleLocationChange('')} />
+                    )}
                     <SearchableSelect
-                      id="delivery-remittance-location-filter-sheet"
+                      id="delivery-remittance-location-filter"
                       value={filters.location}
                       onChange={handleLocationChange}
-                      wrapperClassName="w-full"
+                      wrapperClassName="w-full min-w-0 sm:w-52"
                       placeholder="All locations"
                       searchPlaceholder="Search locations..."
                       options={[
@@ -795,13 +767,15 @@ export function DeliveryRemittancesPage({
                       ]}
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                  <div className="relative">
+                    {!!filters.sentBy && (
+                      <FilterDismiss onClear={() => handleSentByChange('')} />
+                    )}
                     <SearchableSelect
-                      id="delivery-remittance-sent-by-filter-sheet"
+                      id="delivery-remittance-sent-by-filter"
                       value={filters.sentBy}
                       onChange={handleSentByChange}
-                      wrapperClassName="w-full"
+                      wrapperClassName="w-full min-w-0 sm:w-56"
                       placeholder="Sent by anyone"
                       searchPlaceholder="Search accountants..."
                       options={[
@@ -812,10 +786,55 @@ export function DeliveryRemittancesPage({
                   </div>
                 </>
               }
+              sheetFilterBody={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                    <div className="relative">
+                      {!!filters.location && (
+                        <FilterDismiss onClear={() => handleLocationChange('')} />
+                      )}
+                      <SearchableSelect
+                        id="delivery-remittance-location-filter-sheet"
+                        value={filters.location}
+                        onChange={handleLocationChange}
+                        wrapperClassName="w-full"
+                        placeholder="All locations"
+                        searchPlaceholder="Search locations..."
+                        options={[
+                          { value: '', label: 'All locations' },
+                          ...locations.map((loc) => ({
+                            value: loc.id,
+                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                          })),
+                        ]}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                    <div className="relative">
+                      {!!filters.sentBy && (
+                        <FilterDismiss onClear={() => handleSentByChange('')} />
+                      )}
+                      <SearchableSelect
+                        id="delivery-remittance-sent-by-filter-sheet"
+                        value={filters.sentBy}
+                        onChange={handleSentByChange}
+                        wrapperClassName="w-full"
+                        placeholder="Sent by anyone"
+                        searchPlaceholder="Search accountants..."
+                        options={[
+                          { value: '', label: 'Sent by anyone' },
+                          ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                        ]}
+                      />
+                    </div>
+                  </div>
+                </>
+              }
             />
           </div>
-          <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
-
           {/* Status filter pills — narrow the Remitted list to a single
               lifecycle stage. Counts come from the summary (status-agnostic),
               so they don't reshuffle as the user clicks between pills. */}
@@ -933,21 +952,26 @@ export function DeliveryRemittancesPage({
                 controlSize="md"
               />
             </form>
-            <SearchableSelect
-              id="eligible-remittance-location"
-              value={filters.location}
-              onChange={handleLocationChange}
-              wrapperClassName="w-full sm:w-52"
-              placeholder="All locations"
-              searchPlaceholder="Search locations..."
-              options={[
-                { value: '', label: 'All locations' },
-                ...locations.map((loc) => ({
-                  value: loc.id,
-                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                })),
-              ]}
-            />
+            <div className="relative">
+              {!!filters.location && (
+                <FilterDismiss onClear={() => handleLocationChange('')} />
+              )}
+              <SearchableSelect
+                id="eligible-remittance-location"
+                value={filters.location}
+                onChange={handleLocationChange}
+                wrapperClassName="w-full sm:w-52"
+                placeholder="All locations"
+                searchPlaceholder="Search locations..."
+                options={[
+                  { value: '', label: 'All locations' },
+                  ...locations.map((loc) => ({
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                  })),
+                ]}
+              />
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-app-hover px-2.5 py-2 sm:px-3">

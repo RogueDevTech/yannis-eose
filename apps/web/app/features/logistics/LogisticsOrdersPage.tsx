@@ -20,7 +20,7 @@ import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-return';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
@@ -364,15 +364,6 @@ function LogisticsOrdersPageImpl({
     [selectedStatus],
   );
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('status')) n += 1;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('csCloserId')) n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    return n;
-  }, [searchParams]);
-
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
   const allocatedOrders = displayOrders.filter((o) => o.status === 'AGENT_ASSIGNED');
   const selectedOrders = displayOrders.filter((o) => selectedIds.has(o.id));
@@ -647,17 +638,22 @@ function LogisticsOrdersPageImpl({
                 </>
               }
               filters={
-                <FormSelect
-                  value={selectedStatus}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-                    value: status,
-                    label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-                  }))}
-                  controlSize="lg"
-                  className="!bg-app-hover text-center"
-                  wrapperClassName="w-full"
-                />
+                <div className="relative w-full">
+                  {selectedStatus !== 'ALL' && (
+                    <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                  )}
+                  <FormSelect
+                    value={selectedStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                      value: status,
+                      label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                    }))}
+                    controlSize="lg"
+                    className="!bg-app-hover text-center"
+                    wrapperClassName="w-full"
+                  />
+                </div>
               }
               sheet={({ closeSheet }) => (
                 <div className="space-y-2">
@@ -887,22 +883,26 @@ function LogisticsOrdersPageImpl({
                 />
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">
-                <FormSelect
-                  value={selectedStatus}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-                    value: status,
-                    label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-                  }))}
-                  wrapperClassName="w-full min-w-0 sm:w-48"
-                />
+                <div className="relative w-full min-w-0 sm:w-48">
+                  {selectedStatus !== 'ALL' && (
+                    <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                  )}
+                  <FormSelect
+                    value={selectedStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                      value: status,
+                      label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                    }))}
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                  />
+                </div>
               </div>
             </div>
           }
           desktopInlineFilters={null}
           sheetFilterBody={null}
         />
-      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {showChartView ? (
         deferredLoading ? (

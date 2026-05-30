@@ -29,7 +29,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { Tabs } from '~/components/ui/tabs';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
@@ -299,7 +299,7 @@ export function DisbursementsPage({
   requestersList = [],
 }: DisbursementsPageData) {
   const { toast } = useToast();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy().busy;
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
   // Read the pending URL while the loader revalidates — same pattern as the
@@ -432,19 +432,6 @@ export function DisbursementsPage({
     mainTab === 'disbursements' ? disbursementsFilterBadge
     : mainTab === 'balances' ? balancesFilterBadge
     : 0;
-
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('status')) n += 1;
-    if (searchParams.get('selectedReceiver')) n += 1;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    // Balances tab filters
-    if (searchParams.get('balancesRole') && searchParams.get('balancesRole') !== 'ALL') n += 1;
-    if (searchParams.get('balancesStatus') && searchParams.get('balancesStatus') !== 'ALL') n += 1;
-    if (searchParams.get('balancesSearch')) n += 1;
-    return n;
-  }, [searchParams]);
 
   const nameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -820,62 +807,82 @@ export function DisbursementsPage({
             filters={
               mainTab === 'disbursements' ? (
                 <>
-                  <FormSelect
-                    id="disbursement-status-filter-sheet"
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
-                    controlSize="lg"
-                    className="!bg-app-hover text-center"
-                    wrapperClassName="w-full"
-                    aria-label="Filter by status"
-                  />
-                  <SearchableSelect
-                    id="disbursement-recipient-filter-sheet"
-                    value={selectedReceiver}
-                    onChange={handleReceiverChange}
-                    options={[
-                      { value: 'ALL', label: 'All recipients' },
-                      ...recipients.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                    controlSize="lg"
-                    triggerClassName="!bg-app-hover text-center"
-                    wrapperClassName="w-full"
-                    placeholder="All recipients"
-                    searchPlaceholder="Search recipients..."
-                  />
+                  <div className="relative">
+                    {selectedStatus !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="disbursement-status-filter-sheet"
+                      value={selectedStatus}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
+                      controlSize="lg"
+                      className="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      aria-label="Filter by status"
+                    />
+                  </div>
+                  <div className="relative">
+                    {selectedReceiver !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleReceiverChange('ALL')} />
+                    )}
+                    <SearchableSelect
+                      id="disbursement-recipient-filter-sheet"
+                      value={selectedReceiver}
+                      onChange={handleReceiverChange}
+                      options={[
+                        { value: 'ALL', label: 'All recipients' },
+                        ...recipients.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                      controlSize="lg"
+                      triggerClassName="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      placeholder="All recipients"
+                      searchPlaceholder="Search recipients..."
+                    />
+                  </div>
                 </>
               ) : mainTab === 'balances' ? (
                 <>
-                  <FormSelect
-                    id="balances-role-filter-sheet"
-                    value={balancesRoleFilter}
-                    onChange={(e) => handleBalancesRoleChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All roles' },
-                      { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-                      { value: 'MEDIA_BUYER', label: 'Media Buyer' },
-                    ]}
-                    controlSize="lg"
-                    className="!bg-app-hover text-center"
-                    wrapperClassName="w-full"
-                    aria-label="Filter balances by role"
-                  />
-                  <FormSelect
-                    id="balances-status-filter-sheet"
-                    value={balancesStatusFilter}
-                    onChange={(e) => handleBalancesStatusChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All balances' },
-                      { value: 'POSITIVE', label: 'Positive' },
-                      { value: 'ZERO', label: 'Zero' },
-                      { value: 'NEGATIVE', label: 'Negative' },
-                    ]}
-                    controlSize="lg"
-                    className="!bg-app-hover text-center"
-                    wrapperClassName="w-full"
-                    aria-label="Filter by balance status"
-                  />
+                  <div className="relative">
+                    {balancesRoleFilter !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBalancesRoleChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="balances-role-filter-sheet"
+                      value={balancesRoleFilter}
+                      onChange={(e) => handleBalancesRoleChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All roles' },
+                        { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+                        { value: 'MEDIA_BUYER', label: 'Media Buyer' },
+                      ]}
+                      controlSize="lg"
+                      className="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      aria-label="Filter balances by role"
+                    />
+                  </div>
+                  <div className="relative">
+                    {balancesStatusFilter !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBalancesStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="balances-status-filter-sheet"
+                      value={balancesStatusFilter}
+                      onChange={(e) => handleBalancesStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All balances' },
+                        { value: 'POSITIVE', label: 'Positive' },
+                        { value: 'ZERO', label: 'Zero' },
+                        { value: 'NEGATIVE', label: 'Negative' },
+                      ]}
+                      controlSize="lg"
+                      className="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      aria-label="Filter by balance status"
+                    />
+                  </div>
                 </>
               ) : undefined
             }
@@ -1015,56 +1022,75 @@ export function DisbursementsPage({
               }
               desktopInlineFilters={
                 <>
-                  <FormSelect
-                    id="disbursement-status-filter"
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
-                    controlSize="sm"
-                    wrapperClassName="w-full md:w-44"
-                    aria-label="Filter by status"
-                  />
-                  <SearchableSelect
-                    id="disbursement-recipient-filter"
-                    value={selectedReceiver}
-                    onChange={handleReceiverChange}
-                    options={[
-                      { value: 'ALL', label: 'All recipients' },
-                      ...recipients.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                    controlSize="sm"
-                    wrapperClassName="w-full md:w-52"
-                    searchPlaceholder="Search recipients..."
-                  />
+                  <div className="relative">
+                    {selectedStatus !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="disbursement-status-filter"
+                      value={selectedStatus}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
+                      controlSize="sm"
+                      wrapperClassName="w-full md:w-44"
+                      aria-label="Filter by status"
+                    />
+                  </div>
+                  <div className="relative">
+                    {selectedReceiver !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleReceiverChange('ALL')} />
+                    )}
+                    <SearchableSelect
+                      id="disbursement-recipient-filter"
+                      value={selectedReceiver}
+                      onChange={handleReceiverChange}
+                      options={[
+                        { value: 'ALL', label: 'All recipients' },
+                        ...recipients.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                      controlSize="sm"
+                      wrapperClassName="w-full md:w-52"
+                      searchPlaceholder="Search recipients..."
+                    />
+                  </div>
                 </>
               }
               sheetFilterBody={
                 <>
-                  <FormSelect
-                    id="disbursement-status-filter-sheet-inner"
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
-                    controlSize="lg"
-                    wrapperClassName="w-full"
-                    aria-label="Filter by status"
-                  />
-                  <SearchableSelect
-                    id="disbursement-recipient-filter-sheet-inner"
-                    value={selectedReceiver}
-                    onChange={handleReceiverChange}
-                    options={[
-                      { value: 'ALL', label: 'All recipients' },
-                      ...recipients.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                    controlSize="lg"
-                    wrapperClassName="w-full"
-                    searchPlaceholder="Search recipients..."
-                  />
+                  <div className="relative">
+                    {selectedStatus !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="disbursement-status-filter-sheet-inner"
+                      value={selectedStatus}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
+                      controlSize="lg"
+                      wrapperClassName="w-full"
+                      aria-label="Filter by status"
+                    />
+                  </div>
+                  <div className="relative">
+                    {selectedReceiver !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleReceiverChange('ALL')} />
+                    )}
+                    <SearchableSelect
+                      id="disbursement-recipient-filter-sheet-inner"
+                      value={selectedReceiver}
+                      onChange={handleReceiverChange}
+                      options={[
+                        { value: 'ALL', label: 'All recipients' },
+                        ...recipients.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                      controlSize="lg"
+                      wrapperClassName="w-full"
+                      searchPlaceholder="Search recipients..."
+                    />
+                  </div>
                 </>
               }
             />
-            <ClearFiltersButton count={activeFilterCount} preserve={['perPage', 'tab']} className="mt-2 px-4" />
 
             <TableLoadingOverlay show={isFilterLoading}>
               <CompactTable<DisbursementRecord>
@@ -1201,68 +1227,87 @@ export function DisbursementsPage({
               }
               desktopInlineFilters={
                 <>
-                  <FormSelect
-                    id="balances-role-filter"
-                    value={balancesRoleFilter}
-                    onChange={(e) => handleBalancesRoleChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All roles' },
-                      { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-                      { value: 'MEDIA_BUYER', label: 'Media Buyer' },
-                    ]}
-                    controlSize="sm"
-                    wrapperClassName="w-full md:w-52"
-                    aria-label="Filter balances by role"
-                  />
-                  <FormSelect
-                    id="balances-status-filter"
-                    value={balancesStatusFilter}
-                    onChange={(e) => handleBalancesStatusChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All balances' },
-                      { value: 'POSITIVE', label: 'Positive' },
-                      { value: 'ZERO', label: 'Zero' },
-                      { value: 'NEGATIVE', label: 'Negative' },
-                    ]}
-                    controlSize="sm"
-                    wrapperClassName="w-full md:w-48"
-                    aria-label="Filter by balance status"
-                  />
+                  <div className="relative">
+                    {balancesRoleFilter !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBalancesRoleChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="balances-role-filter"
+                      value={balancesRoleFilter}
+                      onChange={(e) => handleBalancesRoleChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All roles' },
+                        { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+                        { value: 'MEDIA_BUYER', label: 'Media Buyer' },
+                      ]}
+                      controlSize="sm"
+                      wrapperClassName="w-full md:w-52"
+                      aria-label="Filter balances by role"
+                    />
+                  </div>
+                  <div className="relative">
+                    {balancesStatusFilter !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBalancesStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="balances-status-filter"
+                      value={balancesStatusFilter}
+                      onChange={(e) => handleBalancesStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All balances' },
+                        { value: 'POSITIVE', label: 'Positive' },
+                        { value: 'ZERO', label: 'Zero' },
+                        { value: 'NEGATIVE', label: 'Negative' },
+                      ]}
+                      controlSize="sm"
+                      wrapperClassName="w-full md:w-48"
+                      aria-label="Filter by balance status"
+                    />
+                  </div>
                 </>
               }
               sheetFilterBody={
                 <>
-                  <FormSelect
-                    id="balances-role-filter-sheet-inner"
-                    value={balancesRoleFilter}
-                    onChange={(e) => handleBalancesRoleChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All roles' },
-                      { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-                      { value: 'MEDIA_BUYER', label: 'Media Buyer' },
-                    ]}
-                    controlSize="lg"
-                    wrapperClassName="w-full"
-                    aria-label="Filter balances by role"
-                  />
-                  <FormSelect
-                    id="balances-status-filter-sheet-inner"
-                    value={balancesStatusFilter}
-                    onChange={(e) => handleBalancesStatusChange(e.target.value)}
-                    options={[
-                      { value: 'ALL', label: 'All balances' },
-                      { value: 'POSITIVE', label: 'Positive' },
-                      { value: 'ZERO', label: 'Zero' },
-                      { value: 'NEGATIVE', label: 'Negative' },
-                    ]}
-                    controlSize="lg"
-                    wrapperClassName="w-full"
-                    aria-label="Filter by balance status"
-                  />
+                  <div className="relative">
+                    {balancesRoleFilter !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBalancesRoleChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="balances-role-filter-sheet-inner"
+                      value={balancesRoleFilter}
+                      onChange={(e) => handleBalancesRoleChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All roles' },
+                        { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+                        { value: 'MEDIA_BUYER', label: 'Media Buyer' },
+                      ]}
+                      controlSize="lg"
+                      wrapperClassName="w-full"
+                      aria-label="Filter balances by role"
+                    />
+                  </div>
+                  <div className="relative">
+                    {balancesStatusFilter !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleBalancesStatusChange('ALL')} />
+                    )}
+                    <FormSelect
+                      id="balances-status-filter-sheet-inner"
+                      value={balancesStatusFilter}
+                      onChange={(e) => handleBalancesStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All balances' },
+                        { value: 'POSITIVE', label: 'Positive' },
+                        { value: 'ZERO', label: 'Zero' },
+                        { value: 'NEGATIVE', label: 'Negative' },
+                      ]}
+                      controlSize="lg"
+                      wrapperClassName="w-full"
+                      aria-label="Filter by balance status"
+                    />
+                  </div>
                 </>
               }
             />
-            <ClearFiltersButton count={activeFilterCount} preserve={['perPage', 'tab']} className="mt-2 px-4" />
 
             <TableLoadingOverlay show={isFilterLoading}>
               <CompactTable<RecipientBalanceRow>

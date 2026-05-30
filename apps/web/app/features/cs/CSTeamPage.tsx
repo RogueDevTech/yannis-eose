@@ -13,7 +13,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
@@ -354,16 +354,6 @@ export function CSTeamPage({
     return count;
   }, [activityFilter, backlogFilter, sort]);
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('q')) n += 1;
-    if (searchParams.get('activity')) n += 1;
-    if (searchParams.get('backlog')) n += 1;
-    if (searchParams.get('sort')) n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    return n;
-  }, [searchParams]);
-
   const showFilteredEmpty = unfilteredCount > 0 && totalCount === 0;
   const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL';
 
@@ -543,30 +533,45 @@ export function CSTeamPage({
                 <>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Activity</span>
-                    <FormSelect
-                      value={activityFilter}
-                      onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
-                      options={CS_ACTIVITY_OPTIONS}
-                      wrapperClassName="w-full"
-                    />
+                    <div className="relative">
+                      {activityFilter !== 'ALL' && (
+                        <FilterDismiss onClear={() => mergeListParams({ activity: 'ALL', page: 1 })} />
+                      )}
+                      <FormSelect
+                        value={activityFilter}
+                        onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
+                        options={CS_ACTIVITY_OPTIONS}
+                        wrapperClassName="w-full"
+                      />
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Backlog</span>
-                    <FormSelect
-                      value={backlogFilter}
-                      onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
-                      options={CS_BACKLOG_OPTIONS}
-                      wrapperClassName="w-full"
-                    />
+                    <div className="relative">
+                      {backlogFilter !== 'ALL' && (
+                        <FilterDismiss onClear={() => mergeListParams({ backlog: 'ALL', page: 1 })} />
+                      )}
+                      <FormSelect
+                        value={backlogFilter}
+                        onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
+                        options={CS_BACKLOG_OPTIONS}
+                        wrapperClassName="w-full"
+                      />
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                    <SortMenu
-                      value={sortMenuValue}
-                      onChange={handleSortChange}
-                      options={CS_SORT_MENU_OPTIONS}
-                      defaultValue={CS_SORT_DEFAULT}
-                    />
+                    <div className="relative">
+                      {sort !== 'total-desc' && (
+                        <FilterDismiss onClear={() => mergeListParams({ sort: 'total-desc', page: 1 })} />
+                      )}
+                      <SortMenu
+                        value={sortMenuValue}
+                        onChange={handleSortChange}
+                        options={CS_SORT_MENU_OPTIONS}
+                        defaultValue={CS_SORT_DEFAULT}
+                      />
+                    </div>
                   </div>
                 </>
               }
@@ -716,48 +721,32 @@ export function CSTeamPage({
           }
           desktopInlineFilters={
             <>
-              <FormSelect
-                value={activityFilter}
-                onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
-                options={CS_ACTIVITY_OPTIONS}
-                wrapperClassName="w-full min-w-0 sm:w-44"
-              />
-              <FormSelect
-                value={backlogFilter}
-                onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
-                options={CS_BACKLOG_OPTIONS}
-                wrapperClassName="w-full min-w-0 sm:w-44"
-              />
-              <SortMenu
-                value={sortMenuValue}
-                onChange={handleSortChange}
-                options={CS_SORT_MENU_OPTIONS}
-                defaultValue={CS_SORT_DEFAULT}
-              />
-            </>
-          }
-          sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Activity</span>
+              <div className="relative">
+                {activityFilter !== 'ALL' && (
+                  <FilterDismiss onClear={() => mergeListParams({ activity: 'ALL', page: 1 })} />
+                )}
                 <FormSelect
                   value={activityFilter}
                   onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
                   options={CS_ACTIVITY_OPTIONS}
-                  wrapperClassName="w-full"
+                  wrapperClassName="w-full min-w-0 sm:w-44"
                 />
               </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Backlog</span>
+              <div className="relative">
+                {backlogFilter !== 'ALL' && (
+                  <FilterDismiss onClear={() => mergeListParams({ backlog: 'ALL', page: 1 })} />
+                )}
                 <FormSelect
                   value={backlogFilter}
                   onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
                   options={CS_BACKLOG_OPTIONS}
-                  wrapperClassName="w-full"
+                  wrapperClassName="w-full min-w-0 sm:w-44"
                 />
               </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
+              <div className="relative">
+                {sort !== 'total-desc' && (
+                  <FilterDismiss onClear={() => mergeListParams({ sort: 'total-desc', page: 1 })} />
+                )}
                 <SortMenu
                   value={sortMenuValue}
                   onChange={handleSortChange}
@@ -767,8 +756,53 @@ export function CSTeamPage({
               </div>
             </>
           }
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Activity</span>
+                <div className="relative">
+                  {activityFilter !== 'ALL' && (
+                    <FilterDismiss onClear={() => mergeListParams({ activity: 'ALL', page: 1 })} />
+                  )}
+                  <FormSelect
+                    value={activityFilter}
+                    onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
+                    options={CS_ACTIVITY_OPTIONS}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Backlog</span>
+                <div className="relative">
+                  {backlogFilter !== 'ALL' && (
+                    <FilterDismiss onClear={() => mergeListParams({ backlog: 'ALL', page: 1 })} />
+                  )}
+                  <FormSelect
+                    value={backlogFilter}
+                    onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
+                    options={CS_BACKLOG_OPTIONS}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
+                <div className="relative">
+                  {sort !== 'total-desc' && (
+                    <FilterDismiss onClear={() => mergeListParams({ sort: 'total-desc', page: 1 })} />
+                  )}
+                  <SortMenu
+                    value={sortMenuValue}
+                    onChange={handleSortChange}
+                    options={CS_SORT_MENU_OPTIONS}
+                    defaultValue={CS_SORT_DEFAULT}
+                  />
+                </div>
+              </div>
+            </>
+          }
         />
-        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {hasActiveFilters && (
           <p className="mb-3 text-xs text-app-fg-muted" aria-live="polite">
