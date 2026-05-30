@@ -1,6 +1,7 @@
 import { json, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { ProfitByShipmentPage, type ProfitByShipmentPayload, type ShipmentOption } from '~/features/finance/ProfitByShipmentPage';
 
 export const meta: MetaFunction = () => [{ title: 'Profit by shipment — Finance — Yannis EOSE' }];
@@ -57,6 +58,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({ shipments, shipmentId, profit });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export default function ProfitByShipmentRoute() {
   const data = useLoaderData<typeof loader>();

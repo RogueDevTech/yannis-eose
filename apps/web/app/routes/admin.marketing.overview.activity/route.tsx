@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { canViewAllBranches } from '~/lib/rbac';
 
 /**
@@ -77,6 +78,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({ activityItems });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export default function AdminMarketingOverviewActivityRoute() {
   return null;

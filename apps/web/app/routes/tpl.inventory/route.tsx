@@ -5,6 +5,7 @@ import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, parsePerPage, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -138,6 +139,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

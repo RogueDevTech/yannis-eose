@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { SettingsPage } from '~/features/settings/SettingsPage';
 import { TplSettingsLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
 export const meta: MetaFunction = () => [
@@ -37,6 +38,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);

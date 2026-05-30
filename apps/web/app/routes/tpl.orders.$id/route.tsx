@@ -2,6 +2,7 @@ import { useMemo, Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -130,6 +131,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
