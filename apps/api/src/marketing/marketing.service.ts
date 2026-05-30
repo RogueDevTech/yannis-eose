@@ -36,6 +36,7 @@ import type {
   PreviewAdSpendIntervalInput,
   CampaignOrderTotalForBatchInput,
   UpdateAdSpendInput,
+  LogDailyAdSpendInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
@@ -111,11 +112,23 @@ export class MarketingService {
 
   private async getBranchUserIds(branchId?: string | null): Promise<string[] | null> {
     if (!branchId) return null;
-    const rows = await this.db
-      .select({ userId: schema.userBranches.userId })
-      .from(schema.userBranches)
-      .where(eq(schema.userBranches.branchId, branchId));
-    return rows.map((row) => row.userId);
+    // Include users from both the junction table (userBranches) AND those whose
+    // primaryBranchId matches. Some users may have a primaryBranchId set without
+    // a corresponding userBranches row — querying both sources prevents them from
+    // vanishing when the viewer switches to that branch individually.
+    const [junctionRows, primaryRows] = await Promise.all([
+      this.db
+        .select({ userId: schema.userBranches.userId })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.branchId, branchId)),
+      this.db
+        .select({ userId: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.primaryBranchId, branchId)),
+    ]);
+    const ids = new Set(junctionRows.map((r) => r.userId));
+    for (const r of primaryRows) ids.add(r.userId);
+    return [...ids];
   }
 
   /**
@@ -1314,46 +1327,62 @@ export class MarketingService {
   }
 
   /**
-   * Funding balance for one user: COMPLETED funding received minus APPROVED ad spend.
-   * Used for Media Buyers and Head of Marketing (HoM has no ad spend).
+   * Funding balance for one user: COMPLETED received − COMPLETED distributed − APPROVED ad spend.
+   * Distributed only ever applies to upstream funders (HoM, admin); MB rows are 0 there. Ad
+   * spend deducts for anyone whose user-id appears as `ad_spend_logs.media_buyer_id` — HoM
+   * included, since HoMs can log their own ad spend.
    */
   async getFundingBalance(
     userId: string,
     branchId?: string | null,
-  ): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
+  ): Promise<{ totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> {
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
-      return { totalReceived: '0', totalSpend: '0', balance: '0' };
+      return { totalReceived: '0', totalDistributed: '0', totalSpend: '0', balance: '0' };
     }
 
-    const [receivedRow] = await this.db
-      .select({ total: sum(schema.marketingFunding.amount) })
-      .from(schema.marketingFunding)
-      .where(
-        and(
-          eq(schema.marketingFunding.receiverId, userId),
-          eq(schema.marketingFunding.status, 'COMPLETED'),
-        ),
-      );
-
-    const [spendRow] = await this.db
-      .select({ total: sum(schema.adSpendLogs.spendAmount) })
-      .from(schema.adSpendLogs)
-      .where(
-        and(
-          eq(schema.adSpendLogs.mediaBuyerId, userId),
-          eq(schema.adSpendLogs.status, 'APPROVED'),
-          branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
-        ),
-      );
+    const [receivedRow, distributedRow, spendRow] = await Promise.all([
+      this.db
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(
+          and(
+            eq(schema.marketingFunding.receiverId, userId),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
+          ),
+        )
+        .then((r) => r[0]),
+      this.db
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(
+          and(
+            eq(schema.marketingFunding.senderId, userId),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
+          ),
+        )
+        .then((r) => r[0]),
+      this.db
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(
+          and(
+            eq(schema.adSpendLogs.mediaBuyerId, userId),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
+            branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
+          ),
+        )
+        .then((r) => r[0]),
+    ]);
 
     const totalReceived = receivedRow?.total ?? '0';
+    const totalDistributed = distributedRow?.total ?? '0';
     const totalSpend = spendRow?.total ?? '0';
-    const received = Number(totalReceived);
-    const spend = Number(totalSpend);
-    const balance = String(Math.max(0, received - spend));
+    const balance = String(
+      Math.max(0, Number(totalReceived) - Number(totalDistributed) - Number(totalSpend)),
+    );
 
-    return { totalReceived, totalSpend, balance };
+    return { totalReceived, totalDistributed, totalSpend, balance };
   }
 
   /**
@@ -1371,6 +1400,7 @@ export class MarketingService {
       name: string;
       role: string;
       totalReceived: string;
+      totalDistributed: string;
       totalSpend: string;
       balance: string;
     }>
@@ -1445,7 +1475,7 @@ export class MarketingService {
 
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
 
-    const [fundingByReceiver, spendByMediaBuyer, userRows] = await Promise.all([
+    const [fundingByReceiver, fundingBySender, spendByMediaBuyer, userRows] = await Promise.all([
       this.db
         .select({
           receiverId: schema.marketingFunding.receiverId,
@@ -1459,6 +1489,19 @@ export class MarketingService {
           ),
         )
         .groupBy(schema.marketingFunding.receiverId),
+      this.db
+        .select({
+          senderId: schema.marketingFunding.senderId,
+          total: sum(schema.marketingFunding.amount),
+        })
+        .from(schema.marketingFunding)
+        .where(
+          and(
+            inArray(schema.marketingFunding.senderId, recipientUserIds),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
+          ),
+        )
+        .groupBy(schema.marketingFunding.senderId),
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -1485,6 +1528,10 @@ export class MarketingService {
     for (const r of fundingByReceiver) {
       receivedMap.set(r.receiverId, r.total ?? '0');
     }
+    const distributedMap = new Map<string, string>();
+    for (const r of fundingBySender) {
+      distributedMap.set(r.senderId, r.total ?? '0');
+    }
     const spendMap = new Map<string, string>();
     for (const s of spendByMediaBuyer) {
       spendMap.set(s.mediaBuyerId, s.total ?? '0');
@@ -1495,18 +1542,23 @@ export class MarketingService {
       name: string;
       role: string;
       totalReceived: string;
+      totalDistributed: string;
       totalSpend: string;
       balance: string;
     }> = [];
     for (const u of userRows) {
       const totalReceived = receivedMap.get(u.id) ?? '0';
+      const totalDistributed = distributedMap.get(u.id) ?? '0';
       const totalSpend = spendMap.get(u.id) ?? '0';
-      const balance = String(Math.max(0, Number(totalReceived) - Number(totalSpend)));
+      const balance = String(
+        Math.max(0, Number(totalReceived) - Number(totalDistributed) - Number(totalSpend)),
+      );
       result.push({
         userId: u.id,
         name: u.name,
         role: u.role,
         totalReceived,
+        totalDistributed,
         totalSpend,
         balance,
       });
@@ -1523,7 +1575,7 @@ export class MarketingService {
     userId: string,
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
-  ): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
+  ): Promise<{ totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> {
     const [target] = await this.db
       .select({ role: schema.users.role })
       .from(schema.users)
@@ -2646,13 +2698,14 @@ export class MarketingService {
   /** Head of Marketing / SuperAdmin / branch marketing supervisor (supervisee rows only). */
   async approveAdSpend(adSpendId: string, actor: SessionUser) {
     const approverId = actor.id;
+    // LEFT JOIN: new-flow rows have campaignId=NULL so innerJoin would miss them.
     const [joined] = await this.db
       .select({
         row: schema.adSpendLogs,
         campaignBranchId: schema.campaigns.branchId,
       })
       .from(schema.adSpendLogs)
-      .innerJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
+      .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
       .where(eq(schema.adSpendLogs.id, adSpendId))
       .limit(1);
 
@@ -2667,7 +2720,18 @@ export class MarketingService {
       });
     }
 
-    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, joined.campaignBranchId);
+    // For new-flow (daily) rows without a campaign, derive branch from the MB's primary branch.
+    let branchId = joined.campaignBranchId ?? null;
+    if (!branchId) {
+      const [mbRow] = await this.db
+        .select({ primaryBranchId: schema.users.primaryBranchId })
+        .from(schema.users)
+        .where(eq(schema.users.id, existing.mediaBuyerId))
+        .limit(1);
+      branchId = mbRow?.primaryBranchId ?? null;
+    }
+
+    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, branchId);
 
     const updated = await withActor(this.db, { id: approverId }, async (tx) => {
       const [row] = await tx
@@ -2700,7 +2764,7 @@ export class MarketingService {
         campaignBranchId: schema.campaigns.branchId,
       })
       .from(schema.adSpendLogs)
-      .innerJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
+      .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
       .where(eq(schema.adSpendLogs.id, adSpendId))
       .limit(1);
 
@@ -2715,7 +2779,17 @@ export class MarketingService {
       });
     }
 
-    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, joined.campaignBranchId);
+    let branchId = joined.campaignBranchId ?? null;
+    if (!branchId) {
+      const [mbRow] = await this.db
+        .select({ primaryBranchId: schema.users.primaryBranchId })
+        .from(schema.users)
+        .where(eq(schema.users.id, existing.mediaBuyerId))
+        .limit(1);
+      branchId = mbRow?.primaryBranchId ?? null;
+    }
+
+    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, branchId);
 
     const updated = await withActor(this.db, { id: rejectorId }, async (tx) => {
       const [row] = await tx
@@ -2757,10 +2831,19 @@ export class MarketingService {
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
     }
-    if (existing.status !== 'PENDING' && existing.status !== 'REJECTED') {
+
+    // New daily-flow rows (productId IS NULL) allow editing even when APPROVED
+    // (edit-after-lock → flips to PENDING for re-approval).
+    const isDailyFlow = existing.productId === null;
+    const allowedStatuses = isDailyFlow
+      ? ['PENDING', 'REJECTED', 'APPROVED']
+      : ['PENDING', 'REJECTED'];
+    if (!allowedStatuses.includes(existing.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'Only PENDING or REJECTED ad spend can be edited',
+        message: isDailyFlow
+          ? 'Cannot edit this ad spend record'
+          : 'Only PENDING or REJECTED ad spend can be edited',
       });
     }
 
@@ -2781,31 +2864,41 @@ export class MarketingService {
     const nextCampaignId = input.campaignId ?? existing.campaignId;
     const nextProductId = input.productId ?? existing.productId;
 
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    if (branchCampaignIds && branchCampaignIds.length === 0) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'No campaigns in your active branch' });
-    }
-    if (branchCampaignIds && !branchCampaignIds.includes(nextCampaignId)) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
-    }
+    // Skip campaign/branch validation for daily-flow rows (no campaign).
+    if (nextCampaignId) {
+      const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+      if (branchCampaignIds && branchCampaignIds.length === 0) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'No campaigns in your active branch' });
+      }
+      if (branchCampaignIds && !branchCampaignIds.includes(nextCampaignId)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+      }
 
-    if (branchId) {
-      const [campaign] = await this.db
-        .select({ id: schema.campaigns.id })
-        .from(schema.campaigns)
-        .where(
-          and(eq(schema.campaigns.id, nextCampaignId), eq(schema.campaigns.branchId, branchId)),
-        )
-        .limit(1);
-      if (!campaign) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Campaign is not in your active branch',
-        });
+      if (branchId) {
+        const [campaign] = await this.db
+          .select({ id: schema.campaigns.id })
+          .from(schema.campaigns)
+          .where(
+            and(eq(schema.campaigns.id, nextCampaignId), eq(schema.campaigns.branchId, branchId)),
+          )
+          .limit(1);
+        if (!campaign) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Campaign is not in your active branch',
+          });
+        }
       }
     }
 
-    const clearingRejection = existing.status === 'REJECTED';
+    const needsStatusReset = existing.status === 'REJECTED' || existing.status === 'APPROVED';
+
+    // For daily-flow updates, refresh the order count snapshot.
+    let orderCountSnapshot: number | undefined;
+    if (isDailyFlow) {
+      const spendDateStr = input.spendDate ?? existing.spendDate.toISOString().slice(0, 10);
+      orderCountSnapshot = await this.getOrderCountForDate(existing.mediaBuyerId, spendDateStr, branchId);
+    }
 
     return withActor(this.db, { id: actor.id }, async (tx) => {
       const [row] = await tx
@@ -2815,8 +2908,9 @@ export class MarketingService {
           campaignId: nextCampaignId,
           spendAmount: String(input.spendAmount),
           screenshotUrl: input.screenshotUrl,
-          spendDate: new Date(input.spendDate),
-          ...(clearingRejection
+          spendDate: input.spendDate ? new Date(input.spendDate) : existing.spendDate,
+          ...(orderCountSnapshot !== undefined ? { orderCountSnapshot } : {}),
+          ...(needsStatusReset
             ? {
                 status: 'PENDING' as const,
                 rejectionReason: null,
@@ -2838,6 +2932,212 @@ export class MarketingService {
       }
       return row;
     });
+  }
+
+  // ── Daily Ad Spend (Simplified Flow — 2026-05) ─────────────────────────────
+
+  /** Count non-DELETED orders created on a single Nigeria-timezone day for this MB. */
+  async getOrderCountForDate(
+    mediaBuyerId: string,
+    spendDate: string,
+    branchId?: string | null,
+  ): Promise<number> {
+    const dayStart = nigeriaDayStart(spendDate);
+    const dayEnd = nigeriaDayEnd(spendDate);
+    const conditions: SQL[] = [
+      eq(schema.orders.mediaBuyerId, mediaBuyerId),
+      sql`${schema.orders.status} != 'DELETED'`,
+      gte(schema.orders.createdAt, dayStart),
+      lte(schema.orders.createdAt, dayEnd),
+    ];
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    const [row] = await this.db.select({ c: count() }).from(schema.orders).where(and(...conditions));
+    return Number(row?.c ?? 0);
+  }
+
+  /**
+   * Returns order count + any existing daily-flow record for (MB, date).
+   * Used by the frontend form to show order count and detect upsert vs create.
+   */
+  async getOrderCountForAdSpendDate(
+    spendDate: string,
+    mediaBuyerId: string,
+    branchId?: string | null,
+  ): Promise<{
+    orderCount: number;
+    existingRecord: { id: string; spendAmount: string; status: string; orderCountSnapshot: number | null } | null;
+  }> {
+    const orderCount = await this.getOrderCountForDate(mediaBuyerId, spendDate, branchId);
+    const dayStart = nigeriaDayStart(spendDate);
+    const dayEnd = nigeriaDayEnd(spendDate);
+    const [existing] = await this.db
+      .select({
+        id: schema.adSpendLogs.id,
+        spendAmount: schema.adSpendLogs.spendAmount,
+        status: schema.adSpendLogs.status,
+        orderCountSnapshot: schema.adSpendLogs.orderCountSnapshot,
+      })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId),
+          gte(schema.adSpendLogs.spendDate, dayStart),
+          lte(schema.adSpendLogs.spendDate, dayEnd),
+          isNull(schema.adSpendLogs.productId),
+        ),
+      )
+      .limit(1);
+    return { orderCount, existingRecord: existing ?? null };
+  }
+
+  /**
+   * Simplified daily ad spend upsert.
+   * - No existing record: creates a new PENDING row.
+   * - Existing PENDING/REJECTED: updates spend + refreshes order count snapshot.
+   * - Existing APPROVED: flips to PENDING (edit-after-lock), updates spend + snapshot.
+   */
+  async logDailyAdSpend(
+    input: LogDailyAdSpendInput,
+    actor: SessionUser,
+    branchId?: string | null,
+  ) {
+    const mediaBuyerId = actor.id;
+    const orderCount = await this.getOrderCountForDate(mediaBuyerId, input.spendDate, branchId);
+
+    const dayStart = nigeriaDayStart(input.spendDate);
+    const dayEnd = nigeriaDayEnd(input.spendDate);
+    const [existing] = await this.db
+      .select()
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId),
+          gte(schema.adSpendLogs.spendDate, dayStart),
+          lte(schema.adSpendLogs.spendDate, dayEnd),
+          isNull(schema.adSpendLogs.productId),
+        ),
+      )
+      .limit(1);
+
+    const cpa = orderCount > 0 ? Number(input.spendAmount) / orderCount : null;
+
+    if (existing) {
+      const wasApproved = existing.status === 'APPROVED';
+      const wasRejected = existing.status === 'REJECTED';
+      const row = await withActor(this.db, actor, async (tx) => {
+        const [updated] = await tx
+          .update(schema.adSpendLogs)
+          .set({
+            spendAmount: sql`${String(input.spendAmount)}::numeric`,
+            orderCountSnapshot: orderCount,
+            ...(wasApproved || wasRejected
+              ? {
+                  status: 'PENDING' as const,
+                  approvedAt: null,
+                  approvedBy: null,
+                  rejectionReason: null,
+                  rejectedAt: null,
+                  rejectedBy: null,
+                }
+              : {}),
+          })
+          .where(eq(schema.adSpendLogs.id, existing.id))
+          .returning();
+        return updated;
+      });
+
+      if (wasApproved) {
+        void this.notifyAdSpendReApprovalNeeded(actor, input.spendDate, branchId);
+      }
+
+      return { record: row!, orderCount, cpa, isUpdate: true };
+    }
+
+    // Insert new record
+    const row = await withActor(this.db, actor, async (tx) => {
+      const [inserted] = await tx
+        .insert(schema.adSpendLogs)
+        .values({
+          mediaBuyerId,
+          productId: null,
+          campaignId: null,
+          spendAmount: sql`${String(input.spendAmount)}::numeric`,
+          screenshotUrl: null,
+          spendDate: new Date(input.spendDate),
+          platform: 'FACEBOOK',
+          orderCountSnapshot: orderCount,
+        })
+        .returning();
+      return inserted;
+    });
+
+    void this.notifyAdSpendSubmitted(actor, input.spendDate, input.spendAmount, branchId);
+
+    return { record: row!, orderCount, cpa, isUpdate: false };
+  }
+
+  /** Notify HoM + branch supervisors that an MB submitted new daily spend. */
+  private async notifyAdSpendSubmitted(
+    actor: SessionUser,
+    spendDate: string,
+    spendAmount: number,
+    branchId?: string | null,
+  ): Promise<void> {
+    const recipientIds = await this.getAdSpendApproverIds(actor.id, branchId);
+    const formatted = new Date(spendDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+    for (const userId of recipientIds) {
+      this.notifications.enqueueCreate({
+        userId,
+        type: 'marketing:ad_spend_submitted',
+        title: 'Ad spend logged',
+        body: `${actor.name ?? 'A media buyer'} logged ₦${Math.round(spendAmount).toLocaleString('en-NG')} spend for ${formatted}.`,
+        data: { mediaBuyerId: actor.id },
+      });
+    }
+  }
+
+  /** Notify HoM + branch supervisors that an approved spend was edited (needs re-approval). */
+  private async notifyAdSpendReApprovalNeeded(
+    actor: SessionUser,
+    spendDate: string,
+    branchId?: string | null,
+  ): Promise<void> {
+    const recipientIds = await this.getAdSpendApproverIds(actor.id, branchId);
+    const formatted = new Date(spendDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+    for (const userId of recipientIds) {
+      this.notifications.enqueueCreate({
+        userId,
+        type: 'marketing:ad_spend_submitted',
+        title: 'Ad spend edited — re-approval needed',
+        body: `${actor.name ?? 'A media buyer'} updated approved spend for ${formatted}. Review under Ads Expense.`,
+        data: { mediaBuyerId: actor.id },
+      });
+    }
+  }
+
+  /** Resolve approver user IDs for ad spend notifications (HoM + branch marketing supervisors). */
+  private async getAdSpendApproverIds(excludeUserId: string, branchId?: string | null): Promise<string[]> {
+    const ids = new Set<string>();
+    const [admins, heads] = await Promise.all([
+      this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+      this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.status, 'ACTIVE'),
+            eq(schema.users.role, 'HEAD_OF_MARKETING'),
+            ...(branchId ? [eq(schema.users.primaryBranchId, branchId)] : []),
+          ),
+        ),
+    ]);
+    for (const r of [...admins, ...heads]) {
+      if (r.id !== excludeUserId) ids.add(r.id);
+    }
+    return [...ids];
   }
 
   /**
@@ -2924,6 +3224,29 @@ export class MarketingService {
     });
   }
 
+  /**
+   * All distinct mediaBuyerId values present in ad_spend_logs, optionally
+   * scoped to a branch's campaigns (+ daily-flow NULL-campaign rows).
+   * Used to backfill the filter dropdown with MBs no longer in the branch.
+   */
+  async distinctAdSpendMediaBuyerIds(branchId?: string | null): Promise<string[]> {
+    const conditions: SQL[] = [];
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) return [];
+    if (branchCampaignIds) {
+      const branchOrDaily = or(
+        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+        isNull(schema.adSpendLogs.campaignId),
+      );
+      if (branchOrDaily) conditions.push(branchOrDaily);
+    }
+    const rows = await this.db
+      .selectDistinct({ mediaBuyerId: schema.adSpendLogs.mediaBuyerId })
+      .from(schema.adSpendLogs)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    return rows.map((r) => r.mediaBuyerId);
+  }
+
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {
     const buyer = alias(schema.users, 'ad_spend_list_buyer');
     const prod = alias(schema.products, 'ad_spend_list_product');
@@ -2966,7 +3289,12 @@ export class MarketingService {
       };
     }
     if (branchCampaignIds) {
-      conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+      // Daily-flow rows have campaignId=NULL — include them alongside branch-scoped legacy rows.
+      const branchOrDaily = or(
+        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+        isNull(schema.adSpendLogs.campaignId),
+      );
+      if (branchOrDaily) conditions.push(branchOrDaily);
     }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
@@ -3013,19 +3341,30 @@ export class MarketingService {
         .where(whereClause),
     ]);
 
-    const snapshotKeys = records.map((r) => ({
+    // Only enrich legacy rows (campaignId + productId set) with interval snapshots.
+    // Daily-flow rows (productId IS NULL) already carry orderCountSnapshot.
+    const legacyRecords = records.filter((r) => r.campaignId && r.productId);
+    const snapshotKeys = legacyRecords.map((r) => ({
       mediaBuyerId: r.mediaBuyerId,
-      campaignId: r.campaignId,
-      productId: r.productId,
+      campaignId: r.campaignId!,
+      productId: r.productId!,
       spendYmd: this.spendDateToYmd(r.spendDate),
       spendAmount: Number(r.spendAmount),
     }));
-    const snapshotMap = await this.batchAdSpendIntervalSnapshots(
-      snapshotKeys,
-      branchCampaignIds,
-      branchId,
-    );
+    const snapshotMap = legacyRecords.length > 0
+      ? await this.batchAdSpendIntervalSnapshots(snapshotKeys, branchCampaignIds, branchId)
+      : new Map<string, { orderCount: number; indicativeCpa: number | null }>();
     const enriched = records.map((r) => {
+      // Daily-flow rows use the frozen snapshot from the row itself.
+      if (!r.campaignId || !r.productId) {
+        const oc = r.orderCountSnapshot ?? 0;
+        const spend = Number(r.spendAmount);
+        return {
+          ...r,
+          orderCount: oc,
+          indicativeCpa: oc > 0 ? spend / oc : null,
+        };
+      }
       const spendYmd = this.spendDateToYmd(r.spendDate);
       const sk = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, spendYmd);
       const snap = snapshotMap.get(sk) ?? {
@@ -3096,7 +3435,11 @@ export class MarketingService {
       };
     }
     if (branchCampaignIds) {
-      conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+      const branchOrDaily = or(
+        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+        isNull(schema.adSpendLogs.campaignId),
+      );
+      if (branchOrDaily) conditions.push(branchOrDaily);
     }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
@@ -3245,6 +3588,7 @@ export class MarketingService {
       linesByGroup.set(gk, arr);
     }
 
+    // Only legacy rows (with campaignId + productId) need interval snapshot enrichment.
     const snapshotInputs: Array<{
       mediaBuyerId: string;
       campaignId: string;
@@ -3253,19 +3597,21 @@ export class MarketingService {
       spendAmount: number;
     }> = [];
     for (const row of lineRows) {
-      snapshotInputs.push({
-        mediaBuyerId: row.mediaBuyerId,
-        campaignId: row.campaignId,
-        productId: row.productId,
-        spendYmd: this.spendDateToYmd(row.spendDate),
-        spendAmount: Number(row.spendAmount),
-      });
+      if (row.campaignId && row.productId) {
+        snapshotInputs.push({
+          mediaBuyerId: row.mediaBuyerId,
+          campaignId: row.campaignId,
+          productId: row.productId,
+          spendYmd: this.spendDateToYmd(row.spendDate),
+          spendAmount: Number(row.spendAmount),
+        });
+      }
     }
-    const snapshotMap = await this.batchAdSpendIntervalSnapshots(
+    const snapshotMap = snapshotInputs.length > 0 ? await this.batchAdSpendIntervalSnapshots(
       snapshotInputs,
       branchCampaignIds,
       branchId,
-    );
+    ) : new Map<string, { orderCount: number; indicativeCpa: number | null }>();
 
     // One grouped query for every (mediaBuyerId, UTC-day) pair on the page
     // instead of N COUNT round-trips. Keyed `${spendDay}::${mediaBuyerId}`.
@@ -3291,6 +3637,16 @@ export class MarketingService {
       const overallCpa = overallOrderCount > 0 ? totalAmt / overallOrderCount : null;
 
       const lines = rawLines.map((line) => {
+        // Daily-flow rows use frozen snapshot; legacy rows use interval calc.
+        if (!line.campaignId || !line.productId) {
+          const oc = (line as { orderCountSnapshot?: number | null }).orderCountSnapshot ?? 0;
+          const spend = Number(line.spendAmount);
+          return {
+            ...line,
+            orderCount: oc,
+            indicativeCpa: oc > 0 ? spend / oc : null,
+          } as typeof line & { orderCount: number; indicativeCpa: number | null };
+        }
         const spendYmd = this.spendDateToYmd(line.spendDate);
         const sk = this.adSpendLineSnapshotKey(
           line.mediaBuyerId,
@@ -3370,7 +3726,11 @@ export class MarketingService {
       return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     }
     if (branchCampaignIds) {
-      conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+      const branchOrDaily = or(
+        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+        isNull(schema.adSpendLogs.campaignId),
+      );
+      if (branchOrDaily) conditions.push(branchOrDaily);
     }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
@@ -3431,10 +3791,16 @@ export class MarketingService {
     const spendConditions: Parameters<typeof and>[0][] = [
       eq(schema.adSpendLogs.status, 'APPROVED'),
     ];
+    // Same scope but for PENDING spend (stat strip breakdown).
+    const pendingSpendConditions: Parameters<typeof and>[0][] = [
+      eq(schema.adSpendLogs.status, 'PENDING'),
+    ];
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return {
         totalSpend: 0,
+        pendingSpend: 0,
+        approvedSpend: 0,
         totalOrders: 0,
         deliveredOrders: 0,
         deliveredRevenue: 0,
@@ -3445,20 +3811,35 @@ export class MarketingService {
         deliveryRate: 0,
       };
     }
-    if (mediaBuyerId) spendConditions.push(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
-    if (branchCampaignIds)
-      spendConditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    // Helper: push the same scope condition into both spend arrays.
+    const pushSpendScope = (cond: Parameters<typeof and>[0]) => {
+      spendConditions.push(cond);
+      pendingSpendConditions.push(cond);
+    };
+    if (mediaBuyerId) pushSpendScope(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
+    if (branchCampaignIds) {
+      const branchOrDailySpend = or(
+        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+        isNull(schema.adSpendLogs.campaignId),
+      );
+      if (branchOrDailySpend) pushSpendScope(branchOrDailySpend);
+    }
     if (
       supervisorScope &&
       !mediaBuyerId &&
       supervisorScope.mediaBuyerIds &&
       supervisorScope.mediaBuyerIds.length > 0
     ) {
-      spendConditions.push(inArray(schema.adSpendLogs.mediaBuyerId, supervisorScope.mediaBuyerIds));
+      pushSpendScope(inArray(schema.adSpendLogs.mediaBuyerId, supervisorScope.mediaBuyerIds));
     }
-    if (periodStart) spendConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
-    if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
+    if (periodStart) {
+      pushSpendScope(gte(schema.adSpendLogs.spendDate, periodStart));
+    }
+    if (periodEnd) {
+      pushSpendScope(lte(schema.adSpendLogs.spendDate, periodEnd));
+    }
     const spendWhere = and(...spendConditions);
+    const pendingSpendWhere = and(...pendingSpendConditions);
 
     /** Same ownership semantics as `orders.list` / `getStatusCounts` (supervisor OR replaces single-ID filters). */
     const appendMetricsOrderScope = (conditions: Parameters<typeof and>[0][]) => {
@@ -3498,8 +3879,12 @@ export class MarketingService {
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
     appendMetricsOrderScope(deliveredConditions);
-    if (periodStart) deliveredConditions.push(gte(schema.orders.deliveredAt, periodStart));
-    if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
+    // Cohort semantics: count orders **created** in period that have since
+    // reached DELIVERED/REMITTED. Using `deliveredAt` here while
+    // `confirmedOrders` below uses `createdAt` produced delivery rates > 100%
+    // when orders from a prior period got delivered in the current one.
+    if (periodStart) deliveredConditions.push(gte(schema.orders.createdAt, periodStart));
+    if (periodEnd) deliveredConditions.push(lte(schema.orders.createdAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
 
     // Orders that CS have scheduled (reached CONFIRMED or beyond)
@@ -3525,6 +3910,7 @@ export class MarketingService {
 
     const [
       totalSpendRows,
+      pendingSpendRows,
       totalOrdersRows,
       deliveredOrdersRows,
       deliveredRevenueRows,
@@ -3534,6 +3920,10 @@ export class MarketingService {
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
         .from(schema.adSpendLogs)
         .where(spendWhere),
+      this.db
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(pendingSpendWhere),
       this.db.select({ count: count() }).from(schema.orders).where(orderWhere),
       this.db.select({ count: count() }).from(schema.orders).where(deliveredWhere),
       this.db
@@ -3543,7 +3933,9 @@ export class MarketingService {
       this.db.select({ count: count() }).from(schema.orders).where(confirmedWhere),
     ]);
 
-    const totalSpend = Number(totalSpendRows[0]?.total ?? 0);
+    const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
+    const pendingSpend = Number(pendingSpendRows[0]?.total ?? 0);
+    const totalSpend = approvedSpend + pendingSpend;
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
     const deliveredOrders = deliveredOrdersRows[0]?.count ?? 0;
     const deliveredRevenue = Number(deliveredRevenueRows[0]?.total ?? 0);
@@ -3552,17 +3944,17 @@ export class MarketingService {
 
     return {
       totalSpend,
+      pendingSpend,
+      approvedSpend,
       totalOrders,
       deliveredOrders,
       deliveredRevenue,
       confirmedOrders,
       confirmationRate,
-      cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
-      trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
-      // DR = delivered / confirmed (same definition as CS team page).
-      // `deliveredOrders` counts by `deliveredAt` while `confirmedOrders`
-      // counts by `createdAt`, so using totalOrders as denominator produced
-      // rates > 100% when old orders got delivered in the current period.
+      cpa: totalOrders > 0 ? approvedSpend / totalOrders : 0,
+      trueRoas: approvedSpend > 0 ? deliveredRevenue / approvedSpend : 0,
+      // DR = delivered cohort / confirmed cohort — both counts now filter by
+      // `createdAt` so the rate is always ≤ 100% (no cross-period leakage).
       deliveryRate: confirmedOrders > 0 ? (deliveredOrders / confirmedOrders) * 100 : 0,
     };
   }
@@ -3666,7 +4058,11 @@ export class MarketingService {
       inArray(schema.adSpendLogs.mediaBuyerId, buyerIds),
     ];
     if (branchCampaignIds) {
-      spendConditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+      const branchOrDailySpend = or(
+        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+        isNull(schema.adSpendLogs.campaignId),
+      );
+      if (branchOrDailySpend) spendConditions.push(branchOrDailySpend);
     }
     if (periodStart) spendConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
     if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
@@ -3675,12 +4071,11 @@ export class MarketingService {
     // expression returns `SQL` not `SQL | undefined`, but `and(...empty)` returns
     // undefined — `?? sql\`true\`` keeps the FILTER tautologically valid when no
     // date scope is provided (period === 'all_time' with no explicit dates).
+    // Both confirmed and delivered counts filter by `createdAt` so DR stays
+    // ≤ 100% (no cross-period leakage when an old order delivers in this one).
     const inCreatedPeriod: SQL[] = [];
     if (periodStart) inCreatedPeriod.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) inCreatedPeriod.push(lte(schema.orders.createdAt, periodEnd));
-    const inDeliveredPeriod: SQL[] = [];
-    if (periodStart) inDeliveredPeriod.push(gte(schema.orders.deliveredAt, periodStart));
-    if (periodEnd) inDeliveredPeriod.push(lte(schema.orders.deliveredAt, periodEnd));
 
     const isDelivered = inArray(schema.orders.status, ['DELIVERED', 'REMITTED']);
     const isConfirmedOrBeyond = inArray(schema.orders.status, [
@@ -3694,8 +4089,8 @@ export class MarketingService {
         ? (and(isConfirmedOrBeyond, ...inCreatedPeriod) ?? isConfirmedOrBeyond)
         : isConfirmedOrBeyond;
     const deliveredFilter =
-      inDeliveredPeriod.length > 0
-        ? (and(isDelivered, ...inDeliveredPeriod) ?? isDelivered)
+      inCreatedPeriod.length > 0
+        ? (and(isDelivered, ...inCreatedPeriod) ?? isDelivered)
         : isDelivered;
 
     const [spendRows, orderRows] = await Promise.all([

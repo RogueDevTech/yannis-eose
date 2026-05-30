@@ -320,7 +320,12 @@ export function UserDetailPage({
     | {
         ok: true;
         marketingMetrics: UserMarketingMetrics | null;
-        fundingBalance: { totalReceived: string; totalSpend: string; balance: string } | null;
+        fundingBalance: {
+          totalReceived: string;
+          totalDistributed: string;
+          totalSpend: string;
+          balance: string;
+        } | null;
       }
     | { ok: false; error?: string }
   >();

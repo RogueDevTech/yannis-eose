@@ -18,6 +18,7 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
     name: u.name,
     role: u.role,
     totalReceived: '0',
+    totalDistributed: '0',
     totalSpend: '0',
     balance: '0',
   }));

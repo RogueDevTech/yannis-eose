@@ -86,13 +86,13 @@ export function SuperAdminDashboardLoadingShell({
         </div>
       </div>
 
-      {/* Key Metrics */}
+      {/* Marketing Spend */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Key Metrics
+          Marketing Spend
         </h2>
-        <div className="card p-3 grid grid-cols-2 md:grid-cols-5 gap-2">
-          {['Ad Spend', 'Order Count', 'CPA', 'CR', 'DR'].map((label) => (
+        <div className="card p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+          {['Total Ad Spend', 'Total Orders', 'Cost Per Acquisition'].map((label) => (
             <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
               <p className="text-mini font-medium text-app-fg-muted">{label}</p>
               <p className="mt-1">
@@ -108,11 +108,13 @@ export function SuperAdminDashboardLoadingShell({
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue Generated
         </h2>
-        <div className="card px-4 py-2">
-          {['Today', 'This Week', 'This Month'].map((label) => (
-            <div key={label} className="flex items-center justify-between py-2">
-              <span className="text-sm text-app-fg-muted">{label}</span>
-              <StatValuePulse />
+        <div className="card p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+          {["Today's Revenue", "This Week's Revenue", "This Month's Revenue", 'Active Staff'].map((label) => (
+            <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
+              <p className="text-mini font-medium text-app-fg-muted">{label}</p>
+              <p className="mt-1">
+                <StatValuePulse />
+              </p>
             </div>
           ))}
         </div>

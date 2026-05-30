@@ -71,6 +71,8 @@ export function parseAdSpendStatusCounts(res: { ok: boolean; data: unknown }): A
 
 const emptyMetrics = (): Metrics => ({
   totalSpend: 0,
+  pendingSpend: 0,
+  approvedSpend: 0,
   totalOrders: 0,
   deliveredOrders: 0,
   deliveredRevenue: 0,
@@ -118,13 +120,20 @@ export function parseFundingDirectionSummary(res: { ok: boolean; data: unknown }
   return data ?? emptyDirectionSummary();
 }
 
-/** COMPLETED funding received minus APPROVED ad spend (same as `marketing.getFundingBalance`). */
+/** Received − distributed − APPROVED ad spend (same as `marketing.getFundingBalance`). */
 export function parseFundingBalance(res: { ok: boolean; data: unknown }):
-  | { totalReceived: string; totalSpend: string; balance: string }
+  | { totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }
   | undefined {
   if (!res.ok) return undefined;
   const data = (res.data as {
-    result?: { data?: { totalReceived: string; totalSpend: string; balance: string } };
+    result?: {
+      data?: {
+        totalReceived: string;
+        totalDistributed: string;
+        totalSpend: string;
+        balance: string;
+      };
+    };
   })?.result?.data;
   return data ?? undefined;
 }
@@ -626,6 +635,40 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to reject ad spend') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'logDailySpend') {
+    const spendDate = formData.get('spendDate')?.toString() ?? '';
+    const spendAmount = formData.get('spendAmount')?.toString() ?? '';
+    if (!spendDate || !spendAmount) {
+      return json({ error: 'Date and spend amount are required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.logDailySpend', {
+      method: 'POST',
+      cookie,
+      body: { spendDate, spendAmount: Number(spendAmount) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to log daily spend') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateDailySpend') {
+    const adSpendId = formData.get('adSpendId')?.toString() ?? '';
+    const spendAmount = formData.get('spendAmount')?.toString() ?? '';
+    if (!adSpendId || !spendAmount) {
+      return json({ error: 'Record ID and spend amount are required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.updateDailySpend', {
+      method: 'POST',
+      cookie,
+      body: { adSpendId, spendAmount: Number(spendAmount) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update daily spend') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

@@ -72,8 +72,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     role === 'HEAD_OF_MARKETING' ||
     (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
   const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
-  // For supervisors + HoM, also fetch personal-only metrics (scoped to own mediaBuyerId)
-  const personalMetricsInput = isSupervisor
+  // For MB-supervisors, fetch personal-only metrics (scoped to own mediaBuyerId).
+  // HoM is NOT a media buyer — their "My Performance" is the branch-wide view (same as team metrics).
+  const isActualMbSupervisor =
+    role !== 'HEAD_OF_MARKETING' &&
+    (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
+  const personalMetricsInput = isActualMbSupervisor
     ? JSON.stringify({ startDate, endDate, mediaBuyerId: user.id, personalOnly: true })
     : null;
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });

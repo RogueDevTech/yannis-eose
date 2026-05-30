@@ -31,6 +31,8 @@ import {
   createCampaignProcedureSchema,
   updateCampaignSchema,
   listCampaignsSchema,
+  logDailyAdSpendWithBranchSchema,
+  updateDailyAdSpendSchema,
   type ListFundingInput,
   type ListFundingRequestsInput,
 } from '@yannis/shared';
@@ -529,6 +531,46 @@ export const marketingRouter = router({
       const { branchId, ...adSpendInput } = input;
       return getMarketingService().updateAdSpend(
         adSpendInput,
+        {
+          id: ctx.user.id,
+          role: ctx.user.role,
+          permissions: ctx.user.permissions ?? [],
+        },
+        branchId ?? ctx.currentBranchId,
+      );
+    }),
+
+  // ── Daily Ad Spend (Simplified Flow — 2026-05) ──────────────────────
+  logDailySpend: permissionProcedure('marketing.adSpend')
+    .meta({ branchScopedMutation: true })
+    .input(logDailyAdSpendWithBranchSchema)
+    .mutation(async ({ input, ctx }) => {
+      const { branchId, ...spendInput } = input;
+      return getMarketingService().logDailyAdSpend(
+        spendInput,
+        ctx.user,
+        branchId ?? ctx.currentBranchId,
+      );
+    }),
+
+  orderCountForDate: permissionProcedure('marketing.adSpend')
+    .input(z.object({ spendDate: z.string().date() }))
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getOrderCountForAdSpendDate(
+        input.spendDate,
+        ctx.user.id,
+        ctx.currentBranchId,
+      );
+    }),
+
+  updateDailySpend: permissionProcedure('marketing.adSpend')
+    .meta({ branchScopedMutation: true })
+    .input(updateDailyAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId, ...spendInput } = input;
+      // Reuse updateAdSpend — it handles PENDING/REJECTED/APPROVED status transitions.
+      return getMarketingService().updateAdSpend(
+        { adSpendId: spendInput.adSpendId, spendAmount: spendInput.spendAmount },
         {
           id: ctx.user.id,
           role: ctx.user.role,
@@ -1294,7 +1336,7 @@ export const marketingRouter = router({
           ? campaignsScope.mediaBuyerIds
           : null;
 
-      const [adSpendStatusCounts, campaigns, buyersResult] = await Promise.all([
+      const [adSpendStatusCounts, campaigns, buyersResult, teamsRaw] = await Promise.all([
         getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
         // Forms are global — never branch-scoped.
         getMarketingService().listCampaigns(campaignsScope, null),
@@ -1317,6 +1359,10 @@ export const marketingRouter = router({
                 branchId,
               )
           : Promise.resolve(null),
+        // Marketing teams for the team filter (HoM / admin / supervisor only).
+        branchId && !isMediaBuyer
+          ? getBranchTeamsService().listTeamsWithMembers(branchId).catch(() => [])
+          : Promise.resolve([]),
       ]);
 
       const canApproveAdSpend =
@@ -1324,15 +1370,41 @@ export const marketingRouter = router({
         callerPerms.includes('marketing.adSpend.approve') ||
         (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId);
 
+      // Marketing teams with their MB member IDs — drives the Team filter dropdown.
+      const marketingTeams = (teamsRaw ?? [])
+        .filter((t) => t.department === 'MARKETING')
+        .map((t) => ({
+          id: t.id,
+          name: t.name ?? 'Unnamed team',
+          memberIds: t.members.map((m) => m.userId),
+        }));
+
+      // The branch-scoped users.list may miss MBs who were removed from the
+      // branch but still have ad-spend records (or daily-flow rows with
+      // campaignId=NULL). Merge any extra MB IDs actually present in ad_spend_logs
+      // so the filter dropdown always lets you reach every row in the list.
+      let mediaBuyersForFilter = buyersResult
+        ? (buyersResult.users ?? []).map((u) => ({ id: u.id, name: u.name }))
+        : [];
+
+      if (canSeeBuyerPicklist && !supervisorBuyerIds) {
+        const knownIds = new Set(mediaBuyersForFilter.map((b) => b.id));
+        const extraBuyerIds = await getMarketingService().distinctAdSpendMediaBuyerIds(branchId);
+        const missingIds = extraBuyerIds.filter((id) => !knownIds.has(id));
+        if (missingIds.length > 0) {
+          const extraUsers = await getUsersService().listByIds(missingIds);
+          mediaBuyersForFilter = [
+            ...mediaBuyersForFilter,
+            ...extraUsers.map((u) => ({ id: u.id, name: u.name })),
+          ];
+        }
+      }
+
       return {
         adSpendStatusCounts,
-        // Mirror the full Campaign shape the page currently parses out of
-        // `marketing.listCampaigns` — id/name/status, plus productIds for the
-        // Add Expense auto-fill flow.
         campaigns: campaigns.campaigns ?? [],
-        mediaBuyersForFilter: buyersResult
-          ? (buyersResult.users ?? []).map((u) => ({ id: u.id, name: u.name }))
-          : [],
+        mediaBuyersForFilter,
+        marketingTeams,
         canApproveAdSpend,
       };
     }),

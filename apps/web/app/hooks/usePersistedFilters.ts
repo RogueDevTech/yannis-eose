@@ -43,8 +43,12 @@ const STORAGE_PREFIX = 'yannis:filters:';
  * - `search` is never persisted (too transient).
  * - Clearing all filters also clears localStorage for the page.
  */
-export function usePersistedFilters(pageKey: string): void {
+export function usePersistedFilters(
+  pageKey: string,
+  opts?: { exclude?: string[] },
+): void {
   const [searchParams, setSearchParams] = useSearchParams();
+  const excludeSet = opts?.exclude ? new Set(opts.exclude) : null;
 
   // On mount: restore filters from localStorage when URL has no filter params.
   useEffect(() => {
@@ -62,7 +66,7 @@ export function usePersistedFilters(pageKey: string): void {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         for (const [key, value] of Object.entries(saved)) {
-          if (PERSISTABLE_PARAMS.has(key) && value) {
+          if (PERSISTABLE_PARAMS.has(key) && value && !excludeSet?.has(key)) {
             next.set(key, value);
           }
         }
@@ -80,6 +84,7 @@ export function usePersistedFilters(pageKey: string): void {
   useEffect(() => {
     const toSave: Record<string, string> = {};
     for (const key of PERSISTABLE_PARAMS) {
+      if (excludeSet?.has(key)) continue;
       const value = searchParams.get(key);
       if (value) toSave[key] = value;
     }

@@ -246,12 +246,42 @@ export function PermissionRequestsPage({
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
-        render: (req) => (
-          <CompactTableActionButton onClick={() => setViewing(req)}>View</CompactTableActionButton>
-        ),
+        render: (req) => {
+          if (req.status !== 'PENDING') {
+            return <CompactTableActionButton onClick={() => setViewing(req)}>View</CompactTableActionButton>;
+          }
+          const mayApprove =
+            (req.type === 'PRODUCT_ARCHIVE' && canApproveProductArchive) ||
+            ((req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') && canApproveOrderLinePriceChange) ||
+            (req.type !== 'PRODUCT_ARCHIVE' && req.type !== 'ORDER_LINE_PRICE_CHANGE' && req.type !== 'ORDER_DELETION' && canApprove);
+          const mayReject =
+            mayApprove ||
+            ((req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') && viewerId !== '' && viewerId === req.requesterId);
+          return (
+            <div className="flex items-center gap-1.5">
+              <CompactTableActionButton onClick={() => setViewing(req)}>View</CompactTableActionButton>
+              {mayApprove && (
+                <CompactTableActionButton
+                  tone="success"
+                  onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
+                >
+                  Approve
+                </CompactTableActionButton>
+              )}
+              {mayReject && (
+                <CompactTableActionButton
+                  tone="danger"
+                  onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
+                >
+                  Reject
+                </CompactTableActionButton>
+              )}
+            </div>
+          );
+        },
       },
     ],
-    [],
+    [canApprove, canApproveProductArchive, canApproveOrderLinePriceChange, viewerId],
   );
 
   const emptyTitle =
@@ -292,7 +322,7 @@ export function PermissionRequestsPage({
 
       <Tabs value={activeStatus} onChange={handleStatusChange} tabs={statusTabItems} />
 
-      <div className="list-panel flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-y-auto overscroll-contain min-h-0">
+      <div className="list-panel">
         <CompactTable<PermissionRequest>
           withCard={false}
           className="min-h-0 min-w-0"

@@ -309,7 +309,8 @@ export const updateAdSpendSchema = z.object({
   adSpendId: z.string().uuid(),
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
   screenshotUrl: optionalAssetUrl,
-  spendDate: z.string().date(),
+  /** Optional for daily-flow updates (date is immutable on daily records). */
+  spendDate: z.string().date().optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
 });
@@ -335,6 +336,28 @@ export const campaignOrderTotalForBatchSchema = z.object({
   spendDate: z.string().date(),
 });
 export type CampaignOrderTotalForBatchInput = z.infer<typeof campaignOrderTotalForBatchSchema>;
+
+// ============================================
+// Daily Ad Spend (Simplified Flow — 2026-05)
+// ============================================
+
+/** MB logs spend for a single day. Order count is system-derived. */
+export const logDailyAdSpendSchema = z.object({
+  spendDate: z.string().date(),
+  spendAmount: z.coerce.number().min(0, 'Spend amount cannot be negative').multipleOf(0.01),
+});
+export type LogDailyAdSpendInput = z.infer<typeof logDailyAdSpendSchema>;
+
+export const logDailyAdSpendWithBranchSchema = logDailyAdSpendSchema.extend({
+  branchId: z.string().uuid().optional(),
+});
+
+/** MB updates spend amount on an existing daily record. */
+export const updateDailyAdSpendSchema = z.object({
+  adSpendId: z.string().uuid(),
+  spendAmount: z.coerce.number().min(0, 'Spend amount cannot be negative').multipleOf(0.01),
+});
+export type UpdateDailyAdSpendInput = z.infer<typeof updateDailyAdSpendSchema>;
 
 // ============================================
 // Offer Template Validators

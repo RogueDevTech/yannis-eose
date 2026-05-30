@@ -306,7 +306,6 @@ function CSDashboard({
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const csAssigned = counts['CS_ASSIGNED'] ?? 0;
   const engaged = counts['CS_ENGAGED'] ?? 0;
-  const confirmed = counts['CONFIRMED'] ?? 0;
   const pendingQueue = unprocessed + csAssigned;
 
   // Sales Closers get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
@@ -380,12 +379,13 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={6} />}>
         {(metrics) => (
           <OverviewStatStrip
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
+              { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
               {
                 label: 'Pending Queue',
                 value: pendingQueue.toString(),
@@ -393,7 +393,10 @@ function CSDashboard({
                   pendingQueue > 20 ? 'text-danger-600 dark:text-danger-400' : pendingQueue > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-success-600 dark:text-success-400',
               },
               { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
-              { label: 'Confirmed', value: confirmed.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+              // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live
+              // `counts['CONFIRMED']` only counts orders sitting in CONFIRMED right
+              // now — almost always 0 once they advance to AGENT_ASSIGNED → DELIVERED.
+              { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
               {
                 label: 'Delivered',
                 value: metrics.deliveredOrders.toString(),
@@ -542,11 +545,14 @@ function MarketingDashboard({
 }) {
   const isHeadOfMarketing = role === 'HEAD_OF_MARKETING';
   const showsTeamManagementCard = isHeadOfMarketing || isMarketingTeamSupervisor;
+  // Only MB-supervisors get the personal/team toggle — HoM IS the team, so their
+  // "personal" metrics are the branch-wide view (no separate funnel to show).
+  const showsPersonalToggle = isMarketingTeamSupervisor && !isHeadOfMarketing;
   const showsSupervisorLayout = isHeadOfMarketing || isMarketingTeamSupervisor;
-  const [viewTab, setViewTab] = useState<'personal' | 'team'>(showsSupervisorLayout ? 'team' : 'team');
+  const [viewTab, setViewTab] = useState<'personal' | 'team'>('team');
 
-  // HoM + Supervisor: show My Performance / Team toggle
-  if (showsSupervisorLayout) {
+  // MB-Supervisor with personal/team toggle
+  if (showsPersonalToggle) {
     return (
       <>
         <FilterPills
@@ -595,7 +601,41 @@ function MarketingDashboard({
     );
   }
 
-  // Non-supervisor MB / HoM: original layout
+  // HoM: single branch-wide view with team management card (no personal toggle)
+  if (isHeadOfMarketing) {
+    return (
+      <>
+        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+          {(metrics, abandonedCartCount) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />}
+        </DashboardMetricsSection>
+
+        <div className="card">
+          <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Branch-wide performance — metrics above aggregate across all media buyers in your branch.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
+            <Link to="/admin/marketing/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
+            <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding</Link>
+            <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
+            <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
+          </div>
+        </div>
+
+        <DashboardMetricsSection fallback={<DualCardSkeleton />}>
+          {(metrics) => (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} />
+              <QuickActionsCard role={role} unprocessed={0} />
+            </div>
+          )}
+        </DashboardMetricsSection>
+      </>
+    );
+  }
+
+  // Non-supervisor MB: original layout
   return (
     <>
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>

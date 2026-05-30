@@ -207,47 +207,72 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         );
       })()}
 
-      {/* ── Key Metrics + Revenue: single strip ── */}
+      {/* ── Marketing Spend ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Key Metrics
+          Marketing Spend
         </h2>
         <OverviewStatStrip
           mobileGrid
           tileClassName="!py-2.5"
           items={[
             {
-              label: 'Ad Spend',
+              label: 'Total Ad Spend',
               value: fmt(marketingSafe.totalSpend),
               valueClassName: 'text-danger-600 dark:text-danger-400',
+              title: 'Total approved ad spend in the selected period',
               to: '/admin/marketing/ad-spend',
             },
             {
-              label: 'Orders',
+              label: 'Total Orders',
               value: orderPipeline.total.toLocaleString(),
               valueClassName: 'text-app-fg',
+              title: 'All orders created in the selected period',
               to: '/admin/marketing/orders',
             },
             {
-              label: 'CPA',
+              label: 'Cost Per Acquisition',
               value: fmt(marketingSafe.cpa),
               valueClassName: cpaColorClass(marketingSafe.cpa),
+              title: 'Ad spend ÷ total orders',
               to: '/admin/marketing/ad-spend',
             },
+          ]}
+        />
+      </div>
+
+      {/* ── Revenue Generated ── */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Revenue Generated
+        </h2>
+        <OverviewStatStrip
+          mobileGrid
+          tileClassName="!py-2.5"
+          items={[
             {
-              label: 'Today',
+              label: "Today's Revenue",
               value: fmt(revenueByPeriod.today),
               valueClassName: revenueByPeriod.today > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              title: 'Revenue from delivered orders today',
             },
             {
-              label: 'This Week',
+              label: "This Week's Revenue",
               value: fmt(revenueByPeriod.thisWeek),
               valueClassName: revenueByPeriod.thisWeek > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              title: 'Revenue from delivered orders this week (Mon–Sun)',
             },
             {
-              label: 'This Month',
+              label: "This Month's Revenue",
               value: fmt(revenueByPeriod.thisMonth),
               valueClassName: revenueByPeriod.thisMonth > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              title: 'Revenue from delivered orders this month',
+            },
+            {
+              label: 'Active Staff',
+              value: activeStaffCount.toLocaleString(),
+              valueClassName: 'text-app-fg',
+              title: 'Total active staff across all branches',
             },
           ]}
         />

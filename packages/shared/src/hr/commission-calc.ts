@@ -9,6 +9,15 @@ export interface OrderAttributedCommissionMetrics {
   deliveredCount: number;
   totalOrders: number;
   returnedCount: number;
+  /**
+   * Orders created in the period that have since reached DELIVERED/REMITTED.
+   * Used as the rate numerator so `deliveryRate` is bounded by 100% — the
+   * pay-out count (`deliveredCount`, by `deliveredAt`) crosses period
+   * boundaries and would otherwise push the rate past 100%, spuriously
+   * tripping `deliveryRateThreshold` bonus gates.
+   * Optional for back-compat — when omitted, falls back to `deliveredCount`.
+   */
+  deliveredCohortCount?: number;
 }
 
 function marginalPerOrderCommissionDelivered(deliveredCount: number, tiers: NonNullable<CommissionRules['orderRateTiers']>): number {
@@ -43,7 +52,9 @@ export function computeOrderAttributedCommission(
   const deliveredCount = metrics.deliveredCount;
   const totalOrders = metrics.totalOrders;
   const returnedCount = metrics.returnedCount;
-  const deliveryRate = totalOrders > 0 ? (deliveredCount / totalOrders) * 100 : 0;
+  // Rate uses the cohort numerator so it's bounded by 100% — see field doc.
+  const deliveredForRate = metrics.deliveredCohortCount ?? deliveredCount;
+  const deliveryRate = totalOrders > 0 ? (deliveredForRate / totalOrders) * 100 : 0;
 
   let baseSalary = 0;
   if (rules.baseThreshold != null && rules.baseThreshold > 0) {

@@ -145,6 +145,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     distributingEntries,
     directionSummary,
     fundingBalance,
+    balancesList,
     users,
     activeBranchName,
     fundingRequestRecipients = [],
@@ -762,8 +763,23 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         summary={directionSummary}
         canDistribute={canDistribute}
         fundingBalance={fundingBalance}
+        balancesList={balancesList}
         pendingRequestsByMe={myRequests.statusCounts.PENDING}
         pendingRequestsToMe={mbRequests?.statusCounts.PENDING ?? 0}
+        activeSection={displaySection}
+        activeEntryType={searchParams.get('entryType') ?? undefined}
+        activeEntryStatus={searchParams.get('entryStatus') ?? undefined}
+        onFilter={({ section, entryType, entryStatus }) => {
+          const params = new URLSearchParams(searchParams);
+          params.set('section', section);
+          params.delete('page');
+          params.delete('search');
+          if (entryType) params.set('entryType', entryType);
+          else params.delete('entryType');
+          if (entryStatus) params.set('entryStatus', entryStatus);
+          else params.delete('entryStatus');
+          setSearchParams(params, { preventScrollReset: true });
+        }}
       />
 
       {/* Disputed surfacing — visible whenever the user has anything in DISPUTED status. */}
@@ -1449,17 +1465,46 @@ function FundingMetricsStrip({
   summary,
   canDistribute,
   fundingBalance,
+  balancesList,
   pendingRequestsByMe,
   pendingRequestsToMe,
+  onFilter,
+  activeSection,
+  activeEntryType,
+  activeEntryStatus,
 }: {
   summary: MarketingFundingLoaderData['directionSummary'];
   canDistribute: boolean;
   fundingBalance?: MarketingFundingLoaderData['fundingBalance'];
-  /** PENDING funding requests I sent upstream that haven't been resolved yet. */
+  balancesList?: MarketingFundingLoaderData['balancesList'];
   pendingRequestsByMe: number;
-  /** PENDING funding requests from my downstream waiting for my approval. Always 0 for non-distributors. */
   pendingRequestsToMe: number;
+  onFilter: (opts: { section: FundingSection; entryType?: string; entryStatus?: string }) => void;
+  activeSection?: FundingSection;
+  activeEntryType?: string;
+  activeEntryStatus?: string;
 }) {
+  const isActive = (section: FundingSection, entryType?: string, entryStatus?: string) =>
+    activeSection === section
+    && (entryType ? activeEntryType === entryType : !activeEntryType)
+    && (entryStatus ? activeEntryStatus === entryStatus : !activeEntryStatus);
+  // Aggregate balances when the viewer can see the full list (Admin/Finance/HoM).
+  // Ad Spend Balance = money parked with MBs not yet spent.
+  // Manager Balance = money parked with HoMs not yet distributed/spent.
+  // Overall Balance = total marketing capital still in the system.
+  const adSpendBalance = balancesList
+    ? balancesList
+        .filter((row) => row.role === 'MEDIA_BUYER')
+        .reduce((acc, row) => acc + Number(row.balance), 0)
+    : null;
+  const managerBalance = balancesList
+    ? balancesList
+        .filter((row) => row.role === 'HEAD_OF_MARKETING')
+        .reduce((acc, row) => acc + Number(row.balance), 0)
+    : null;
+  const overallBalance =
+    adSpendBalance != null && managerBalance != null ? adSpendBalance + managerBalance : null;
+
   const items = [
     ...(fundingBalance
       ? [
@@ -1467,8 +1512,27 @@ function FundingMetricsStrip({
             label: 'Current balance',
             value: <NairaPrice amount={Number(fundingBalance.balance)} />,
             valueClassName: 'text-success-600 dark:text-success-400',
-            title:
-              'COMPLETED funding received (all time) minus APPROVED ad spend on your campaigns. Can be lower than Total Received until you mark incoming transfers as Received.',
+            title: `Received ₦${Number(fundingBalance.totalReceived).toLocaleString()} − distributed ₦${Number(fundingBalance.totalDistributed).toLocaleString()} − ad spend ₦${Number(fundingBalance.totalSpend).toLocaleString()}.`,
+          },
+        ]
+      : []),
+    ...(adSpendBalance != null
+      ? [
+          {
+            label: 'Ad Spend Balance',
+            value: <NairaPrice amount={adSpendBalance} />,
+            valueClassName: 'text-app-fg',
+            title: 'Sum of unspent funding sitting with all Media Buyers (received − approved ad spend).',
+          },
+        ]
+      : []),
+    ...(overallBalance != null
+      ? [
+          {
+            label: 'Overall Balance',
+            value: <NairaPrice amount={overallBalance} />,
+            valueClassName: 'text-app-fg font-semibold',
+            title: 'Ad Spend Balance + Balance with Manager — total marketing capital still in the system.',
           },
         ]
       : []),
@@ -1476,7 +1540,9 @@ function FundingMetricsStrip({
       label: 'Total Received',
       value: <NairaPrice amount={Number(summary.totalReceived)} />,
       valueClassName: 'text-app-fg',
-      title: 'Sum of incoming ledger transfers (any status) in the selected period — same data as the Transfers tab',
+      title: 'Sum of incoming ledger transfers (any status) in the selected period',
+      onClick: () => onFilter({ section: 'received', entryType: 'transfer' }),
+      active: isActive('received', 'transfer'),
     },
     ...(canDistribute
       ? [
@@ -1485,6 +1551,8 @@ function FundingMetricsStrip({
             value: <NairaPrice amount={Number(summary.totalDistributed)} />,
             valueClassName: 'text-app-fg',
             title: 'Sum of transfers you have sent in the selected period',
+            onClick: () => onFilter({ section: 'distributing', entryType: 'transfer' }),
+            active: isActive('distributing', 'transfer'),
           },
         ]
       : []),
@@ -1496,10 +1564,9 @@ function FundingMetricsStrip({
           ? 'text-warning-600 dark:text-warning-400'
           : 'text-app-fg',
       title: 'Incoming transfers awaiting your confirmation',
+      onClick: () => onFilter({ section: 'received', entryType: 'transfer', entryStatus: 'SENT' }),
+      active: isActive('received', 'transfer', 'SENT'),
     },
-    // Pending request counts — for distributors we surface BOTH directions
-    // (asks waiting on me + my own asks waiting upstream); for MBs only their
-    // own outbound asks are relevant.
     ...(canDistribute
       ? [
           {
@@ -1510,6 +1577,8 @@ function FundingMetricsStrip({
                 ? 'text-warning-600 dark:text-warning-400'
                 : 'text-app-fg',
             title: 'Funding requests from your team waiting for your approval',
+            onClick: () => onFilter({ section: 'distributing', entryType: 'request', entryStatus: 'PENDING' }),
+            active: isActive('distributing', 'request', 'PENDING'),
           },
         ]
       : []),
@@ -1523,6 +1592,8 @@ function FundingMetricsStrip({
       title: canDistribute
         ? 'Your outbound funding requests (e.g. to Finance) still awaiting approval'
         : 'Your funding requests still awaiting approval from Head of Marketing',
+      onClick: () => onFilter({ section: 'received', entryType: 'request', entryStatus: 'PENDING' }),
+      active: isActive('received', 'request', 'PENDING'),
     },
     {
       label: 'Disputed',
@@ -1532,6 +1603,8 @@ function FundingMetricsStrip({
           ? 'text-danger-600 dark:text-danger-400'
           : 'text-app-fg',
       title: 'Transfers flagged as Not Received (you or counterparty)',
+      onClick: () => onFilter({ section: 'received', entryType: 'transfer', entryStatus: 'DISPUTED' }),
+      active: isActive('received', 'transfer', 'DISPUTED'),
     },
   ];
   return <OverviewStatStrip mobileGrid items={items} />;
