@@ -22,6 +22,7 @@ export interface FundingBalanceRow {
   name: string;
   role: string;
   totalReceived: string;
+  totalDistributed: string;
   totalSpend: string;
   balance: string;
   /** This month's confirmation rate (0–100), when loaded from team page with leaderboard */
@@ -145,6 +146,8 @@ export interface AdSpendStatusCounts {
 
 export interface Metrics {
   totalSpend: number;
+  pendingSpend: number;
+  approvedSpend: number;
   totalOrders: number;
   deliveredOrders: number;
   deliveredRevenue: number;
@@ -316,8 +319,13 @@ export interface MarketingFundingLoaderData {
 
   /** Top strip + supporting data */
   directionSummary: FundingDirectionSummary;
-  /** Media Buyer / HoM: running balance (COMPLETED transfers in minus APPROVED ad spend). */
-  fundingBalance?: { totalReceived: string; totalSpend: string; balance: string };
+  /** Media Buyer / HoM: running balance (received − distributed − APPROVED ad spend). */
+  fundingBalance?: {
+    totalReceived: string;
+    totalDistributed: string;
+    totalSpend: string;
+    balance: string;
+  };
   users: User[];
   balancesList?: FundingBalanceRow[];
   /**
@@ -409,6 +417,8 @@ export interface MarketingAdSpendLoaderData {
   mediaBuyerIdFilter?: string;
   /** Active MEDIA_BUYER users for the media-buyer filter dropdown (admin view only). */
   mediaBuyersForFilter?: Array<{ id: string; name: string }>;
+  /** Marketing teams for the team filter (HoM / admin). */
+  marketingTeams?: Array<{ id: string; name: string; memberIds: string[] }>;
   statusCounts?: AdSpendStatusCounts;
   campaigns?: Campaign[];
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */

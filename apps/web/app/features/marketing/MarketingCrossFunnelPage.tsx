@@ -17,7 +17,7 @@ import {
   CompactTable,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
-import { TableActionButton } from '~/components/ui/table-action-button';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -270,13 +270,27 @@ export function MarketingCrossFunnelPage({
       tight: true,
       mobileShowLabel: false,
       render: (row) => (
-          <TableActionButton
-            variant="primary"
-            onClick={() => setCompareRow(row)}
-          >
-            Compare
-          </TableActionButton>
-        ),
+        <TableRowActionsSheet
+          ariaLabel={`Actions for ${row.customerName}`}
+          sheetTitle={row.customerName}
+          actions={[
+            {
+              key: 'compare',
+              kind: 'button',
+              label: 'Compare',
+              onClick: () => setCompareRow(row),
+            },
+            ...(row.originalOrderId
+              ? [{
+                  key: 'view-order',
+                  kind: 'link' as const,
+                  label: 'View original order',
+                  to: orderDetailHref('/admin/orders', row.originalOrderId, 'marketing'),
+                }]
+              : []),
+          ]}
+        />
+      ),
     },
   ], []);
 
@@ -447,14 +461,15 @@ export function MarketingCrossFunnelPage({
             onClick={() => setCompareRow(row)}
             className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
           >
-            {/* Row 1: customer + order ID */}
             <div className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-sm font-medium text-app-fg">{row.customerName}</span>
+              <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+                {row.customerName}
+                <DuplicateTag row={row} />
+              </span>
               {row.originalOrderNumber && (
                 <OrderIdBadge id={row.originalOrderId ?? ''} orderNumber={row.originalOrderNumber} textClassName="text-sm font-medium text-app-fg" />
               )}
             </div>
-            {/* Row 2: status + tag + date */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 {row.originalOrderStatus ? (
@@ -462,22 +477,9 @@ export function MarketingCrossFunnelPage({
                 ) : (
                   <span className="text-xs text-app-fg-muted">—</span>
                 )}
-                <DuplicateTag row={row} />
+                <span className="text-xs text-app-fg-muted truncate">{row.productName ?? '—'}</span>
               </div>
               <span className="whitespace-nowrap text-xs text-app-fg-muted">{formatShortDate(row.attemptedAt)}</span>
-            </div>
-            {/* Row 3: phone + product as labeled pairs */}
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-              {row.customerPhone && (
-                <div>
-                  <span className="text-app-fg-muted">Phone</span>
-                  <p className="font-medium text-app-fg tabular-nums">{row.customerPhone}</p>
-                </div>
-              )}
-              <div>
-                <span className="text-app-fg-muted">Product</span>
-                <p className="font-medium text-app-fg">{row.productName ?? '—'}</p>
-              </div>
             </div>
           </button>
         )}
@@ -517,16 +519,18 @@ function CompareRow({
           {right}
         </td>
       </tr>
-      {/* Mobile: stacked — label, then duplicate value, then original value */}
+      {/* Mobile: column — label, then Old : value, New : value */}
       <tr className="md:hidden border-b border-app-border/50">
-        <td colSpan={3} className="py-2 px-1">
-          <div className="text-micro font-medium uppercase tracking-wider text-app-fg-muted mb-1">{label}</div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className={`text-sm rounded-md px-2 py-1 bg-danger-50/50 dark:bg-danger-900/10 ${match ? 'text-app-fg' : 'text-danger-600 dark:text-danger-400 font-medium'}`}>
-              {left}
+        <td colSpan={3} className="py-2.5 px-3">
+          <div className="text-micro font-bold uppercase tracking-wider text-app-fg-muted mb-1.5">{label}</div>
+          <div className="space-y-1">
+            <div className="flex items-baseline gap-2">
+              <span className="text-micro font-semibold uppercase text-danger-500 dark:text-danger-400 w-12 shrink-0">Old</span>
+              <span className={`text-sm ${match ? 'text-app-fg' : 'text-danger-600 dark:text-danger-400 font-medium'}`}>{left}</span>
             </div>
-            <div className={`text-sm rounded-md px-2 py-1 bg-success-50/50 dark:bg-success-900/10 ${match ? 'text-app-fg' : 'text-success-600 dark:text-success-400 font-medium'}`}>
-              {right}
+            <div className="flex items-baseline gap-2">
+              <span className="text-micro font-semibold uppercase text-success-500 dark:text-success-400 w-12 shrink-0">New</span>
+              <span className={`text-sm ${match ? 'text-app-fg' : 'text-success-600 dark:text-success-400 font-medium'}`}>{right}</span>
             </div>
           </div>
         </td>
@@ -595,15 +599,8 @@ function DuplicateCompareOverlay({
                 Original order
               </th>
             </tr>
-            {/* Mobile header */}
-            <tr className="md:hidden border-b border-app-border bg-app-hover/50">
-              <th colSpan={3} className="py-2.5 px-3">
-                <div className="grid grid-cols-2 gap-2 text-micro font-bold uppercase tracking-wider">
-                  <span className="text-danger-600 dark:text-danger-400">Duplicate</span>
-                  <span className="text-success-600 dark:text-success-400">Original</span>
-                </div>
-              </th>
-            </tr>
+            {/* Mobile header — hidden; labels are inline per row */}
+            <tr className="md:hidden sr-only"><th colSpan={3} /></tr>
           </thead>
           <tbody className="divide-y divide-app-border/50">
             {row.originalOrderId && row.originalOrderNumber && (

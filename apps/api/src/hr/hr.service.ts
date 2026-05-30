@@ -190,14 +190,18 @@ export class HrService {
     const payouts = [];
 
     for (const member of staff) {
-      // Get delivered orders in this period — check BOTH Sales closer and Media Buyer attribution
-      // Commission is based on DELIVERED_AT timestamp, NOT CREATED_AT
+      // Pay count by `deliveredAt` — staff get credited in the period their
+      // delivery actually closed, so cross-period orders aren't lost.
+      // Include REMITTED — once the accountant marks remittance received, the
+      // status flips DELIVERED→REMITTED but the delivery still happened. If
+      // payroll runs after that flip, status='DELIVERED' alone would silently
+      // drop the order from the pay count and lose the agent's commission.
       const deliveredRows = await tx
         .select({ count: count(), revenue: sum(schema.orders.totalAmount) })
         .from(schema.orders)
         .where(
           and(
-            eq(schema.orders.status, 'DELIVERED'),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
             gte(schema.orders.deliveredAt, periodStart),
             lte(schema.orders.deliveredAt, periodEnd),
             or(
@@ -207,9 +211,8 @@ export class HrService {
           ),
         );
 
-      // Get total orders for delivery rate calculation — DELETED orders are
-      // editorial removals (test/fake/mistake), not real workload, so they
-      // never enter a rate denominator.
+      // DELETED orders are editorial removals (test/fake/mistake), not real
+      // workload, so they never enter a rate denominator.
       const totalOrdersRows = await tx
         .select({ count: count() })
         .from(schema.orders)
@@ -225,7 +228,23 @@ export class HrService {
           ),
         );
 
-      // Get returned orders for penalty calculation
+      // Cohort delivered (created in period AND now delivered) — feeds the
+      // bonus-threshold rate so it can't exceed 100% on cross-period leakage.
+      const deliveredCohortRows = await tx
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            gte(schema.orders.createdAt, periodStart),
+            lte(schema.orders.createdAt, periodEnd),
+            or(
+              eq(schema.orders.assignedCsId, member.id),
+              eq(schema.orders.mediaBuyerId, member.id),
+            ),
+          ),
+        );
+
       const returnedRows = await tx
         .select({ count: count() })
         .from(schema.orders)
@@ -243,6 +262,7 @@ export class HrService {
 
       const deliveredCount = deliveredRows[0]?.count ?? 0;
       const totalOrders = totalOrdersRows[0]?.count ?? 0;
+      const deliveredCohortCount = deliveredCohortRows[0]?.count ?? 0;
       const returnedCount = returnedRows[0]?.count ?? 0;
 
       const plan = await resolveApplicableCommissionPlan(tx, {
@@ -257,6 +277,7 @@ export class HrService {
         deliveredCount,
         totalOrders,
         returnedCount,
+        deliveredCohortCount,
       });
 
       // Get pending deductions (clawbacks from previous returns)
@@ -538,12 +559,17 @@ export class HrService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found' });
     }
 
+    // Commission pay is by `deliveredAt` (pay the agent in the period the
+    // delivery actually happened) — never switch this to `createdAt` or
+    // commissions on cross-period orders disappear from every payroll.
+    // Include REMITTED so commission isn't lost when the accountant marks
+    // remittance received before payroll runs (DELIVERED→REMITTED flip).
     const deliveredRows = await this.db
       .select({ count: count(), revenue: sum(schema.orders.totalAmount) })
       .from(schema.orders)
       .where(
         and(
-          eq(schema.orders.status, 'DELIVERED'),
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
           gte(schema.orders.deliveredAt, start),
           lte(schema.orders.deliveredAt, end),
           or(
@@ -559,6 +585,24 @@ export class HrService {
       .where(
         and(
           sql`${schema.orders.status} <> 'DELETED'`,
+          gte(schema.orders.createdAt, start),
+          lte(schema.orders.createdAt, end),
+          or(
+            eq(schema.orders.assignedCsId, staffId),
+            eq(schema.orders.mediaBuyerId, staffId),
+          ),
+        ),
+      );
+
+    // Cohort delivered (orders created in period AND now delivered) — drives
+    // the bonus-threshold rate so it's bounded by 100%. Decoupled from the
+    // pay count above so a cross-period delivery still pays out.
+    const deliveredCohortRows = await this.db
+      .select({ count: count() })
+      .from(schema.orders)
+      .where(
+        and(
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
           gte(schema.orders.createdAt, start),
           lte(schema.orders.createdAt, end),
           or(
@@ -585,6 +629,7 @@ export class HrService {
 
     const deliveredCount = deliveredRows[0]?.count ?? 0;
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
+    const deliveredCohortCount = deliveredCohortRows[0]?.count ?? 0;
     const returnedCount = returnedRows[0]?.count ?? 0;
 
     const plan = await resolveApplicableCommissionPlan(this.db, {
@@ -603,6 +648,7 @@ export class HrService {
       deliveredCount,
       totalOrders,
       returnedCount,
+      deliveredCohortCount,
     });
 
     const pendingClawbacks = await this.db

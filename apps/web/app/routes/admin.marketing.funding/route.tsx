@@ -131,8 +131,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   type BundleData = {
     directionSummary: unknown;
     users: Array<{ id: string; name: string; email: string; role: string }>;
-    balancesList: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }> | null;
-    fundingBalance: { totalReceived: string; totalSpend: string; balance: string } | null;
+    balancesList: Array<{ userId: string; name: string; role: string; totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> | null;
+    fundingBalance: { totalReceived: string; totalDistributed: string; totalSpend: string; balance: string } | null;
     branches: Array<{ id: string; name: string }>;
     fundingRequestRecipients: Array<{
       id: string;

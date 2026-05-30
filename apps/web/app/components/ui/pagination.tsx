@@ -178,7 +178,7 @@ export function Pagination({
         to={buildHref(p)}
         className={btnClass}
         aria-current={isActive ? 'page' : undefined}
-        prefetch="intent"
+        prefetch="none"
       >
         {content}
       </Link>
@@ -214,7 +214,7 @@ export function Pagination({
       <Link
         to={buildHref(p)}
         className={btnClass}
-        prefetch="intent"
+        prefetch="none"
       >
         {label}
       </Link>
@@ -413,7 +413,7 @@ function PageJumpTrigger({
                     key={p}
                     to={buildHref(p)}
                     className={cls}
-                    prefetch="intent"
+                    prefetch="none"
                     onClick={() => {
                       onSelect(p);
                       setOpen(false);

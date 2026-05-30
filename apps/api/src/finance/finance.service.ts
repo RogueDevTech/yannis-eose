@@ -307,7 +307,10 @@ export class FinanceService {
       // AND ad spend (logs by MB) so the report shows that buyer's funnel slice.
       orderConditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
     }
-    orderConditions.push(eq(schema.orders.status, 'DELIVERED'));
+    // REMITTED is post-delivery — same physical delivery, just remittance
+    // received. Excluding it dropped revenue for any order the accountant
+    // had already marked received within the window.
+    orderConditions.push(inArray(schema.orders.status, ['DELIVERED', 'REMITTED']));
     const orderWhere = and(...orderConditions);
 
     // ── 2. Ad spend date range (only APPROVED counts toward profit) ───────────────────────────
@@ -584,7 +587,7 @@ export class FinanceService {
 
     const adByProduct = new Map<string, number>();
     for (const r of adRows) {
-      adByProduct.set(r.productId, Number(r.total ?? 0));
+      if (r.productId) adByProduct.set(r.productId, Number(r.total ?? 0));
     }
 
     const revTotal = pools.revenue;
@@ -1196,7 +1199,7 @@ export class FinanceService {
         .where(
           and(
             inArray(schema.orderItems.productId, productIds),
-            eq(schema.orders.status, 'DELIVERED'),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
             gte(schema.orders.deliveredAt, ninetyDaysAgo),
           ),
         )

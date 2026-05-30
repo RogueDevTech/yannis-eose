@@ -19,11 +19,8 @@ export function getNotificationLink(notif: NotificationForLink): string | null {
 export function getNotificationAction(notif: NotificationForLink): { link: string; label: string } | null {
   const data = notif.data as Record<string, string> | null | undefined;
   if (data) {
-    if (data.orderId) return { link: `/admin/orders/${data.orderId}`, label: 'View order' };
-    if (data.transferId) return { link: '/admin/inventory', label: 'View transfer' };
-    if (data.productId) return { link: `/admin/products/${data.productId}`, label: 'View product' };
-    if (data.fundingId) return { link: '/admin/marketing/funding', label: 'View funding' };
-    if (data.payoutId) return { link: '/hr/payroll', label: 'View payroll' };
+    // Approval notifications with a requestId take priority over generic orderId links
+    // so HoCS/HoL land on the Permission Requests page, not the order detail.
     if (data.requestId) {
       if (notif.type === 'approval:email_change' && data.userId)
         return { link: `/hr/users/${data.userId}`, label: 'Review email change' };
@@ -33,6 +30,11 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
       if (notif.type === 'funding:approved') return { link: '/admin/marketing/funding', label: 'View receipt' };
       if (notif.type === 'funding:rejected') return { link: '/admin/marketing/funding', label: 'View funding' };
     }
+    if (data.orderId) return { link: `/admin/orders/${data.orderId}`, label: 'View order' };
+    if (data.transferId) return { link: '/admin/inventory', label: 'View transfer' };
+    if (data.productId) return { link: `/admin/products/${data.productId}`, label: 'View product' };
+    if (data.fundingId) return { link: '/admin/marketing/funding', label: 'View funding' };
+    if (data.payoutId) return { link: '/hr/payroll', label: 'View payroll' };
     if (data.approvalId) return { link: '/admin/finance/overview', label: 'View finance' };
     if (data.deliveryRemittanceId) {
       if (notif.type === 'delivery_remittance:sent') return { link: '/admin/finance/delivery-remittances', label: 'View delivery remittance' };

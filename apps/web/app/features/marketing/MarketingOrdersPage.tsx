@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { usePersistedFilters } from '~/hooks/usePersistedFilters';
@@ -208,6 +208,20 @@ export function MarketingOrdersPage({
 }: MarketingOrdersPageProps) {
   usePersistedFilters('marketing-orders');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
+
+  // On pagination-only loads (page > 1) the loader skips the secondary bundle
+  // to cut response time in half. Keep the previous secondary data so stats,
+  // charts, and filter picklists don't flash empty.
+  const secondaryRef = useRef(secondary);
+  const personalSecondaryRef = useRef(personalSecondary);
+  const isSecondaryEmpty = Object.keys(secondary.statusCounts).length === 0
+    && secondary.mediaBuyersForFilter.length === 0;
+  if (!isSecondaryEmpty) {
+    secondaryRef.current = secondary;
+    personalSecondaryRef.current = personalSecondary;
+  }
+  secondary = secondaryRef.current;
+  personalSecondary = personalSecondaryRef.current;
 
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   // Treat both the initial Suspense fallback AND any same-path loader refetch
@@ -524,13 +538,6 @@ export function MarketingOrdersPage({
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
           </div>
-          {showMediaBuyerColumn && order.mediaBuyerName && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className="font-semibold text-brand-600 dark:text-brand-400 truncate">
-                {order.mediaBuyerName}
-              </span>
-            </div>
-          )}
           <div className="flex items-center justify-between gap-2">
             {order.status === 'CART' ? (
               <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
@@ -1062,18 +1069,18 @@ export function MarketingOrdersPage({
                           }} />
                         )}
                         <FormSelect
-                          value={searchParams.get('orderSource') || ''}
+                          value={searchParams.get('orderSource') || 'ALL'}
                           onChange={(e) => {
                             setSearchParams((p) => {
                               const next = new URLSearchParams(p);
                               next.set('page', '1');
-                              if (e.target.value) next.set('orderSource', e.target.value);
+                              if (e.target.value && e.target.value !== 'ALL') next.set('orderSource', e.target.value);
                               else next.delete('orderSource');
                               return next;
                             });
                           }}
                           options={[
-                            { value: '', label: 'All sources' },
+                            { value: 'ALL', label: 'All sources' },
                             { value: 'edge-form', label: 'Online orders' },
                             { value: 'offline', label: 'Offline orders' },
                           ]}

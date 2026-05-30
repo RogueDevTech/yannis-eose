@@ -20,7 +20,7 @@ export const MV_PROFIT_SUMMARY = `
     COUNT(*)::integer AS order_count,
     DATE_TRUNC('day', delivered_at) AS delivery_date
   FROM orders
-  WHERE status = 'DELIVERED' AND delivered_at IS NOT NULL
+  WHERE status IN ('DELIVERED', 'REMITTED') AND delivered_at IS NOT NULL
   GROUP BY DATE_TRUNC('day', delivered_at)
   WITH DATA
 `;

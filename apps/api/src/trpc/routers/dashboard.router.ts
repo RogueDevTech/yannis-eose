@@ -440,7 +440,7 @@ export const dashboardRouter = router({
             0,
           ),
           confirmed: today['CONFIRMED'] ?? 0,
-          delivered: today['DELIVERED'] ?? 0,
+          delivered: (today['DELIVERED'] ?? 0) + (today['REMITTED'] ?? 0),
           cancelled: today['CANCELLED'] ?? 0,
         },
       },
@@ -448,7 +448,7 @@ export const dashboardRouter = router({
         unassigned: today['UNPROCESSED'] ?? 0,
         engaged: today['CS_ENGAGED'] ?? 0,
         confirmed: today['CONFIRMED'] ?? 0,
-        delivered: today['DELIVERED'] ?? 0,
+        delivered: (today['DELIVERED'] ?? 0) + (today['REMITTED'] ?? 0),
       },
       pendingApprovals,
     };

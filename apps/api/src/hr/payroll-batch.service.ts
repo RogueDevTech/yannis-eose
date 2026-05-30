@@ -480,12 +480,16 @@ export class PayrollBatchService {
     periodStart: Date,
     periodEnd: Date,
   ): Promise<Omit<PayoutRow, 'staffId'> | null> {
+    // Pay count by `deliveredAt` — staff get credited in the period their
+    // delivery actually closed, so cross-period orders aren't lost.
+    // Include REMITTED so commission isn't lost when the accountant marks
+    // remittance received before payroll runs (DELIVERED→REMITTED flip).
     const deliveredRows = await tx
       .select({ count: count() })
       .from(schema.orders)
       .where(
         and(
-          eq(schema.orders.status, 'DELIVERED'),
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
           gte(schema.orders.deliveredAt, periodStart),
           lte(schema.orders.deliveredAt, periodEnd),
           or(eq(schema.orders.assignedCsId, member.id), eq(schema.orders.mediaBuyerId, member.id)),
@@ -499,6 +503,19 @@ export class PayrollBatchService {
       .where(
         and(
           sql`${schema.orders.status} <> 'DELETED'`,
+          gte(schema.orders.createdAt, periodStart),
+          lte(schema.orders.createdAt, periodEnd),
+          or(eq(schema.orders.assignedCsId, member.id), eq(schema.orders.mediaBuyerId, member.id)),
+        ),
+      );
+    // Cohort delivered (created in period AND now delivered) — feeds the
+    // bonus-threshold rate so it can't exceed 100% on cross-period leakage.
+    const deliveredCohortRows = await tx
+      .select({ count: count() })
+      .from(schema.orders)
+      .where(
+        and(
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
           gte(schema.orders.createdAt, periodStart),
           lte(schema.orders.createdAt, periodEnd),
           or(eq(schema.orders.assignedCsId, member.id), eq(schema.orders.mediaBuyerId, member.id)),
@@ -518,6 +535,7 @@ export class PayrollBatchService {
 
     const deliveredCount = deliveredRows[0]?.count ?? 0;
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
+    const deliveredCohortCount = deliveredCohortRows[0]?.count ?? 0;
     const returnedCount = returnedRows[0]?.count ?? 0;
 
     const plan = await resolveApplicableCommissionPlan(tx, {
@@ -536,6 +554,7 @@ export class PayrollBatchService {
       deliveredCount,
       totalOrders,
       returnedCount,
+      deliveredCohortCount,
     });
 
     const pendingClawbackRows = await tx

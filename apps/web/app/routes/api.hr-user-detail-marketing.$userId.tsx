@@ -21,7 +21,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return secondaryCacheJson({
       ok: true as const,
       marketingMetrics: null as UserMarketingMetrics | null,
-      fundingBalance: null as { totalReceived: string; totalSpend: string; balance: string } | null,
+      fundingBalance: null as {
+        totalReceived: string;
+        totalDistributed: string;
+        totalSpend: string;
+        balance: string;
+      } | null,
     });
   }
 
@@ -46,10 +51,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const fundingBalance = fundingRes.ok
     ? (((
         fundingRes.data as {
-          result?: { data?: { totalReceived: string; totalSpend: string; balance: string } };
+          result?: {
+            data?: {
+              totalReceived: string;
+              totalDistributed: string;
+              totalSpend: string;
+              balance: string;
+            };
+          };
         }
       )?.result?.data ?? null) as {
         totalReceived: string;
+        totalDistributed: string;
         totalSpend: string;
         balance: string;
       } | null)
