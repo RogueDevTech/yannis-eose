@@ -46,21 +46,7 @@ import {
   TableCellTextPulse,
 } from '~/components/ui/deferred-skeletons';
 
-/** Floating dismiss badge at the top-right edge of a filter control. */
-function FilterDismiss({ onClear }: { onClear: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); onClear(); }}
-      className="absolute -top-1.5 -right-1.5 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-danger-500 text-white shadow-sm transition-colors hover:bg-danger-600 dark:bg-danger-600 dark:hover:bg-danger-500"
-      title="Clear filter"
-    >
-      <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-      </svg>
-    </button>
-  );
-}
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 
 const DEFERRED_PLACEHOLDER_ROW_COUNT = 10;
 const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(

@@ -27,7 +27,7 @@ import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -292,15 +292,6 @@ export function WarehousesPage({
     },
   ];
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('search')) n += 1;
-    const sb = searchParams.get('sortBy');
-    const sd = searchParams.get('sortDir');
-    if ((sb && sb !== 'createdAt') || (sd && sd !== 'desc')) n += 1;
-    return n;
-  }, [searchParams]);
-
   const updateWarehouseSort = (nextSortBy: 'createdAt' | 'name' | 'available', nextSortDir: 'asc' | 'desc') => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -336,42 +327,49 @@ export function WarehousesPage({
               <input type="hidden" name="page" value="1" />
             </Form>
             <div className="hidden md:inline-flex">
-              <SortMenu
-                value={{ sortBy, sortDir }}
-                onChange={(next) =>
-                  updateWarehouseSort(
-                    next.sortBy as 'createdAt' | 'name' | 'available',
-                    next.sortDir,
-                  )
-                }
-                defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
-                options={[
-                  {
-                    value: 'createdAt',
-                    label: 'Recently added',
-                    description: 'When the warehouse was created.',
-                    ascLabel: 'Oldest first',
-                    descLabel: 'Newest first',
-                    defaultDir: 'desc',
-                  },
-                  {
-                    value: 'name',
-                    label: 'Name',
-                    description: 'Alphabetical.',
-                    ascLabel: 'A → Z',
-                    descLabel: 'Z → A',
-                    defaultDir: 'asc',
-                  },
-                  {
-                    value: 'available',
-                    label: 'Available units',
-                    description: 'Stock count minus reserved units across the warehouse.',
-                    ascLabel: 'Lowest first',
-                    descLabel: 'Highest first',
-                    defaultDir: 'desc',
-                  },
-                ]}
-              />
+              <div className="relative">
+                {!sortIsDefault && (
+                  <FilterDismiss
+                    onClear={() => updateWarehouseSort('createdAt', 'desc')}
+                  />
+                )}
+                <SortMenu
+                  value={{ sortBy, sortDir }}
+                  onChange={(next) =>
+                    updateWarehouseSort(
+                      next.sortBy as 'createdAt' | 'name' | 'available',
+                      next.sortDir,
+                    )
+                  }
+                  defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+                  options={[
+                    {
+                      value: 'createdAt',
+                      label: 'Recently added',
+                      description: 'When the warehouse was created.',
+                      ascLabel: 'Oldest first',
+                      descLabel: 'Newest first',
+                      defaultDir: 'desc',
+                    },
+                    {
+                      value: 'name',
+                      label: 'Name',
+                      description: 'Alphabetical.',
+                      ascLabel: 'A → Z',
+                      descLabel: 'Z → A',
+                      defaultDir: 'asc',
+                    },
+                    {
+                      value: 'available',
+                      label: 'Available units',
+                      description: 'Stock count minus reserved units across the warehouse.',
+                      ascLabel: 'Lowest first',
+                      descLabel: 'Highest first',
+                      defaultDir: 'desc',
+                    },
+                  ]}
+                />
+              </div>
             </div>
           </div>
         }
@@ -408,22 +406,29 @@ export function WarehousesPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <SortMenu
-                  value={{ sortBy, sortDir }}
-                  onChange={(next) => {
-                    updateWarehouseSort(
-                      next.sortBy as 'createdAt' | 'name' | 'available',
-                      next.sortDir,
-                    );
-                    closeSheet();
-                  }}
-                  defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
-                  options={[
-                    { value: 'createdAt', label: 'Recently added', ascLabel: 'Oldest first', descLabel: 'Newest first', defaultDir: 'desc' },
-                    { value: 'name', label: 'Name', ascLabel: 'A → Z', descLabel: 'Z → A', defaultDir: 'asc' },
-                    { value: 'available', label: 'Available units', ascLabel: 'Lowest first', descLabel: 'Highest first', defaultDir: 'desc' },
-                  ]}
-                />
+                <div className="relative">
+                  {!(sortBy === 'createdAt' && sortDir === 'desc') && (
+                    <FilterDismiss
+                      onClear={() => updateWarehouseSort('createdAt', 'desc')}
+                    />
+                  )}
+                  <SortMenu
+                    value={{ sortBy, sortDir }}
+                    onChange={(next) => {
+                      updateWarehouseSort(
+                        next.sortBy as 'createdAt' | 'name' | 'available',
+                        next.sortDir,
+                      );
+                      closeSheet();
+                    }}
+                    defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+                    options={[
+                      { value: 'createdAt', label: 'Recently added', ascLabel: 'Oldest first', descLabel: 'Newest first', defaultDir: 'desc' },
+                      { value: 'name', label: 'Name', ascLabel: 'A → Z', descLabel: 'Z → A', defaultDir: 'asc' },
+                      { value: 'available', label: 'Available units', ascLabel: 'Lowest first', descLabel: 'Highest first', defaultDir: 'desc' },
+                    ]}
+                  />
+                </div>
                 {canManage ? (
                   <Button variant="primary" size="sm" className="w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
                     Add warehouse
@@ -474,7 +479,6 @@ export function WarehousesPage({
       {/* Card chrome hidden on mobile — listing goes edge-to-edge. Desktop keeps the card wrapper. */}
       <div className="md:card md:p-4">
         <div className="mb-4">{toolbar}</div>
-        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2 px-4" />
         <div>
           <TableLoadingOverlay show={isRefetching} minHeightClassName={display.length === 0 ? 'min-h-[14rem]' : 'min-h-[12rem]'}>
             {display.length === 0 ? (

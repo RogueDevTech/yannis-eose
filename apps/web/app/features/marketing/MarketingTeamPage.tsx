@@ -7,7 +7,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -635,27 +635,32 @@ export function MarketingTeamPage({
           desktopInlineFilters={
             <>
               {allMembersForFilter.length > 0 ? (
-                <SearchableSelect
-                  id="marketing-team-filter-buyer"
-                  value={(() => {
-                    const match = allMembersForFilter.find((m) => m.name === q);
-                    return match ? match.id : 'ALL';
-                  })()}
-                  onChange={(v) => {
-                    const picked = allMembersForFilter.find((m) => m.id === v);
-                    // Picking a buyer drives the existing `q` filter to that exact
-                    // name. "All" / clear resets `q`. Reuses the loader's name
-                    // filter — no new URL param or backend change needed.
-                    mergeListParams({ q: picked ? picked.name : '', page: 1 });
-                  }}
-                  options={[
-                    { value: 'ALL', label: 'All media buyers' },
-                    ...allMembersForFilter.map((m) => ({ value: m.id, label: m.name })),
-                  ]}
-                  placeholder="All media buyers"
-                  searchPlaceholder="Search buyers…"
-                  wrapperClassName="w-auto min-w-[12rem] sm:w-56"
-                />
+                <div className="relative">
+                  {!!q && (
+                    <FilterDismiss onClear={() => mergeListParams({ q: '', page: 1 })} />
+                  )}
+                  <SearchableSelect
+                    id="marketing-team-filter-buyer"
+                    value={(() => {
+                      const match = allMembersForFilter.find((m) => m.name === q);
+                      return match ? match.id : 'ALL';
+                    })()}
+                    onChange={(v) => {
+                      const picked = allMembersForFilter.find((m) => m.id === v);
+                      // Picking a buyer drives the existing `q` filter to that exact
+                      // name. "All" / clear resets `q`. Reuses the loader's name
+                      // filter — no new URL param or backend change needed.
+                      mergeListParams({ q: picked ? picked.name : '', page: 1 });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All media buyers' },
+                      ...allMembersForFilter.map((m) => ({ value: m.id, label: m.name })),
+                    ]}
+                    placeholder="All media buyers"
+                    searchPlaceholder="Search buyers…"
+                    wrapperClassName="w-auto min-w-[12rem] sm:w-56"
+                  />
+                </div>
               ) : null}
               <SortMenu
                 value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
@@ -670,26 +675,31 @@ export function MarketingTeamPage({
           sheetFilterBody={
             <div className="flex flex-col gap-3">
               {allMembersForFilter.length > 0 ? (
-                <SearchableSelect
-                  id="marketing-team-filter-buyer-sheet"
-                  value={(() => {
-                    const match = allMembersForFilter.find((m) => m.name === q);
-                    return match ? match.id : 'ALL';
-                  })()}
-                  onChange={(v) => {
-                    const picked = allMembersForFilter.find((m) => m.id === v);
-                    mergeListParams({ q: picked ? picked.name : '', page: 1 });
-                  }}
-                  options={[
-                    { value: 'ALL', label: 'All media buyers' },
-                    ...allMembersForFilter.map((m) => ({ value: m.id, label: m.name })),
-                  ]}
-                  placeholder="All media buyers"
-                  searchPlaceholder="Search buyers…"
-                  controlSize="lg"
-                  triggerClassName="!bg-app-hover text-center"
-                  wrapperClassName="w-full"
-                />
+                <div className="relative">
+                  {!!q && (
+                    <FilterDismiss onClear={() => mergeListParams({ q: '', page: 1 })} />
+                  )}
+                  <SearchableSelect
+                    id="marketing-team-filter-buyer-sheet"
+                    value={(() => {
+                      const match = allMembersForFilter.find((m) => m.name === q);
+                      return match ? match.id : 'ALL';
+                    })()}
+                    onChange={(v) => {
+                      const picked = allMembersForFilter.find((m) => m.id === v);
+                      mergeListParams({ q: picked ? picked.name : '', page: 1 });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All media buyers' },
+                      ...allMembersForFilter.map((m) => ({ value: m.id, label: m.name })),
+                    ]}
+                    placeholder="All media buyers"
+                    searchPlaceholder="Search buyers…"
+                    controlSize="lg"
+                    triggerClassName="!bg-app-hover text-center"
+                    wrapperClassName="w-full"
+                  />
+                </div>
               ) : null}
               <SortMenu
                 value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
@@ -703,7 +713,6 @@ export function MarketingTeamPage({
             </div>
           }
         />
-        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
           <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">

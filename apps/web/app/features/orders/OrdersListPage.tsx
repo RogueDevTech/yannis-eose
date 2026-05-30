@@ -52,7 +52,7 @@ import {
 } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
@@ -773,7 +773,7 @@ function OrdersListPageImpl({
   // Mobile tools-sheet chrome — every option sits in the same boxed, centered,
   // grey (app-hover) row at one shared height so the sheet reads consistently.
   const mobileFilterBoxClass =
-    'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+    'relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
   const mobileSelectTransparent = '!bg-transparent !border-transparent !text-center';
 
   // Smart pick + deep-select toolbar — shared between the desktop inline card
@@ -1294,17 +1294,6 @@ function OrdersListPageImpl({
     campaignFilter,
   ]);
 
-  const totalActiveFilterCount = useMemo(() => {
-    let n = ordersListToolbarFilterBadge;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('period') === 'all_time') n += 1;
-    else if (searchParams.get('startDate') || searchParams.get('endDate')) n += 1;
-    if (searchParams.get('sortBy') && searchParams.get('sortBy') !== 'createdAt') n += 1;
-    if (searchParams.get('fromCart') === '1') n += 1;
-    if (searchParams.get('testOrders') === '1') n += 1;
-    return n;
-  }, [ordersListToolbarFilterBadge, searchParams]);
-
   // `boxed` → the mobile tools-sheet variant: same boxed/centered/grey chrome
   // as the other sheet filters. Plain inline layout for the desktop filter row.
   function renderScheduleFilter(boxed: boolean) {
@@ -1358,12 +1347,32 @@ function OrdersListPageImpl({
         className={boxed ? mobileSelectTransparent : undefined}
       />
     );
+    const scheduleActive = !!scheduleFilters?.scheduleKind;
+    const clearSchedule = () => {
+      setSelectedIds(new Set());
+      setBulkResult(null);
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.delete('scheduleKind');
+        next.delete('scheduleDate');
+        next.set('page', '1');
+        return next;
+      });
+    };
     if (boxed) {
-      return <div className={mobileFilterBoxClass}>{select}</div>;
+      return (
+        <div className={mobileFilterBoxClass}>
+          {scheduleActive && <FilterDismiss onClear={clearSchedule} />}
+          {select}
+        </div>
+      );
     }
     return (
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
-        <div className="flex min-w-0 flex-col gap-1 sm:flex-1">{select}</div>
+        <div className="relative flex min-w-0 flex-col gap-1 sm:flex-1">
+          {scheduleActive && <FilterDismiss onClear={clearSchedule} />}
+          {select}
+        </div>
       </div>
     );
   }
@@ -1394,6 +1403,15 @@ function OrdersListPageImpl({
                 <>
                   {renderScheduleFilter(true)}
                   <div className={mobileFilterBoxClass}>
+                    {selectedStatus !== 'ALL' && (
+                      <FilterDismiss
+                        onClear={() => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          handleStatusSelect('ALL');
+                        }}
+                      />
+                    )}
                     <FormSelect
                       value={selectedStatus}
                       onChange={(e) => handleStatusSelect(e.target.value)}
@@ -1406,6 +1424,20 @@ function OrdersListPageImpl({
                   </div>
                   {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
                     <div className={mobileFilterBoxClass}>
+                      {(searchParams.get('csCloserId') || 'ALL') !== 'ALL' && (
+                        <FilterDismiss
+                          onClear={() => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.delete('csCloserId');
+                              next.set('page', '1');
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
                       {deferredLoading && !(csClosersForFilter?.length) ? (
                         <div className="h-5 w-32 rounded-md bg-app-border/70 animate-pulse" aria-hidden />
                       ) : (
@@ -1435,6 +1467,20 @@ function OrdersListPageImpl({
                   ) : null}
                   {(productsForFilter?.length ?? 0) > 0 ? (
                     <div className={mobileFilterBoxClass}>
+                      {(productFilter || 'ALL') !== 'ALL' && (
+                        <FilterDismiss
+                          onClear={() => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.delete('productId');
+                              next.set('page', '1');
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
                       <SearchableSelect
                         id="orders-filter-product-sheet"
                         value={productFilter || 'ALL'}
@@ -1463,6 +1509,20 @@ function OrdersListPageImpl({
                   ) : null}
                   {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
                     <div className={mobileFilterBoxClass}>
+                      {(campaignFilter || 'ALL') !== 'ALL' && (
+                        <FilterDismiss
+                          onClear={() => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.delete('campaignId');
+                              next.set('page', '1');
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
                       <SearchableSelect
                         id="orders-filter-form-sheet"
                         value={campaignFilter || 'ALL'}
@@ -1973,12 +2033,23 @@ function OrdersListPageImpl({
                 />
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">
-                <FormSelect
-                  value={selectedStatus}
-                  onChange={(e) => handleStatusSelect(e.target.value)}
-                  options={statusOptions}
-                  wrapperClassName="w-full min-w-0 sm:w-48"
-                />
+                <div className="relative">
+                  {selectedStatus !== 'ALL' && (
+                    <FilterDismiss
+                      onClear={() => {
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        handleStatusSelect('ALL');
+                      }}
+                    />
+                  )}
+                  <FormSelect
+                    value={selectedStatus}
+                    onChange={(e) => handleStatusSelect(e.target.value)}
+                    options={statusOptions}
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                  />
+                </div>
                 {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
                   deferredLoading && !(csClosersForFilter?.length) ? (
                     <div
@@ -1986,107 +2057,169 @@ function OrdersListPageImpl({
                       aria-hidden
                     />
                   ) : (
+                    <div className="relative">
+                      {(searchParams.get('csCloserId') || 'ALL') !== 'ALL' && (
+                        <FilterDismiss
+                          onClear={() => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.delete('csCloserId');
+                              next.set('page', '1');
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
+                      <SearchableSelect
+                        id="orders-filter-closer"
+                        value={searchParams.get('csCloserId') || 'ALL'}
+                        onChange={(v) => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('csCloserId', v);
+                            else next.delete('csCloserId');
+                            return next;
+                          });
+                        }}
+                        options={csCloserOptions}
+                        wrapperClassName="w-full min-w-0 sm:w-48"
+                        placeholder="All closers"
+                        searchPlaceholder="Search closers..."
+                      />
+                    </div>
+                  )
+                ) : null}
+                {(productsForFilter?.length ?? 0) > 0 ? (
+                  <div className="relative">
+                    {(productFilter || 'ALL') !== 'ALL' && (
+                      <FilterDismiss
+                        onClear={() => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.delete('productId');
+                            next.set('page', '1');
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
                     <SearchableSelect
-                      id="orders-filter-closer"
-                      value={searchParams.get('csCloserId') || 'ALL'}
+                      id="orders-filter-product"
+                      value={productFilter || 'ALL'}
                       onChange={(v) => {
                         setSelectedIds(new Set());
                         setBulkResult(null);
                         setSearchParams((p) => {
                           const next = new URLSearchParams(p);
                           next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('csCloserId', v);
-                          else next.delete('csCloserId');
+                          if (v && v !== 'ALL') next.set('productId', v);
+                          else next.delete('productId');
                           return next;
                         });
                       }}
-                      options={csCloserOptions}
+                      options={[
+                        { value: 'ALL', label: 'All products' },
+                        ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
+                      ]}
                       wrapperClassName="w-full min-w-0 sm:w-48"
-                      placeholder="All closers"
-                      searchPlaceholder="Search closers..."
+                      placeholder="All products"
+                      searchPlaceholder="Search products..."
                     />
-                  )
-                ) : null}
-                {(productsForFilter?.length ?? 0) > 0 ? (
-                  <SearchableSelect
-                    id="orders-filter-product"
-                    value={productFilter || 'ALL'}
-                    onChange={(v) => {
-                      setSelectedIds(new Set());
-                      setBulkResult(null);
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('productId', v);
-                        else next.delete('productId');
-                        return next;
-                      });
-                    }}
-                    options={[
-                      { value: 'ALL', label: 'All products' },
-                      ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
-                    ]}
-                    wrapperClassName="w-full min-w-0 sm:w-48"
-                    placeholder="All products"
-                    searchPlaceholder="Search products..."
-                  />
+                  </div>
                 ) : null}
                 {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
-                  <SearchableSelect
-                    id="orders-filter-form"
-                    value={campaignFilter || 'ALL'}
-                    onChange={(v) => {
-                      setSelectedIds(new Set());
-                      setBulkResult(null);
+                  <div className="relative">
+                    {(campaignFilter || 'ALL') !== 'ALL' && (
+                      <FilterDismiss
+                        onClear={() => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.delete('campaignId');
+                            next.set('page', '1');
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    <SearchableSelect
+                      id="orders-filter-form"
+                      value={campaignFilter || 'ALL'}
+                      onChange={(v) => {
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('campaignId', v);
+                          else next.delete('campaignId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All forms' },
+                        ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
+                      ]}
+                      wrapperClassName="w-full min-w-0 sm:w-48"
+                      placeholder="All forms"
+                      searchPlaceholder="Search forms..."
+                    />
+                  </div>
+                ) : null}
+                <div className="relative">
+                  {(sortByProp !== 'createdAt' || sortOrderProp !== 'desc') && (
+                    <FilterDismiss
+                      onClear={() => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.delete('sortBy');
+                          next.delete('sortOrder');
+                          next.set('page', '1');
+                          return next;
+                        });
+                      }}
+                    />
+                  )}
+                  <FormSelect
+                    value={`${sortByProp}:${sortOrderProp}`}
+                    onChange={(e) => {
+                      const [newSortBy, newSortOrder] = e.target.value.split(':');
                       setSearchParams((p) => {
                         const next = new URLSearchParams(p);
                         next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('campaignId', v);
-                        else next.delete('campaignId');
+                        if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                        else next.delete('sortBy');
+                        if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                        else next.delete('sortOrder');
                         return next;
                       });
                     }}
                     options={[
-                      { value: 'ALL', label: 'All forms' },
-                      ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
+                      { value: 'createdAt:desc', label: 'Newest first' },
+                      { value: 'createdAt:asc', label: 'Oldest first' },
+                      { value: 'totalAmount:desc', label: 'Highest amount' },
+                      { value: 'totalAmount:asc', label: 'Lowest amount' },
+                      { value: 'updatedAt:desc', label: 'Recently updated' },
+                      { value: 'status:asc', label: 'Status A–Z' },
+                      { value: 'status:desc', label: 'Status Z–A' },
                     ]}
-                    wrapperClassName="w-full min-w-0 sm:w-48"
-                    placeholder="All forms"
-                    searchPlaceholder="Search forms..."
+                    wrapperClassName="w-full min-w-0 sm:w-44"
                   />
-                ) : null}
-                <FormSelect
-                  value={`${sortByProp}:${sortOrderProp}`}
-                  onChange={(e) => {
-                    const [newSortBy, newSortOrder] = e.target.value.split(':');
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.set('page', '1');
-                      if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
-                      else next.delete('sortBy');
-                      if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
-                      else next.delete('sortOrder');
-                      return next;
-                    });
-                  }}
-                  options={[
-                    { value: 'createdAt:desc', label: 'Newest first' },
-                    { value: 'createdAt:asc', label: 'Oldest first' },
-                    { value: 'totalAmount:desc', label: 'Highest amount' },
-                    { value: 'totalAmount:asc', label: 'Lowest amount' },
-                    { value: 'updatedAt:desc', label: 'Recently updated' },
-                    { value: 'status:asc', label: 'Status A–Z' },
-                    { value: 'status:desc', label: 'Status Z–A' },
-                  ]}
-                  wrapperClassName="w-full min-w-0 sm:w-44"
-                />
+                </div>
               </div>
             </div>
           }
           desktopInlineFilters={renderScheduleFilter(false)}
           sheetFilterBody={null}
         />
-        <ClearFiltersButton count={totalActiveFilterCount} preserve={['perPage']} className="mt-2" />
       </div>
 
       {/* Smart pick + deep-select. Desktop: inline card under the filters.

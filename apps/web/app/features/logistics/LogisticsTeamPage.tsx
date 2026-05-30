@@ -5,7 +5,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -299,16 +299,6 @@ export function LogisticsTeamPage({
     return n;
   }, [sortByFromLoader, sortDirFromLoader]);
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('q')) n += 1;
-    const sb = searchParams.get('sortBy');
-    const sd = searchParams.get('sortDir');
-    if ((sb && sb !== 'deliveryRate') || (sd && sd !== 'desc')) n += 1;
-    if (searchParams.get('startDate') || searchParams.get('endDate') || searchParams.get('period')) n += 1;
-    return n;
-  }, [searchParams]);
-
   const showSearchEmpty = unfilteredCount > 0 && providers.length === 0;
 
   // Top-strip rollups across the displayed slice — when sliced by search we
@@ -539,28 +529,45 @@ export function LogisticsTeamPage({
             </form>
           }
           desktopInlineFilters={
-            <SortMenu
-              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-              onChange={(next) =>
-                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-              }
-              defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
-              options={SORT_MENU_OPTIONS}
-            />
+            <div className="relative">
+              {(sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
+                <FilterDismiss
+                  onClear={() =>
+                    mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })
+                  }
+                />
+              )}
+              <SortMenu
+                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                onChange={(next) =>
+                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                }
+                defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+                options={SORT_MENU_OPTIONS}
+              />
+            </div>
           }
           sheetFilterBody={
-            <SortMenu
-              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-              onChange={(next) =>
-                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-              }
-              defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
-              options={SORT_MENU_OPTIONS}
-              className="w-full justify-center"
-            />
+            <div className="relative">
+              {(sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
+                <FilterDismiss
+                  onClear={() =>
+                    mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })
+                  }
+                />
+              )}
+              <SortMenu
+                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                onChange={(next) =>
+                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                }
+                defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+                options={SORT_MENU_OPTIONS}
+                className="w-full justify-center"
+              />
+            </div>
           }
         />
-        <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
         {totalCount > 0 && (q || sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
           <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">

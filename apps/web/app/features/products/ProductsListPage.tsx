@@ -14,7 +14,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
-import { ClearFiltersButton } from '~/components/ui/clear-filters-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -190,14 +190,6 @@ export function ProductsListPage({
 
   const productsToolbarFilterBadge = useMemo(() => (statusFilter !== 'ACTIVE' ? 1 : 0), [statusFilter]);
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (searchParams.get('search')) n += 1;
-    if (searchParams.get('status')) n += 1;
-    if (searchParams.get('category')) n += 1;
-    return n;
-  }, [searchParams]);
-
   const productColumns = useMemo((): CompactTableColumn<Product>[] => {
     const cols: CompactTableColumn<Product>[] = [
       {
@@ -352,21 +344,10 @@ export function ProductsListPage({
             </form>
           }
           desktopInlineFilters={
-            <FormSelect
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              options={[
-                { value: 'ALL', label: 'All Status' },
-                { value: 'ACTIVE', label: 'Active' },
-                { value: 'INACTIVE', label: 'Inactive' },
-                { value: 'ARCHIVED', label: 'Archived' },
-              ]}
-              wrapperClassName="w-full min-w-0 sm:w-40"
-            />
-          }
-          sheetFilterBody={
-            <div className="space-y-1.5">
-              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+            <div className="relative">
+              {statusFilter !== 'ACTIVE' && (
+                <FilterDismiss onClear={() => setStatusFilter('ACTIVE')} />
+              )}
               <FormSelect
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -376,13 +357,33 @@ export function ProductsListPage({
                   { value: 'INACTIVE', label: 'Inactive' },
                   { value: 'ARCHIVED', label: 'Archived' },
                 ]}
-                wrapperClassName="w-full"
+                wrapperClassName="w-full min-w-0 sm:w-40"
               />
+            </div>
+          }
+          sheetFilterBody={
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+              <div className="relative">
+                {statusFilter !== 'ACTIVE' && (
+                  <FilterDismiss onClear={() => setStatusFilter('ACTIVE')} />
+                )}
+                <FormSelect
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  options={[
+                    { value: 'ALL', label: 'All Status' },
+                    { value: 'ACTIVE', label: 'Active' },
+                    { value: 'INACTIVE', label: 'Inactive' },
+                    { value: 'ARCHIVED', label: 'Archived' },
+                  ]}
+                  wrapperClassName="w-full"
+                />
+              </div>
             </div>
           }
         />
       </div>
-      <ClearFiltersButton count={activeFilterCount} preserve={['perPage']} className="mt-2" />
 
       {productsLoadError && <RouteFetchErrorBanner messages={[productsLoadError]} variant="danger" />}
 
