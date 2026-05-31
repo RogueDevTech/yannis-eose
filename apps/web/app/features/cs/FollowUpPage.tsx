@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
-import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useNavigate, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -112,6 +112,7 @@ export function FollowUpPage({
   filters,
   deferredLoading = false,
 }: FollowUpPageProps) {
+  const navigate = useNavigate();
   const branchesCatalog = useBranchesCatalog();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const showSkeletonRows = deferredLoading || isLoaderRefetchBusy;
@@ -151,7 +152,20 @@ export function FollowUpPage({
   useCloseOnFetcherSuccess(reopenFetcher, () => {
     setReopenModalOpen(false);
     setSelectedIds(new Set());
+    navigate('/admin/cs/follow-up');
   });
+
+  /** Set the status filter to exactly these statuses (used by the overview strip). */
+  const selectStatuses = (statuses: string[]) => {
+    setSearchParams((p) => {
+      const params = new URLSearchParams(p);
+      if (statuses.length === 0) params.delete('statuses');
+      else params.set('statuses', statuses.join(','));
+      params.set('page', '1');
+      if (statuses.length === 1 && statuses[0] === ABANDONED_CART_STATUS) params.delete('assignedCsId');
+      return params;
+    });
+  };
 
   const toggleStatus = (status: string) => {
     // Abandoned carts is exclusive — clicking it selects only it, clicking another clears it
@@ -455,9 +469,10 @@ export function FollowUpPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Follow Up"
+        title="Create Follow-Up"
+        backTo="/admin/cs/follow-up"
         mobileInlineActions
-        description="Pull orders from any status back into the pipeline."
+        description="Select orders or carts to reopen for follow-up."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
@@ -496,6 +511,21 @@ export function FollowUpPage({
             }
           />
         }
+      />
+
+      {/* ── Summary strip ────────────────────────────────── */}
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          { label: `Deleted (${(statusCounts['DELETED'] ?? 0).toLocaleString()})`, value: (statusCounts['DELETED'] ?? 0).toLocaleString(), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums', active: activeStatuses.has('DELETED'), onClick: () => selectStatuses(['DELETED']) },
+          { label: `Assigned (${(statusCounts['CS_ASSIGNED'] ?? 0).toLocaleString()})`, value: (statusCounts['CS_ASSIGNED'] ?? 0).toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums', active: activeStatuses.has('CS_ASSIGNED') && !activeStatuses.has('CS_ENGAGED'), onClick: () => selectStatuses(['CS_ASSIGNED']) },
+          { label: `Engaged (${(statusCounts['CS_ENGAGED'] ?? 0).toLocaleString()})`, value: (statusCounts['CS_ENGAGED'] ?? 0).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400 tabular-nums', active: activeStatuses.has('CS_ENGAGED') && !activeStatuses.has('CS_ASSIGNED'), onClick: () => selectStatuses(['CS_ENGAGED']) },
+          { label: `Unconfirmed (${((statusCounts['CS_ASSIGNED'] ?? 0) + (statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString()})`, value: ((statusCounts['CS_ASSIGNED'] ?? 0) + (statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400 tabular-nums', active: activeStatuses.has('CS_ASSIGNED') && activeStatuses.has('CS_ENGAGED') && activeStatuses.size === 2, onClick: () => selectStatuses(['CS_ASSIGNED', 'CS_ENGAGED']) },
+          { label: `Confirmed (${(statusCounts['CONFIRMED'] ?? 0).toLocaleString()})`, value: (statusCounts['CONFIRMED'] ?? 0).toLocaleString(), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums', active: activeStatuses.has('CONFIRMED'), onClick: () => selectStatuses(['CONFIRMED']) },
+          { label: `Delivered (${(statusCounts['DELIVERED'] ?? 0).toLocaleString()})`, value: (statusCounts['DELIVERED'] ?? 0).toLocaleString(), valueClassName: 'text-info-600 dark:text-info-400 tabular-nums', active: activeStatuses.has('DELIVERED'), onClick: () => selectStatuses(['DELIVERED']) },
+          { label: `Carts (${(statusCounts['ABANDONED_CART'] ?? 0).toLocaleString()})`, value: (statusCounts['ABANDONED_CART'] ?? 0).toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums', active: isCartView, onClick: () => selectStatuses(['ABANDONED_CART']) },
+          { label: 'Selected', value: selectedIds.size.toLocaleString(), valueClassName: selectedIds.size > 0 ? 'text-brand-500 tabular-nums' : 'tabular-nums' },
+        ]}
       />
 
       {/* ── Status chips with counts ─────────────────────── */}
@@ -571,16 +601,6 @@ export function FollowUpPage({
         </div>
       </div>
 
-      {/* ── Summary strip ────────────────────────────────── */}
-      <OverviewStatStrip
-        mobileGrid
-        items={[
-          { label: 'Assigned', value: ((statusCounts['CS_ASSIGNED'] ?? 0)).toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Unconfirmed', value: ((statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400' },
-          { label: isCartView ? 'Abandoned carts' : 'Matched', value: viewTotal.toLocaleString() },
-          { label: 'Selected', value: selectedIds.size.toLocaleString(), valueClassName: selectedIds.size > 0 ? 'text-brand-500' : undefined },
-        ]}
-      />
 
       {/* ── Smart Pick ─────────────────────────────────── */}
       {viewItems.length > 0 && !noStatusSelected && (
@@ -630,7 +650,11 @@ export function FollowUpPage({
               </button>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" size="sm" onClick={() => setReopenModalOpen(true)}>
+              <Button variant="primary" size="sm" onClick={() => {
+                const today = new Date().toLocaleDateString('en-NG', { month: 'short', day: 'numeric' });
+                setBatchName(`Follow Up — ${today}`);
+                setReopenModalOpen(true);
+              }}>
                 Reopen for follow-up
               </Button>
               {isCartView && (
@@ -866,6 +890,12 @@ export function FollowUpPage({
             </>
           )}
         </p>
+        <TextInput
+          label="Batch name"
+          value={batchName}
+          onChange={(e) => setBatchName(e.target.value)}
+          placeholder="e.g. Follow Up #1"
+        />
         {branchesCatalog.length > 0 && (
           <FormSelect
             label="CS branch"
@@ -883,16 +913,23 @@ export function FollowUpPage({
           </Button>
           <Button
             variant="primary"
-            disabled={reopenFetcher.state === 'submitting' || !targetBranchId}
+            disabled={reopenFetcher.state === 'submitting' || !targetBranchId || !batchName.trim()}
             loading={reopenFetcher.state === 'submitting'}
             loadingText={isCartView ? 'Converting…' : 'Reopening…'}
             onClick={() => {
+              const originalStatuses: Record<string, string> = {};
+              if (!isCartView) {
+                for (const o of orders) {
+                  if (selectedIds.has(o.id)) originalStatuses[o.id] = o.status;
+                }
+              }
               if (isCartView) {
                 reopenFetcher.submit(
                   {
                     intent: 'bulkRecoverCarts',
                     cartIds: JSON.stringify([...selectedIds]),
                     targetBranchId,
+                    batchName: batchName.trim(),
                   },
                   { method: 'post' },
                 );
@@ -902,6 +939,8 @@ export function FollowUpPage({
                     intent: 'reopenForFollowUp',
                     orderIds: JSON.stringify([...selectedIds]),
                     targetBranchId,
+                    batchName: batchName.trim(),
+                    originalStatuses: JSON.stringify(originalStatuses),
                   },
                   { method: 'post' },
                 );
