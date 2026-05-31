@@ -61,7 +61,7 @@ type SecondaryOk = {
   groupsTotal: number;
   groupsPage: number;
   groupsTotalPages: number;
-  otherExpensesCounts?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number; totalSpend: number };
+  otherExpensesCounts?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number; totalSpend: number; pendingSpend: number };
 };
 type SecondaryErr = {
   ok: false;
@@ -845,7 +845,7 @@ export function MarketingAdSpendPage({
                       controlSize="sm"
                       openAs="modal"
                       wrapperClassName="w-full"
-                      className={selectTransparent}
+                      className={selectTransparent} inlineChevron
                     />
                   </div>
                   {products.length > 0 && (
@@ -859,7 +859,7 @@ export function MarketingAdSpendPage({
                           ...products.map((p) => ({ value: p.id, label: p.name })),
                         ]}
                         wrapperClassName="w-full"
-                        triggerClassName={selectTransparent}
+                        triggerClassName={selectTransparent} inlineChevron
                         placeholder="All products"
                         searchPlaceholder="Search products..."
                       />
@@ -876,7 +876,7 @@ export function MarketingAdSpendPage({
                           ...marketingTeams.map((t) => ({ value: t.id, label: t.name })),
                         ]}
                         wrapperClassName="w-full"
-                        triggerClassName={selectTransparent}
+                        triggerClassName={selectTransparent} inlineChevron
                         searchPlaceholder="Search teams..."
                       />
                     </div>
@@ -895,7 +895,7 @@ export function MarketingAdSpendPage({
                             ...filteredMedisBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
                           ]}
                           wrapperClassName="w-full"
-                          triggerClassName={selectTransparent}
+                          triggerClassName={selectTransparent} inlineChevron
                           searchPlaceholder="Search media buyers..."
                         />
                       )}
@@ -950,41 +950,43 @@ export function MarketingAdSpendPage({
       )}
 
       {(() => {
-        const otherCounts = secondary?.otherExpensesCounts ?? otherCountsRef.current ?? { PENDING: 0, APPROVED: 0, ALL: 0, totalSpend: 0 };
+        const otherCounts = secondary?.otherExpensesCounts ?? otherCountsRef.current ?? { PENDING: 0, APPROVED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 };
+        const loading = !metrics && !metricsRef.current;
+        const skeleton = <span className="inline-block h-4 w-16 rounded bg-app-hover animate-pulse" />;
         return (
           <OverviewStatStrip
             mobileGrid
             items={[
               {
-                label: `Ad Spend (${metrics?.totalOrders ?? 0})`,
-                value: <>{'\u20A6'}{Math.round(metrics?.approvedSpend ?? 0).toLocaleString()}</>,
+                label: `Ad Spend (${metrics?.totalOrders ?? '—'})`,
+                value: loading ? skeleton : <>{'\u20A6'}{Math.round(metrics?.approvedSpend ?? 0).toLocaleString()}</>,
                 valueClassName: (metrics?.approvedSpend ?? 0) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
                 onClick: () => handleOverviewClick('AD_SPEND', 'APPROVED'),
                 active: selectedCategory === 'AD_SPEND' && selectedStatus === 'APPROVED',
               },
               {
-                label: `Pending Ads (${selectedCategory === 'AD_SPEND' ? (statusCounts?.PENDING ?? 0) : 0})`,
-                value: <>{'\u20A6'}{Math.round(metrics?.pendingSpend ?? 0).toLocaleString()}</>,
+                label: `Pending Ads (${selectedCategory === 'AD_SPEND' ? (statusCounts?.PENDING ?? '—') : '—'})`,
+                value: loading ? skeleton : <>{'\u20A6'}{Math.round(metrics?.pendingSpend ?? 0).toLocaleString()}</>,
                 valueClassName: 'text-amber-600 dark:text-amber-400',
                 onClick: () => handleOverviewClick('AD_SPEND', 'PENDING'),
                 active: selectedCategory === 'AD_SPEND' && selectedStatus === 'PENDING',
               },
               {
                 label: 'CPA',
-                value: (metrics?.cpa ?? 0) > 0 ? <>{'\u20A6'}{Math.round(metrics!.cpa).toLocaleString()}</> : '\u2014',
+                value: loading ? skeleton : (metrics?.cpa ?? 0) > 0 ? <>{'\u20A6'}{Math.round(metrics!.cpa).toLocaleString()}</> : '\u2014',
                 valueClassName: (metrics?.cpa ?? 0) > 0 ? cpaColorClass(metrics!.cpa) : 'text-app-fg',
                 onClick: () => handleOverviewClick('AD_SPEND', 'ALL'),
               },
               {
-                label: `Other (${otherCounts.ALL})`,
-                value: <>{'\u20A6'}{Math.round(otherCounts.totalSpend).toLocaleString()}</>,
+                label: `Others (${!secondary && !otherCountsRef.current ? '—' : otherCounts.APPROVED})`,
+                value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.totalSpend).toLocaleString()}</>,
                 valueClassName: otherCounts.totalSpend > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
-                onClick: () => handleOverviewClick('AD_ACCOUNT', 'ALL'),
-                active: isFilteringNonAdSpend && selectedStatus === 'ALL',
+                onClick: () => handleOverviewClick('AD_ACCOUNT', 'APPROVED'),
+                active: isFilteringNonAdSpend && selectedStatus === 'APPROVED',
               },
               {
-                label: `Other Pending (${otherCounts.PENDING})`,
-                value: otherCounts.PENDING.toLocaleString(),
+                label: `Others Pending (${!secondary && !otherCountsRef.current ? '—' : otherCounts.PENDING})`,
+                value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.pendingSpend).toLocaleString()}</>,
                 valueClassName: 'text-amber-600 dark:text-amber-400',
                 onClick: () => handleOverviewClick('AD_ACCOUNT', 'PENDING'),
                 active: isFilteringNonAdSpend && selectedStatus === 'PENDING',

@@ -49,6 +49,8 @@ interface FormSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElem
    *   sits inside another sheet/modal where an anchored popover gets cramped.
    */
   openAs?: 'popover' | 'modal';
+  /** Render the chevron inline next to the label (centered) instead of absolute-right. Use in mobile sheet box wrappers. */
+  inlineChevron?: boolean;
 }
 
 const sizeClasses: Record<FormSelectSize, string> = {
@@ -146,6 +148,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
       controlSize = 'md',
       wrapperClassName = '',
       openAs = 'popover',
+      inlineChevron = false,
       className = '',
       required,
       id,
@@ -406,7 +409,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
             id={inputId}
             ref={triggerRef}
             type="button"
-            className={triggerClass}
+            className={inlineChevron ? `${triggerClass} !flex items-center justify-center gap-1.5 !pr-3` : triggerClass}
             disabled={disabled}
             onClick={() => setOpen((v) => !v)}
             onKeyDown={handleTriggerKeyDown}
@@ -415,21 +418,26 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
             aria-controls={inputId ? `${inputId}-listbox` : undefined}
           >
             <span
-              className={['block min-w-0 truncate', selected ? 'text-app-fg' : 'text-app-fg-muted'].join(' ')}
+              className={[inlineChevron ? 'min-w-0 truncate' : 'block min-w-0 truncate', selected ? 'text-app-fg' : 'text-app-fg-muted'].join(' ')}
             >
               {selected?.label ?? placeholder ?? ''}
             </span>
+            {inlineChevron && (
+              <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 text-app-fg-muted" />
+            )}
           </button>
 
-          <span
-            className={[
-              'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
-              chevronSizeClasses[controlSize],
-            ].join(' ')}
-            aria-hidden="true"
-          >
-            <ChevronDownIcon className="h-full w-full" />
-          </span>
+          {!inlineChevron && (
+            <span
+              className={[
+                'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
+                chevronSizeClasses[controlSize],
+              ].join(' ')}
+              aria-hidden="true"
+            >
+              <ChevronDownIcon className="h-full w-full" />
+            </span>
+          )}
 
           {open &&
             typeof document !== 'undefined' &&

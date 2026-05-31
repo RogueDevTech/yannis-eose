@@ -665,7 +665,7 @@ function LogisticsOrdersPageImpl({
                         }))}
                         controlSize="sm"
                         openAs="modal"
-                        className="!bg-transparent !border-transparent !text-center"
+                        className="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                       />
                     </div>
@@ -687,7 +687,7 @@ function LogisticsOrdersPageImpl({
                               label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                             })),
                           ]}
-                          triggerClassName="!bg-transparent !border-transparent !text-center"
+                          triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                           wrapperClassName="w-full"
                           placeholder="All locations"
                           searchPlaceholder="Search locations..."

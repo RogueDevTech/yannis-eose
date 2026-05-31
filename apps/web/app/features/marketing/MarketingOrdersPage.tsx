@@ -623,7 +623,7 @@ export function MarketingOrdersPage({
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={statusOptionsBase}
                     controlSize="sm"
-                    className="!bg-transparent !border-transparent !text-center"
+                    className="!bg-transparent !border-transparent !text-center" inlineChevron
                     openAs="modal"
                     wrapperClassName="w-full"
                   />
@@ -652,7 +652,7 @@ export function MarketingOrdersPage({
                           { value: 'ALL', label: 'All media buyers' },
                           ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
                         ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         placeholder="All media buyers"
                         searchPlaceholder="Search buyers…"
@@ -684,7 +684,7 @@ export function MarketingOrdersPage({
                           { value: 'ALL', label: 'All products' },
                           ...secondary.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
                         ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         placeholder="All products"
                         searchPlaceholder="Search products…"
@@ -716,7 +716,7 @@ export function MarketingOrdersPage({
                           { value: 'ALL', label: 'All forms' },
                           ...secondary.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
                         ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         placeholder="All forms"
                         searchPlaceholder="Search forms…"

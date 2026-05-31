@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultTodayRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -21,7 +21,7 @@ export const meta: MetaFunction = () => [
 // only refreshed on a manual reload.
 const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed', 'cart:updated'] as const;
 
-const getDefaultTodayRange = defaultThisMonthRange;
+const getDefaultTodayRange = defaultTodayRange;
 
 /** Fallback secondary data for pagination-only loads (page > 1).
  *  Stats/charts/picklists don't change with page — the component keeps

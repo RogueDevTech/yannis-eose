@@ -31,23 +31,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
 
+  const ALL_FOLLOW_UP_STATUSES = [
+    'DELETED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED',
+    'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED',
+  ];
   const statusParam = url.searchParams.get('statuses') || '';
   const statuses = statusParam.split(',').filter(Boolean);
   const isCartView = statuses.length === 1 && statuses[0] === ABANDONED_CART_STATUS;
   const search = url.searchParams.get('search') || undefined;
   const assignedCsId = url.searchParams.get('assignedCsId') || undefined;
   const olderThanDays = url.searchParams.get('olderThanDays') || undefined;
+  const customStartDate = url.searchParams.get('startDate') || undefined;
+  const customEndDate = url.searchParams.get('endDate') || undefined;
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const limit = 50;
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
   // Status counts for all follow-up-relevant statuses
-  const allFollowUpStatuses = [
-    'DELETED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED',
-    'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED',
-  ];
-  const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: allFollowUpStatuses }));
+  const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: ALL_FOLLOW_UP_STATUSES }));
 
   const pageData = (async (): Promise<FollowUpPageData> => {
     // Always fetch counts, closers, products, and cart stats
@@ -77,11 +79,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Add abandoned cart count to statusCounts
     statusCounts[ABANDONED_CART_STATUS] = cartStats.abandonedOpen;
 
+    // No statuses selected — return only counts (no orders fetched)
+    if (statuses.length === 0) {
+      return {
+        orders: [],
+        total: 0,
+        totalPages: 1,
+        closers,
+        statusCounts,
+        products,
+        abandonedCarts: [],
+        abandonedCartsTotal: 0,
+        abandonedCartsTotalPages: 1,
+      };
+    }
+
     if (isCartView) {
       // Fetch abandoned carts instead of orders
       const cartInput: Record<string, unknown> = { page, limit };
       if (search) cartInput.search = search;
-      if (olderThanDays) {
+      if (customStartDate || customEndDate) {
+        if (customStartDate) cartInput.startDate = customStartDate;
+        if (customEndDate) cartInput.endDate = customEndDate;
+      } else if (olderThanDays) {
         const days = parseInt(olderThanDays, 10);
         if (Number.isFinite(days) && days > 0) {
           const cutoff = new Date();
@@ -121,7 +141,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     if (search) listInput.search = search;
     if (assignedCsId) listInput.assignedCsId = assignedCsId;
-    if (olderThanDays) {
+    // Custom date range takes priority over olderThanDays preset
+    if (customStartDate || customEndDate) {
+      if (customStartDate) listInput.startDate = customStartDate;
+      if (customEndDate) listInput.endDate = customEndDate;
+    } else if (olderThanDays) {
       const days = parseInt(olderThanDays, 10);
       if (Number.isFinite(days) && days > 0) {
         const cutoff = new Date();
@@ -157,6 +181,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       search: search ?? '',
       assignedCsId: assignedCsId ?? '',
       olderThanDays: olderThanDays ?? '',
+      startDate: customStartDate ?? '',
+      endDate: customEndDate ?? '',
       page,
     },
     pageData,
@@ -187,6 +213,9 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Select at least one order' }, { status: 400 });
     }
     const targetBranchId = formData.get('targetBranchId')?.toString() || undefined;
+    const batchName = formData.get('batchName')?.toString()?.trim() || '';
+    let originalStatuses: Record<string, string> = {};
+    try { originalStatuses = JSON.parse(formData.get('originalStatuses')?.toString() ?? '{}'); } catch { /* ignore */ }
 
     const res = await apiRequest<unknown>('/trpc/orders.reopenForFollowUp', {
       method: 'POST',
@@ -199,7 +228,23 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: safeStatus(res.status) },
       );
     }
-    const data = (res.data as { result?: { data?: { succeeded: number; failed: number } } })?.result?.data;
+    const data = (res.data as { result?: { data?: { succeeded: number; failed: number; results?: Array<{ orderId: string; success: boolean }> } } })?.result?.data;
+    const succeededIds = (data?.results ?? []).filter((r) => r.success).map((r) => r.orderId);
+
+    // Create batch record for tracking
+    if (batchName && succeededIds.length > 0) {
+      await apiRequest<unknown>('/trpc/orders.createFollowUpBatch', {
+        method: 'POST',
+        cookie,
+        body: {
+          name: batchName,
+          source: 'orders',
+          ...(targetBranchId ? { branchId: targetBranchId } : {}),
+          items: succeededIds.map((id) => ({ orderId: id, originalStatus: originalStatuses[id] ?? 'UNKNOWN' })),
+        },
+      });
+    }
+
     return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
   }
 
@@ -264,6 +309,51 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const orderId = (res.data as { result?: { data?: { id: string } } })?.result?.data?.id;
     return json({ success: true, orderId });
+  }
+
+  if (intent === 'bulkRecoverCarts') {
+    let cartIds: string[];
+    try {
+      cartIds = JSON.parse(formData.get('cartIds')?.toString() ?? '[]');
+      if (!Array.isArray(cartIds)) throw new Error();
+    } catch {
+      return json({ error: 'Invalid cart IDs' }, { status: 400 });
+    }
+    if (cartIds.length === 0) {
+      return json({ error: 'Select at least one cart' }, { status: 400 });
+    }
+    const targetBranchId = formData.get('targetBranchId')?.toString() || undefined;
+
+    let succeeded = 0;
+    let failed = 0;
+    const createdOrderIds: string[] = [];
+    for (const cartId of cartIds) {
+      const res = await apiRequest<unknown>('/trpc/orders.recoverFromCart', {
+        method: 'POST',
+        cookie,
+        body: { cartId },
+        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+      });
+      if (res.ok) {
+        succeeded++;
+        const orderId = (res.data as { result?: { data?: { id: string } } })?.result?.data?.id;
+        if (orderId) createdOrderIds.push(orderId);
+      } else {
+        failed++;
+      }
+    }
+
+    // Move created orders to the target CS branch if specified
+    if (targetBranchId && createdOrderIds.length > 0) {
+      await apiRequest<unknown>('/trpc/orders.reopenForFollowUp', {
+        method: 'POST',
+        cookie,
+        body: { orderIds: createdOrderIds, targetBranchId },
+        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+      });
+    }
+
+    return json({ success: true, succeeded, failed });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });

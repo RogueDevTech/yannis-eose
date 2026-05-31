@@ -541,7 +541,7 @@ export function DeliveryRemittancesPage({
                       id="delivery-remittance-status-filter-kebab"
                       value={pendingStatus}
                       onChange={handleStatusChange}
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                       placeholder="All statuses"
                       options={[
@@ -561,7 +561,7 @@ export function DeliveryRemittancesPage({
                     id="delivery-remittance-location-filter-kebab"
                     value={filters.location}
                     onChange={handleLocationChange}
-                    triggerClassName="!bg-transparent !border-transparent !text-center"
+                    triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                     wrapperClassName="w-full"
                     placeholder="All locations"
                     searchPlaceholder="Search locations..."
@@ -583,7 +583,7 @@ export function DeliveryRemittancesPage({
                       id="delivery-remittance-sent-by-filter-kebab"
                       value={filters.sentBy}
                       onChange={handleSentByChange}
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                       placeholder="Sent by anyone"
                       searchPlaceholder="Search accountants..."

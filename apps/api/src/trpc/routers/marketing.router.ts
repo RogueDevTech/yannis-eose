@@ -1561,15 +1561,19 @@ export const marketingRouter = router({
       const branchId = ctx.currentBranchId;
       const role = ctx.user.role;
       const isMediaBuyer = role === 'MEDIA_BUYER';
+      const isMarketingSupervisor = isMediaBuyer && ctx.user.isTeamSupervisor && branchId
+        ? await getBranchTeamsService().isMarketingSupervisorOnBranch(ctx.user.id, branchId)
+        : false;
       const isFundingAdmin =
         isAdminLevel(ctx.user) ||
         role === 'HEAD_OF_MARKETING' ||
-        role === 'FINANCE_OFFICER';
-      const canDistribute = !isMediaBuyer;
+        role === 'FINANCE_OFFICER' ||
+        isMarketingSupervisor;
+      const canDistribute = !isMediaBuyer || isMarketingSupervisor;
       const canRequestFunding =
-        role === 'MEDIA_BUYER' || role === 'HEAD_OF_MARKETING';
+        role === 'MEDIA_BUYER' || role === 'HEAD_OF_MARKETING' || isMarketingSupervisor;
       const showFundingBalance =
-        role === 'MEDIA_BUYER' || role === 'HEAD_OF_MARKETING';
+        role === 'MEDIA_BUYER' || role === 'HEAD_OF_MARKETING' || isMarketingSupervisor;
 
       // Same skip logic as the loader: if `entryStatus` is request-only
       // (PENDING/APPROVED/REJECTED), the transfer ledger pull is wasted; same in
@@ -1647,17 +1651,24 @@ export const marketingRouter = router({
       ] = await Promise.all([
         getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange),
         isFundingAdmin
-          ? getUsersService().list(
-              {
-                page: 1,
-                limit: 200,
-                sortBy: 'createdAt' as const,
-                sortOrder: 'desc' as const,
-                includeBranchMemberships: false,
-              },
-              ctx.user,
-              branchId,
-            )
+          ? (async () => {
+              // Supervisors see only their team members as funding recipients
+              if (isMarketingSupervisor) {
+                const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId!);
+                const teamMemberIds = scope.marketingUserIds.filter((id) => id !== ctx.user.id);
+                if (teamMemberIds.length === 0) return null;
+                return getUsersService().list(
+                  { page: 1, limit: 200, sortBy: 'createdAt' as const, sortOrder: 'desc' as const, includeBranchMemberships: false, userIds: teamMemberIds },
+                  ctx.user,
+                  branchId,
+                );
+              }
+              return getUsersService().list(
+                { page: 1, limit: 200, sortBy: 'createdAt' as const, sortOrder: 'desc' as const, includeBranchMemberships: false },
+                ctx.user,
+                branchId,
+              );
+            })()
           : Promise.resolve(null),
         isFundingAdmin
           ? getMarketingService().listFundingBalances(ctx.user, branchId).catch(() => null)

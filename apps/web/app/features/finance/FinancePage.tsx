@@ -104,7 +104,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
                     placeholder="All branches"
                     searchPlaceholder="Search branches..."
                     disabled={branchSwitching}
-                    triggerClassName="!bg-transparent !border-transparent !text-center"
+                    triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                     wrapperClassName="w-full"
                   />
                 </div>

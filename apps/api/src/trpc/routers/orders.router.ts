@@ -2019,4 +2019,42 @@ export const ordersRouter = router({
     // Manual trigger — scan every order (not just the cron's 48h window).
     return testOrderPurgeInstance.purgeTestOrders(true);
   }),
+
+  // ── Follow-Up Batches ──────────────────────────────────────
+
+  createFollowUpBatch: permissionProcedure('orders.followUp')
+    .input(
+      z.object({
+        name: z.string().min(1).max(200),
+        source: z.enum(['orders', 'carts']),
+        branchId: z.string().uuid().optional(),
+        items: z.array(z.object({
+          orderId: z.string().uuid(),
+          originalStatus: z.string(),
+        })).min(1).max(500),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().createFollowUpBatch({
+        ...input,
+        createdById: ctx.user.id,
+      });
+    }),
+
+  listFollowUpBatches: permissionProcedure('orders.followUp')
+    .input(z.object({ page: z.number().int().min(1).default(1), limit: z.number().int().min(1).max(100).default(20) }))
+    .query(async ({ input }) => {
+      return getOrdersService().listFollowUpBatches(input);
+    }),
+
+  getFollowUpBatchDetail: permissionProcedure('orders.followUp')
+    .input(z.object({ batchId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getOrdersService().getFollowUpBatchDetail(input.batchId);
+    }),
+
+  nextFollowUpBatchName: permissionProcedure('orders.followUp')
+    .query(async () => {
+      return getOrdersService().nextFollowUpBatchName();
+    }),
 });

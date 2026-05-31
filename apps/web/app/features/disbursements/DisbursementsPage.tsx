@@ -124,6 +124,9 @@ export interface DisbursementsPageData {
     totalSent: string;
     totalCompleted: string;
     totalDisputed: string;
+    sentCount: number;
+    completedCount: number;
+    disputedCount: number;
   };
   fundingRequests?: FundingRequestRecord[];
   fundingRequestsTotal?: number;
@@ -289,7 +292,7 @@ export function DisbursementsPage({
   balancesPage = 1,
   balancesTotalPages = 1,
   balancesPerPage = 20,
-  summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0' },
+  summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 },
   fundingRequests = [],
   fundingRequestsTotal = 0,
   fundingRequestStatusCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 },
@@ -818,7 +821,7 @@ export function DisbursementsPage({
                         options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
                         controlSize="sm"
                         openAs="modal"
-                        className="!bg-transparent !border-transparent !text-center"
+                        className="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         aria-label="Filter by status"
                       />
@@ -837,7 +840,7 @@ export function DisbursementsPage({
                           { value: 'ALL', label: 'All recipients' },
                           ...recipients.map((u) => ({ value: u.id, label: u.name })),
                         ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         placeholder="All recipients"
                         searchPlaceholder="Search recipients..."
@@ -862,7 +865,7 @@ export function DisbursementsPage({
                         ]}
                         controlSize="sm"
                         openAs="modal"
-                        className="!bg-transparent !border-transparent !text-center"
+                        className="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         aria-label="Filter balances by role"
                       />
@@ -885,7 +888,7 @@ export function DisbursementsPage({
                         ]}
                         controlSize="sm"
                         openAs="modal"
-                        className="!bg-transparent !border-transparent !text-center"
+                        className="!bg-transparent !border-transparent !text-center" inlineChevron
                         wrapperClassName="w-full"
                         aria-label="Filter by balance status"
                       />
@@ -909,7 +912,7 @@ export function DisbursementsPage({
                 </Button>
                 {canCreate ? (
                   <Button
-                    variant="primary"
+                    variant="secondary"
                     size="sm"
                     className="h-12 w-full justify-center"
                     onClick={() => {
@@ -958,19 +961,20 @@ export function DisbursementsPage({
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Total disbursed', value: formatNaira(totalAllAmt), valueClassName: 'text-app-fg tabular-nums' },
-          { label: 'Pending', value: formatNaira(totalSentAmt), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums' },
+          { label: `Total disbursed (${summary.completedCount})`, value: formatNaira(totalReceivedAmt), valueClassName: 'text-app-fg tabular-nums' },
+          { label: `Pending confirmation (${summary.sentCount})`, value: formatNaira(totalSentAmt), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums' },
           {
-            label: 'Pending Requests',
-            value: fundingRequestStatusCounts.PENDING.toString(),
+            label: `Pending requests (${fundingRequestStatusCounts.PENDING})`,
+            value: fundingRequestStatusCounts.PENDING > 0
+              ? fundingRequestStatusCounts.PENDING.toString()
+              : '0',
             valueClassName:
               fundingRequestStatusCounts.PENDING > 0
                 ? 'text-warning-600 dark:text-warning-400 tabular-nums'
                 : 'text-app-fg tabular-nums',
             title: 'Funding requests awaiting your approval — switch the View dropdown to "Funding requests" to action them',
           },
-          { label: 'Received', value: formatNaira(totalReceivedAmt), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
-          { label: 'Disputed', value: formatNaira(totalDisputedAmt), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
+          { label: `Disputed (${summary.disputedCount})`, value: formatNaira(totalDisputedAmt), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
         ]}
       />
 

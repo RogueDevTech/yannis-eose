@@ -549,7 +549,7 @@ export function UsersListPage({
                       { value: 'ARCHIVED', label: 'Archived' },
                       { value: 'DEACTIVATED', label: 'Deactivated' },
                     ]}
-                    className="!bg-transparent !border-transparent !text-center"
+                    className="!bg-transparent !border-transparent !text-center" inlineChevron
                     controlSize="sm"
                     openAs="modal"
                     wrapperClassName="w-full"
@@ -563,7 +563,7 @@ export function UsersListPage({
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                     placeholder="All Roles"
                     searchPlaceholder="Search roles…"
-                    triggerClassName="!bg-transparent !border-transparent !text-center"
+                    triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                     wrapperClassName="w-full"
                   />
                 </div>
@@ -576,7 +576,7 @@ export function UsersListPage({
                       options={branchPickerOptions}
                       placeholder="All branches"
                       searchPlaceholder="Search branches…"
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                     />
                   </div>
