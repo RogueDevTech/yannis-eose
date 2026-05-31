@@ -2976,6 +2976,8 @@ export class OrdersService {
       cartId: schema.orders.cartId,
       // Duplicate flag — shown as a badge on the orders list table.
       isDuplicate: schema.orders.isDuplicate,
+      // Follow-up flag — shown as a badge when order was reopened via Follow Up page.
+      isFollowUp: schema.orders.isFollowUp,
     } as const;
 
     const [orders, totalRows] = await Promise.all([
@@ -7862,12 +7864,17 @@ export class OrdersService {
         const targetBranch = opts?.targetBranchId ?? order.servicingBranchId;
         const branchChanged = targetBranch !== order.servicingBranchId;
 
+        const now = new Date();
         const updateFields: Record<string, unknown> = {
           status: 'UNPROCESSED',
           assignedCsId: null,
-          updatedAt: new Date(),
+          updatedAt: now,
+          // Reset createdAt so reopened orders appear in today's queue.
+          createdAt: now,
           // Clear soft-delete flag so DELETED orders reappear in normal queries.
           deletedAt: null,
+          // Tag as follow-up for badge display.
+          isFollowUp: true,
         };
         if (branchChanged && targetBranch) {
           updateFields.servicingBranchId = targetBranch;
@@ -7911,5 +7918,227 @@ export class OrdersService {
       failed: results.filter((r) => !r.success).length,
       total: orderIds.length,
     };
+  }
+
+  // ── Follow-Up Batches ──────────────────────────────────────
+
+  /**
+   * Create a follow-up batch with its items. Called after reopenForFollowUp
+   * or bulkRecoverCarts succeeds.
+   */
+  async createFollowUpBatch(input: {
+    name: string;
+    source: 'orders' | 'carts';
+    branchId?: string;
+    createdById: string;
+    items: Array<{ orderId: string; originalStatus: string }>;
+  }) {
+    const [batch] = await this.db
+      .insert(schema.followUpBatches)
+      .values({
+        name: input.name,
+        source: input.source,
+        branchId: input.branchId ?? null,
+        createdById: input.createdById,
+        orderCount: input.items.length,
+      })
+      .returning({ id: schema.followUpBatches.id });
+
+    if (input.items.length > 0) {
+      await this.db.insert(schema.followUpBatchItems).values(
+        input.items.map((item) => ({
+          batchId: batch!.id,
+          orderId: item.orderId,
+          originalStatus: item.originalStatus,
+        })),
+      );
+    }
+
+    return batch!;
+  }
+
+  /** List all follow-up batches with summary stats. */
+  async listFollowUpBatches(input: { page: number; limit: number }) {
+    const offset = (input.page - 1) * input.limit;
+
+    const [batches, countRows] = await Promise.all([
+      this.db
+        .select({
+          id: schema.followUpBatches.id,
+          name: schema.followUpBatches.name,
+          source: schema.followUpBatches.source,
+          branchId: schema.followUpBatches.branchId,
+          createdById: schema.followUpBatches.createdById,
+          orderCount: schema.followUpBatches.orderCount,
+          createdAt: schema.followUpBatches.createdAt,
+        })
+        .from(schema.followUpBatches)
+        .orderBy(desc(schema.followUpBatches.createdAt))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.followUpBatches),
+    ]);
+
+    const total = countRows[0]?.count ?? 0;
+
+    // Enrich with creator names and branch names
+    const creatorIds = [...new Set(batches.map((b) => b.createdById))];
+    const branchIds = [...new Set(batches.map((b) => b.branchId).filter(Boolean))] as string[];
+
+    const [creators, branchRows] = await Promise.all([
+      creatorIds.length > 0
+        ? this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, creatorIds))
+        : Promise.resolve([]),
+      branchIds.length > 0
+        ? this.db.select({ id: schema.branches.id, name: schema.branches.name }).from(schema.branches).where(inArray(schema.branches.id, branchIds))
+        : Promise.resolve([]),
+    ]);
+
+    const creatorNames = new Map(creators.map((u) => [u.id, u.name]));
+    const branchNames = new Map(branchRows.map((b) => [b.id, b.name]));
+
+    // Get per-batch order status breakdown in one query
+    const batchIds = batches.map((b) => b.id);
+    const statusBreakdown = batchIds.length > 0
+      ? await this.db
+          .select({
+            batchId: schema.followUpBatchItems.batchId,
+            status: schema.orders.status,
+            count: sql<number>`count(*)::int`,
+            revenue: sql<string>`coalesce(sum(${schema.orders.totalAmount}), 0)::text`,
+          })
+          .from(schema.followUpBatchItems)
+          .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
+          .where(inArray(schema.followUpBatchItems.batchId, batchIds))
+          .groupBy(schema.followUpBatchItems.batchId, schema.orders.status)
+      : [];
+
+    const breakdownByBatch = new Map<string, Record<string, { count: number; revenue: string }>>();
+    for (const row of statusBreakdown) {
+      let map = breakdownByBatch.get(row.batchId);
+      if (!map) { map = {}; breakdownByBatch.set(row.batchId, map); }
+      map[row.status] = { count: row.count, revenue: row.revenue };
+    }
+
+    return {
+      batches: batches.map((b) => {
+        const breakdown = breakdownByBatch.get(b.id) ?? {};
+        const confirmed = (breakdown.CONFIRMED?.count ?? 0) + (breakdown.AGENT_ASSIGNED?.count ?? 0) +
+          (breakdown.DISPATCHED?.count ?? 0) + (breakdown.IN_TRANSIT?.count ?? 0) +
+          (breakdown.DELIVERED?.count ?? 0) + (breakdown.REMITTED?.count ?? 0);
+        const delivered = (breakdown.DELIVERED?.count ?? 0) + (breakdown.REMITTED?.count ?? 0);
+        const deliveredRevenue =
+          Number(breakdown.DELIVERED?.revenue ?? 0) + Number(breakdown.REMITTED?.revenue ?? 0);
+
+        return {
+          id: b.id,
+          name: b.name,
+          source: b.source,
+          branchName: b.branchId ? branchNames.get(b.branchId) ?? null : null,
+          createdByName: creatorNames.get(b.createdById) ?? null,
+          orderCount: b.orderCount,
+          confirmed,
+          delivered,
+          deliveredRevenue: String(deliveredRevenue),
+          confirmationRate: b.orderCount > 0 ? Math.round((confirmed / b.orderCount) * 100) : 0,
+          deliveryRate: b.orderCount > 0 ? Math.round((delivered / b.orderCount) * 100) : 0,
+          createdAt: b.createdAt,
+        };
+      }),
+      pagination: { page: input.page, limit: input.limit, total, totalPages: Math.ceil(total / input.limit) },
+    };
+  }
+
+  /** Get detail for a single follow-up batch: order list + analytics. */
+  async getFollowUpBatchDetail(batchId: string) {
+    const [batch] = await this.db
+      .select()
+      .from(schema.followUpBatches)
+      .where(eq(schema.followUpBatches.id, batchId))
+      .limit(1);
+
+    if (!batch) return null;
+
+    // Get all items with current order data
+    const items = await this.db
+      .select({
+        itemId: schema.followUpBatchItems.id,
+        orderId: schema.followUpBatchItems.orderId,
+        originalStatus: schema.followUpBatchItems.originalStatus,
+        addedAt: schema.followUpBatchItems.createdAt,
+        orderStatus: schema.orders.status,
+        customerName: schema.orders.customerName,
+        totalAmount: schema.orders.totalAmount,
+        orderCreatedAt: schema.orders.createdAt,
+      })
+      .from(schema.followUpBatchItems)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
+      .where(eq(schema.followUpBatchItems.batchId, batchId))
+      .orderBy(desc(schema.orders.createdAt));
+
+    // Creator + branch names
+    const [creator] = await this.db
+      .select({ name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, batch.createdById))
+      .limit(1);
+
+    let branchName: string | null = null;
+    if (batch.branchId) {
+      const [br] = await this.db
+        .select({ name: schema.branches.name })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, batch.branchId))
+        .limit(1);
+      branchName = br?.name ?? null;
+    }
+
+    // Compute funnel
+    const statusCounts: Record<string, number> = {};
+    let totalRevenue = 0;
+    let deliveredRevenue = 0;
+    for (const item of items) {
+      statusCounts[item.orderStatus] = (statusCounts[item.orderStatus] ?? 0) + 1;
+      const amt = Number(item.totalAmount) || 0;
+      totalRevenue += amt;
+      if (item.orderStatus === 'DELIVERED' || item.orderStatus === 'REMITTED') {
+        deliveredRevenue += amt;
+      }
+    }
+
+    const confirmed = (statusCounts.CONFIRMED ?? 0) + (statusCounts.AGENT_ASSIGNED ?? 0) +
+      (statusCounts.DISPATCHED ?? 0) + (statusCounts.IN_TRANSIT ?? 0) +
+      (statusCounts.DELIVERED ?? 0) + (statusCounts.REMITTED ?? 0);
+    const delivered = (statusCounts.DELIVERED ?? 0) + (statusCounts.REMITTED ?? 0);
+
+    return {
+      id: batch.id,
+      name: batch.name,
+      source: batch.source,
+      branchName,
+      createdByName: creator?.name ?? null,
+      orderCount: batch.orderCount,
+      createdAt: batch.createdAt,
+      items,
+      analytics: {
+        statusCounts,
+        confirmed,
+        delivered,
+        confirmationRate: batch.orderCount > 0 ? Math.round((confirmed / batch.orderCount) * 100) : 0,
+        deliveryRate: batch.orderCount > 0 ? Math.round((delivered / batch.orderCount) * 100) : 0,
+        totalRevenue: String(totalRevenue),
+        deliveredRevenue: String(deliveredRevenue),
+      },
+    };
+  }
+
+  /** Next auto-generated batch name: "Follow Up #N". */
+  async nextFollowUpBatchName(): Promise<string> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.followUpBatches);
+    return `Follow Up #${(row?.count ?? 0) + 1}`;
   }
 }

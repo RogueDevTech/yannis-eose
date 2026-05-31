@@ -34,6 +34,8 @@ interface SearchableSelectProps {
   wrapperClassName?: string;
   /** Extra classes on the trigger button — e.g. `!bg-app-hover text-center`. */
   triggerClassName?: string;
+  /** Render the chevron inline next to the label (centered) instead of absolute-right. Use in mobile sheet box wrappers. */
+  inlineChevron?: boolean;
   filterFn?: (opt: SearchableSelectOption, query: string) => boolean;
 }
 
@@ -73,6 +75,7 @@ export function SearchableSelect({
   controlSize = 'md',
   wrapperClassName = '',
   triggerClassName = '',
+  inlineChevron = false,
   filterFn,
 }: SearchableSelectProps) {
   const inputId = id ?? (label ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
@@ -350,18 +353,30 @@ export function SearchableSelect({
           ref={triggerRef}
           id={inputId}
           type="button"
-          className={triggerClass}
+          className={inlineChevron ? `${triggerClass} !flex items-center justify-center gap-1.5 !pr-3` : triggerClass}
           disabled={disabled}
           onClick={() => setOpen((v) => !v)}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={listboxId}
         >
-          <span className="block min-w-0 truncate">
+          <span className={inlineChevron ? 'min-w-0 truncate' : 'block min-w-0 truncate'}>
             {selected?.label ?? placeholder}
           </span>
+          {inlineChevron && !loading && (
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 shrink-0 text-app-fg-muted" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                clipRule="evenodd"
+              />
+            </svg>
+          )}
+          {inlineChevron && loading && (
+            <Spinner size="sm" className="w-3.5 h-3.5 shrink-0" />
+          )}
         </button>
-        {clearable && value && !disabled ? (
+        {!inlineChevron && (clearable && value && !disabled ? (
           <button
             type="button"
             className={[
@@ -404,7 +419,7 @@ export function SearchableSelect({
               />
             </svg>
           </span>
-        )}
+        ))}
       </div>
 
       {(error || hint) && (

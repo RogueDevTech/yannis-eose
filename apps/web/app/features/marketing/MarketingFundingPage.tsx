@@ -1729,7 +1729,7 @@ function FundingFilterControls({
           value={slice.typeFilter}
           onChange={(e) => onTypeChange(e.target.value)}
           options={typeOptions}
-          className="!bg-transparent !border-transparent !text-center"
+          className="!bg-transparent !border-transparent !text-center" inlineChevron
           controlSize="sm"
           openAs="modal"
           wrapperClassName="w-full"
@@ -1741,7 +1741,7 @@ function FundingFilterControls({
           value={slice.statusFilter ?? 'ALL'}
           onChange={(e) => onStatusChange(e.target.value)}
           options={statusOptions}
-          className="!bg-transparent !border-transparent !text-center"
+          className="!bg-transparent !border-transparent !text-center" inlineChevron
           controlSize="sm"
           openAs="modal"
           wrapperClassName="w-full"

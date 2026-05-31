@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, integer, numeric, jsonb, timestamp, boolean } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { orderStatusEnum, callStatusEnum, timelineEventTypeEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
@@ -103,6 +103,8 @@ export const orders = pgTable('orders', {
    * Rows are never physically removed — temporal history + audit remain intact.
    */
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  /** Set to true when an order is reopened via the Follow Up page. */
+  isFollowUp: boolean('is_follow_up').default(false).notNull(),
   ...temporalColumns,
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -160,5 +162,33 @@ export const orderTimelineEvents = pgTable('order_timeline_events', {
   metadata: jsonb('metadata'),
   /** Branch context — scopes the event to a branch for RLS filtering. */
   branchId: uuid('branch_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Follow-Up Batches ──────────────────────────────────────────
+// Tracks groups of orders reopened via the Follow Up page so users
+// can measure conversion/recovery performance per batch.
+
+export const followUpBatches = pgTable('follow_up_batches', {
+  id: uuidv7Pk(),
+  /** Display name — auto-generated ("Follow Up #N") or user-supplied. */
+  name: text('name').notNull(),
+  /** "orders" or "carts" — what was selected when the batch was created. */
+  source: text('source').notNull().default('orders'),
+  /** Target CS branch the orders were assigned to. */
+  branchId: uuid('branch_id'),
+  /** User who created this batch. */
+  createdById: uuid('created_by_id').references(() => users.id).notNull(),
+  /** Denormalized count for list views (avoids COUNT on every row). */
+  orderCount: integer('order_count').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const followUpBatchItems = pgTable('follow_up_batch_items', {
+  id: uuidv7Pk(),
+  batchId: uuid('batch_id').references(() => followUpBatches.id, { onDelete: 'cascade' }).notNull(),
+  orderId: uuid('order_id').references(() => orders.id).notNull(),
+  /** Status of the order at the time it was added to the batch. */
+  originalStatus: text('original_status').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

@@ -19,8 +19,11 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
+import { DateInput } from '~/components/ui/date-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SmartPick } from '~/components/ui/smart-pick';
+import { TextInput } from '~/components/ui/text-input';
+import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { Checkbox } from '~/components/ui/checkbox';
 import type { PendingCart } from '~/features/cs/types';
 import type { CartPrefill } from '~/features/orders/CreateOfflineOrderModal';
@@ -45,6 +48,7 @@ export interface FollowUpPageData {
     branchId?: string | null;
     assignedCsName?: string | null;
     assignedCsId?: string | null;
+    isFollowUp?: boolean;
   }>;
   total: number;
   totalPages: number;
@@ -61,6 +65,8 @@ interface FollowUpFilters {
   search: string;
   assignedCsId: string;
   olderThanDays: string;
+  startDate: string;
+  endDate: string;
   page: number;
 }
 
@@ -75,12 +81,12 @@ const STATUS_CHOICES = [
   { value: 'CS_ENGAGED', label: 'CS Engaged' },
   { value: 'CONFIRMED', label: 'Confirmed' },
   { value: 'AGENT_ASSIGNED', label: 'Agent Assigned' },
-  { value: 'DISPATCHED', label: 'Dispatched' },
-  { value: 'IN_TRANSIT', label: 'In Transit' },
   { value: 'DELIVERED', label: 'Delivered' },
   { value: 'REMITTED', label: 'Remitted' },
   { value: ABANDONED_CART_STATUS, label: 'Abandoned Carts' },
 ] as const;
+
+const CUSTOM_RANGE_VALUE = '__custom__';
 
 const AGE_OPTIONS = [
   { value: '', label: 'Any age' },
@@ -90,6 +96,7 @@ const AGE_OPTIONS = [
   { value: '30', label: 'Older than 30 days' },
   { value: '60', label: 'Older than 60 days' },
   { value: '90', label: 'Older than 90 days' },
+  { value: CUSTOM_RANGE_VALUE, label: 'Custom range…' },
 ];
 
 export function FollowUpPage({
@@ -105,6 +112,7 @@ export function FollowUpPage({
   filters,
   deferredLoading = false,
 }: FollowUpPageProps) {
+  const branchesCatalog = useBranchesCatalog();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const showSkeletonRows = deferredLoading || isLoaderRefetchBusy;
   const [, remixSetSearchParams] = useSearchParams();
@@ -118,17 +126,27 @@ export function FollowUpPage({
 
   const activeStatuses = useMemo(() => new Set(filters.statuses.split(',').filter(Boolean)), [filters.statuses]);
   const isCartView = activeStatuses.size === 1 && activeStatuses.has(ABANDONED_CART_STATUS);
+  const noStatusSelected = activeStatuses.size === 0;
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(filters.search);
   const [convertCartPrefill, setConvertCartPrefill] = useState<CartPrefill | null>(null);
+  const [peekOrder, setPeekOrder] = useState<FollowUpPageData['orders'][number] | null>(null);
+  const [customDateModalOpen, setCustomDateModalOpen] = useState(false);
+  const [draftStartDate, setDraftStartDate] = useState(filters.startDate);
+  const [draftEndDate, setDraftEndDate] = useState(filters.endDate);
+  const hasCustomDateRange = Boolean(filters.startDate || filters.endDate);
+  const [targetBranchId, setTargetBranchId] = useState('');
+  const [batchName, setBatchName] = useState('');
 
   useEffect(() => { setSelectedIds(new Set()); }, [filters.statuses, filters.assignedCsId, filters.olderThanDays]);
 
   const reopenFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
   useFetcherToast(reopenFetcher.data, {
-    successMessage: `${reopenFetcher.data?.succeeded ?? 0} order(s) reopened for follow-up`,
+    successMessage: isCartView
+      ? `${reopenFetcher.data?.succeeded ?? 0} cart(s) converted to orders`
+      : `${reopenFetcher.data?.succeeded ?? 0} order(s) reopened for follow-up`,
   });
   useCloseOnFetcherSuccess(reopenFetcher, () => {
     setReopenModalOpen(false);
@@ -185,13 +203,37 @@ export function FollowUpPage({
   };
 
   const handleAgeChange = (days: string) => {
+    if (days === CUSTOM_RANGE_VALUE) {
+      setDraftStartDate(filters.startDate);
+      setDraftEndDate(filters.endDate);
+      setCustomDateModalOpen(true);
+      return;
+    }
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       if (days) next.set('olderThanDays', days);
       else next.delete('olderThanDays');
+      // Clear custom dates when switching to a preset
+      next.delete('startDate');
+      next.delete('endDate');
       next.set('page', '1');
       return next;
     });
+  };
+
+  const applyCustomDateRange = () => {
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      // Custom range replaces olderThanDays
+      next.delete('olderThanDays');
+      if (draftStartDate) next.set('startDate', draftStartDate);
+      else next.delete('startDate');
+      if (draftEndDate) next.set('endDate', draftEndDate);
+      else next.delete('endDate');
+      next.set('page', '1');
+      return next;
+    });
+    setCustomDateModalOpen(false);
   };
 
   const handleSearchSubmit = () => {
@@ -232,6 +274,9 @@ export function FollowUpPage({
                 {order.customerName}
                 {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+                )}
+                {order.isFollowUp && (
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-info-300 bg-info-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-info-600 dark:border-info-700 dark:bg-info-900/30 dark:text-info-400">Follow Up</span>
                 )}
               </span>
             ),
@@ -399,7 +444,7 @@ export function FollowUpPage({
 
   const activeFilterCount =
     (filters.assignedCsId ? 1 : 0) +
-    (filters.olderThanDays ? 1 : 0) +
+    (filters.olderThanDays || hasCustomDateRange ? 1 : 0) +
     (filters.search ? 1 : 0);
 
   // Current view data
@@ -430,7 +475,7 @@ export function FollowUpPage({
                       options={closerOptions}
                       placeholder="All closers"
                       searchPlaceholder="Search closers…"
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                     />
                   </div>
@@ -438,10 +483,10 @@ export function FollowUpPage({
                 <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                   <FormSelect
                     id="follow-up-mobile-age"
-                    value={filters.olderThanDays}
+                    value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
                     onChange={(e) => handleAgeChange(e.target.value)}
                     options={AGE_OPTIONS}
-                    className="!bg-transparent !border-transparent !text-center"
+                    className="!bg-transparent !border-transparent !text-center" inlineChevron
                     controlSize="sm"
                     openAs="modal"
                     wrapperClassName="w-full"
@@ -491,24 +536,29 @@ export function FollowUpPage({
 
       {/* ── Filters row ──────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-3">
+        {/* Closer + age hidden on mobile — inside Actions sheet */}
         {!isCartView && (
-          <SearchableSelect
-            id="follow-up-closer"
-            value={filters.assignedCsId}
-            onChange={handleCloserChange}
-            options={closerOptions}
-            placeholder="All closers"
-            searchPlaceholder="Search closers…"
-            controlSize="sm"
-            wrapperClassName="w-full sm:w-48"
-          />
+          <div className="hidden sm:block">
+            <SearchableSelect
+              id="follow-up-closer"
+              value={filters.assignedCsId}
+              onChange={handleCloserChange}
+              options={closerOptions}
+              placeholder="All closers"
+              searchPlaceholder="Search closers…"
+              controlSize="sm"
+              wrapperClassName="w-48"
+            />
+          </div>
         )}
-        <FormSelect
-          id="follow-up-age"
-          value={filters.olderThanDays}
-          onChange={(e) => handleAgeChange(e.target.value)}
-          options={AGE_OPTIONS}
-        />
+        <div className="hidden sm:block">
+          <FormSelect
+            id="follow-up-age"
+            value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
+            onChange={(e) => handleAgeChange(e.target.value)}
+            options={AGE_OPTIONS}
+          />
+        </div>
         <div className="flex-1">
           <SearchInput
             value={searchQuery}
@@ -525,35 +575,39 @@ export function FollowUpPage({
       <OverviewStatStrip
         mobileGrid
         items={[
+          { label: 'Assigned', value: ((statusCounts['CS_ASSIGNED'] ?? 0)).toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Unconfirmed', value: ((statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400' },
           { label: isCartView ? 'Abandoned carts' : 'Matched', value: viewTotal.toLocaleString() },
           { label: 'Selected', value: selectedIds.size.toLocaleString(), valueClassName: selectedIds.size > 0 ? 'text-brand-500' : undefined },
         ]}
       />
 
       {/* ── Smart Pick ─────────────────────────────────── */}
-      {viewItems.length > 0 && !isCartView && (
+      {viewItems.length > 0 && !noStatusSelected && (
         <div className="card">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <SmartPick
-              total={Math.min(viewTotal, orders.length)}
+              total={Math.min(viewTotal, isCartView ? abandonedCarts.length : orders.length)}
               selectedCount={selectedIds.size}
               onPick={(count) => {
-                setSelectedIds(new Set(orders.slice(0, count).map((o) => o.id)));
+                const items = isCartView ? abandonedCarts : orders;
+                setSelectedIds(new Set(items.slice(0, count).map((o) => o.id)));
               }}
               onClear={() => setSelectedIds(new Set())}
-              itemNoun="orders"
+              itemNoun={isCartView ? 'carts' : 'orders'}
             />
             {viewTotal > 0 && (
               <label className="flex items-center gap-1.5 text-sm">
                 <Checkbox
-                  checked={selectedIds.size === orders.length && orders.length > 0}
+                  checked={selectedIds.size === (isCartView ? abandonedCarts : orders).length && (isCartView ? abandonedCarts : orders).length > 0}
                   onChange={(e) => {
-                    if (e.target.checked) setSelectedIds(new Set(orders.map((o) => o.id)));
+                    const items = isCartView ? abandonedCarts : orders;
+                    if (e.target.checked) setSelectedIds(new Set(items.map((o) => o.id)));
                     else setSelectedIds(new Set());
                   }}
                 />
                 <span className="font-medium text-app-fg">
-                  {selectedIds.size === orders.length && orders.length > 0
+                  {selectedIds.size === (isCartView ? abandonedCarts : orders).length && (isCartView ? abandonedCarts : orders).length > 0
                     ? `${selectedIds.size.toLocaleString()} selected`
                     : `Select all ${viewTotal.toLocaleString()} matching`}
                 </span>
@@ -564,26 +618,62 @@ export function FollowUpPage({
       )}
 
       {/* ── Bulk action bar ──────────────────────────────── */}
-      {selectedIds.size > 0 && !isCartView && (
+      {selectedIds.size > 0 && (
         <div className="card bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-700/50">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
-                {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} selected
+                {selectedIds.size} {isCartView ? 'cart' : 'order'}{selectedIds.size !== 1 ? 's' : ''} selected
               </span>
               <button onClick={() => setSelectedIds(new Set())} className="text-xs text-brand-500 hover:text-brand-600 underline">
                 Clear
               </button>
             </div>
-            <Button variant="primary" size="sm" onClick={() => setReopenModalOpen(true)}>
-              Reopen for follow-up
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" size="sm" onClick={() => setReopenModalOpen(true)}>
+                Reopen for follow-up
+              </Button>
+              {isCartView && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const first = abandonedCarts.find((c) => selectedIds.has(c.id));
+                    if (first) {
+                      setConvertCartPrefill({
+                        cartId: first.id,
+                        customerName: first.customerName,
+                        customerPhone: first.customerPhone ?? undefined,
+                        customerAddress: first.customerAddress ?? undefined,
+                        deliveryAddress: first.deliveryAddress ?? undefined,
+                        deliveryState: first.deliveryState ?? undefined,
+                        deliveryNotes: first.deliveryNotes ?? undefined,
+                        customerGender: first.customerGender ?? undefined,
+                        preferredDeliveryDate: first.preferredDeliveryDate ?? undefined,
+                        customerEmail: first.customerEmail ?? undefined,
+                        paymentMethod: first.paymentMethod ?? undefined,
+                        productId: first.productId ?? undefined,
+                        offerLabel: first.offerLabel ?? undefined,
+                        quantity: first.quantity ?? undefined,
+                      });
+                    }
+                  }}
+                >
+                  Convert to order
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* ── Table ─────────────────────────────────────────── */}
-      {viewItems.length === 0 && !showSkeletonRows ? (
+      {noStatusSelected && !showSkeletonRows ? (
+        <EmptyState
+          title="Select a status"
+          description="Pick one or more statuses above to see orders for follow-up."
+        />
+      ) : viewItems.length === 0 && !showSkeletonRows ? (
         <EmptyState
           title={isCartView ? 'No abandoned carts' : 'No orders match'}
           description={isCartView ? 'No abandoned carts found for the current filters.' : 'Adjust the status chips or filters to find orders for follow-up.'}
@@ -593,6 +683,21 @@ export function FollowUpPage({
           columns={cartColumns}
           rows={showSkeletonRows ? Array.from({ length: 10 }, (_, i) => ({ id: `sk-${i}`, customerName: '', customerPhoneDisplay: '', productName: null, campaignName: null, offerLabel: null, updatedAt: '' })) as PendingCart[] : abandonedCarts}
           rowKey={(row) => row.id}
+          selection={{
+            selectedIds,
+            onToggle: (id, selected) => {
+              setSelectedIds((prev) => {
+                const next = new Set(prev);
+                if (selected) next.add(id);
+                else next.delete(id);
+                return next;
+              });
+            },
+            onToggleAll: (selectAll) => {
+              if (selectAll) setSelectedIds(new Set(abandonedCarts.map((c) => c.id)));
+              else setSelectedIds(new Set());
+            },
+          }}
           renderMobileCard={(cart) => (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
@@ -641,15 +746,19 @@ export function FollowUpPage({
             },
           }}
           renderMobileCard={(order) => (
-            <Link
-              to={`/admin/orders/${order.id}`}
-              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
+            <button
+              type="button"
+              onClick={() => setPeekOrder(order)}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-app-fg truncate">
                   {order.customerName}
                   {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                     <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+                  )}
+                  {order.isFollowUp && (
+                    <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-info-300 bg-info-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-info-600 dark:border-info-700 dark:bg-info-900/30 dark:text-info-400">Follow Up</span>
                   )}
                 </span>
                 <OrderStatusBadge status={order.status} expanded />
@@ -662,7 +771,7 @@ export function FollowUpPage({
                 <span>{order.assignedCsName ?? 'Unassigned'}</span>
                 <span>{new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}</span>
               </div>
-            </Link>
+            </button>
           )}
         />
       )}
@@ -676,6 +785,68 @@ export function FollowUpPage({
         </div>
       )}
 
+      {/* ── Peek Order Modal (mobile) ── */}
+      {peekOrder && (
+        <Modal
+          open
+          onClose={() => setPeekOrder(null)}
+          maxWidth="max-w-sm"
+          contentClassName="p-5 space-y-4"
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-app-fg truncate">{peekOrder.customerName}</h3>
+              <OrderStatusBadge status={peekOrder.status} expanded />
+            </div>
+            {peekOrder.orderNumber && (
+              <OrderIdBadge id={peekOrder.id} orderNumber={peekOrder.orderNumber} />
+            )}
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="block text-xs text-app-fg-muted">Amount</span>
+                <NairaPrice amount={peekOrder.totalAmount ? Number(peekOrder.totalAmount) : null} />
+              </div>
+              <div>
+                <span className="block text-xs text-app-fg-muted">Date</span>
+                <span className="text-app-fg">{new Date(peekOrder.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              </div>
+              <div>
+                <span className="block text-xs text-app-fg-muted">Branch</span>
+                <span className="text-app-fg">{peekOrder.branchName ?? '—'}</span>
+              </div>
+              <div>
+                <span className="block text-xs text-app-fg-muted">Assigned CS</span>
+                <span className="text-app-fg">{peekOrder.assignedCsName ?? 'Unassigned'}</span>
+              </div>
+              {peekOrder.mediaBuyerName && (
+                <div>
+                  <span className="block text-xs text-app-fg-muted">Media Buyer</span>
+                  <span className="text-app-fg">{peekOrder.mediaBuyerName}</span>
+                </div>
+              )}
+              {peekOrder.customerPhoneDisplay && (
+                <div>
+                  <span className="block text-xs text-app-fg-muted">Phone</span>
+                  <span className="text-app-fg">{peekOrder.customerPhoneDisplay}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-app-border">
+            <Link
+              to={`/admin/orders/${peekOrder.id}`}
+              className="btn-primary btn-sm flex-1 text-center inline-flex items-center justify-center"
+              onClick={() => setPeekOrder(null)}
+            >
+              View full details
+            </Link>
+            <Button variant="secondary" size="sm" onClick={() => setPeekOrder(null)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {/* ── Reopen Modal ─────────────────────────────────── */}
       <Modal
         open={reopenModalOpen}
@@ -685,28 +856,98 @@ export function FollowUpPage({
       >
         <h3 className="text-lg font-semibold text-app-fg">Reopen for follow-up</h3>
         <p className="text-sm text-app-fg-muted">
-          {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} will be reset to <strong>Unprocessed</strong> and re-enter the CS queue. All order data and history are preserved.
+          {isCartView ? (
+            <>
+              {selectedIds.size} abandoned cart{selectedIds.size !== 1 ? 's' : ''} will be converted into <strong>Unprocessed</strong> orders and assigned to the selected CS branch.
+            </>
+          ) : (
+            <>
+              {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} will be reset to <strong>Unprocessed</strong> and assigned to the selected CS branch.
+            </>
+          )}
         </p>
+        {branchesCatalog.length > 0 && (
+          <FormSelect
+            label="CS branch"
+            value={targetBranchId}
+            onChange={(e) => setTargetBranchId(e.target.value)}
+            options={[
+              { value: '', label: 'Select a branch…' },
+              ...branchesCatalog.map((b) => ({ value: b.id, label: `${b.name} (${b.code})` })),
+            ]}
+          />
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={() => setReopenModalOpen(false)}>
             Cancel
           </Button>
           <Button
             variant="primary"
-            disabled={reopenFetcher.state === 'submitting'}
+            disabled={reopenFetcher.state === 'submitting' || !targetBranchId}
             loading={reopenFetcher.state === 'submitting'}
-            loadingText="Reopening…"
+            loadingText={isCartView ? 'Converting…' : 'Reopening…'}
             onClick={() => {
-              reopenFetcher.submit(
-                {
-                  intent: 'reopenForFollowUp',
-                  orderIds: JSON.stringify([...selectedIds]),
-                },
-                { method: 'post' },
-              );
+              if (isCartView) {
+                reopenFetcher.submit(
+                  {
+                    intent: 'bulkRecoverCarts',
+                    cartIds: JSON.stringify([...selectedIds]),
+                    targetBranchId,
+                  },
+                  { method: 'post' },
+                );
+              } else {
+                reopenFetcher.submit(
+                  {
+                    intent: 'reopenForFollowUp',
+                    orderIds: JSON.stringify([...selectedIds]),
+                    targetBranchId,
+                  },
+                  { method: 'post' },
+                );
+              }
             }}
           >
-            Reopen {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
+            {isCartView
+              ? `Convert ${selectedIds.size} cart${selectedIds.size !== 1 ? 's' : ''} to orders`
+              : `Reopen ${selectedIds.size} order${selectedIds.size !== 1 ? 's' : ''}`}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* ── Custom Date Range Modal ─────────────────────── */}
+      <Modal
+        open={customDateModalOpen}
+        onClose={() => setCustomDateModalOpen(false)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5 space-y-4"
+      >
+        <h3 className="text-base font-semibold text-app-fg">Custom date range</h3>
+        <p className="text-sm text-app-fg-muted">Show orders created within this date range.</p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-app-fg-muted mb-1">From</label>
+            <DateInput
+              kind="date"
+              value={draftStartDate}
+              onChange={(e) => setDraftStartDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-app-fg-muted mb-1">To</label>
+            <DateInput
+              kind="date"
+              value={draftEndDate}
+              onChange={(e) => setDraftEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <Button variant="primary" className="flex-1" onClick={applyCustomDateRange} disabled={!draftStartDate && !draftEndDate}>
+            Apply
+          </Button>
+          <Button variant="secondary" onClick={() => setCustomDateModalOpen(false)}>
+            Cancel
           </Button>
         </div>
       </Modal>

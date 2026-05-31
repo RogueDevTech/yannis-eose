@@ -322,7 +322,7 @@ export function MarketingCrossFunnelPage({
                       ]}
                       placeholder="All media buyers"
                       searchPlaceholder="Search buyers…"
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                     />
                   </div>
@@ -347,7 +347,7 @@ export function MarketingCrossFunnelPage({
                       ]}
                       placeholder="All products"
                       searchPlaceholder="Search products…"
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                     />
                   </div>
@@ -372,7 +372,7 @@ export function MarketingCrossFunnelPage({
                       ]}
                       placeholder="All forms"
                       searchPlaceholder="Search forms…"
-                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
                       wrapperClassName="w-full"
                     />
                   </div>

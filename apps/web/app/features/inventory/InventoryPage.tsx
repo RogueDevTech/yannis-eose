@@ -622,7 +622,7 @@ export function InventoryPage(props: InventoryStreamData) {
         value={currentProductFilter}
         onChange={(v) => updateLevelsParam('productId', v)}
         wrapperClassName="w-full"
-        triggerClassName="!bg-transparent !border-transparent !text-center"
+        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
         placeholder="All products"
         searchPlaceholder="Search products..."
         options={[
@@ -642,7 +642,7 @@ export function InventoryPage(props: InventoryStreamData) {
         value={currentLocationFilter}
         onChange={(v) => updateLevelsParam('locationId', v)}
         wrapperClassName="w-full"
-        triggerClassName="!bg-transparent !border-transparent !text-center"
+        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
         placeholder="All locations"
         searchPlaceholder="Search locations..."
         options={[
@@ -686,7 +686,7 @@ export function InventoryPage(props: InventoryStreamData) {
         value={currentShipmentFilter}
         onChange={(v) => updateLevelsParam('shipmentId', v)}
         wrapperClassName="w-full"
-        triggerClassName="!bg-transparent !border-transparent !text-center"
+        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
         placeholder="All shipments"
         searchPlaceholder="Search SHIP ref…"
         options={[

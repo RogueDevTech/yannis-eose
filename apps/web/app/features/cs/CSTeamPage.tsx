@@ -535,7 +535,7 @@ export function CSTeamPage({
                       value={activityFilter}
                       onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
                       options={CS_ACTIVITY_OPTIONS}
-                      className="!bg-transparent !border-transparent !text-center"
+                      className="!bg-transparent !border-transparent !text-center" inlineChevron
                       controlSize="sm"
                       openAs="modal"
                       wrapperClassName="w-full"
@@ -546,7 +546,7 @@ export function CSTeamPage({
                       value={backlogFilter}
                       onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
                       options={CS_BACKLOG_OPTIONS}
-                      className="!bg-transparent !border-transparent !text-center"
+                      className="!bg-transparent !border-transparent !text-center" inlineChevron
                       controlSize="sm"
                       openAs="modal"
                       wrapperClassName="w-full"

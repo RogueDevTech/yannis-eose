@@ -36,7 +36,7 @@ function emptyPayload(): SecondaryPayload {
     groupsTotal: 0,
     groupsPage: 1,
     groupsTotalPages: 1,
-    otherExpensesCounts: { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0 },
+    otherExpensesCounts: { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 },
   };
 }
 
