@@ -942,7 +942,11 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                     ? 'Team supervisor'
                     : r.isFinance
                       ? 'Finance'
-                      : 'Head of Marketing';
+                      : r.role === 'SUPER_ADMIN'
+                        ? 'Super Admin'
+                        : r.role === 'ADMIN'
+                          ? 'Admin'
+                          : 'Head of Marketing';
                   return {
                     value: r.id,
                     label: `${r.name} — ${roleLabel}${r.isPreferred ? ' (default)' : ''}`,
