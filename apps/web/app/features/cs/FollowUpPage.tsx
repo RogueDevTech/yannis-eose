@@ -22,6 +22,7 @@ import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { DateInput } from '~/components/ui/date-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SmartPick } from '~/components/ui/smart-pick';
+import { TextInput } from '~/components/ui/text-input';
 import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { Checkbox } from '~/components/ui/checkbox';
 import type { PendingCart } from '~/features/cs/types';
@@ -137,6 +138,7 @@ export function FollowUpPage({
   const [draftEndDate, setDraftEndDate] = useState(filters.endDate);
   const hasCustomDateRange = Boolean(filters.startDate || filters.endDate);
   const [targetBranchId, setTargetBranchId] = useState('');
+  const [batchName, setBatchName] = useState('');
 
   useEffect(() => { setSelectedIds(new Set()); }, [filters.statuses, filters.assignedCsId, filters.olderThanDays]);
 
@@ -573,6 +575,8 @@ export function FollowUpPage({
       <OverviewStatStrip
         mobileGrid
         items={[
+          { label: 'Assigned', value: ((statusCounts['CS_ASSIGNED'] ?? 0)).toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Unconfirmed', value: ((statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400' },
           { label: isCartView ? 'Abandoned carts' : 'Matched', value: viewTotal.toLocaleString() },
           { label: 'Selected', value: selectedIds.size.toLocaleString(), valueClassName: selectedIds.size > 0 ? 'text-brand-500' : undefined },
         ]}

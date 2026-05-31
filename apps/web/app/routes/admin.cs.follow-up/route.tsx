@@ -353,6 +353,21 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
+    // Create batch record for tracking
+    const batchName = formData.get('batchName')?.toString()?.trim() || '';
+    if (batchName && createdOrderIds.length > 0) {
+      await apiRequest<unknown>('/trpc/orders.createFollowUpBatch', {
+        method: 'POST',
+        cookie,
+        body: {
+          name: batchName,
+          source: 'carts',
+          ...(targetBranchId ? { branchId: targetBranchId } : {}),
+          items: createdOrderIds.map((id) => ({ orderId: id, originalStatus: 'ABANDONED_CART' })),
+        },
+      });
+    }
+
     return json({ success: true, succeeded, failed });
   }
 
