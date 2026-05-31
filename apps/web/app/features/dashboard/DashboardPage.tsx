@@ -544,9 +544,9 @@ function MarketingDashboard({
 }) {
   const isHeadOfMarketing = role === 'HEAD_OF_MARKETING';
   const showsTeamManagementCard = isHeadOfMarketing || isMarketingTeamSupervisor;
-  // Only MB-supervisors get the personal/team toggle — HoM IS the team, so their
-  // "personal" metrics are the branch-wide view (no separate funnel to show).
-  const showsPersonalToggle = isMarketingTeamSupervisor && !isHeadOfMarketing;
+  // HoM + MB-supervisors both get the personal/team toggle. HoM may also run
+  // ads — "My Performance" shows their own orders (zero when they haven't).
+  const showsPersonalToggle = isHeadOfMarketing || isMarketingTeamSupervisor;
   const showsSupervisorLayout = isHeadOfMarketing || isMarketingTeamSupervisor;
   const [viewTab, setViewTab] = useState<'personal' | 'team'>('team');
 

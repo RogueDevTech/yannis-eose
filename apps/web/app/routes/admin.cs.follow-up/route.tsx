@@ -15,6 +15,8 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { FollowUpPage } from '~/features/cs/FollowUpPage';
 import type { FollowUpPageData } from '~/features/cs/FollowUpPage';
+import { FollowUpBatchesPage } from '~/features/cs/FollowUpBatchesPage';
+import type { FollowUpBatchesPageData } from '~/features/cs/FollowUpBatchesPage';
 import type { PendingCart } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
@@ -30,7 +32,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
+  const view = url.searchParams.get('view') || 'batches';
 
+  // ── Batches view (default) ──────────────────────────────────
+  if (view === 'batches') {
+    const batchesPage = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+    const emptyBatches = { batches: [] as Array<{ id: string; name: string; source: string; branchName: string | null; createdByName: string | null; orderCount: number; confirmed: number; delivered: number; deliveredRevenue: string; confirmationRate: number; deliveryRate: number; createdAt: string }>, pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } };
+    const batchesData = (async () => {
+      try {
+        const res = await apiRequest<unknown>(
+          `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20 }))}`,
+          { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+        );
+        if (!res.ok) return emptyBatches;
+        return ((res.data as { result?: { data?: typeof emptyBatches } })?.result?.data) ?? emptyBatches;
+      } catch {
+        return emptyBatches;
+      }
+    })();
+    return defer({
+      shell: { view: 'batches' as const, page: batchesPage },
+      batchesData,
+    });
+  }
+
+  // ── Create view — order/cart picker ─────────────────────────
   const ALL_FOLLOW_UP_STATUSES = [
     'DELETED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED',
     'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED',
@@ -47,12 +73,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const limit = 50;
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
-
-  // Status counts for all follow-up-relevant statuses
   const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: ALL_FOLLOW_UP_STATUSES }));
 
   const pageData = (async (): Promise<FollowUpPageData> => {
-    // Always fetch counts, closers, products, and cart stats
     const [closersRes, countsRes, productsRes, cartStatsRes] = await Promise.all([
       apiRequest<unknown>('/trpc/orders.listCSClosers', deferredOpt),
       apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, deferredOpt),
@@ -76,26 +99,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ((cartStatsRes.data as { result?: { data?: { abandonedOpen: number } } })?.result?.data ?? { abandonedOpen: 0 })
       : { abandonedOpen: 0 };
 
-    // Add abandoned cart count to statusCounts
     statusCounts[ABANDONED_CART_STATUS] = cartStats.abandonedOpen;
 
-    // No statuses selected — return only counts (no orders fetched)
     if (statuses.length === 0) {
-      return {
-        orders: [],
-        total: 0,
-        totalPages: 1,
-        closers,
-        statusCounts,
-        products,
-        abandonedCarts: [],
-        abandonedCartsTotal: 0,
-        abandonedCartsTotalPages: 1,
-      };
+      return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1 };
     }
 
     if (isCartView) {
-      // Fetch abandoned carts instead of orders
       const cartInput: Record<string, unknown> = { page, limit };
       if (search) cartInput.search = search;
       if (customStartDate || customEndDate) {
@@ -116,32 +126,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const cartData = cartRes.ok
         ? (cartRes.data as { result?: { data?: { items: PendingCart[]; total: number; page: number; limit: number } } })?.result?.data
         : null;
-
-      return {
-        orders: [],
-        total: 0,
-        totalPages: 1,
-        closers,
-        statusCounts,
-        products,
-        abandonedCarts: cartData?.items ?? [],
-        abandonedCartsTotal: cartData?.total ?? 0,
-        abandonedCartsTotalPages: Math.max(1, Math.ceil((cartData?.total ?? 0) / limit)),
-      };
+      return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: cartData?.items ?? [], abandonedCartsTotal: cartData?.total ?? 0, abandonedCartsTotalPages: Math.max(1, Math.ceil((cartData?.total ?? 0) / limit)) };
     }
 
-    // Fetch orders
-    const listInput: Record<string, unknown> = {
-      page, limit, sortBy: 'createdAt', sortOrder: 'desc',
-    };
-    // Filter out the cart pseudo-status
+    const listInput: Record<string, unknown> = { page, limit, sortBy: 'createdAt', sortOrder: 'desc' };
     const orderStatuses = statuses.filter((s) => s !== ABANDONED_CART_STATUS);
     if (orderStatuses.length === 1) listInput.status = orderStatuses[0];
     else if (orderStatuses.length > 1) listInput.statuses = orderStatuses;
-
     if (search) listInput.search = search;
     if (assignedCsId) listInput.assignedCsId = assignedCsId;
-    // Custom date range takes priority over olderThanDays preset
     if (customStartDate || customEndDate) {
       if (customStartDate) listInput.startDate = customStartDate;
       if (customEndDate) listInput.endDate = customEndDate;
@@ -161,22 +154,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: FollowUpPageData['orders']; pagination: { total: number; totalPages: number } } } })?.result?.data
       : null;
-
-    return {
-      orders: ordersData?.orders ?? [],
-      total: ordersData?.pagination?.total ?? 0,
-      totalPages: ordersData?.pagination?.totalPages ?? 1,
-      closers,
-      statusCounts,
-      products,
-      abandonedCarts: [],
-      abandonedCartsTotal: 0,
-      abandonedCartsTotalPages: 1,
-    };
+    return { orders: ordersData?.orders ?? [], total: ordersData?.pagination?.total ?? 0, totalPages: ordersData?.pagination?.totalPages ?? 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1 };
   })();
 
   return defer({
     shell: {
+      view: 'create' as const,
       statuses: statusParam,
       search: search ?? '',
       assignedCsId: assignedCsId ?? '',
@@ -375,10 +358,50 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function FollowUpRoute() {
-  const { shell, pageData } = useLoaderData<typeof loader>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const loaderData = useLoaderData<typeof loader>() as any;
+  const shell = loaderData.shell;
+  const view: string = shell?.view ?? 'batches';
+
+  if (view === 'batches') {
+    const batchesPage: number = shell?.page ?? 1;
+    return (
+      <CachedAwait<FollowUpBatchesPageData>
+        resolve={loaderData.batchesData as Promise<FollowUpBatchesPageData>}
+        fallback={
+          <FollowUpBatchesPage
+            batches={[]}
+            pagination={{ page: 1, limit: 20, total: 0, totalPages: 1 }}
+            page={batchesPage}
+            deferredLoading
+          />
+        }
+        loaderShell={{ shell }}
+        deferredKey="batchesData"
+      >
+        {(data) => (
+          <FollowUpBatchesPage
+            {...data}
+            page={batchesPage}
+          />
+        )}
+      </CachedAwait>
+    );
+  }
+
+  const filters = {
+    view: 'create',
+    statuses: shell?.statuses ?? '',
+    search: shell?.search ?? '',
+    assignedCsId: shell?.assignedCsId ?? '',
+    olderThanDays: shell?.olderThanDays ?? '',
+    startDate: shell?.startDate ?? '',
+    endDate: shell?.endDate ?? '',
+    page: shell?.page ?? 1,
+  };
   return (
     <CachedAwait<FollowUpPageData>
-      resolve={pageData as Promise<FollowUpPageData>}
+      resolve={loaderData.pageData as Promise<FollowUpPageData>}
       fallback={
         <FollowUpPage
           orders={[]}
@@ -390,7 +413,7 @@ export default function FollowUpRoute() {
           abandonedCarts={[]}
           abandonedCartsTotal={0}
           abandonedCartsTotalPages={1}
-          filters={shell}
+          filters={filters}
           deferredLoading
         />
       }
@@ -400,7 +423,7 @@ export default function FollowUpRoute() {
       {(data) => (
         <FollowUpPage
           {...data}
-          filters={shell}
+          filters={filters}
         />
       )}
     </CachedAwait>

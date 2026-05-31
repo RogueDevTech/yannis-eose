@@ -66,18 +66,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
-  const mediaBuyerIdParam = role === 'MEDIA_BUYER' ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' ? { assignedCsId: user.id } : {};
-  const isSupervisor =
-    role === 'HEAD_OF_MARKETING' ||
-    (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
-  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
-  // For MB-supervisors, fetch personal-only metrics (scoped to own mediaBuyerId).
-  // HoM is NOT a media buyer — their "My Performance" is the branch-wide view (same as team metrics).
   const isActualMbSupervisor =
     role !== 'HEAD_OF_MARKETING' &&
     (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
-  const personalMetricsInput = isActualMbSupervisor
+  const isSupervisor =
+    role === 'HEAD_OF_MARKETING' || isActualMbSupervisor;
+  // Team metrics: supervisors/HoM should NOT pass mediaBuyerId — the backend
+  // applies supervisor scope to aggregate the whole team. Regular MBs self-scope.
+  const mediaBuyerIdParam =
+    role === 'MEDIA_BUYER' && !isActualMbSupervisor ? { mediaBuyerId: user.id } : {};
+  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
+  // Personal metrics: the user's own funnel (scoped to own mediaBuyerId).
+  // Both MB-supervisors and HoM can run ads — "My Performance" shows their own orders.
+  const personalMetricsInput = isSupervisor
     ? JSON.stringify({ startDate, endDate, mediaBuyerId: user.id, personalOnly: true })
     : null;
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });

@@ -1667,10 +1667,10 @@ export class MarketingService {
     // A normal Media Buyer requests funding from their team supervisor or Head
     // of Marketing — never directly from a Finance Officer. Finance disburses
     // to HoMs only; the HoM then funds their Media Buyers.
-    const allowedRoles: Array<'FINANCE_OFFICER' | 'HEAD_OF_MARKETING' | 'MEDIA_BUYER' | 'SUPER_ADMIN'> =
+    const allowedRoles: Array<'FINANCE_OFFICER' | 'HEAD_OF_MARKETING' | 'MEDIA_BUYER' | 'SUPER_ADMIN' | 'ADMIN'> =
       requesterRole === 'MEDIA_BUYER'
         ? ['HEAD_OF_MARKETING', 'MEDIA_BUYER']
-        : ['FINANCE_OFFICER', 'SUPER_ADMIN'];
+        : ['FINANCE_OFFICER', 'SUPER_ADMIN', 'ADMIN'];
 
     // Resolve the requester's marketing supervisors on this branch. When
     // present, they become the preferred recipients; HoM stays in the list
@@ -1807,17 +1807,18 @@ export class MarketingService {
           branchId,
         );
       }
-      // Finance is a valid target for HoM requesters only; a normal Media Buyer
-      // must route through their supervisor / Head of Marketing.
-      const financeTargetAllowed = targetIsFinance && !requesterIsMb;
+      // Finance / Admin / SuperAdmin are valid targets for HoM requesters;
+      // a normal Media Buyer must route through their supervisor / Head of Marketing.
+      const targetIsAdminLevel = ['SUPER_ADMIN', 'ADMIN'].includes(target.role);
+      const nonMbTargetAllowed = !requesterIsMb && (targetIsFinance || targetIsAdminLevel);
       const mbMarketingTargetAllowed =
         requesterIsMb && (targetIsHoM || targetIsSupervisor);
-      if (!financeTargetAllowed && !mbMarketingTargetAllowed) {
+      if (!nonMbTargetAllowed && !mbMarketingTargetAllowed) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: requesterIsMb
             ? 'Funding requests must be sent to your team supervisor or Head of Marketing'
-            : 'Funding requests must be sent to a Finance Officer',
+            : 'Funding requests must be sent to a Finance Officer, Admin, or Super Admin',
         });
       }
       // Branch check for HoM targets only — Finance is org-wide; the supervisor

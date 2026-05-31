@@ -7837,86 +7837,86 @@ export class OrdersService {
     actor: SessionUser,
     opts?: { targetBranchId?: string },
   ) {
+    const unique = [...new Set(orderIds)];
+    if (unique.length === 0) return { results: [], succeeded: 0, failed: 0, total: 0 };
+
+    // 1. Batch-read all orders in one query
+    const existingOrders = await this.db
+      .select({
+        id: schema.orders.id,
+        status: schema.orders.status,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(inArray(schema.orders.id, unique));
+
+    const orderMap = new Map(existingOrders.map((o) => [o.id, o]));
     const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
+    const toUpdate: Array<{ id: string; previousStatus: string; previousBranchId: string | null }> = [];
 
-    for (const orderId of orderIds) {
-      try {
-        const [order] = await this.db
-          .select({
-            id: schema.orders.id,
-            status: schema.orders.status,
-            servicingBranchId: schema.orders.servicingBranchId,
-          })
-          .from(schema.orders)
-          .where(eq(schema.orders.id, orderId))
-          .limit(1);
+    for (const id of unique) {
+      const order = orderMap.get(id);
+      if (!order) { results.push({ orderId: id, success: false, error: 'Order not found' }); continue; }
+      if (order.status === 'UNPROCESSED') { results.push({ orderId: id, success: false, error: 'Already unprocessed' }); continue; }
+      toUpdate.push({ id, previousStatus: order.status, previousBranchId: order.servicingBranchId });
+    }
 
-        if (!order) {
-          results.push({ orderId, success: false, error: 'Order not found' });
-          continue;
-        }
+    if (toUpdate.length > 0) {
+      const targetBranch = opts?.targetBranchId;
+      const now = new Date();
+      const updateIds = toUpdate.map((o) => o.id);
 
-        if (order.status === 'UNPROCESSED') {
-          results.push({ orderId, success: false, error: 'Order is already unprocessed' });
-          continue;
-        }
+      // 2. Batch-update all eligible orders in one query
+      const updateFields: Record<string, unknown> = {
+        status: 'UNPROCESSED',
+        assignedCsId: null,
+        updatedAt: now,
+        createdAt: now,
+        deletedAt: null,
+        isFollowUp: true,
+      };
+      if (targetBranch) updateFields.servicingBranchId = targetBranch;
 
-        const targetBranch = opts?.targetBranchId ?? order.servicingBranchId;
-        const branchChanged = targetBranch !== order.servicingBranchId;
+      await withActorAndBranch(
+        this.db,
+        { id: actor.id, currentBranchId: targetBranch ?? actor.currentBranchId },
+        async (tx) => {
+          await tx
+            .update(schema.orders)
+            .set(updateFields)
+            .where(inArray(schema.orders.id, updateIds));
+        },
+      );
 
-        const now = new Date();
-        const updateFields: Record<string, unknown> = {
-          status: 'UNPROCESSED',
-          assignedCsId: null,
-          updatedAt: now,
-          // Reset createdAt so reopened orders appear in today's queue.
-          createdAt: now,
-          // Clear soft-delete flag so DELETED orders reappear in normal queries.
-          deletedAt: null,
-          // Tag as follow-up for badge display.
-          isFollowUp: true,
-        };
-        if (branchChanged && targetBranch) {
-          updateFields.servicingBranchId = targetBranch;
-        }
-
-        await withActorAndBranch(
-          this.db,
-          { id: actor.id, currentBranchId: targetBranch ?? actor.currentBranchId },
-          async (tx) => {
-            await tx
-              .update(schema.orders)
-              .set(updateFields)
-              .where(eq(schema.orders.id, orderId));
-          },
-        );
-
+      // 3. Batch-insert timeline events
+      const timelineRows = toUpdate.map((o) => {
+        const branchChanged = targetBranch && targetBranch !== o.previousBranchId;
         const branchNote = branchChanged ? ` Moved to branch ${targetBranch}.` : '';
-        await this.writeTimelineEvent({
-          orderId,
-          eventType: 'FOLLOW_UP_REASSIGNED' as 'STATUS_CHANGED',
+        return {
+          orderId: o.id,
+          eventType: 'STATUS_CHANGED' as const,
           actorId: actor.id,
           actorName: actor.name ?? null,
-          description: `Reopened for follow-up. Previous status: ${order.status}.${branchNote}`,
+          description: `Reopened for follow-up. Previous status: ${o.previousStatus}.${branchNote}`,
           metadata: {
-            previousStatus: order.status,
-            ...(branchChanged ? { previousServicingBranchId: order.servicingBranchId, targetServicingBranchId: targetBranch } : {}),
+            previousStatus: o.previousStatus,
+            ...(branchChanged ? { previousServicingBranchId: o.previousBranchId, targetServicingBranchId: targetBranch } : {}),
           },
-          branchId: targetBranch ?? order.servicingBranchId,
-        });
-
-        results.push({ orderId, success: true });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        results.push({ orderId, success: false, error: message });
+          branchId: targetBranch ?? o.previousBranchId,
+        };
+      });
+      if (timelineRows.length > 0) {
+        await this.db.insert(schema.orderTimelineEvents).values(timelineRows);
       }
+
+      for (const o of toUpdate) results.push({ orderId: o.id, success: true });
     }
 
     return {
       results,
       succeeded: results.filter((r) => r.success).length,
       failed: results.filter((r) => !r.success).length,
-      total: orderIds.length,
+      total: unique.length,
     };
   }
 
