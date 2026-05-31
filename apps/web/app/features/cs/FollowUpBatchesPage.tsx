@@ -4,6 +4,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -125,10 +126,27 @@ export function FollowUpBatchesPage({
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[6rem]" />
           : (b) => (
-              <div className="text-xs text-app-fg-muted">
-                <div>{new Date(b.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
-                {b.createdByName && <div className="truncate max-w-[8rem]">{b.createdByName}</div>}
-              </div>
+              <span className="text-xs text-app-fg-muted">
+                {new Date(b.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
+            ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        align: 'right',
+        tight: true,
+        mobileShowLabel: false,
+        render: showSkeleton
+          ? () => null
+          : (b) => (
+              <TableRowActionsSheet
+                ariaLabel={`Actions for ${b.name}`}
+                sheetTitle={b.name}
+                actions={[
+                  { key: 'view', kind: 'link', label: 'View orders', to: `/admin/cs/follow-up/${b.id}` },
+                ]}
+              />
             ),
       },
     ],

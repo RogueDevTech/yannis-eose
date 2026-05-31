@@ -7894,7 +7894,7 @@ export class OrdersService {
         const branchNote = branchChanged ? ` Moved to branch ${targetBranch}.` : '';
         return {
           orderId: o.id,
-          eventType: 'STATUS_CHANGED' as const,
+          eventType: 'ORDER_RESTORED' as const,
           actorId: actor.id,
           actorName: actor.name ?? null,
           description: `Reopened for follow-up. Previous status: ${o.previousStatus}.${branchNote}`,
