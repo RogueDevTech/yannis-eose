@@ -2117,7 +2117,13 @@ export class MarketingService {
       if (!receiverRole || !senderRole) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
       }
-      this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: true });
+      // If the approver is the targeted recipient of this request, they already
+      // passed the recipient gate — skip the role-pair validation so supervisors
+      // and targeted recipients can approve without needing a specific role.
+      const isTargetedRecipient = existing.targetUserId === approverId;
+      if (!isTargetedRecipient) {
+        this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: true });
+      }
 
       if (senderRole === 'HEAD_OF_MARKETING' && receiverRole === 'MEDIA_BUYER') {
         const disbursable = await this.computeMarketingDisbursableInTx(

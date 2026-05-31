@@ -149,7 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   type BundleData = {
     funding: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } | null;
     balances: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>;
-    summary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+    summary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
     requests: { records: FundingRequestRecord[]; pagination: { page: number; limit: number; total: number } };
     requestsCounts: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number };
     users: Array<{ id: string; name: string; email: string; role: string }>;
@@ -183,7 +183,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   const fundingData = bundle?.funding ?? null;
-  const summary = bundle?.summary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
+  const summary = bundle?.summary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 };
   let fundingRequestsResult = bundle?.requests ?? { records: [], pagination: { page: 1, limit: 20, total: 0 } };
   const requestsTotal = Number(fundingRequestsResult.pagination.total);
   let requestsTotalPages = Math.max(1, Math.ceil(requestsTotal / requestsPerPage));
