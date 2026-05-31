@@ -415,7 +415,7 @@ export class ReportsService {
   private async exportDisbursements(input: Extract<ExportReportInput, { reportKey: 'disbursements' }>, user: SessionUser, currentBranchId: string | null, date: string) {
     this.ensureExportPermission(user, 'finance.disburse', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const all: Awaited<ReturnType<MarketingService['listFunding']>>['records'] = [];
+    const all: Array<Awaited<ReturnType<MarketingService['listFunding']>>['records'][number]> = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
       const fundingInput = listFundingSchema.parse({
         page,

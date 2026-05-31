@@ -263,8 +263,7 @@ export function RoleTemplatesPage({
         description="Create and manage permission presets for staff roles."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Role template tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Role template toolbar"
             desktop={
               <>
@@ -278,7 +277,8 @@ export function RoleTemplatesPage({
               <Button
                 type="button"
                 variant="primary"
-                className="w-full justify-center"
+                size="sm"
+                className="h-12 w-full justify-center"
                 onClick={() => {
                   closeSheet();
                   openCreate();

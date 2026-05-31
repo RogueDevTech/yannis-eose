@@ -497,11 +497,26 @@ const entries: ShellEntry[] = [
   },
   {
     match: /^\/admin\/marketing\/cross-funnel$/,
-    render: (_m, sp) => (
-      <MarketingCrossFunnelLoadingShell
-        filters={{ ...parseDateFilters(sp), productId: sp.get('productId') ?? '' }}
-      />
-    ),
+    render: (_m, sp) => {
+      const periodAllTime = sp.get('period') === 'all_time';
+      let startDate = sp.get('startDate') ?? '';
+      let endDate = sp.get('endDate') ?? '';
+      if (!periodAllTime && !startDate && !endDate) {
+        const d = defaultTodayRangeClient();
+        startDate = d.startDate;
+        endDate = d.endDate;
+      }
+      if (periodAllTime) {
+        startDate = '';
+        endDate = '';
+      }
+      return (
+        <MarketingCrossFunnelLoadingShell
+          filters={{ startDate, endDate, periodAllTime, productId: sp.get('productId') ?? '', campaignId: sp.get('campaignId') ?? '', mediaBuyerId: sp.get('mediaBuyerId') ?? '', search: sp.get('search') ?? '' }}
+          showMbFilter={false}
+        />
+      );
+    },
   },
   {
     match: /^\/admin\/marketing\/orders$/,

@@ -341,8 +341,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         description={shipment.label ?? undefined}
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Shipment tools"
-            sheetSubtitle={<span>Status and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Shipment toolbar"
             mobileLeading={
               <StatusBadge
@@ -407,7 +406,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
             sheet={
               <>
                 {(status === 'VERIFIED' || status === 'CLOSED') ? (
-                  <Link to={`/admin/inventory?shipmentId=${shipment.id}`} prefetch="intent" className="btn-primary btn-sm w-full justify-center">
+                  <Link to={`/admin/inventory?shipmentId=${shipment.id}`} prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
                     View shipment stock
                   </Link>
                 ) : null}

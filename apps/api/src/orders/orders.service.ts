@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
-import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray, notInArray, exists, isNull } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray, notInArray, exists, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
@@ -26,6 +26,7 @@ import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
+import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
@@ -2742,6 +2743,7 @@ export class OrdersService {
        *  `orders.servicing_branch_id` (CS branch). Marketing viewers pass
        *  `'marketing'`. */
       branchScope?: 'servicing' | 'marketing';
+      effectiveBranchIds?: string[] | null;
     },
   ) {
     // Skip the exclusion gate when explicitly querying DELETED orders —
@@ -2879,8 +2881,11 @@ export class OrdersService {
     if (input.endDate) {
       conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     }
-    if (branchId) {
+    {
+      const scope = listOpts?.branchScope ?? 'servicing';
+      const eIds = listOpts?.effectiveBranchIds;
       if (
+        branchId &&
         listOpts?.assignedCloserViewerId &&
         input.assignedCsId &&
         input.assignedCsId === listOpts.assignedCloserViewerId
@@ -2894,9 +2899,8 @@ export class OrdersService {
         );
         if (branchOrAssigned) conditions.push(branchOrAssigned);
       } else {
-        conditions.push(
-          this.orderBranchScopeCondition(branchId, listOpts?.branchScope ?? 'servicing'),
-        );
+        const cond = this.orderBranchScopeCondition(branchId, scope, eIds);
+        if (cond) conditions.push(cond);
       }
     }
 
@@ -3131,6 +3135,7 @@ export class OrdersService {
   async scheduleCalendarHeat(
     input: ScheduleCalendarHeatInput,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{ date: string; callbackCount: number; deliveryCount: number; deliveredCount: number }>
   > {
@@ -3144,7 +3149,8 @@ export class OrdersService {
 
     const base: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     // CS schedule calendar — scope by the servicing branch (migration 0150).
-    if (branchId) base.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) base.push(bCond);
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
       const orParts = [];
@@ -4704,11 +4710,13 @@ export class OrdersService {
    *   creation and never changes, so past orders correctly stay in their
    *   original marketing branch even after the campaign is moved.
    */
-  private orderBranchScopeCondition(branchId: string, scope: 'servicing' | 'marketing') {
-    if (scope === 'marketing') {
-      return eq(schema.orders.branchId, branchId);
-    }
-    return eq(schema.orders.servicingBranchId, branchId);
+  private orderBranchScopeCondition(
+    branchId: string | null | undefined,
+    scope: 'servicing' | 'marketing',
+    effectiveBranchIds?: string[] | null,
+  ): SQL | null {
+    const col = scope === 'marketing' ? schema.orders.branchId : schema.orders.servicingBranchId;
+    return branchScopeCondition(col, branchId, effectiveBranchIds);
   }
 
   /**
@@ -4729,6 +4737,7 @@ export class OrdersService {
     statuses?: Array<(typeof schema.orders.$inferSelect)['status']>,
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
+    effectiveBranchIds?: string[] | null,
   ) {
     // Status counts always include every status (including DELETED) so the
     // stat strip can show the Deleted count. CANCELLED is merged into DELETED
@@ -4742,7 +4751,8 @@ export class OrdersService {
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
-    if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
+    const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -4772,7 +4782,7 @@ export class OrdersService {
    * Get order pipeline chart data — Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel chart. Same date filter as getStatusCounts (created_at).
    */
-  async getOrderPipelineChart(startDate?: string, endDate?: string, branchId?: string | null): Promise<{
+  async getOrderPipelineChart(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<{
     volume: number;
     unconfirmed: number;
     confirmed: number;
@@ -4788,6 +4798,8 @@ export class OrdersService {
       branchId,
       undefined,
       undefined,
+      'servicing',
+      effectiveBranchIds,
     );
     // `volume` is the funnel's top-of-stack count. DELETED orders are editorial
     // removals (test/fake/mistake), never real business volume — exclude them.
@@ -4814,6 +4826,7 @@ export class OrdersService {
   private async getTodayCsStageCloseCountsByAgent(
     branchId?: string | null,
     onlyAgentId?: string,
+    effectiveBranchIds?: string[] | null,
   ): Promise<Record<string, number>> {
     const conditions: Parameters<typeof and>[0][] = [
       inArray(schema.orderTimelineEvents.eventType, ['ORDER_CONFIRMED', 'ORDER_CANCELLED']),
@@ -4821,9 +4834,8 @@ export class OrdersService {
       sql`${schema.orders.assignedCsId} IS NOT NULL`,
       isNull(schema.orders.deletedAt),
     ];
-    if (branchId) {
-      conditions.push(eq(schema.orders.servicingBranchId, branchId));
-    }
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     if (onlyAgentId) {
       conditions.push(eq(schema.orders.assignedCsId, onlyAgentId));
     }
@@ -4920,15 +4932,14 @@ export class OrdersService {
    * Pending workload orders for a Sales closer (same status/branch rules as getCSCloserWorkloads),
    * with line items for HoCS queue modal. Sorted by updatedAt desc (most recently touched first).
    */
-  async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null) {
+  async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const workloadStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
-    const conditions = [
+    const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.assignedCsId, agentId),
       inArray(schema.orders.status, [...workloadStatuses]),
     ];
-    if (branchId) {
-      conditions.push(eq(schema.orders.servicingBranchId, branchId));
-    }
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
 
     const orderRows = await this.db
       .select({
@@ -5041,14 +5052,15 @@ export class OrdersService {
    * Get delivered orders aggregated by day — for CEO overview time-series chart.
    * Returns { date: YYYY-MM-DD, revenue, orderCount }[] for the given date range (delivered_at).
    */
-  async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string, branchId?: string | null): Promise<{ date: string; revenue: number; orderCount: number }[]> {
+  async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<{ date: string; revenue: number; orderCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
     ];
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
-    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     const whereClause = and(...conditions);
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
 
@@ -5101,7 +5113,7 @@ export class OrdersService {
    * Returns delivery counts for today, this week, and this month per product/brand.
    * Bounded to the current month for index-friendly scans.
    */
-  async getDeliveriesByProduct(branchId?: string | null): Promise<
+  async getDeliveriesByProduct(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<
     Array<{
       productId: string;
       productName: string;
@@ -5122,7 +5134,8 @@ export class OrdersService {
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
     ];
-    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
 
     const rows = await this.db
       .select({
@@ -5156,7 +5169,7 @@ export class OrdersService {
    * Bounded to current month for index-friendly scans; CASE expressions
    * compute the narrower today/week buckets within that range.
    */
-  async getRevenueByPeriod(branchId?: string | null): Promise<{
+  async getRevenueByPeriod(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<{
     today: number;
     thisWeek: number;
     thisMonth: number;
@@ -5172,7 +5185,8 @@ export class OrdersService {
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
     ];
-    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
 
     const [row] = await this.db
       .select({
@@ -5200,6 +5214,7 @@ export class OrdersService {
     branchId?: string | null,
     extra?: OrdersAggregateScopeFilters,
     branchScope: 'servicing' | 'marketing' = 'servicing',
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ date: string; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.orders.deletedAt),
@@ -5208,7 +5223,8 @@ export class OrdersService {
     ];
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
-    if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
+    const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -5260,6 +5276,7 @@ export class OrdersService {
     branchId?: string | null,
     extra?: OrdersAggregateScopeFilters,
     branchScope: 'servicing' | 'marketing' = 'servicing',
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
     // CEO directive 2026-05-23: exclude both DELETED and legacy CANCELLED from default views.
     const conditions: Parameters<typeof and>[0][] = [
@@ -5268,7 +5285,8 @@ export class OrdersService {
     ];
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
-    if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
+    const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -5302,7 +5320,7 @@ export class OrdersService {
     // because it was a single 1-RTT-per-step waterfall with `db ≈ total`.
     const [createdRows, delivered] = await Promise.all([
       createdQuery.groupBy(dateTrunc).orderBy(asc(dateTrunc)),
-      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra, branchScope),
+      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra, branchScope, effectiveBranchIds),
     ]);
 
     const created = createdRows.map((r) => ({

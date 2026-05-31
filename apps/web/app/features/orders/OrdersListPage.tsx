@@ -1,6 +1,5 @@
 import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { SmartPick } from '~/components/ui/smart-pick';
@@ -338,7 +337,6 @@ function OrdersListPageImpl({
   bulkSelectAllMatchingInput,
   branchesForMove,
 }: OrdersListPageImplProps) {
-  usePersistedFilters('sales-orders');
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
     (orderId: string) => orderDetailHref('/admin/orders', orderId, orderDetailFrom ?? undefined),
@@ -902,12 +900,13 @@ function OrdersListPageImpl({
     setBulkResult(null);
     ensureBranchForAction({
       actionLabel: `transitioning selected orders to ${formatStatus(newStatus)}`,
-      onProceed: () =>
+      onProceed: (branchId) =>
         fetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus,
+            branchId,
           },
           { method: 'post' },
         ),
@@ -950,12 +949,13 @@ function OrdersListPageImpl({
         assignModalKind === 'reassign'
           ? 'reassigning selected orders to closers'
           : 'assigning selected orders to closers',
-      onProceed: () =>
+      onProceed: (branchId) =>
         assignFetcher.submit(
           {
             intent: 'bulkAssign',
             orderIds: JSON.stringify([...selectedIds]),
             csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
+            branchId,
           },
           { method: 'post' },
         ),
@@ -966,13 +966,14 @@ function OrdersListPageImpl({
     setBulkResult(null);
     ensureBranchForAction({
       actionLabel: 'assigning selected orders for delivery at a 3PL location',
-      onProceed: () =>
+      onProceed: (branchId) =>
         allocateFetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus: 'AGENT_ASSIGNED',
             logisticsLocationId: allocateLocationId,
+            branchId,
           },
           { method: 'post' },
         ),
@@ -984,13 +985,14 @@ function OrdersListPageImpl({
     setCancelModalOpen(false);
     ensureBranchForAction({
       actionLabel: 'deleting selected orders',
-      onProceed: () =>
+      onProceed: (branchId) =>
         fetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus: 'DELETED',
             reason: cancelReason,
+            branchId,
           },
           { method: 'post' },
         ),
@@ -1015,8 +1017,8 @@ function OrdersListPageImpl({
         key: 'customer',
         header: 'Customer',
         render: (order) => (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-medium text-app-fg">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate font-medium text-app-fg" title={order.customerName ?? undefined}>
               {order.customerName}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
@@ -1395,8 +1397,7 @@ function OrdersListPageImpl({
         description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
           <PageHeaderMobileTools
-              sheetTitle="Sales orders tools"
-              sheetSubtitle={<span>Chart, offline order, and export</span>}
+              sheetTitle="Actions"
               triggerAriaLabel="Sales orders toolbar"
               filtersBadgeCount={ordersListToolbarFilterBadge}
               filters={
@@ -2006,7 +2007,6 @@ function OrdersListPageImpl({
           className="!border-0"
           hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
-          sheetSubtitle={<span>Status and closer apply immediately</span>}
           searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form

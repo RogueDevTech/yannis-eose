@@ -326,7 +326,6 @@ export function ProductsListPage({
           className="!border-0 !px-0 md:!px-4"
           hideMobileSheet
           badgeCount={productsToolbarFilterBadge}
-          sheetSubtitle={<span>Status applies immediately</span>}
           searchRow={
             <form
               className="min-w-0 flex-1"

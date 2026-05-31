@@ -159,8 +159,7 @@ export function LogisticsProviderDetailPage({
         description="View logistics company details and performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Provider tools"
-            sheetSubtitle={<span>Date range and filters</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Provider toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">

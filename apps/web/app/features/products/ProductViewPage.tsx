@@ -33,8 +33,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
         description="View product details."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Product tools"
-            sheetSubtitle={<span>Status and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Product toolbar"
             mobileLeading={<span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>{product.status}</span>}
             desktop={
@@ -58,7 +57,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
             }
             sheet={
               canEditProduct ? (
-                <Link to={`/admin/products/${product.id}?mode=edit`} className="btn-primary btn-sm w-full justify-center">
+                <Link to={`/admin/products/${product.id}?mode=edit`} className="btn-secondary btn-sm w-full justify-center">
                   Edit
                 </Link>
               ) : null

@@ -1,5 +1,5 @@
 import { uuid, pgTable, text, numeric, jsonb, timestamp, index, integer } from 'drizzle-orm/pg-core';
-import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum } from './enums';
+import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum, expenseCategoryEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -145,6 +145,10 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   platform: adPlatformEnum('platform').default('FACEBOOK').notNull(),
   /** When `platform` is OTHER, Media Buyer–supplied label (e.g. Snapchat). Otherwise null. */
   platformCustomLabel: text('platform_custom_label'),
+  /** Expense category — only AD_SPEND rows feed into CPA/ROAS. Others deduct from balance only. */
+  category: expenseCategoryEnum('category').default('AD_SPEND').notNull(),
+  /** Free-text description for non-AD_SPEND categories (e.g. "WhatsApp API credits for May"). */
+  description: text('description'),
   /**
    * Manual order-split entered by the Media Buyer when creating the batch.
    * The Add Expense modal asks for the form's total order count from the

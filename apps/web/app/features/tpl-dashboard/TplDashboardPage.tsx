@@ -40,8 +40,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
         description="Your location's stock and deliveries."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Dashboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="TPL dashboard date range"
             desktop={
               <>

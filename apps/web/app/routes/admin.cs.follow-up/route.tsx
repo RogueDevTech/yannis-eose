@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
 
-  const statusParam = url.searchParams.get('statuses') || 'DELETED';
+  const statusParam = url.searchParams.get('statuses') || '';
   const statuses = statusParam.split(',').filter(Boolean);
   const isCartView = statuses.length === 1 && statuses[0] === ABANDONED_CART_STATUS;
   const search = url.searchParams.get('search') || undefined;

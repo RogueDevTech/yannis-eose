@@ -3312,11 +3312,11 @@ export function OrderDetailPage({
                       setCallDebugLog((prev) => [...prev, `Initiate sent at ${new Date().toLocaleTimeString()}`]);
                       ensureBranchForAction({
                         actionLabel: 'starting a customer call',
-                        onProceed: () =>
+                        onProceed: (branchId) =>
                           fetcher.submit(
                             {
                               intent: 'initiateCall',
-                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                              branchId: order.branchId || branchId,
                             },
                             { method: 'post' },
                           ),
@@ -3457,11 +3457,11 @@ export function OrderDetailPage({
                       );
                       ensureBranchForAction({
                         actionLabel: 'recording customer call',
-                        onProceed: () =>
+                        onProceed: (branchId) =>
                           recordCallFetcher.submit(
                             {
                               intent: 'initiateCall',
-                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                              branchId: order.branchId || branchId,
                             },
                             { method: 'post' },
                           ),
@@ -3479,11 +3479,11 @@ export function OrderDetailPage({
                       setPhoneUnmasked(true);
                       ensureBranchForAction({
                         actionLabel: 'recording customer call',
-                        onProceed: () =>
+                        onProceed: (branchId) =>
                           recordCallFetcher.submit(
                             {
                               intent: 'initiateCall',
-                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                              branchId: order.branchId || branchId,
                             },
                             { method: 'post' },
                           ),
@@ -3712,12 +3712,12 @@ export function OrderDetailPage({
                         totalAmount: String(totalAmount),
                         reason: priceApprovalReason.trim(),
                       };
-                      if (order.branchId) {
-                        fd.branchId = order.branchId;
-                      }
                       ensureBranchForAction({
                         actionLabel: 'submitting the change request',
-                        onProceed: () => priceRequestFetcher.submit(fd, { method: 'post' }),
+                        onProceed: (branchId) => {
+                          fd.branchId = order.branchId || branchId;
+                          priceRequestFetcher.submit(fd, { method: 'post' });
+                        },
                       });
                     }}
                   >
@@ -3744,13 +3744,13 @@ export function OrderDetailPage({
                       const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.unitPrice, 0) * 100) / 100;
                       ensureBranchForAction({
                         actionLabel: 'updating order items',
-                        onProceed: () =>
+                        onProceed: (branchId) =>
                           adjustItemsFetcher.submit(
                             {
                               intent: 'adjustOrderItems',
                               items: JSON.stringify(payload),
                               totalAmount: String(totalAmount),
-                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                              branchId: order.branchId || branchId,
                             },
                             { method: 'post' },
                           ),

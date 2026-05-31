@@ -76,6 +76,12 @@ export function BranchScopeGuardProvider({
   const [actionLabel, setActionLabel] = useState<string>('this action');
   const [nextHref, setNextHref] = useState<string | null>(null);
   const consumedBranchPickerNextRef = useRef<string | null>(null);
+  // Stored callback for inline-proceed (mutations). When set, the modal
+  // calls this with the chosen branchId instead of switching the session.
+  const pendingOnProceedRef = useRef<((branchId: string) => void) | null>(null);
+  // Stored form + action for the global submit-capture path so the modal
+  // can replay the submission with branchId injected.
+  const pendingFormReplayRef = useRef<{ form: HTMLFormElement; action: string } | null>(null);
 
   // Only prompt when there's an actual choice to make — an org-wide head
   // viewing All Branches with MULTIPLE branches in their roster. If they
@@ -98,6 +104,8 @@ export function BranchScopeGuardProvider({
       }
       setActionLabel(label ?? 'this action');
       setNextHref(next ?? null);
+      pendingOnProceedRef.current = onProceed ?? null;
+      pendingFormReplayRef.current = null;
       setSelectedBranchId((prev) => prev || branches[0]?.id || '');
       setOpen(true);
       return false;
@@ -120,6 +128,8 @@ export function BranchScopeGuardProvider({
     consumedBranchPickerNextRef.current = consumeKey;
     setActionLabel('this action');
     setNextHref(next);
+    pendingOnProceedRef.current = null;
+    pendingFormReplayRef.current = null;
     setSelectedBranchId((prev) => prev || branches[0]?.id || '');
     setOpen(true);
     // Strip the param from the URL so a subsequent close + reopen of the
@@ -166,6 +176,8 @@ export function BranchScopeGuardProvider({
 
       submitEvent.preventDefault();
       setActionLabel('this action');
+      pendingOnProceedRef.current = null;
+      pendingFormReplayRef.current = { form, action };
       setSelectedBranchId((prev) => prev || branches[0]?.id || '');
       setOpen(true);
     };
@@ -173,6 +185,44 @@ export function BranchScopeGuardProvider({
     document.addEventListener('submit', onSubmitCapture, true);
     return () => document.removeEventListener('submit', onSubmitCapture, true);
   }, [branches, requiresBranchSelection, role, branchesHydrationReady]);
+
+  const handleConfirm = useCallback(() => {
+    if (!selectedBranchId) return;
+
+    // Path 1: onProceed callback (ensureBranchForAction callers)
+    if (pendingOnProceedRef.current) {
+      pendingOnProceedRef.current(selectedBranchId);
+      pendingOnProceedRef.current = null;
+      pendingFormReplayRef.current = null;
+      setOpen(false);
+      setNextHref(null);
+      return;
+    }
+
+    // Path 2: Captured form submit — replay with branchId injected
+    if (pendingFormReplayRef.current) {
+      const { form, action } = pendingFormReplayRef.current;
+      const fd = new FormData(form);
+      fd.set('branchId', selectedBranchId);
+      submit(fd, { method: 'post', ...(action ? { action } : {}) });
+      pendingFormReplayRef.current = null;
+      pendingOnProceedRef.current = null;
+      setOpen(false);
+      setNextHref(null);
+      return;
+    }
+
+    // Path 3: Navigation (nextHref from BranchScopedLink / branchPickerNext)
+    // — must switch session because the destination loader needs branch context.
+    const payload: Record<string, string> = {
+      intent: 'switchBranch',
+      branchId: selectedBranchId,
+    };
+    if (nextHref) payload.next = nextHref;
+    submit(payload, { method: 'post', action: '/admin/branches/switch' });
+    setOpen(false);
+    setNextHref(null);
+  }, [selectedBranchId, nextHref, submit]);
 
   const value = useMemo<BranchScopeGuardContextValue>(
     () => ({ requiresBranchSelection, ensureBranchForAction }),
@@ -187,26 +237,15 @@ export function BranchScopeGuardProvider({
         branches={branches}
         selectedBranchId={selectedBranchId}
         actionLabel={actionLabel}
+        isNavigation={!pendingOnProceedRef.current && !pendingFormReplayRef.current}
         onClose={() => {
           setOpen(false);
           setNextHref(null);
+          pendingOnProceedRef.current = null;
+          pendingFormReplayRef.current = null;
         }}
         onSelectedBranchChange={setSelectedBranchId}
-        onSwitchBranch={() => {
-          if (!selectedBranchId) return;
-          // The /admin/branches/switch action redirects to `next` when present
-          // (after a same-origin path safety check), so the user lands
-          // directly on the originally-clicked destination once the new
-          // branch context is hot in Redis.
-          const payload: Record<string, string> = {
-            intent: 'switchBranch',
-            branchId: selectedBranchId,
-          };
-          if (nextHref) payload.next = nextHref;
-          submit(payload, { method: 'post', action: '/admin/branches/switch' });
-          setOpen(false);
-          setNextHref(null);
-        }}
+        onConfirm={handleConfirm}
       />
     </BranchScopeGuardContext.Provider>
   );

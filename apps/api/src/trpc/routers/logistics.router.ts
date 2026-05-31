@@ -348,6 +348,7 @@ export const logisticsRouter = router({
         input.startDate,
         input.endDate,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 });

@@ -324,11 +324,11 @@ export function DateFilterBar({
   const triggerClassName =
     triggerLayout === 'blockCenter'
       ? // Mobile (used inside MobileDateFilterRow) — bold dark label so it reads against the shadow chrome
-        'flex w-full min-w-0 items-center justify-center gap-1.5 text-sm font-medium text-app-fg hover:text-app-fg transition-colors'
-      : // Desktop inline — small muted secondary control next to other page chrome
-        'inline-flex items-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg transition-colors';
+        'flex w-full min-w-0 items-center justify-center gap-1.5 text-sm font-medium text-app-fg transition-colors'
+      : // Desktop inline — matches btn-secondary text weight; not muted so it doesn't look disabled
+        'inline-flex items-center gap-1.5 text-xs font-medium text-app-fg hover:opacity-90 transition-colors';
   const triggerIconClassName =
-    triggerLayout === 'blockCenter' ? 'w-4 h-4 text-app-fg-muted' : 'w-3.5 h-3.5';
+    triggerLayout === 'blockCenter' ? 'w-4 h-4' : 'w-3.5 h-3.5';
 
   /**
    * Pill chrome — canonical control height, bg + border on desktop, shadow + ring
@@ -341,12 +341,9 @@ export function DateFilterBar({
       ? [
           'flex items-center rounded-lg px-3',
           CONTROL_HEIGHT_CLASS,
-          // Mobile: shadow + inset ring on elevated surface
-          'bg-app-elevated shadow-sm ring-1 ring-inset ring-app-fg-muted/35',
-          'hover:shadow hover:ring-app-fg-muted/55 transition-shadow',
-          // Desktop: quieter — soft hover surface + hairline border, no shadow/ring
-          'md:bg-app-hover md:shadow-none md:ring-0 md:border md:border-app-border',
-          'md:hover:shadow-none',
+          // Matches btn-secondary: same bg, border, and hover treatment
+          'bg-app-hover border-2 border-app-border',
+          'hover:border-brand-500/40 dark:hover:border-brand-400/45 hover:opacity-90 transition-colors',
           triggerLayout === 'blockCenter' ? 'w-full' : '',
         ]
           .filter(Boolean)
@@ -354,7 +351,11 @@ export function DateFilterBar({
       : '';
 
   const triggerButton = (
-    <button type="button" onClick={() => setModalOpen(true)} className={triggerClassName}>
+    <button
+      type="button"
+      onClick={() => setModalOpen(true)}
+      className={chrome === 'pill' ? `${chromeClass} ${triggerClassName}` : triggerClassName}
+    >
       <svg className={triggerIconClassName} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
       </svg>
@@ -364,7 +365,7 @@ export function DateFilterBar({
 
   return (
     <>
-      {chrome === 'pill' ? <div className={chromeClass}>{triggerButton}</div> : triggerButton}
+      {triggerButton}
 
       {modalOpen && (
         <Modal open onClose={closeModal} maxWidth="max-w-sm" backdropBlur contentClassName="flex flex-col gap-4 p-5">

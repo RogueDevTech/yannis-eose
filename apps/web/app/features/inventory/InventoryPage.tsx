@@ -613,7 +613,7 @@ export function InventoryPage(props: InventoryStreamData) {
   /** Toolbar hides entirely when there's no data AND no active filter. */
   const levelsShowToolbar = !(totalLevels === 0 && !levelsHasActiveFilters);
   const levelsProductSelect = (
-    <div className="relative">
+    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
       {currentProductFilter !== 'ALL' && (
         <FilterDismiss onClear={() => updateLevelsParam('productId', '')} />
       )}
@@ -621,7 +621,8 @@ export function InventoryPage(props: InventoryStreamData) {
         id="levels-product-filter"
         value={currentProductFilter}
         onChange={(v) => updateLevelsParam('productId', v)}
-        wrapperClassName="w-full md:w-48"
+        wrapperClassName="w-full"
+        triggerClassName="!bg-transparent !border-transparent !text-center"
         placeholder="All products"
         searchPlaceholder="Search products..."
         options={[
@@ -632,7 +633,7 @@ export function InventoryPage(props: InventoryStreamData) {
     </div>
   );
   const levelsLocationSelect = (
-    <div className="relative">
+    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
       {currentLocationFilter !== 'ALL' && (
         <FilterDismiss onClear={() => updateLevelsParam('locationId', '')} />
       )}
@@ -640,7 +641,8 @@ export function InventoryPage(props: InventoryStreamData) {
         id="levels-location-filter"
         value={currentLocationFilter}
         onChange={(v) => updateLevelsParam('locationId', v)}
-        wrapperClassName="w-full md:w-48"
+        wrapperClassName="w-full"
+        triggerClassName="!bg-transparent !border-transparent !text-center"
         placeholder="All locations"
         searchPlaceholder="Search locations..."
         options={[
@@ -675,7 +677,7 @@ export function InventoryPage(props: InventoryStreamData) {
     </div>
   );
   const levelsShipmentSelect = (
-    <div className="relative">
+    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
       {currentShipmentFilter !== 'ALL' && (
         <FilterDismiss onClear={() => updateLevelsParam('shipmentId', '')} />
       )}
@@ -683,7 +685,8 @@ export function InventoryPage(props: InventoryStreamData) {
         id="levels-shipment-filter"
         value={currentShipmentFilter}
         onChange={(v) => updateLevelsParam('shipmentId', v)}
-        wrapperClassName="w-full md:w-52"
+        wrapperClassName="w-full"
+        triggerClassName="!bg-transparent !border-transparent !text-center"
         placeholder="All shipments"
         searchPlaceholder="Search SHIP ref…"
         options={[
@@ -733,13 +736,13 @@ export function InventoryPage(props: InventoryStreamData) {
     </button>
   ) : null;
   const levelsFilterControls = (
-    <div className="space-y-3">
+    <>
       {levelsProductSelect}
       {levelsLocationSelect}
       {levelsShipmentSelect}
       {levelsSortMenu}
       {levelsResetBtn && <div className="pt-1">{levelsResetBtn}</div>}
-    </div>
+    </>
   );
 
   return (
@@ -751,8 +754,7 @@ export function InventoryPage(props: InventoryStreamData) {
         description="Track stock and reservations."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Inventory tools"
-            sheetSubtitle={<span>Filters, threshold, receive shipment, export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Inventory toolbar"
             filtersBadgeCount={
               activeTab === 'levels' && levelsShowToolbar ? levelsFilterBadgeCount : 0
@@ -814,28 +816,26 @@ export function InventoryPage(props: InventoryStreamData) {
             }
             sheet={({ closeSheet }) => (
               <>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  disabled={!canEditLowStock}
                   onClick={() => {
                     if (canEditLowStock) {
                       closeSheet();
                       setShowThresholdModal(true);
                     }
                   }}
-                  disabled={!canEditLowStock}
-                  className={`inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-app-border bg-app-elevated px-3 py-2 text-sm ${
-                    canEditLowStock
-                      ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong'
-                      : 'cursor-default text-app-fg-muted opacity-60'
-                  }`}
                 >
                   Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units
-                </button>
+                </Button>
                 {canIntake && (
                   <Button
-                    variant="primary"
+                    variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       window.location.href = '/admin/shipments/receive';
@@ -848,7 +848,7 @@ export function InventoryPage(props: InventoryStreamData) {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setShowExportModal(true);

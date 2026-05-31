@@ -666,8 +666,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         description="Manage logistics companies and locations."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Logistics tools"
-            sheetSubtitle={<span>Refresh and add records</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Logistics toolbar"
             desktop={
               <div className="flex flex-wrap gap-2">

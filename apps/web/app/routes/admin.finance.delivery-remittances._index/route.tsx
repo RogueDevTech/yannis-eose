@@ -12,7 +12,7 @@ import { DeliveryRemittancesLoadingShell } from '~/features/finance/FinanceDefer
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
 
-const REMITTANCES_PAGE_SIZE = 20;
+const REMITTANCES_PAGE_SIZE = 50;
 const ELIGIBLE_PAGE_SIZE = 20;
 
 export const meta: MetaFunction = () => [

@@ -40,6 +40,7 @@ export type VerifyFundingInput = z.infer<typeof verifyFundingSchema>;
 export const listFundingSchema = z.object({
   status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
   receiverId: z.string().uuid().optional(),
+  receiverRole: z.string().optional(),
   senderId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
@@ -136,6 +137,10 @@ export const adPlatformValues = ['FACEBOOK', 'TIKTOK', 'GOOGLE', 'OTHER'] as con
 export type AdPlatform = (typeof adPlatformValues)[number];
 export const adPlatformSchema = z.enum(adPlatformValues);
 
+export const expenseCategoryValues = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION'] as const;
+export type ExpenseCategory = (typeof expenseCategoryValues)[number];
+export const expenseCategorySchema = z.enum(expenseCategoryValues);
+
 /** Optional MB-supplied label when platform is OTHER; blank → undefined. */
 const platformCustomLabelSchema = z
   .union([z.literal(''), z.string().trim().max(80)])
@@ -154,6 +159,8 @@ const createAdSpendObjectSchema = z.object({
   platform: adPlatformSchema.default('FACEBOOK'),
   platformCustomLabel: platformCustomLabelSchema,
   adUrl: adUrlSchema,
+  category: expenseCategorySchema.default('AD_SPEND'),
+  description: z.string().trim().max(500).optional().transform((v) => (v && v.length > 0 ? v : undefined)),
 });
 
 const refineAdSpendPlatform = (data: { platform: AdPlatform; platformCustomLabel?: string | undefined }, ctx: z.RefinementCtx) => {
@@ -202,6 +209,8 @@ const adSpendBatchLineSchema = z.object({
   platform: adPlatformSchema.default('FACEBOOK'),
   platformCustomLabel: platformCustomLabelSchema,
   adUrl: optionalAssetUrl,
+  category: expenseCategorySchema.default('AD_SPEND'),
+  description: z.string().trim().max(500).optional().transform((v) => (v && v.length > 0 ? v : undefined)),
 });
 
 const createAdSpendBatchObjectSchema = z.object({
@@ -261,6 +270,7 @@ export const listAdSpendSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  category: expenseCategorySchema.optional(),
   search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
@@ -276,6 +286,7 @@ export const listAdSpendGroupedSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  category: expenseCategorySchema.optional(),
   search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(50).default(20),
@@ -290,6 +301,7 @@ export const adSpendStatusCountsSchema = z.object({
   campaignId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  category: expenseCategorySchema.optional(),
   search: z.string().trim().max(200).optional(),
 });
 export type AdSpendStatusCountsInput = z.infer<typeof adSpendStatusCountsSchema>;

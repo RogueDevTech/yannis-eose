@@ -8,6 +8,7 @@ import { FormField } from '~/components/ui/form-field';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
@@ -566,22 +567,37 @@ export function StaffOnboardingPage({
 
       <PageHeader
         title={mode === 'self' ? 'Your onboarding' : `Onboarding · ${subject.name}`}
+        mobileInlineActions
         description={
           mode === 'self'
-            ? 'Help HR keep accurate records. You can save and come back anytime — submit when you\'re ready.'
+            ? 'Complete your documents and submit when ready.'
             : 'Review the documents below and approve when ready.'
         }
         actions={
-          <div className="flex items-center gap-2">
-            <StatusBadge status={record.status} label={formatStatusLabel(record.status)} />
-            {submittedDate ? (
-              <span className="text-xs text-app-fg-muted">Submitted {submittedDate}</span>
-            ) : null}
-            {approvedDate ? (
-              <span className="text-xs text-app-fg-muted">Approved {approvedDate}</span>
-            ) : null}
-            <PageRefreshButton />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Onboarding toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <StatusBadge status={record.status} label={formatStatusLabel(record.status)} />
+                {submittedDate ? (
+                  <span className="text-xs text-app-fg-muted">Submitted {submittedDate}</span>
+                ) : null}
+                {approvedDate ? (
+                  <span className="text-xs text-app-fg-muted">Approved {approvedDate}</span>
+                ) : null}
+                <PageRefreshButton />
+              </div>
+            }
+            sheet={
+              <div className="flex items-center justify-between gap-2 px-1">
+                <StatusBadge status={record.status} label={formatStatusLabel(record.status)} />
+                <span className="text-xs text-app-fg-muted">
+                  {approvedDate ? `Approved ${approvedDate}` : submittedDate ? `Submitted ${submittedDate}` : ''}
+                </span>
+              </div>
+            }
+          />
         }
       />
 

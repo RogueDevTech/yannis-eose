@@ -174,8 +174,7 @@ export function FinanceOverviewLoadingShell({
         description="Cash remittance, disbursements, and payroll."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Finance tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Finance toolbar and date range"
             desktop={
               <>
@@ -357,8 +356,7 @@ export function FinanceDisbursementsLoadingShell({
         description="Send and track marketing disbursements."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Disbursements tools"
-            sheetSubtitle={<span>Date range and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Disbursements toolbar"
             desktop={
               <>
@@ -377,10 +375,10 @@ export function FinanceDisbursementsLoadingShell({
             }
             sheet={() => (
               <>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Generate report
                 </Button>
-                <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                   + New disbursement
                 </Button>
               </>
@@ -711,8 +709,7 @@ export function DeliveryRemittancesLoadingShell({
         description="Review and record cash remittances."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Cash remittances tools"
-            sheetSubtitle={<span>Date range, export, and pick orders</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Cash remittances toolbar and date range"
             desktop={
               <>
@@ -728,7 +725,7 @@ export function DeliveryRemittancesLoadingShell({
             }
             sheet={() => (
               <>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Generate report
                 </Button>
               </>
@@ -771,7 +768,6 @@ export function DeliveryRemittancesLoadingShell({
               className="!border-0"
               hideMobileSheet
               badgeCount={remittanceToolbarBadge}
-              sheetSubtitle={<span>Location and sent-by apply immediately</span>}
               desktopInlineFilters={
                 <>
                   <SearchableSelect
@@ -1007,8 +1003,7 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Cash remittance tools"
-            sheetSubtitle={<span>Refresh and navigation</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Cash remittance toolbar"
             desktop={
               <>
@@ -1136,8 +1131,7 @@ export function FinancePayoutLoadingShell({
         description="Review payroll payout batches."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Payout tools"
-            sheetSubtitle={<span>Refresh and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Payout toolbar"
             desktop={
               <>
@@ -1147,7 +1141,7 @@ export function FinancePayoutLoadingShell({
                 </Button>
               </>
             }
-            sheet={<Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>Export payout document</Button>}
+            sheet={<Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>Export payout document</Button>}
           />
         }
       />

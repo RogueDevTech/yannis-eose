@@ -43,6 +43,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
+import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { OrdersService } from '../orders/orders.service';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -1887,12 +1888,14 @@ export class LogisticsService {
    * Optional startDate/endDate filter by orders.deliveredAt.
    */
   async deliveredOrdersByProduct(
-    branchId?: string,
+    branchId?: string | null,
     startDate?: string,
     endDate?: string,
+    effectiveBranchIds?: string[] | null,
   ) {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
-    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, new Date(endDate)));
 
@@ -1920,12 +1923,14 @@ export class LogisticsService {
    * Optional startDate/endDate filter by orders.deliveredAt.
    */
   async deliveredOrdersByLocation(
-    branchId?: string,
+    branchId?: string | null,
     startDate?: string,
     endDate?: string,
+    effectiveBranchIds?: string[] | null,
   ) {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
-    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, new Date(endDate)));
 
@@ -2585,6 +2590,7 @@ export class LogisticsService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
       providerId: string;
@@ -2645,7 +2651,8 @@ export class LogisticsService {
     const orderConditions: SQL[] = [isNotNull(schema.orders.logisticsLocationId)];
     if (effectiveStart) orderConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
     if (effectiveEnd) orderConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
-    if (branchId) orderConditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond1 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond1) orderConditions.push(bCond1);
 
     const statusRows = await this.db
       .select({
@@ -2688,7 +2695,8 @@ export class LogisticsService {
     const remittanceConditions: SQL[] = [];
     if (effectiveStart) remittanceConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
     if (effectiveEnd) remittanceConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
-    if (branchId) remittanceConditions.push(eq(schema.orders.servicingBranchId, branchId));
+    const bCond2 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond2) remittanceConditions.push(bCond2);
 
     const remittanceRows = await this.db
       .select({

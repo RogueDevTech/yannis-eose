@@ -54,8 +54,7 @@ export function CSLeaderboardPage({
         description="Rank closer performance by delivery rate."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Leaderboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="CS leaderboard date range"
             desktop={
               <>
