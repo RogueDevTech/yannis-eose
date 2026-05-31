@@ -197,8 +197,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         description="Review payroll payout batches."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Payout tools"
-            sheetSubtitle={<span>Refresh and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Payout toolbar"
             desktop={
               <>
@@ -215,7 +214,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);

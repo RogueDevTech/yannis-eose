@@ -377,8 +377,7 @@ export function WarehousesPage({
         hideMobileSheet
         sheetFilterBody={null}
         badgeCount={sortIsDefault ? 0 : 1}
-        sheetTitle="Filters"
-        sheetSubtitle="Search warehouses by name."
+        sheetTitle="Actions"
       />
     );
   }, [search, sortBy, sortDir, setSearchParams]);
@@ -391,8 +390,7 @@ export function WarehousesPage({
         mobileInlineActions
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Warehouse tools"
-            sheetSubtitle={<span>Sort, search, and manage</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Warehouse toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
@@ -430,7 +428,7 @@ export function WarehousesPage({
                   />
                 </div>
                 {canManage ? (
-                  <Button variant="primary" size="sm" className="w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
+                  <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
                     Add warehouse
                   </Button>
                 ) : null}

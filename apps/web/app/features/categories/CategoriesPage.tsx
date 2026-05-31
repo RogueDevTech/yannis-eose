@@ -393,8 +393,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         description="Manage product categories."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Category tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Category toolbar"
             desktop={
               <>
@@ -410,7 +409,8 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
             sheet={({ closeSheet }) => (
               <Button
                 variant="secondary"
-                className="w-full justify-center"
+                size="sm"
+                className="h-12 w-full justify-center"
                 onClick={() => {
                   closeSheet();
                   setModalCategory(null);

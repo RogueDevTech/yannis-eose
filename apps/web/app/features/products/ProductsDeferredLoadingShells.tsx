@@ -89,8 +89,7 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
         description="Manage products and offers."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Product tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Product toolbar"
             desktop={
               <div className="flex items-center gap-2">

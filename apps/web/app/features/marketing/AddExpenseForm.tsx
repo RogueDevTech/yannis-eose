@@ -10,8 +10,9 @@ import { FormField } from '~/components/ui/form-field';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
 import { fetchCampaignOrderTotalForBatch } from '~/lib/trpc-browser';
-import type { Campaign, Product, AdPlatform } from './types';
+import type { Campaign, Product, AdPlatform, ExpenseCategory } from './types';
 import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
+import { EXPENSE_CATEGORY_OPTIONS } from './expense-category-options';
 
 interface ExpenseLine {
   uid: string;
@@ -101,6 +102,10 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
   // One date for the whole submission — every form + ad under it shares this
   // date (CEO directive 2026-05-10). Logging is a "today's spend" workflow.
   const [spendDate, setSpendDate] = useState(todayYmd());
+  const [category, setCategory] = useState<ExpenseCategory>('AD_SPEND');
+  // Simplified form state for non-AD_SPEND categories (amount + description only).
+  const [simpleAmount, setSimpleAmount] = useState('');
+  const [simpleDescription, setSimpleDescription] = useState('');
 
   const [forms, setForms] = useState<FormSection[]>(() => [
     {
@@ -259,7 +264,38 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    if (!canSubmit || submitting) return;
+    if (submitting) return;
+
+    // Simplified flow for non-AD_SPEND categories
+    if (category !== 'AD_SPEND') {
+      const amt = Number(simpleAmount.replace(/,/g, '').trim());
+      if (!amt || amt <= 0) return;
+      setSubmitting(true);
+      setSubmitError(null);
+      const fd = new FormData();
+      fd.set('intent', 'createSimpleExpense');
+      fd.set('spendDate', spendDate);
+      fd.set('category', category);
+      fd.set('spendAmount', String(amt));
+      if (simpleDescription.trim()) fd.set('description', simpleDescription.trim());
+      try {
+        const res = await fetch(location.pathname, { method: 'POST', body: fd });
+        const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+        if (!res.ok || !body.success) {
+          setSubmitError(body.error ?? 'Submission failed');
+          setSubmitting(false);
+          return;
+        }
+      } catch {
+        setSubmitError('Network error');
+        setSubmitting(false);
+        return;
+      }
+      navigate('/admin/marketing/expenses');
+      return;
+    }
+
+    if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError(null);
 
@@ -270,6 +306,7 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
           spendAmount: Number(l.spendAmount.replace(/,/g, '')),
           attributedOrderCount: parseInt(l.attributedOrderCount, 10),
           platform: l.platform,
+          category: 'AD_SPEND' as const,
         };
         if (l.platform === 'OTHER' && l.platformCustomLabel.trim()) {
           return { ...base, platformCustomLabel: l.platformCustomLabel.trim() };
@@ -297,16 +334,31 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
       }
     }
 
-    navigate('/admin/marketing/ad-spend');
+    navigate('/admin/marketing/expenses');
   };
 
   const error = submitError ?? actionData?.error;
   const busy = submitting || navigation.state === 'submitting';
 
+  const simpleCanSubmit = category !== 'AD_SPEND' && (() => {
+    const t = simpleAmount.replace(/,/g, '').trim();
+    if (t === '') return false;
+    const n = Number(t);
+    return !Number.isNaN(n) && n > 0;
+  })();
+
   return (
     <div className="space-y-4">
-      {/* Top-level date — every form + ad below shares this date. */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+      {/* Category + date row */}
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+        <FormField label="Category" htmlFor="add-expense-category" required className="sm:w-56">
+          <FormSelect
+            id="add-expense-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
+            options={EXPENSE_CATEGORY_OPTIONS}
+          />
+        </FormField>
         <FormField label="Date" htmlFor="add-expense-date" required className="sm:w-56">
           <TextInput
             id="add-expense-date"
@@ -316,11 +368,51 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
             max={todayYmd()}
           />
         </FormField>
-        <p className="text-xs text-app-fg-muted">
-          All forms and ads below are logged for this date.
-        </p>
       </div>
 
+      {/* Simplified form for non-AD_SPEND categories */}
+      {category !== 'AD_SPEND' && (
+        <div className="card !p-4 space-y-3">
+          <p className="text-sm font-medium text-app-fg">
+            {EXPENSE_CATEGORY_OPTIONS.find((o) => o.value === category)?.label} expense
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField label="Amount" htmlFor="simple-expense-amount" required>
+              <AmountInput
+                id="simple-expense-amount"
+                value={simpleAmount}
+                onChange={setSimpleAmount}
+                placeholder="0.00"
+              />
+            </FormField>
+            <FormField label="Description" htmlFor="simple-expense-desc">
+              <TextInput
+                id="simple-expense-desc"
+                value={simpleDescription}
+                onChange={(e) => setSimpleDescription(e.target.value)}
+                placeholder="What was this expense for?"
+              />
+            </FormField>
+          </div>
+
+          {error && (
+            <p className="text-sm text-danger-600 dark:text-danger-400">{error}</p>
+          )}
+
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={!simpleCanSubmit || busy}
+          >
+            {busy ? <><Spinner className="w-4 h-4" /> Submitting…</> : 'Submit expense'}
+          </Button>
+        </div>
+      )}
+
+      {/* Full Ad Spend form (only when category is AD_SPEND) */}
+      {category === 'AD_SPEND' && (
+        <>
       {forms.map((form, idx) => (
         <FormSectionCard
           key={form.uid}
@@ -440,6 +532,8 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
             : `Submit ${grandTotalLines} ad${grandTotalLines === 1 ? '' : 's'} across ${forms.length} form${forms.length === 1 ? '' : 's'}`}
         </Button>
       </div>
+        </>
+      )}
     </div>
   );
 }

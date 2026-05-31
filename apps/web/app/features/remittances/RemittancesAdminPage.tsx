@@ -598,8 +598,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
         description="Confirm incoming stock transfers."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Transfer confirmation tools"
-            sheetSubtitle={<span>Date range and filters</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Transfer confirmation toolbar"
             filters={mobileFiltersBody}
             filtersBadgeCount={hasNonSearchFilters ? 1 : 0}

@@ -18,6 +18,7 @@ import type {
 import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
 @Injectable()
@@ -287,20 +288,21 @@ export class FinanceService {
   // Profit Reports
   // ============================================
 
-  async getProfitReport(input: ProfitReportInput) {
+  async getProfitReport(input: ProfitReportInput, effectiveBranchIds?: string[] | null) {
     // ── 1. Revenue from delivered orders ──────────────────
-    const orderConditions = [];
+    const orderConditions: Parameters<typeof and>[0][] = [];
     if (input.startDate) {
       orderConditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate)));
     }
     if (input.endDate) {
       orderConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate)));
     }
-    if (input.branchId) {
+    {
       // P&L follows the CS servicing branch — the branch that actually worked
       // and delivered the order (migration 0150). `orders.branch_id` is the
       // marketing attribution branch and is reported on Marketing surfaces.
-      orderConditions.push(eq(schema.orders.servicingBranchId, input.branchId));
+      const bCond = branchScopeCondition(schema.orders.servicingBranchId, input.branchId, effectiveBranchIds);
+      if (bCond) orderConditions.push(bCond);
     }
     if (input.mediaBuyerId) {
       // Optional MB filter — narrows revenue (delivered orders attributed to MB)

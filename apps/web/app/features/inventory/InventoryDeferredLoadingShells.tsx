@@ -342,8 +342,7 @@ export function InventoryOverviewLoadingShell() {
         description="Track stock and reservations."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Inventory tools"
-            sheetSubtitle={<span>Threshold, receive shipment, and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Inventory toolbar"
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -582,8 +581,7 @@ export function WarehouseShipmentsLoadingShell() {
         description="View warehouse shipments."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Warehouse shipment tools"
-            sheetSubtitle={<span>Refresh and navigation</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Warehouse shipment toolbar"
             desktop={
               <div className="flex items-center gap-2">
@@ -648,8 +646,7 @@ export function ShipmentsListLoadingShell() {
         description="Receive and verify supplier shipments."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Shipment tools"
-            sheetSubtitle={<span>Refresh and view inventory</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Shipment toolbar"
             desktop={
               <div className="flex items-center gap-2">
@@ -887,8 +884,7 @@ export function ShipmentDetailLoadingShell() {
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Shipment tools"
-            sheetSubtitle={<span>Status and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Shipment toolbar"
             mobileLeading={
               <span
@@ -1024,8 +1020,7 @@ export function CategoriesLoadingShell() {
         description="Manage product categories."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Category tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Category toolbar"
             desktop={
               <>
@@ -1035,7 +1030,7 @@ export function CategoriesLoadingShell() {
                 </Button>
               </>
             }
-            sheet={<Button type="button" variant="primary" className="w-full justify-center" disabled>New Category</Button>}
+            sheet={<Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>New Category</Button>}
           />
         }
       />

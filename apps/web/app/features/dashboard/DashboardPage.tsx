@@ -67,8 +67,7 @@ export function DashboardPage({
           // them into the kebab sheet; icon-only refresh stays beside it for
           // one-tap reload.
           <PageHeaderMobileTools
-            sheetTitle="Dashboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Dashboard toolbar"
             desktop={
               <>
@@ -485,7 +484,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
           to: '/admin/marketing/orders?status=DELIVERED',
         },
-        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/ad-spend' },
+        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
         {
           label: 'True ROAS',
           value: `${metrics.trueRoas.toFixed(2)}x`,
@@ -511,7 +510,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           title: 'Captured carts not yet recovered (browsing + dropped off)',
           to: '/admin/marketing/orders?fromCart=1',
         },
-        { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/ad-spend' },
+        { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
       ]}
     />
   );
@@ -618,7 +617,7 @@ function MarketingDashboard({
             <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
             <Link to="/admin/marketing/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
             <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding</Link>
-            <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
+            <Link to="/admin/marketing/expenses" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
             <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
           </div>
         </div>
@@ -654,7 +653,7 @@ function MarketingDashboard({
             {role === 'HEAD_OF_MARKETING' && (
               <>
                 <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding</Link>
-                <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
+                <Link to="/admin/marketing/expenses" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
               </>
             )}
             <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
@@ -1007,7 +1006,7 @@ function getQuickActions(role: string, unprocessed: number) {
     case 'MEDIA_BUYER':
       return [
         { href: '/admin/marketing/funding', label: 'Funding', description: 'Ledger & requests', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
-        { href: '/admin/marketing/ad-spend', label: 'Ad spend', description: 'Log & approve spend', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/marketing/expenses', label: 'Ad spend', description: 'Log & approve spend', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
         { href: '/admin/marketing/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-app-hover text-app-fg-muted' },
       ];
     case 'CS_CLOSER':

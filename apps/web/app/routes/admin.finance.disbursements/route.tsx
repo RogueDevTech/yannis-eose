@@ -159,8 +159,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
 
   const recipientBalancesAll = (bundle?.balances ?? []).filter(
-    // Only show people who have actually received funding from Finance.
-    (b) => Number(b.totalReceived) > 0,
+    // Finance disburses to HoM only — MB balances are the HoM's concern (Marketing → Funding page).
+    // Only show HoMs who have actually received funding from Finance.
+    (b) => b.role === 'HEAD_OF_MARKETING' && Number(b.totalReceived) > 0,
   );
   const filteredRecipientBalancesAll = recipientBalancesAll.filter((b) => {
     const roleMatch = !balancesRole || balancesRole === 'ALL' || b.role === balancesRole;

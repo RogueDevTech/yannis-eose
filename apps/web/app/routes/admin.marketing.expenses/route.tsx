@@ -19,7 +19,7 @@ import {
 
 const AD_SPEND_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
-export const meta: MetaFunction = () => [{ title: 'Ads Expense — Marketing — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'Marketing Expenses — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');
@@ -46,6 +46,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusParam && (AD_SPEND_STATUSES as readonly string[]).includes(statusParam)
       ? (statusParam as AdSpendStatusFilter)
       : undefined;
+  const EXPENSE_CATEGORIES = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION'] as const;
+  const categoryParam = url.searchParams.get('category') ?? undefined;
+  const categoryFilter = categoryParam && (EXPENSE_CATEGORIES as readonly string[]).includes(categoryParam)
+    ? categoryParam
+    : 'AD_SPEND';
   // UUIDv7 is hex-with-dashes; cheap regex avoids passing garbage through to the API.
   const productIdParam = url.searchParams.get('productId')?.trim();
   const productIdFilter = productIdParam && /^[0-9a-f-]{32,36}$/i.test(productIdParam)
@@ -66,6 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(statusFilter && { status: statusFilter }),
+    ...(categoryFilter && { category: categoryFilter }),
     ...(searchFilter && { search: searchFilter }),
     ...(productIdFilter && { productId: productIdFilter }),
     ...(campaignIdFilter && { campaignId: campaignIdFilter }),
@@ -87,6 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(statusFilter && { status: statusFilter }),
+    ...(categoryFilter && { category: categoryFilter }),
     ...(searchFilter && { search: searchFilter }),
     ...(productIdFilter && { productId: productIdFilter }),
     ...(campaignIdFilter && { campaignId: campaignIdFilter }),
@@ -102,6 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
+      ...(categoryFilter && { category: categoryFilter }),
       ...(searchFilter && { search: searchFilter }),
       ...(productIdFilter && { productId: productIdFilter }),
       ...(campaignIdFilter && { campaignId: campaignIdFilter }),
@@ -171,6 +179,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: AD_SPEND_PER_PAGE,
     totalPages,
     statusFilter,
+    categoryFilter,
     searchFilter,
     productIdFilter,
     campaignIdFilter,

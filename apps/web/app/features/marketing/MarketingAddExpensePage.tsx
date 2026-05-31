@@ -17,7 +17,7 @@ export function MarketingAddExpensePage({
         description="Daily ad spend per form — screenshot required."
         actions={
           <Link
-            to="/admin/marketing/ad-spend"
+            to="/admin/marketing/expenses"
             className="btn-secondary btn-sm inline-flex items-center justify-center shrink-0"
           >
             Back to Ads Expense

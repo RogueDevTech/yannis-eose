@@ -376,11 +376,17 @@ export const marketingRouter = router({
     }),
 
   /**
-   * HoM / custom roles: `marketing.funding.approve`.
-   * Finance disbursements (`/admin/finance/disbursements`): `finance.disburse` only — catalog
-   * removed `marketing.funding.approve` from FINANCE_OFFICER (2026-05-05); both codes OR here.
+   * Approve a funding request. Allowed for:
+   *   - SUPER_ADMIN / SUPPORT (permissionProcedure bypass)
+   *   - Users with `marketing.funding.approve` or `finance.disburse` permission
+   *   - The targeted recipient of the request (HoM, supervisor, or anyone the
+   *     requester picked in the "Request from" modal — the service layer validates
+   *     `existing.targetUserId === actor.id`)
+   *
+   * Uses `authedProcedure` instead of `permissionProcedure` so the targeted-
+   * recipient path isn't blocked before the service can check it.
    */
-  approveFundingRequest: permissionProcedure('marketing.funding.approve', 'finance.disburse')
+  approveFundingRequest: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(approveFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
@@ -393,8 +399,8 @@ export const marketingRouter = router({
       );
     }),
 
-  /** Approve parity — Finance rejects from disbursements inbox with same gate as approve. */
-  rejectFundingRequest: permissionProcedure('marketing.funding.approve', 'finance.disburse')
+  /** Reject parity — same gate as approve (targeted recipient OR perm holder). */
+  rejectFundingRequest: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(rejectFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
@@ -628,6 +634,7 @@ export const marketingRouter = router({
             ctx.currentBranchId,
             undefined,
             narrowed.supervisorScope,
+            ctx.effectiveBranchIds,
           );
         }
         mediaBuyerId = ctx.user.id;
@@ -670,6 +677,7 @@ export const marketingRouter = router({
           null,
           narrowed.assignedCsId,
           narrowed.supervisorScope,
+          ctx.effectiveBranchIds,
         );
       }
 
@@ -680,6 +688,8 @@ export const marketingRouter = router({
         input.endDate,
         ctx.currentBranchId,
         assignedCsId,
+        undefined,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -803,6 +813,7 @@ export const marketingRouter = router({
           branchId,
           undefined,
           supervisorScope,
+          ctx.effectiveBranchIds,
         ),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,
@@ -1053,6 +1064,7 @@ export const marketingRouter = router({
           // marketing branch (`orders.branch_id`) so counts match the order
           // rows and an order CS-routed elsewhere still counts here.
           'marketing',
+          ctx.effectiveBranchIds,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1062,6 +1074,7 @@ export const marketingRouter = router({
           branchId,
           ordersScope.assignedCsId,
           ordersScope.supervisorScope,
+          ctx.effectiveBranchIds,
         ),
         getOrdersService().getOrdersTimeSeriesByCreated(
           ordersScope.startDate,
@@ -1075,6 +1088,7 @@ export const marketingRouter = router({
           },
           // Marketing Orders page — scope the trend by the marketing branch.
           'marketing',
+          ctx.effectiveBranchIds,
         ),
         canSeeBuyerPicklist
           ? supervisorBuyerIds && supervisorBuyerIds.length > 0
@@ -1440,6 +1454,7 @@ export const marketingRouter = router({
       const listFundingInput = {
         page: input.page,
         limit: input.limit,
+        receiverRole: 'HEAD_OF_MARKETING' as const,
         ...(input.startDate && { startDate: input.startDate }),
         ...(input.endDate && { endDate: input.endDate }),
         ...(input.status && { status: input.status }),
@@ -1464,11 +1479,16 @@ export const marketingRouter = router({
         ...(seesAllRequests ? {} : { targetUserId: ctx.user.id }),
       };
 
-      const [funding, balances, summary, requests, requestsCounts, users] =
+      // Pre-fetch HoM IDs so we can scope the summary to Finance→HoM transfers only.
+      const homBalances = await getMarketingService().listFundingBalances(ctx.user, branchId);
+      const homUserIds = homBalances
+        .filter((b) => b.role === 'HEAD_OF_MARKETING')
+        .map((b) => b.userId);
+
+      const [funding, summary, requests, requestsCounts, users] =
         await Promise.all([
           getMarketingService().listFunding(listFundingInput, branchId),
-          getMarketingService().listFundingBalances(ctx.user, branchId),
-          getMarketingService().getFundingSummary(branchId),
+          getMarketingService().getFundingSummary(branchId, { restrictToReceiverIds: homUserIds }),
           getMarketingService().listFundingRequests(requestsInput, branchId),
           getMarketingService().fundingRequestStatusCounts(
             {
@@ -1491,6 +1511,7 @@ export const marketingRouter = router({
             branchId,
           ),
         ]);
+      const balances = homBalances;
 
       return {
         funding,
@@ -1750,6 +1771,7 @@ export const marketingRouter = router({
         ctx.user,
         input,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -1769,6 +1791,7 @@ export const marketingRouter = router({
         ctx.user,
         input,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 

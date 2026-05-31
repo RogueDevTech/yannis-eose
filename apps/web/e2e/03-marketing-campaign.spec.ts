@@ -42,7 +42,7 @@ test.describe('Marketing Campaign Flow', () => {
   });
 
   test('ad spend page loads without errors', async ({ page }) => {
-    await page.goto('/admin/marketing/ad-spend');
+    await page.goto('/admin/marketing/expenses');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('body')).not.toContainText(/something went wrong/i);
     // HoM Preview / Approve / Reject / MB resubmit flows are covered by API + unit tests;

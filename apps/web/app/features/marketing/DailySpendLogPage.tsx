@@ -3,12 +3,16 @@ import { useFetcher, useNavigate, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
 import { Spinner } from '~/components/ui/spinner';
 import { useFetcherToast } from '~/components/ui/toast';
 import { formatNaira } from '~/lib/format-amount';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { cpaColorClass } from '~/lib/rate-color';
 import { fetchOrderCountForDate, type OrderCountForDateResult } from '~/lib/trpc-browser';
+import type { ExpenseCategory } from './types';
+import { EXPENSE_CATEGORY_OPTIONS } from './expense-category-options';
 
 function todayYmd(): string {
   const d = new Date();
@@ -23,6 +27,8 @@ export function DailySpendLogPage() {
   useFetcherToast(fetcher.data, { successMessage: 'Spend saved' });
 
   const [spendDate, setSpendDate] = useState(() => dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayYmd());
+  const [category, setCategory] = useState<ExpenseCategory>('AD_SPEND');
+  const [simpleDescription, setSimpleDescription] = useState('');
   const [spendAmount, setSpendAmount] = useState<number | null>(null);
   const [orderData, setOrderData] = useState<OrderCountForDateResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,13 +62,13 @@ export function DailySpendLogPage() {
   // appears immediately instead of showing stale cached data.
   useEffect(() => {
     if (fetcher.data?.success) {
-      invalidateCachedLoader('/admin/marketing/ad-spend');
+      invalidateCachedLoader('/admin/marketing/expenses');
       // Navigate with the spend date so the "today" default filter matches the
       // newly logged entry (avoids blank list if TZ offsets push the date).
       const params = new URLSearchParams();
       params.set('startDate', spendDate);
       params.set('endDate', spendDate);
-      const t = setTimeout(() => navigate(`/admin/marketing/ad-spend?${params}`), 600);
+      const t = setTimeout(() => navigate(`/admin/marketing/expenses?${params}`), 600);
       return () => clearTimeout(t);
     }
   }, [fetcher.data, navigate, spendDate]);
@@ -73,117 +79,162 @@ export function DailySpendLogPage() {
   const isUpdate = !!existing;
   const isLocked = existing?.status === 'APPROVED';
   const submitting = fetcher.state === 'submitting';
-  const canSubmit = spendAmount !== null && spendAmount >= 0 && !loading && !submitting;
+  const canSubmit = spendAmount !== null && spendAmount >= 0 && !submitting && (category !== 'AD_SPEND' || !loading);
 
   function handleSubmit() {
     if (!canSubmit) return;
     const fd = new FormData();
-    fd.set('intent', 'logDailySpend');
-    fd.set('spendDate', spendDate);
-    fd.set('spendAmount', String(spendAmount));
+    if (category !== 'AD_SPEND') {
+      fd.set('intent', 'createSimpleExpense');
+      fd.set('spendDate', spendDate);
+      fd.set('category', category);
+      fd.set('spendAmount', String(spendAmount));
+      if (simpleDescription.trim()) fd.set('description', simpleDescription.trim());
+    } else {
+      fd.set('intent', 'logDailySpend');
+      fd.set('spendDate', spendDate);
+      fd.set('spendAmount', String(spendAmount));
+    }
     fetcher.submit(fd, { method: 'post' });
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={isUpdate ? 'Update daily spend' : 'Log daily spend'}
-        description={isUpdate ? 'Update your ad spend for this day.' : 'Enter your total ad spend for the day.'}
-        backTo="/admin/marketing/ad-spend"
+        title={isUpdate ? 'Update expense' : 'Log expense'}
+        description="Select a category and enter the details."
+        backTo="/admin/marketing/expenses"
       />
 
       <div className="card space-y-5">
-        {/* Date + Spend — primary inputs */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-app-border bg-app-bg p-3">
-            <label htmlFor="spendDate" className="block text-xs font-medium text-app-fg-muted mb-1.5 uppercase tracking-wide">
-              Date
-            </label>
-            <input
-              id="spendDate"
-              type="date"
-              value={spendDate}
-              max={todayYmd()}
-              onChange={(e) => setSpendDate(e.target.value)}
-              className="input-base w-full"
-            />
-          </div>
+        {/* Category — standalone pill-style selector */}
+        <FormSelect
+          id="expenseCategory"
+          label="Expense type"
+          value={category}
+          onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
+          options={EXPENSE_CATEGORY_OPTIONS}
+        />
 
-          <div className="rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50/50 dark:bg-brand-950/20 p-3 ring-1 ring-brand-100 dark:ring-brand-900">
-            <label htmlFor="spendAmount" className="block text-xs font-medium text-brand-700 dark:text-brand-300 mb-1.5 uppercase tracking-wide">
-              Spend amount
-            </label>
-            <AmountInput
-              id="spendAmount"
-              prefix="₦"
-              value={spendAmount !== null ? String(spendAmount) : ''}
-              onChange={(raw) => {
-                const n = Number(raw.replace(/,/g, ''));
-                setSpendAmount(raw === '' ? null : isNaN(n) ? null : n);
-              }}
-              placeholder="0.00"
-            />
-          </div>
-        </div>
-
-        {/* Orders + CPA — derived stats */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg border border-app-border bg-app-bg p-3">
-            <span className="block text-xs font-medium text-app-fg-muted mb-1.5 uppercase tracking-wide">Orders</span>
-            <div className="h-10 md:h-9 flex items-center justify-center">
-              {loading ? (
-                <Spinner size="sm" />
-              ) : (
-                <span className="text-2xl font-bold text-app-fg tabular-nums">{orderCount}</span>
-              )}
+        {/* Non-AD_SPEND: Date + Amount + Description + Submit */}
+        {category !== 'AD_SPEND' && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+              <TextInput
+                id="spendDate"
+                type="date"
+                label="Date"
+                value={spendDate}
+                max={todayYmd()}
+                onChange={(e) => setSpendDate(e.target.value)}
+              />
+              <TextInput
+                id="spendAmount"
+                label="Amount (₦)"
+                value={spendAmount !== null ? spendAmount.toLocaleString() : ''}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/,/g, '');
+                  if (raw === '') { setSpendAmount(null); return; }
+                  const n = Number(raw);
+                  if (!isNaN(n)) setSpendAmount(n);
+                }}
+                placeholder="0.00"
+              />
+              <TextInput
+                id="simpleDescription"
+                label="Description"
+                value={simpleDescription}
+                onChange={(e) => setSimpleDescription(e.target.value)}
+                placeholder="What was this for?"
+              />
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                loading={submitting}
+                loadingText="…"
+                className="h-10 md:h-9 w-full mt-2 sm:mt-0"
+              >
+                Submit
+              </Button>
             </div>
-          </div>
-
-          <div className="rounded-lg border border-app-border bg-app-bg p-3">
-            <span className="block text-xs font-medium text-app-fg-muted mb-1.5 uppercase tracking-wide">CPA</span>
-            <div className="h-10 md:h-9 flex items-center justify-center">
-              {cpa !== null ? (
-                <span className={`text-2xl font-bold tabular-nums ${cpaColorClass(cpa)}`}>
-                  {formatNaira(Math.round(cpa * 100) / 100)}
-                </span>
-              ) : spendAmount != null && spendAmount > 0 && orderCount === 0 ? (
-                <span className="text-xs text-app-fg-muted">No orders</span>
-              ) : (
-                <span className="text-2xl font-bold text-app-fg-muted">{'\u2014'}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Existing record banner */}
-        {isUpdate && !loading && (
-          <div className={`rounded-lg px-4 py-3 text-sm ${
-            isLocked
-              ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-              : 'bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-          }`}>
-            {isLocked
-              ? "This day\u2019s spend is approved. Submitting will send it for re-approval."
-              : `You already logged spend for this date (${existing.status.toLowerCase()}). Submitting will update it.`}
-          </div>
+            {fetcher.data && 'error' in fetcher.data && fetcher.data.error && (
+              <p className="text-sm text-danger-600 dark:text-danger-400">{fetcher.data.error}</p>
+            )}
+          </>
         )}
 
-        {/* Error */}
-        {fetcher.data && 'error' in fetcher.data && fetcher.data.error && (
-          <p className="text-sm text-danger-600 dark:text-danger-400">{fetcher.data.error}</p>
-        )}
+        {/* AD_SPEND: Date + Amount + Orders + CPA + Submit */}
+        {category === 'AD_SPEND' && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+              <TextInput
+                id="spendDate"
+                type="date"
+                label="Date"
+                value={spendDate}
+                max={todayYmd()}
+                onChange={(e) => setSpendDate(e.target.value)}
+              />
+              <TextInput
+                id="spendAmount"
+                label="Amount (₦)"
+                value={spendAmount !== null ? spendAmount.toLocaleString() : ''}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/,/g, '');
+                  if (raw === '') { setSpendAmount(null); return; }
+                  const n = Number(raw);
+                  if (!isNaN(n)) setSpendAmount(n);
+                }}
+                placeholder="0.00"
+              />
+              <div>
+                <span className="block text-sm font-medium text-app-fg-muted mb-1">Orders</span>
+                <div className="h-10 md:h-9 flex items-center justify-center rounded-lg border border-app-border bg-app-canvas text-sm font-semibold text-app-fg tabular-nums">
+                  {loading ? <Spinner size="sm" /> : orderCount}
+                </div>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-app-fg-muted mb-1">CPA</span>
+                <div className="h-10 md:h-9 flex items-center justify-center rounded-lg border border-app-border bg-app-canvas text-sm font-semibold tabular-nums">
+                  {cpa !== null ? (
+                    <span className={cpaColorClass(cpa)}>{formatNaira(Math.round(cpa * 100) / 100)}</span>
+                  ) : (
+                    <span className="text-app-fg-muted">{'\u2014'}</span>
+                  )}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                loading={submitting}
+                loadingText="…"
+                className="h-10 md:h-9 w-full mt-2 sm:mt-0"
+              >
+                {isUpdate ? 'Update' : 'Log'}
+              </Button>
+            </div>
 
-        {/* Submit */}
-        <Button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          loading={submitting}
-          loadingText={isUpdate ? 'Updating…' : 'Logging…'}
-          className="w-full sm:w-auto sm:px-8"
-        >
-          {isUpdate ? 'Update Spend' : 'Log Spend'}
-        </Button>
+            {isUpdate && !loading && (
+              <p className={`text-xs px-3 py-2 rounded-md ${
+                isLocked
+                  ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300'
+                  : 'bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300'
+              }`}>
+                {isLocked
+                  ? "Approved — submitting sends for re-approval."
+                  : `Existing ${existing.status.toLowerCase()} record — submitting will update.`}
+              </p>
+            )}
+
+            {fetcher.data && 'error' in fetcher.data && fetcher.data.error && (
+              <p className="text-sm text-danger-600 dark:text-danger-400">{fetcher.data.error}</p>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

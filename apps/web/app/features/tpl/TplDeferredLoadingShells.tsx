@@ -28,8 +28,7 @@ export function TplDashboardLoadingShell({
         description="Your location's stock and deliveries."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Dashboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="TPL dashboard date range"
             desktop={
               <>
@@ -87,8 +86,7 @@ export function TplOrdersLoadingShell({
         description="Use View to open an order at your hub, or Resolve order on a confirmed row for the fast path (delivery date, receipt, and handoff)."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Orders tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Orders toolbar"
             desktop={
               <>

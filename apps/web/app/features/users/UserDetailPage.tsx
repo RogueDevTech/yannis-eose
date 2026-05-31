@@ -1014,8 +1014,7 @@ export function UserDetailPage({
                     </div>
                     <div className="flex-shrink-0 hidden md:block">
                       <PageHeaderMobileTools
-                        sheetTitle="Profile tools"
-                        sheetSubtitle={<span>Refresh and account actions</span>}
+                        sheetTitle="Actions"
                         triggerAriaLabel="Profile toolbar"
                         desktop={
                           <div className="flex flex-wrap items-center gap-2">
@@ -1173,6 +1172,15 @@ export function UserDetailPage({
                         }
                         sheet={({ closeSheet }) => (
                           <>
+                            {isSelfView && (
+                              <Link
+                                to="/admin/settings"
+                                onClick={() => closeSheet()}
+                                className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
+                              >
+                                Settings
+                              </Link>
+                            )}
                             {!isSelfView &&
                               viewerShowsMirror &&
                               (mirrorSubmitDisabled ? (
@@ -1181,7 +1189,7 @@ export function UserDetailPage({
                                   variant="secondary"
                                   size="sm"
                                   disabled
-                                  className="w-full justify-center opacity-70 cursor-not-allowed"
+                                  className="h-12 w-full justify-center"
                                 >
                                   Mirror user
                                 </Button>
@@ -1192,7 +1200,7 @@ export function UserDetailPage({
                                     type="submit"
                                     variant="secondary"
                                     size="sm"
-                                    className="w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                                    className="h-12 w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
                                     loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
                                     loadingText="Entering..."
                                   >
@@ -1207,7 +1215,7 @@ export function UserDetailPage({
                                   to={`/hr/users/${user.id}/edit`}
                                   actionLabel="editing this user"
                                   prefetch="intent"
-                                  className="btn-primary btn-sm w-full justify-center"
+                                  className="btn-primary btn-sm h-12 flex items-center justify-center w-full"
                                   onClick={() => closeSheet()}
                                 >
                                   Edit user
@@ -1219,7 +1227,7 @@ export function UserDetailPage({
                                   type="button"
                                   variant="secondary"
                                   size="sm"
-                                  className="w-full justify-center"
+                                  className="h-12 w-full justify-center"
                                   onClick={() => {
                                     closeSheet();
                                     setShowResetPassword(true);
@@ -1233,7 +1241,7 @@ export function UserDetailPage({
                                       type="button"
                                       variant="danger"
                                       size="sm"
-                                      className="w-full justify-center bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                      className="h-12 w-full justify-center"
                                       onClick={() => {
                                         closeSheet();
                                         setShowDeactivateConfirm(true);
@@ -1249,7 +1257,7 @@ export function UserDetailPage({
                                     type="button"
                                     variant="secondary"
                                     size="sm"
-                                    className="w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
+                                    className="h-12 w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
                                     onClick={() => {
                                       closeSheet();
                                       setShowReactivateConfirm(true);
@@ -1427,7 +1435,7 @@ export function UserDetailPage({
             onClick={() => setOpenModal('finance')}
           />
         )}
-        <SectionCard label="Activity" onClick={() => setOpenModal('activity')} />
+        <SectionCard label="Activity" linkTo={`/admin/analytics/audit?actorId=${user.id}`} />
       </div>
 
       {/* ─── Marketing Performance modal ───────────────── */}
@@ -1859,7 +1867,7 @@ export function UserDetailPage({
             )
           )}
           {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
-            <BranchScopedLink to={`/hr/users/${user.id}/edit`} actionLabel="editing this user" prefetch="intent" className="btn-primary btn-sm w-full justify-center" onClick={() => setMobileProfileSheetOpen(false)}>Edit user</BranchScopedLink>
+            <BranchScopedLink to={`/hr/users/${user.id}/edit`} actionLabel="editing this user" prefetch="intent" className="btn-secondary btn-sm w-full justify-center" onClick={() => setMobileProfileSheetOpen(false)}>Edit user</BranchScopedLink>
           )}
           {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
             <>
@@ -2183,15 +2191,20 @@ export function UserDetailPage({
  * Grey clickable card for the minimal user-detail layout. Each card opens a
  * modal with the section's lazy-loaded data.
  */
-function SectionCard({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-left rounded-lg border border-app-border bg-app-hover px-4 py-3 hover:bg-app-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 transition-colors"
-    >
+function SectionCard({ label, onClick, linkTo }: { label: string; onClick?: () => void; linkTo?: string }) {
+  const className = "text-left rounded-lg border border-app-border bg-app-hover px-4 py-3 hover:bg-app-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 transition-colors";
+  const content = (
+    <>
       <span className="block text-sm font-medium text-app-fg">{label}</span>
       <span className="block text-xs text-app-fg-muted mt-0.5">View details →</span>
+    </>
+  );
+  if (linkTo) {
+    return <Link to={linkTo} className={className}>{content}</Link>;
+  }
+  return (
+    <button type="button" onClick={onClick} className={className}>
+      {content}
     </button>
   );
 }

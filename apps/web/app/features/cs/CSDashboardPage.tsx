@@ -595,11 +595,10 @@ function CSQueueStaticHeader({
     <PageHeader
       title="Live Activities"
       mobileInlineActions
-      description="This month's queue and closer activity."
+      description="Queue and closer activity."
       actions={
         <PageHeaderMobileTools
-          sheetTitle="Sales queue tools"
-          sheetSubtitle={<span>Create offline orders and refresh the queue</span>}
+          sheetTitle="Actions"
           triggerAriaLabel="Sales queue tools"
           mobileLeading={
             liveEvents != null && liveEvents.length > 0 ? (
@@ -626,7 +625,7 @@ function CSQueueStaticHeader({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     onCreateOffline();

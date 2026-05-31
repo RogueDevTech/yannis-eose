@@ -9,16 +9,19 @@ export function BranchContextRequiredModal({
   branches,
   selectedBranchId,
   actionLabel,
+  isNavigation,
   onSelectedBranchChange,
-  onSwitchBranch,
+  onConfirm,
   onClose,
 }: {
   open: boolean;
   branches: BranchInfo[];
   selectedBranchId: string;
   actionLabel: string;
+  /** When true the confirm button says "Switch & continue" (navigation needs a session switch). */
+  isNavigation?: boolean;
   onSelectedBranchChange: (branchId: string) => void;
-  onSwitchBranch: () => void;
+  onConfirm: () => void;
   onClose: () => void;
 }) {
   return (
@@ -44,8 +47,8 @@ export function BranchContextRequiredModal({
         />
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button type="button" variant="primary" onClick={onSwitchBranch} disabled={!selectedBranchId}>
-            Switch to selected branch
+          <Button type="button" variant="primary" onClick={onConfirm} disabled={!selectedBranchId}>
+            {isNavigation ? 'Switch & continue' : 'Continue'}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

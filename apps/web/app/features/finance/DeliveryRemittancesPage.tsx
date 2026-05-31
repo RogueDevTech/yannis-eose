@@ -530,55 +530,68 @@ export function DeliveryRemittancesPage({
         description="Review and record cash remittances."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Cash remittances tools"
-            sheetSubtitle={<span>Date range, export, and pick orders</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Cash remittances toolbar and date range"
             filtersBadgeCount={viewTab === 'remittances' ? remittanceToolbarFilterBadge : 0}
             filters={
               <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Location</span>
-                  <div className="relative">
-                    {!!filters.location && (
-                      <FilterDismiss onClear={() => handleLocationChange('')} />
-                    )}
+                {viewTab === 'remittances' && (
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                     <SearchableSelect
-                      id="delivery-remittance-location-filter-kebab"
-                      value={filters.location}
-                      onChange={handleLocationChange}
+                      id="delivery-remittance-status-filter-kebab"
+                      value={pendingStatus}
+                      onChange={handleStatusChange}
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
                       wrapperClassName="w-full"
-                      placeholder="All locations"
-                      searchPlaceholder="Search locations..."
+                      placeholder="All statuses"
                       options={[
-                        { value: '', label: 'All locations' },
-                        ...locations.map((loc) => ({
-                          value: loc.id,
-                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                        })),
+                        { value: '', label: 'All statuses' },
+                        { value: 'SENT', label: 'Pending' },
+                        { value: 'RECEIVED', label: 'Received' },
+                        { value: 'DISPUTED', label: 'Disputed' },
                       ]}
                     />
                   </div>
+                )}
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                  {!!filters.location && (
+                    <FilterDismiss onClear={() => handleLocationChange('')} />
+                  )}
+                  <SearchableSelect
+                    id="delivery-remittance-location-filter-kebab"
+                    value={filters.location}
+                    onChange={handleLocationChange}
+                    triggerClassName="!bg-transparent !border-transparent !text-center"
+                    wrapperClassName="w-full"
+                    placeholder="All locations"
+                    searchPlaceholder="Search locations..."
+                    options={[
+                      { value: '', label: 'All locations' },
+                      ...locations.map((loc) => ({
+                        value: loc.id,
+                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                      })),
+                    ]}
+                  />
                 </div>
                 {viewTab === 'remittances' && (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
-                    <div className="relative">
-                      {!!filters.sentBy && (
-                        <FilterDismiss onClear={() => handleSentByChange('')} />
-                      )}
-                      <SearchableSelect
-                        id="delivery-remittance-sent-by-filter-kebab"
-                        value={filters.sentBy}
-                        onChange={handleSentByChange}
-                        wrapperClassName="w-full"
-                        placeholder="Sent by anyone"
-                        searchPlaceholder="Search accountants..."
-                        options={[
-                          { value: '', label: 'Sent by anyone' },
-                          ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                        ]}
-                      />
-                    </div>
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    {!!filters.sentBy && (
+                      <FilterDismiss onClear={() => handleSentByChange('')} />
+                    )}
+                    <SearchableSelect
+                      id="delivery-remittance-sent-by-filter-kebab"
+                      value={filters.sentBy}
+                      onChange={handleSentByChange}
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                      placeholder="Sent by anyone"
+                      searchPlaceholder="Search accountants..."
+                      options={[
+                        { value: '', label: 'Sent by anyone' },
+                        ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                    />
                   </div>
                 )}
               </>
@@ -600,7 +613,7 @@ export function DeliveryRemittancesPage({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);
@@ -744,7 +757,6 @@ export function DeliveryRemittancesPage({
               className="!border-0"
               hideMobileSheet
               badgeCount={remittanceToolbarFilterBadge}
-              sheetSubtitle={<span>Location and sent-by apply immediately</span>}
               desktopInlineFilters={
                 <>
                   <div className="relative">

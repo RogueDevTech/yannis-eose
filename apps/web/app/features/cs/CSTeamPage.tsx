@@ -525,53 +525,43 @@ export function CSTeamPage({
         actions={
           dateFilters ? (
             <PageHeaderMobileTools
-              sheetTitle="Sales team tools"
-              sheetSubtitle={<span>Filters, date range and export</span>}
+              sheetTitle="Actions"
               triggerAriaLabel="Sales team toolbar and date range"
               filtersBadgeCount={filtersBadgeCount}
               filters={
                 <>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Activity</span>
-                    <div className="relative">
-                      {activityFilter !== 'ALL' && (
-                        <FilterDismiss onClear={() => mergeListParams({ activity: 'ALL', page: 1 })} />
-                      )}
-                      <FormSelect
-                        value={activityFilter}
-                        onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
-                        options={CS_ACTIVITY_OPTIONS}
-                        wrapperClassName="w-full"
-                      />
-                    </div>
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <FormSelect
+                      value={activityFilter}
+                      onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
+                      options={CS_ACTIVITY_OPTIONS}
+                      className="!bg-transparent !border-transparent !text-center"
+                      controlSize="sm"
+                      openAs="modal"
+                      wrapperClassName="w-full"
+                    />
                   </div>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Backlog</span>
-                    <div className="relative">
-                      {backlogFilter !== 'ALL' && (
-                        <FilterDismiss onClear={() => mergeListParams({ backlog: 'ALL', page: 1 })} />
-                      )}
-                      <FormSelect
-                        value={backlogFilter}
-                        onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
-                        options={CS_BACKLOG_OPTIONS}
-                        wrapperClassName="w-full"
-                      />
-                    </div>
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <FormSelect
+                      value={backlogFilter}
+                      onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
+                      options={CS_BACKLOG_OPTIONS}
+                      className="!bg-transparent !border-transparent !text-center"
+                      controlSize="sm"
+                      openAs="modal"
+                      wrapperClassName="w-full"
+                    />
                   </div>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                    <div className="relative">
-                      {sort !== 'total-desc' && (
-                        <FilterDismiss onClear={() => mergeListParams({ sort: 'total-desc', page: 1 })} />
-                      )}
-                      <SortMenu
-                        value={sortMenuValue}
-                        onChange={handleSortChange}
-                        options={CS_SORT_MENU_OPTIONS}
-                        defaultValue={CS_SORT_DEFAULT}
-                      />
-                    </div>
+                  <div className="relative">
+                    {sort !== 'total-desc' && (
+                      <FilterDismiss onClear={() => mergeListParams({ sort: 'total-desc', page: 1 })} />
+                    )}
+                    <SortMenu
+                      value={sortMenuValue}
+                      onChange={handleSortChange}
+                      options={CS_SORT_MENU_OPTIONS}
+                      defaultValue={CS_SORT_DEFAULT}
+                    />
                   </div>
                 </>
               }
@@ -592,7 +582,7 @@ export function CSTeamPage({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);
@@ -702,7 +692,6 @@ export function CSTeamPage({
           className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={filtersBadgeCount}
-          sheetSubtitle={<span>Filter closers by live activity and backlog</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput

@@ -3,7 +3,7 @@ import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { MarketingCrossFunnelPage } from '~/features/marketing/MarketingCrossFunnelPage';
 import { MarketingCrossFunnelLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type {
@@ -59,7 +59,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const period = url.searchParams.get('period') ?? undefined;
   const periodAllTime = period === 'all_time';
   if (!periodAllTime && !startDate && !endDate) {
-    const def = defaultThisMonthRange();
+    const def = defaultTodayRange();
     startDate = def.startDate;
     endDate = def.endDate;
   }
@@ -168,6 +168,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statsPromise,
   });
 }
+
 
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;

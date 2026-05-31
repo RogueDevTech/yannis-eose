@@ -234,8 +234,7 @@ export function LogisticsPartnersLoadingShell() {
         description="Manage logistics companies and locations."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Logistics tools"
-            sheetSubtitle={<span>Refresh and add records</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Logistics toolbar"
             desktop={
               <div className="flex flex-wrap gap-2">
@@ -501,8 +500,7 @@ export function LogisticsRemittancesLoadingShell() {
         description="Confirm incoming stock transfers."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Transfer confirmation tools"
-            sheetSubtitle={<span>Date range and filters</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Transfer confirmation toolbar"
             filters={mobileFiltersBody}
             filtersBadgeCount={hasNonSearchFilters ? 1 : 0}
@@ -771,8 +769,7 @@ function TransfersWorkspaceLoadingShell({
         description={pageDescription}
         actions={
           <PageHeaderMobileTools
-            sheetTitle={`${pageTitle} — tools`}
-            sheetSubtitle={<span>Date range and new transfer</span>}
+            sheetTitle="Actions"
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
             desktop={
               <>
@@ -787,7 +784,7 @@ function TransfersWorkspaceLoadingShell({
               </>
             }
             sheet={
-              <Button variant="primary" size="sm" className="w-full justify-center" disabled>
+              <Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                 {initiateCta}
               </Button>
             }

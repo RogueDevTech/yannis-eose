@@ -17,6 +17,14 @@ const PLATFORM_PRESET: Record<'FACEBOOK' | 'TIKTOK' | 'GOOGLE', string> = {
   GOOGLE: 'Google',
 };
 
+const CATEGORY_LABELS: Record<string, string> = {
+  AD_SPEND: 'Ad Spend',
+  AD_ACCOUNT: 'Ad Account',
+  RECRUITMENT_AD: 'Recruitment Ad',
+  WHATSAPP_CAMPAIGN: 'WhatsApp Campaign',
+  UGC_PRODUCTION: 'UGC Production',
+};
+
 function linePlatformLabel(line: AdSpendGroupLine): string {
   if (line.platform === 'OTHER') {
     return line.platformCustomLabel?.trim() || 'Other';
@@ -58,24 +66,41 @@ function buildAdSpendLineColumns(
     {
       key: 'campaign',
       header: 'Campaign',
-      render: (line) => line.campaignName ?? '—',
+      render: (line) => {
+        const cat = line.category ?? 'AD_SPEND';
+        if (cat !== 'AD_SPEND') {
+          const label = CATEGORY_LABELS[cat] ?? cat;
+          return (
+            <span className="text-sm text-app-fg">
+              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-app-hover text-app-fg-muted">{label}</span>
+              {line.description && <span className="ml-1.5 text-xs text-app-fg-muted">{line.description}</span>}
+            </span>
+          );
+        }
+        return <span className="text-sm">{line.campaignName ?? '—'}</span>;
+      },
     },
     {
       key: 'product',
       header: 'Product',
-      render: (line) =>
-        line.productId ? (
+      render: (line) => {
+        if ((line.category ?? 'AD_SPEND') !== 'AD_SPEND') return <span className="text-app-fg-muted">—</span>;
+        return line.productId ? (
           <Link to={`/admin/products/${line.productId}`} className="text-brand-500 hover:text-brand-600">
             {line.productName ?? '—'}
           </Link>
         ) : (
           '—'
-        ),
+        );
+      },
     },
     {
       key: 'platform',
       header: 'Platform',
-      render: (line) => linePlatformLabel(line),
+      render: (line) => {
+        if ((line.category ?? 'AD_SPEND') !== 'AD_SPEND') return <span className="text-app-fg-muted">—</span>;
+        return linePlatformLabel(line);
+      },
     },
     {
       key: 'amount',
@@ -89,21 +114,24 @@ function buildAdSpendLineColumns(
       header: 'Orders',
       align: 'right',
       nowrap: true,
-      render: (line) => (
-        <span className="text-sm text-app-fg-muted tabular-nums">{(line.orderCount ?? 0).toLocaleString()}</span>
-      ),
+      render: (line) => {
+        if ((line.category ?? 'AD_SPEND') !== 'AD_SPEND') return <span className="text-sm text-app-fg-muted">—</span>;
+        return <span className="text-sm text-app-fg-muted tabular-nums">{(line.orderCount ?? 0).toLocaleString()}</span>;
+      },
     },
     {
       key: 'cpa',
       header: 'CPA',
       align: 'right',
       nowrap: true,
-      render: (line) =>
-        line.indicativeCpa != null ? (
+      render: (line) => {
+        if ((line.category ?? 'AD_SPEND') !== 'AD_SPEND') return <span className="text-sm text-app-fg-muted">—</span>;
+        return line.indicativeCpa != null ? (
           <NairaPrice amount={line.indicativeCpa} />
         ) : (
           <span className="text-sm text-app-fg-muted">—</span>
-        ),
+        );
+      },
     },
     {
       key: 'ad',

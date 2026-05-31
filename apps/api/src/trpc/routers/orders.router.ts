@@ -178,6 +178,7 @@ export function buildOrdersListOpts(
       assignedCloserViewerId?: string;
       searchIncludeCustomerPhone?: boolean;
       branchScope?: 'servicing' | 'marketing';
+      effectiveBranchIds?: string[] | null;
     }
   | undefined {
   const closer = csCloserSelfQueueListOpts(user, input);
@@ -651,6 +652,7 @@ export const ordersRouter = router({
       // precedence over the role-based default — lets the same endpoint serve both
       // CS (servicing-scoped) and marketing (marketing-scoped) pages correctly.
       if (input.branchScope) baseOpts.branchScope = input.branchScope;
+      baseOpts.effectiveBranchIds = ctx.effectiveBranchIds;
       const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
       const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
 
@@ -949,6 +951,7 @@ export const ordersRouter = router({
           narrowed.statuses,
           narrowed.supervisorScope,
           branchScope,
+          ctx.effectiveBranchIds,
         );
       }
 
@@ -972,6 +975,7 @@ export const ordersRouter = router({
           narrowed.statuses,
           narrowed.supervisorScope,
           branchScope,
+          ctx.effectiveBranchIds,
         ),
       );
     }),
@@ -1044,6 +1048,7 @@ export const ordersRouter = router({
           effectiveBranchId,
           filters,
           tsBranchScope,
+          ctx.effectiveBranchIds,
         );
       }
 
@@ -1063,6 +1068,7 @@ export const ordersRouter = router({
           effectiveBranchId,
           filters,
           tsBranchScope,
+          ctx.effectiveBranchIds,
         ),
       );
     }),
@@ -1258,6 +1264,7 @@ export const ordersRouter = router({
           undefined,
           scope.supervisorScope,
           bundleBranchScope,
+          ctx.effectiveBranchIds,
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
@@ -1266,8 +1273,9 @@ export const ordersRouter = router({
           aggregateBranchId,
           trendFilters,
           bundleBranchScope,
+          ctx.effectiveBranchIds,
         ),
-        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId),
+        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, ctx.effectiveBranchIds),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
         // agent roster.
@@ -1404,7 +1412,7 @@ export const ordersRouter = router({
 
       const [ordersResult, statusCounts, transfers, returnedOrders] =
         await Promise.all([
-          getOrdersService().list(listInput, branchId, buildOrdersListOpts(ctx.user, listInput)),
+          getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds }),
           getOrdersService().getStatusCounts(
             undefined,
             input.startDate,
@@ -1413,6 +1421,9 @@ export const ordersRouter = router({
             locationFilter,
             branchId,
             undefined,
+            undefined,
+            'servicing',
+            ctx.effectiveBranchIds,
           ),
           getInventoryService().listTransfers(undefined, ctx.user),
           getInventoryService().listReturnedOrders(locationFilter),
@@ -1536,7 +1547,7 @@ export const ordersRouter = router({
 
       const [ordersResult, statusCounts, locationsResult, ridersResult] =
         await Promise.all([
-          getOrdersService().list(listInput, branchId, buildOrdersListOpts(ctx.user, listInput)),
+          getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds }),
           getOrdersService().getStatusCounts(
             undefined,
             input.startDate,
@@ -1545,6 +1556,9 @@ export const ordersRouter = router({
             input.logisticsLocationId,
             branchId,
             input.statuses?.length ? input.statuses : undefined,
+            undefined,
+            'servicing',
+            ctx.effectiveBranchIds,
           ),
           getLogisticsService().listLocations({ page: 1, limit: 20, status: 'ACTIVE' }),
           getLogisticsService().listRiders(),

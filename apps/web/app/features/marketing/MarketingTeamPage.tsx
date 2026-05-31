@@ -499,8 +499,7 @@ export function MarketingTeamPage({
         description="View media buyer performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Team analysis tools"
-            sheetSubtitle={<span>Date range, sort and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Team analysis toolbar and date range"
             filtersBadgeCount={teamToolbarFilterBadge}
             filters={
@@ -531,7 +530,7 @@ export function MarketingTeamPage({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="w-full justify-center"
+                className="h-12 w-full justify-center"
                 onClick={() => {
                   closeSheet();
                   setShowExportModal(true);
@@ -617,7 +616,6 @@ export function MarketingTeamPage({
           className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={teamToolbarFilterBadge}
-          sheetSubtitle={<span>Sort options apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex w-full min-w-0 gap-2 md:flex-1">
               <SearchInput

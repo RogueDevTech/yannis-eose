@@ -47,8 +47,7 @@ export function AuditLoadingShell({
         description="Immutable record of changes across the platform."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Audit trail tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Audit toolbar and date range"
             desktop={
               <>

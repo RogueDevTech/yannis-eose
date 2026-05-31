@@ -59,8 +59,7 @@ export function MarketingLeaderboardPage({
         description="Compare media buyer performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Leaderboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Marketing leaderboard date range"
             desktop={
               <>

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cpaColorClass } from '~/lib/rate-color';
 import { formatNaira } from '~/lib/format-amount';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -50,6 +49,7 @@ import type {
   User,
 } from './types';
 import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
+import { EXPENSE_CATEGORY_FILTER_OPTIONS } from './expense-category-options';
 import { AdSpendDayAccordion } from './AdSpendDayAccordion';
 
 type SecondaryOk = {
@@ -61,6 +61,7 @@ type SecondaryOk = {
   groupsTotal: number;
   groupsPage: number;
   groupsTotalPages: number;
+  otherExpensesCounts?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number; totalSpend: number };
 };
 type SecondaryErr = {
   ok: false;
@@ -165,6 +166,7 @@ export function MarketingAdSpendPage({
   totalPages,
   limit,
   statusFilter,
+  categoryFilter,
   searchFilter,
   productIdFilter,
   campaignIdFilter,
@@ -191,13 +193,13 @@ export function MarketingAdSpendPage({
   const mediaBuyersForFilter = mediaBuyersForFilterProp ?? [];
   const marketingTeams = marketingTeamsProp ?? [];
   const dateFilters = filters;
-  usePersistedFilters('ad-spend', { exclude: ['status'] });
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const secondaryFetcher = useFetcher<SecondaryResponse>();
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
+  const [selectedCategory, setSelectedCategory] = useState(categoryFilter || 'AD_SPEND');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaignIdFilter || 'ALL');
@@ -257,6 +259,7 @@ export function MarketingAdSpendPage({
     if (filters?.endDate) p.set('endDate', filters.endDate);
     if (filters?.periodAllTime) p.set('periodAllTime', 'true');
     if (statusFilter) p.set('status', statusFilter);
+    if (categoryFilter) p.set('category', categoryFilter);
     if (searchFilter) p.set('search', searchFilter);
     if (productIdFilter) p.set('productId', productIdFilter);
     if (campaignIdFilter) p.set('campaignId', campaignIdFilter);
@@ -271,6 +274,7 @@ export function MarketingAdSpendPage({
     filters?.endDate,
     filters?.periodAllTime,
     statusFilter,
+    categoryFilter,
     searchFilter,
     productIdFilter,
     campaignIdFilter,
@@ -289,7 +293,13 @@ export function MarketingAdSpendPage({
   const secondaryLoading = secondaryFetcher.state === 'loading' && !secondaryFetcher.data;
   const secondaryError = secondaryFetcher.data && !secondaryFetcher.data.ok ? secondaryFetcher.data.error : null;
 
-  const metrics = secondary?.metrics ?? initialMetrics ?? null;
+  // Cache overview data to prevent flicker on filter changes
+  const metricsRef = useRef(initialMetrics);
+  const otherCountsRef = useRef(secondary?.otherExpensesCounts);
+  if (secondary?.metrics) metricsRef.current = secondary.metrics;
+  if (secondary?.otherExpensesCounts) otherCountsRef.current = secondary.otherExpensesCounts;
+
+  const metrics = secondary?.metrics ?? metricsRef.current ?? initialMetrics ?? null;
   const users = secondary?.users ?? initialUsers ?? [];
   const products = secondary?.products ?? initialProducts ?? [];
   const groups = secondary?.groups ?? initialGroups ?? [];
@@ -393,6 +403,7 @@ export function MarketingAdSpendPage({
     page?: number;
     gpage?: number;
     status?: string;
+    category?: string;
     search?: string;
     productId?: string;
     campaignId?: string;
@@ -407,6 +418,10 @@ export function MarketingAdSpendPage({
     if (overrides.status !== undefined) {
       if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
       else params.set('status', overrides.status);
+    }
+    if (overrides.category !== undefined) {
+      if (overrides.category === 'AD_SPEND' || !overrides.category) params.delete('category');
+      else params.set('category', overrides.category);
     }
     if (overrides.search !== undefined) {
       if (overrides.search) params.set('search', overrides.search);
@@ -426,6 +441,7 @@ export function MarketingAdSpendPage({
     }
     const narrowsGroups =
       overrides.status !== undefined ||
+      overrides.category !== undefined ||
       overrides.search !== undefined ||
       overrides.productId !== undefined ||
       overrides.campaignId !== undefined ||
@@ -442,6 +458,18 @@ export function MarketingAdSpendPage({
   const handleAdSpendStatusChange = (status: string) => {
     setSelectedStatus(status);
     setSearchParams(getListParams({ status: status === 'ALL' ? 'ALL' : status, page: 1 }));
+  };
+
+  const handleCategoryChange = (category: string) => {
+    setSelectedCategory(category);
+    setSearchParams(getListParams({ category, page: 1 }));
+  };
+
+  /** Combined category + status change for overview stat clicks. */
+  const handleOverviewClick = (category: string, status: string) => {
+    setSelectedCategory(category);
+    setSelectedStatus(status);
+    setSearchParams(getListParams({ category, status, page: 1 }));
   };
 
   /** Switching the product filter resets to page 1 — the new filtered set has different rows. */
@@ -515,7 +543,10 @@ export function MarketingAdSpendPage({
     }
     ensureBranchForAction({
       actionLabel: 'logging ad spend',
-      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+      onProceed: (branchId) => {
+        fd.set('branchId', branchId);
+        fetcher.submit(fd, { method: 'post' });
+      },
     });
   };
 
@@ -545,7 +576,10 @@ export function MarketingAdSpendPage({
     fd.set('productId', editFormProductId);
     ensureBranchForAction({
       actionLabel: 'updating ad spend',
-      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+      onProceed: (branchId) => {
+        fd.set('branchId', branchId);
+        fetcher.submit(fd, { method: 'post' });
+      },
     });
   };
 
@@ -616,6 +650,8 @@ export function MarketingAdSpendPage({
   const getUserName = (userId: string, resolvedUsers: User[]): string =>
     resolvedUsers.find((u) => u.id === userId)?.name ?? 'Unknown user';
 
+  const isFilteringNonAdSpend = selectedCategory !== 'AD_SPEND';
+
   const legacyAdSpendColumns = useMemo((): CompactTableColumn<AdSpendRecord>[] => {
     const cols: CompactTableColumn<AdSpendRecord>[] = [
       {
@@ -626,6 +662,8 @@ export function MarketingAdSpendPage({
           new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }),
       },
     ];
+
+
     if (viewMode !== 'media_buyer') {
       cols.push({
         key: 'mediaBuyer',
@@ -641,33 +679,50 @@ export function MarketingAdSpendPage({
         ),
       });
     }
-    cols.push(
-      {
-        key: 'amount',
-        header: 'Amount',
-        align: 'right',
-        nowrap: true,
-        render: (s) => <NairaPrice amount={Number(s.spendAmount)} />,
-      },
-      {
-        key: 'orders',
-        header: 'Orders',
-        align: 'right',
+
+    cols.push({
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      nowrap: true,
+      render: (s) => <NairaPrice amount={Number(s.spendAmount)} />,
+    });
+
+    if (isFilteringNonAdSpend) {
+      // Non-AD_SPEND: Description column
+      cols.push({
+        key: 'description',
+        header: 'Description',
         render: (s) => (
-          <span className="text-sm text-app-fg-muted">{(s.orderCount ?? 0).toLocaleString()}</span>
+          <span className="text-sm text-app-fg-muted truncate max-w-[16rem] block">
+            {s.description || '—'}
+          </span>
         ),
-      },
-      {
-        key: 'cpa',
-        header: 'CPA',
-        align: 'right',
-        render: (s) =>
-          s.indicativeCpa != null ? (
-            <NairaPrice amount={s.indicativeCpa} />
-          ) : (
-            <span className="text-sm text-app-fg-muted">{'\u2014'}</span>
-          ),
-      },
+      });
+    } else {
+      // AD_SPEND: Orders + CPA columns
+      cols.push(
+        {
+          key: 'orders',
+          header: 'Orders',
+          align: 'right',
+          render: (s) => <span className="text-sm text-app-fg-muted">{(s.orderCount ?? 0).toLocaleString()}</span>,
+        },
+        {
+          key: 'cpa',
+          header: 'CPA',
+          align: 'right',
+          render: (s) =>
+            s.indicativeCpa != null ? (
+              <NairaPrice amount={s.indicativeCpa} />
+            ) : (
+              <span className="text-sm text-app-fg-muted">{'\u2014'}</span>
+            ),
+        },
+      );
+    }
+
+    cols.push(
       {
         key: 'status',
         header: 'Status',
@@ -715,7 +770,7 @@ export function MarketingAdSpendPage({
                   key: 'edit',
                   kind: 'link',
                   label: 'Edit',
-                  to: `/admin/marketing/ad-spend/new?date=${new Date(s.spendDate).toISOString().slice(0, 10)}`,
+                  to: `/admin/marketing/expenses/new?date=${new Date(s.spendDate).toISOString().slice(0, 10)}`,
                   show: canEdit,
                 },
               ]}
@@ -725,7 +780,7 @@ export function MarketingAdSpendPage({
       },
     );
     return cols;
-  }, [viewMode, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData]);
+  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData]);
 
   const adSpendToolbarFilterBadge = useMemo(() => {
     let n = 0;
@@ -769,55 +824,86 @@ export function MarketingAdSpendPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Ads Expense"
+        title="Marketing Expenses"
         mobileInlineActions
         description="Log daily ad spend."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Ads Expense tools"
-            sheetSubtitle={<span>Date range and new expense entry</span>}
-            triggerAriaLabel="Date, add expense, and more"
+            sheetTitle="Actions"
+            triggerAriaLabel="Filters and actions"
             filtersBadgeCount={adSpendToolbarFilterBadge}
-            filters={
-              <>
-                {viewMode !== 'media_buyer' && marketingTeams.length > 1 && (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Team</span>
-                    <SearchableSelect
-                      id="marketing-adspend-team-filter-sheet"
-                      value={selectedTeamId}
-                      onChange={handleTeamChange}
-                      options={[
-                        { value: 'ALL', label: 'All teams' },
-                        ...marketingTeams.map((t) => ({ value: t.id, label: t.name })),
-                      ]}
+            filters={(() => {
+              const boxClass = 'relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+              const selectTransparent = '!bg-transparent !border-transparent !text-center';
+              return (
+                <>
+                  <div className={boxClass}>
+                    <FormSelect
+                      value={selectedStatus}
+                      onChange={(e) => handleAdSpendStatusChange(e.target.value)}
+                      options={AD_SPEND_STATUS_OPTIONS}
+                      controlSize="sm"
+                      openAs="modal"
                       wrapperClassName="w-full"
-                      searchPlaceholder="Search teams..."
+                      className={selectTransparent}
                     />
                   </div>
-                )}
-                {viewMode !== 'media_buyer' && (picklistsLoading || filteredMedisBuyersForFilter.length > 0) ? (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                    {picklistsLoading ? (
-                      <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
-                    ) : (
+                  {products.length > 0 && (
+                    <div className={boxClass}>
                       <SearchableSelect
-                        id="marketing-adspend-media-buyer-filter-sheet"
-                        value={selectedMediaBuyerId}
-                        onChange={handleAdSpendMediaBuyerChange}
+                        id="marketing-adspend-product-filter-sheet"
+                        value={selectedProductId}
+                        onChange={handleAdSpendProductChange}
                         options={[
-                          { value: 'ALL', label: 'All media buyers' },
-                          ...filteredMedisBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                          { value: 'ALL', label: 'All products' },
+                          ...products.map((p) => ({ value: p.id, label: p.name })),
                         ]}
                         wrapperClassName="w-full"
-                        searchPlaceholder="Search media buyers..."
+                        triggerClassName={selectTransparent}
+                        placeholder="All products"
+                        searchPlaceholder="Search products..."
                       />
-                    )}
-                  </div>
-                ) : null}
-              </>
-            }
+                    </div>
+                  )}
+                  {viewMode !== 'media_buyer' && marketingTeams.length > 1 && (
+                    <div className={boxClass}>
+                      <SearchableSelect
+                        id="marketing-adspend-team-filter-sheet"
+                        value={selectedTeamId}
+                        onChange={handleTeamChange}
+                        options={[
+                          { value: 'ALL', label: 'All teams' },
+                          ...marketingTeams.map((t) => ({ value: t.id, label: t.name })),
+                        ]}
+                        wrapperClassName="w-full"
+                        triggerClassName={selectTransparent}
+                        searchPlaceholder="Search teams..."
+                      />
+                    </div>
+                  )}
+                  {viewMode !== 'media_buyer' && (picklistsLoading || filteredMedisBuyersForFilter.length > 0) ? (
+                    <div className={boxClass}>
+                      {picklistsLoading ? (
+                        <div className="h-5 w-32 rounded-md bg-app-border/70 animate-pulse" aria-hidden />
+                      ) : (
+                        <SearchableSelect
+                          id="marketing-adspend-media-buyer-filter-sheet"
+                          value={selectedMediaBuyerId}
+                          onChange={handleAdSpendMediaBuyerChange}
+                          options={[
+                            { value: 'ALL', label: 'All media buyers' },
+                            ...filteredMedisBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                          ]}
+                          wrapperClassName="w-full"
+                          triggerClassName={selectTransparent}
+                          searchPlaceholder="Search media buyers..."
+                        />
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              );
+            })()}
             desktop={
               <>
                 <PageRefreshButton />
@@ -826,7 +912,7 @@ export function MarketingAdSpendPage({
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <BranchScopedLink
-                  to="/admin/marketing/ad-spend/new"
+                  to="/admin/marketing/expenses/new"
                   actionLabel="adding ad spend"
                   className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
                 >
@@ -836,10 +922,10 @@ export function MarketingAdSpendPage({
             }
             sheet={({ closeSheet }) => (
               <BranchScopedLink
-                to="/admin/marketing/ad-spend/new"
+                to="/admin/marketing/expenses/new"
                 actionLabel="adding ad spend"
                 onClick={() => closeSheet()}
-                className="btn-primary btn-sm w-full justify-center inline-flex items-center"
+                className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
               >
                 + Add Expense
               </BranchScopedLink>
@@ -863,48 +949,50 @@ export function MarketingAdSpendPage({
         />
       )}
 
-      {metrics ? (
-        <OverviewStatStrip
-          mobileGrid
-          items={[
-            {
-              label: 'Total spend',
-              value: <>{'\u20A6'}{Math.round(metrics.totalSpend).toLocaleString()}</>,
-              valueClassName: 'text-app-fg',
-              onClick: () => handleAdSpendStatusChange('ALL'),
-            },
-            {
-              label: 'Orders',
-              value: metrics.totalOrders.toLocaleString(),
-              valueClassName: 'text-app-fg',
-              onClick: () => handleAdSpendStatusChange('ALL'),
-            },
-            {
-              label: 'CPA',
-              value: metrics.cpa > 0 ? <>{'\u20A6'}{Math.round(metrics.cpa).toLocaleString()}</> : '\u2014',
-              valueClassName: metrics.cpa > 0 ? cpaColorClass(metrics.cpa) : 'text-app-fg-muted',
-              title: 'Total spend / total orders',
-              onClick: () => handleAdSpendStatusChange('ALL'),
-            },
-            {
-              label: `Pending (${statusCounts?.PENDING ?? 0})`,
-              value: <>{'\u20A6'}{Math.round(metrics.pendingSpend ?? 0).toLocaleString()}</>,
-              valueClassName: (metrics.pendingSpend ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg-muted',
-              onClick: () => handleAdSpendStatusChange('PENDING'),
-              active: selectedStatus === 'PENDING',
-            },
-            {
-              label: `Approved (${statusCounts?.APPROVED ?? 0})`,
-              value: <>{'\u20A6'}{Math.round(metrics.approvedSpend ?? 0).toLocaleString()}</>,
-              valueClassName: 'text-success-600 dark:text-success-400',
-              onClick: () => handleAdSpendStatusChange('APPROVED'),
-              active: selectedStatus === 'APPROVED',
-            },
-          ]}
-        />
-      ) : (
-        <OverviewStatStripSkeleton count={5} />
-      )}
+      {(() => {
+        const otherCounts = secondary?.otherExpensesCounts ?? otherCountsRef.current ?? { PENDING: 0, APPROVED: 0, ALL: 0, totalSpend: 0 };
+        return (
+          <OverviewStatStrip
+            mobileGrid
+            items={[
+              {
+                label: `Ad Spend (${metrics?.totalOrders ?? 0})`,
+                value: <>{'\u20A6'}{Math.round(metrics?.approvedSpend ?? 0).toLocaleString()}</>,
+                valueClassName: (metrics?.approvedSpend ?? 0) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
+                onClick: () => handleOverviewClick('AD_SPEND', 'APPROVED'),
+                active: selectedCategory === 'AD_SPEND' && selectedStatus === 'APPROVED',
+              },
+              {
+                label: `Pending Ads (${selectedCategory === 'AD_SPEND' ? (statusCounts?.PENDING ?? 0) : 0})`,
+                value: <>{'\u20A6'}{Math.round(metrics?.pendingSpend ?? 0).toLocaleString()}</>,
+                valueClassName: 'text-amber-600 dark:text-amber-400',
+                onClick: () => handleOverviewClick('AD_SPEND', 'PENDING'),
+                active: selectedCategory === 'AD_SPEND' && selectedStatus === 'PENDING',
+              },
+              {
+                label: 'CPA',
+                value: (metrics?.cpa ?? 0) > 0 ? <>{'\u20A6'}{Math.round(metrics!.cpa).toLocaleString()}</> : '\u2014',
+                valueClassName: (metrics?.cpa ?? 0) > 0 ? cpaColorClass(metrics!.cpa) : 'text-app-fg',
+                onClick: () => handleOverviewClick('AD_SPEND', 'ALL'),
+              },
+              {
+                label: `Other (${otherCounts.ALL})`,
+                value: <>{'\u20A6'}{Math.round(otherCounts.totalSpend).toLocaleString()}</>,
+                valueClassName: otherCounts.totalSpend > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
+                onClick: () => handleOverviewClick('AD_ACCOUNT', 'ALL'),
+                active: isFilteringNonAdSpend && selectedStatus === 'ALL',
+              },
+              {
+                label: `Other Pending (${otherCounts.PENDING})`,
+                value: otherCounts.PENDING.toLocaleString(),
+                valueClassName: 'text-amber-600 dark:text-amber-400',
+                onClick: () => handleOverviewClick('AD_ACCOUNT', 'PENDING'),
+                active: isFilteringNonAdSpend && selectedStatus === 'PENDING',
+              },
+            ]}
+          />
+        );
+      })()}
 
       {/* High-CPA warning banner removed (CEO directive 2026-05-08) — the
           inline alert added an extra render path on every page load without
@@ -1089,7 +1177,6 @@ export function MarketingAdSpendPage({
         <ToolbarFiltersCollapsible
           hideMobileSheet
           badgeCount={adSpendToolbarFilterBadge}
-          sheetSubtitle={<span>Product, campaign, and buyer filters apply immediately</span>}
           searchRow={
             <form onSubmit={handleAdSpendSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
@@ -1103,6 +1190,12 @@ export function MarketingAdSpendPage({
           }
           desktopInlineFilters={
             <>
+              <FormSelect
+                value={selectedCategory}
+                onChange={(e) => handleCategoryChange(e.target.value)}
+                options={EXPENSE_CATEGORY_FILTER_OPTIONS}
+                wrapperClassName="w-auto min-w-[10rem]"
+              />
               <FormSelect
                 value={selectedStatus}
                 onChange={(e) => handleAdSpendStatusChange(e.target.value)}
@@ -1332,7 +1425,7 @@ export function MarketingAdSpendPage({
               )}
               {adSpendRowCanEdit(adSpendDetailModal) && (
                 <Link
-                  to={`/admin/marketing/ad-spend/new?date=${new Date(adSpendDetailModal.spendDate).toISOString().slice(0, 10)}`}
+                  to={`/admin/marketing/expenses/new?date=${new Date(adSpendDetailModal.spendDate).toISOString().slice(0, 10)}`}
                   className="btn-secondary btn-sm inline-flex items-center"
                   onClick={() => { setAdSpendDetailModal(null); setRejectStep(false); }}
                 >
@@ -1391,45 +1484,41 @@ export function MarketingAdSpendPage({
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-app-border">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="flex-1 justify-center"
+              {/* Actions — sheet-style full-width rows */}
+              <div className="flex flex-col gap-1.5 pt-1 border-t border-app-border">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-xl border bg-app-elevated px-4 py-3.5 text-left text-sm font-semibold transition-colors text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20 border-brand-200 dark:border-brand-800"
                   onClick={() => { setPeekAdSpend(null); setAdSpendDetailModal(s); setRejectStep(false); }}
                 >
                   View details
-                </Button>
+                </button>
                 {canApproveAdSpend && (s.status ?? 'PENDING') === 'PENDING' && (
                   <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="flex-1 justify-center"
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-xl border bg-app-elevated px-4 py-3.5 text-left text-sm font-semibold transition-colors text-success-600 hover:bg-success-50 dark:text-success-400 dark:hover:bg-success-900/20 border-success-200 dark:border-success-800"
                       onClick={() => { setPeekAdSpend(null); setConfirmApprove(s); }}
                     >
                       Approve
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      className="flex-1 justify-center"
+                    </button>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-xl border bg-app-elevated px-4 py-3.5 text-left text-sm font-semibold transition-colors text-danger-600 hover:bg-danger-50 dark:text-danger-400 dark:hover:bg-danger-900/20 border-danger-200 dark:border-danger-800"
                       onClick={() => { setPeekAdSpend(null); setConfirmReject(s); setRejectReason(''); }}
                     >
                       Reject
-                    </Button>
+                    </button>
                   </>
                 )}
                 {adSpendRowCanEdit(s) && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="flex-1 justify-center"
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between rounded-xl border bg-app-elevated px-4 py-3.5 text-left text-sm font-semibold transition-colors text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20 border-brand-200 dark:border-brand-800"
                     onClick={() => { setPeekAdSpend(null); setEditTarget(s); }}
                   >
                     Edit
-                  </Button>
+                  </button>
                 )}
               </div>
             </div>

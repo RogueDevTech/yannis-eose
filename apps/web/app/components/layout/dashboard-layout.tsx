@@ -141,8 +141,8 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
-        label: 'Ads Expense',
-        href: '/admin/marketing/ad-spend',
+        label: 'Expenses',
+        href: '/admin/marketing/expenses',
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -606,7 +606,7 @@ const MARKETING_SUPERVISOR_NAV_HREFS: ReadonlySet<string> = new Set([
   '/admin/marketing/team',
   '/admin/marketing/orders',
   '/admin/marketing/funding',
-  '/admin/marketing/ad-spend',
+  '/admin/marketing/expenses',
   '/admin/marketing/forms',
   '/admin/marketing/leaderboard',
 ]);
@@ -639,14 +639,14 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/marketing/overview',
     '/admin/marketing/team',
     '/admin/marketing/funding',
-    '/admin/marketing/ad-spend',
+    '/admin/marketing/expenses',
   ],
   MEDIA_BUYER: [
     '/admin',
     '/admin/marketing/overview',
     '/admin/marketing/orders',
     '/admin/marketing/funding',
-    '/admin/marketing/ad-spend',
+    '/admin/marketing/expenses',
   ],
   HEAD_OF_CS: [
     '/admin',

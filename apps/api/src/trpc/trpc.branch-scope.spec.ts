@@ -30,6 +30,7 @@ function buildCtx(overrides?: Partial<TrpcContext>): TrpcContext {
     res: {} as TrpcContext['res'],
     sessionToken: null,
     currentBranchId: null,
+    effectiveBranchIds: null,
     ...overrides,
   };
 }

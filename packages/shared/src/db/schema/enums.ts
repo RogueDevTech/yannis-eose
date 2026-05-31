@@ -262,6 +262,18 @@ export const adPlatformEnum = pgEnum('ad_platform', [
   'OTHER',
 ]);
 
+/**
+ * Expense category for marketing expenses. Only `AD_SPEND` feeds into CPA/ROAS.
+ * Other categories deduct from the MB's funded balance but don't affect performance metrics.
+ */
+export const expenseCategoryEnum = pgEnum('expense_category', [
+  'AD_SPEND',
+  'AD_ACCOUNT',
+  'RECRUITMENT_AD',
+  'WHATSAPP_CAMPAIGN',
+  'UGC_PRODUCTION',
+]);
+
 /** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */
 export const remittanceStatusEnum = pgEnum('remittance_status', [
   'SENT',

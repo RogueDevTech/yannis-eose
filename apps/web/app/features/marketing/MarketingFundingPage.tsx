@@ -428,7 +428,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     ensureBranchForAction({
       actionLabel: 'sending funding',
-      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+      onProceed: (branchId) => {
+        fd.set('branchId', branchId);
+        fetcher.submit(fd, { method: 'post' });
+      },
     });
   };
 
@@ -461,7 +464,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     fd.set('amount', String(parsed.data.amount));
     ensureBranchForAction({
       actionLabel: 'approving funding request',
-      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+      onProceed: (branchId) => {
+        fd.set('branchId', branchId);
+        fetcher.submit(fd, { method: 'post' });
+      },
     });
   };
 
@@ -667,7 +673,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <Button
             variant={canSendFunding ? 'secondary' : 'primary'}
             size="sm"
-            className="md:inline-flex w-full justify-center md:w-auto"
+            className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
             onClick={() => {
               closeMobileSheet();
               setShowRequestForm(true);
@@ -680,7 +686,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <Button
             variant="primary"
             size="sm"
-            className="md:inline-flex w-full justify-center md:w-auto"
+            className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
             onClick={() => {
               closeMobileSheet();
               setShowSendForm(true);
@@ -701,8 +707,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         description="Track funds received and sent."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Funding tools"
-            sheetSubtitle={<span>Filters, request, send, and date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Filters and funding actions"
             filtersBadgeCount={(() => {
               const s =
@@ -948,7 +953,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               />
               {fundingRequestRecipients.length === 0 && (
                 <p className="mt-1 text-xs text-warning-600 dark:text-warning-400">
-                  No Head of Marketing or Finance Officer is set up to receive your request. Contact an admin.
+                  No eligible recipient found. Contact an admin.
                 </p>
               )}
             </div>
@@ -1092,7 +1097,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 fd.set('action', 'COMPLETED');
                 ensureBranchForAction({
                   actionLabel: 'marking funding as received',
-                  onProceed: () => fetcher.submit(fd, { method: 'post' }),
+                  onProceed: (branchId) => {
+                    fd.set('branchId', branchId);
+                    fetcher.submit(fd, { method: 'post' });
+                  },
                 });
               }}
             >
@@ -1715,29 +1723,29 @@ function FundingFilterControls({
   const statusActive = !!slice.statusFilter && slice.statusFilter !== 'ALL';
   return (
     <>
-      <div className="space-y-1.5">
-        <span className="text-xs font-medium text-app-fg-muted">Type</span>
-        <div className="relative">
-          {typeActive && <FilterDismiss onClear={() => onTypeChange('all')} />}
-          <FormSelect
-            value={slice.typeFilter}
-            onChange={(e) => onTypeChange(e.target.value)}
-            options={typeOptions}
-            wrapperClassName="w-full"
-          />
-        </div>
+      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+        {typeActive && <FilterDismiss onClear={() => onTypeChange('all')} />}
+        <FormSelect
+          value={slice.typeFilter}
+          onChange={(e) => onTypeChange(e.target.value)}
+          options={typeOptions}
+          className="!bg-transparent !border-transparent !text-center"
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+        />
       </div>
-      <div className="space-y-1.5">
-        <span className="text-xs font-medium text-app-fg-muted">Status</span>
-        <div className="relative">
-          {statusActive && <FilterDismiss onClear={() => onStatusChange('ALL')} />}
-          <FormSelect
-            value={slice.statusFilter ?? 'ALL'}
-            onChange={(e) => onStatusChange(e.target.value)}
-            options={statusOptions}
-            wrapperClassName="w-full"
-          />
-        </div>
+      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+        {statusActive && <FilterDismiss onClear={() => onStatusChange('ALL')} />}
+        <FormSelect
+          value={slice.statusFilter ?? 'ALL'}
+          onChange={(e) => onStatusChange(e.target.value)}
+          options={statusOptions}
+          className="!bg-transparent !border-transparent !text-center"
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+        />
       </div>
     </>
   );
@@ -1784,7 +1792,6 @@ function UnifiedDistributingFilterBar({
     <ToolbarFiltersCollapsible
       hideMobileSheet
       badgeCount={filterBadge}
-      sheetSubtitle={<span>Type and status apply immediately</span>}
       searchRow={
         <form onSubmit={onSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
           <SearchInput
@@ -2117,7 +2124,6 @@ function UnifiedReceivedFilterBar({
     <ToolbarFiltersCollapsible
       hideMobileSheet
       badgeCount={filterBadge}
-      sheetSubtitle={<span>Type and status apply immediately</span>}
       searchRow={
         <form onSubmit={onSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
           <SearchInput

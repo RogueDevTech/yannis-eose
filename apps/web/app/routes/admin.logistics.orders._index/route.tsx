@@ -58,8 +58,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const isTplManager = user.role === 'TPL_MANAGER';
+  const userLocationFilter = url.searchParams.get('location') || undefined;
   const effectiveLogisticsLocationId =
-    isTplManager && user.logisticsLocationId ? user.logisticsLocationId : undefined;
+    isTplManager && user.logisticsLocationId
+      ? user.logisticsLocationId
+      : userLocationFilter || undefined;
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const status = url.searchParams.get('status') || 'ALL';
@@ -119,7 +122,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search ?? '',
-    isTplManagerScoped: !!effectiveLogisticsLocationId,
+    locationFilter: userLocationFilter ?? '',
+    isTplManagerScoped: isTplManager && !!user.logisticsLocationId,
     canEditDeliveryDate: false,
     allocationOnDetailOnly: true,
     orderDetailBasePath: '/admin/orders',
@@ -197,6 +201,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       limit: logisticsOrdersShell.limit,
       statusFilter: logisticsOrdersShell.statusFilter,
       searchFilter: logisticsOrdersShell.searchFilter,
+      locationFilter: logisticsOrdersShell.locationFilter,
       listErrorMessage,
       statusCounts,
       locations,

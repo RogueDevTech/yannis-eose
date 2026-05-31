@@ -1,6 +1,5 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
@@ -81,6 +80,7 @@ interface LogisticsOrdersPageProps {
   statusCounts?: Record<string, number>;
   statusFilter?: string;
   searchFilter?: string;
+  locationFilter?: string;
   listErrorMessage?: string;
   /** Omitted when `deferredSecondary` is used. */
   locations?: Location[];
@@ -187,6 +187,7 @@ function LogisticsOrdersPageImpl({
   statusCounts: statusCountsProp,
   statusFilter,
   searchFilter,
+  locationFilter: locationFilterProp,
   listErrorMessage,
   locations: locationsProp,
   allocatableLocations: allocatableLocationsProp,
@@ -223,7 +224,6 @@ function LogisticsOrdersPageImpl({
     [orderDetailBasePath, orderDetailFrom],
   );
 
-  usePersistedFilters('logistics-orders');
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
   const isFilterLoading = useLoaderRefetchBusy().busy;
@@ -234,6 +234,18 @@ function LogisticsOrdersPageImpl({
   }>();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
+  const [selectedLocation, setSelectedLocation] = useState(locationFilterProp || '');
+
+  const handleLocationChange = (locationId: string) => {
+    setSelectedLocation(locationId);
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (locationId) next.set('location', locationId);
+      else next.delete('location');
+      return next;
+    });
+  };
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [allocateLocationId, setAllocateLocationId] = useState('');
@@ -360,8 +372,8 @@ function LogisticsOrdersPageImpl({
   };
 
   const logisticsOrdersToolbarFilterBadge = useMemo(
-    () => (selectedStatus !== 'ALL' ? 1 : 0),
-    [selectedStatus],
+    () => (selectedStatus !== 'ALL' ? 1 : 0) + (selectedLocation ? 1 : 0),
+    [selectedStatus, selectedLocation],
   );
 
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
@@ -638,36 +650,66 @@ function LogisticsOrdersPageImpl({
                 </>
               }
               filters={
-                <div className="relative w-full">
-                  {selectedStatus !== 'ALL' && (
-                    <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                <>
+                  <div className="relative w-full">
+                    {selectedStatus !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
+                    )}
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <FormSelect
+                        value={selectedStatus}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                          value: status,
+                          label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                        }))}
+                        controlSize="sm"
+                        openAs="modal"
+                        className="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
+                  </div>
+                  {!isTplManagerScoped && locations.length > 0 && (
+                    <div className="relative w-full">
+                      {!!selectedLocation && (
+                        <FilterDismiss onClear={() => handleLocationChange('')} />
+                      )}
+                      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                        <SearchableSelect
+                          id="logistics-location-filter-mobile"
+                          value={selectedLocation}
+                          onChange={handleLocationChange}
+                          options={[
+                            { value: '', label: 'All locations' },
+                            ...locations.map((loc) => ({
+                              value: loc.id,
+                              label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            })),
+                          ]}
+                          triggerClassName="!bg-transparent !border-transparent !text-center"
+                          wrapperClassName="w-full"
+                          placeholder="All locations"
+                          searchPlaceholder="Search locations..."
+                        />
+                      </div>
+                    </div>
                   )}
-                  <FormSelect
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-                      value: status,
-                      label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-                    }))}
-                    controlSize="lg"
-                    className="!bg-app-hover text-center"
-                    wrapperClassName="w-full"
-                  />
-                </div>
+                </>
               }
               sheet={({ closeSheet }) => (
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    className="flex h-10 w-full items-center justify-center rounded-md border border-app-border bg-app-hover text-sm font-medium text-app-fg transition-colors hover:bg-app-border"
-                    onClick={() => {
-                      closeSheet();
-                      setShowChartView((v) => !v);
-                    }}
-                  >
-                    {showChartView ? 'View as data' : 'View data in chart'}
-                  </button>
-                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
               )}
             />
           }
@@ -686,8 +728,7 @@ function LogisticsOrdersPageImpl({
           items={[
             { label: 'Total', value: <StatValuePulse className="min-w-[2.5rem]" /> },
             { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Dispatched', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Agent Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Overdue', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -699,8 +740,7 @@ function LogisticsOrdersPageImpl({
           items={[
             { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL') },
             { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED') },
-            { label: 'Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED') },
-            { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('DISPATCHED') },
+            { label: 'Agent Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED') },
             { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('IN_TRANSIT') },
             { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED') },
             { label: 'Overdue', value: overdueCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('OVERDUE') },

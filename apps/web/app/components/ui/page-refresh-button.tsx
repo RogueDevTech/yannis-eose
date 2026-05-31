@@ -19,11 +19,10 @@ export function PageRefreshButton({
   const { revalidate, state } = useRevalidator();
   const isLoading = state === 'loading';
 
-  // Mobile: primary brand filled (brand-500) to match `btn-primary`. Desktop: grey subtle chrome.
   const mergedClassName = [
     iconOnly
-      ? 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg p-0 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 bg-brand-500 text-white border-0 hover:bg-brand-600 md:bg-surface-100 md:dark:bg-surface-800 md:text-app-fg-muted md:border-2 md:border-app-border md:hover:border-brand-500/40 md:hover:bg-surface-200 md:hover:text-brand-600 md:dark:hover:border-brand-400/45 md:dark:hover:bg-surface-700'
-      : 'inline-flex h-9 items-center gap-1.5 px-2.5 rounded-lg border-2 border-app-border bg-surface-100 dark:bg-surface-800 text-xs font-medium text-app-fg-muted hover:border-brand-500/40 hover:bg-surface-200 hover:text-brand-600 dark:hover:border-brand-400/45 dark:hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+      ? 'btn-primary !px-0 !h-9 !min-h-0 w-9 shrink-0 md:bg-app-hover md:text-app-fg md:hover:opacity-90 md:focus:ring-surface-400'
+      : 'btn-secondary btn-sm',
     className,
   ]
     .filter(Boolean)

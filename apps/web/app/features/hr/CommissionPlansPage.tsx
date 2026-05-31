@@ -277,8 +277,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Commission plan tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Commission plan toolbar"
             desktop={
               <>
@@ -295,7 +294,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                 <Button
                   variant="primary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowCreate(true);

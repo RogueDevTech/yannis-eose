@@ -483,8 +483,7 @@ export function CSOrdersLoadingShell({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Sales orders tools"
-            sheetSubtitle={<span>Date range, chart, export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Sales orders toolbar"
             mobileLeading={
               liveEvents != null && liveEvents.length > 0 ? (
@@ -535,7 +534,6 @@ export function CSOrdersLoadingShell({
         <ToolbarFiltersCollapsible
           className="!border-0"
           badgeCount={ordersListToolbarFilterBadge}
-          sheetSubtitle={<span>Status and closer apply immediately</span>}
           searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form
@@ -780,8 +778,7 @@ export function CSTeamLoadingShell({
         description="View closer workload and performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Sales team tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Sales team toolbar"
             desktop={
               <>
@@ -820,7 +817,6 @@ export function CSTeamLoadingShell({
           className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={filtersBadgeCount}
-          sheetSubtitle={<span>Filter closers by live activity and backlog</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
@@ -903,8 +899,7 @@ export function CSLeaderboardLoadingShell({
         description="Rank closer performance by delivery rate."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Leaderboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="CS leaderboard date range"
             desktop={
               <>
@@ -1026,8 +1021,7 @@ export function CSMessageTemplatesLoadingShell() {
         description="Manage SMS and WhatsApp templates."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Message template tools"
-            sheetSubtitle={<span>Preview and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Message template toolbar"
             desktop={
               <>
@@ -1042,10 +1036,10 @@ export function CSMessageTemplatesLoadingShell() {
             }
             sheet={
               <>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Preview all
                 </Button>
-                <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                   + New Template
                 </Button>
               </>

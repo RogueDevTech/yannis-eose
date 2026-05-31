@@ -39,8 +39,7 @@ export function SuperAdminDashboardLoadingShell({
         description="Executive dashboard — key business metrics at a glance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Dashboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Dashboard date range"
             desktop={
               <>

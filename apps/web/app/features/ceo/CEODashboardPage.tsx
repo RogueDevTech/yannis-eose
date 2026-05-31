@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { useToast } from '~/components/ui/toast';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -278,8 +279,7 @@ export function CEODashboardPage({
         description="Real-time business intelligence across all departments."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Executive overview tools"
-            sheetSubtitle={<span>Date range, chart toggle &amp; refresh</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Executive overview toolbar"
             desktop={
               <>
@@ -322,23 +322,27 @@ export function CEODashboardPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <div className="space-y-2">
-                <button
+              <>
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowChartView((v) => !v);
                   }}
-                  className="btn-secondary btn-sm w-full justify-center"
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
-                </button>
+                </Button>
                 <refreshFetcher.Form method="post" className="block">
                   <input type="hidden" name="intent" value="refreshExecutiveData" />
-                  <button
+                  <Button
                     type="submit"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
                     disabled={isRefreshing}
-                    className="btn-secondary btn-sm w-full justify-center inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isRefreshing ? (
                       <>
@@ -348,14 +352,14 @@ export function CEODashboardPage({
                     ) : (
                       'Refresh data'
                     )}
-                  </button>
+                  </Button>
                 </refreshFetcher.Form>
                 {showBackToDashboard && (
-                  <Link to="/admin" className="btn-secondary btn-sm w-full justify-center">
+                  <Link to="/admin" className="btn-secondary btn-sm h-12 flex items-center justify-center w-full">
                     Back to Dashboard
                   </Link>
                 )}
-              </div>
+              </>
             )}
           />
         }
@@ -523,17 +527,14 @@ export function CEODashboardPage({
         </div>
       </div>
 
-      {/* ── Revenue Generated: Day / Week / Month — stacked column ── */}
+      {/* ── Revenue Generated — follows the page date filter ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue Generated
         </h2>
         <div className="card px-4 py-2">
           <StatRowGroup divided>
-            <StatRow label="Today" value={fmt(revenueByPeriod.today)} />
-            <StatRow label="This Week" value={fmt(revenueByPeriod.thisWeek)} />
-            <StatRow label="This Month" value={fmt(revenueByPeriod.thisMonth)} />
-            <StatRow label="Period Total" value={fmt(revenue)} variant="highlight" />
+            <StatRow label="Revenue" value={fmt(revenue)} variant="highlight" />
           </StatRowGroup>
         </div>
       </div>
@@ -832,7 +833,7 @@ export function CEODashboardPage({
               <span className="text-app-fg-muted" aria-hidden>
                 ·
               </span>
-              <Link to="/admin/marketing/ad-spend" className="text-brand-500 hover:text-brand-600">Ad spend</Link>
+              <Link to="/admin/marketing/expenses" className="text-brand-500 hover:text-brand-600">Ad spend</Link>
             </div>
           </div>
           <div className="space-y-3">
