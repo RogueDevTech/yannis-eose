@@ -129,7 +129,7 @@ export function HRPage({
                 <Button
                   variant="primary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowAddAdjustment(true);

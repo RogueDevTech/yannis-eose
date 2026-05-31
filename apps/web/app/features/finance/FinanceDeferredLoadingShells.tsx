@@ -377,10 +377,10 @@ export function FinanceDisbursementsLoadingShell({
             }
             sheet={() => (
               <>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Generate report
                 </Button>
-                <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                   + New disbursement
                 </Button>
               </>
@@ -728,7 +728,7 @@ export function DeliveryRemittancesLoadingShell({
             }
             sheet={() => (
               <>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Generate report
                 </Button>
               </>
@@ -1147,7 +1147,7 @@ export function FinancePayoutLoadingShell({
                 </Button>
               </>
             }
-            sheet={<Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>Export payout document</Button>}
+            sheet={<Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>Export payout document</Button>}
           />
         }
       />

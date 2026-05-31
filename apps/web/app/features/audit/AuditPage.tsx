@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -1079,7 +1078,6 @@ export function AuditPage({
   error,
   canExport = false,
 }: AuditPageProps) {
-  usePersistedFilters('audit');
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy().busy;
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
@@ -1252,7 +1250,7 @@ export function AuditPage({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setShowExportModal(true);

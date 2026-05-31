@@ -592,7 +592,7 @@ export function CSTeamPage({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);

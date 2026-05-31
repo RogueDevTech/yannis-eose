@@ -10,6 +10,7 @@ import {
 } from '~/hooks/use-fetcher-action-surface';
 import {
   apiRequest,
+  defaultThisMonthRange,
   getCurrentUser,
   getSessionCookie,
   requirePermission,
@@ -21,6 +22,8 @@ import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -592,8 +595,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const loadingVisibility = getBranchDetailLoadingVisibility(viewer);
 
+  const url = new URL(request.url);
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  const startDateParam = url.searchParams.get('startDate') ?? undefined;
+  const endDateParam = url.searchParams.get('endDate') ?? undefined;
+  const thisMonth = defaultThisMonthRange();
+  const dateRange = periodAllTime
+    ? {}
+    : { startDate: startDateParam ?? thisMonth.startDate, endDate: endDateParam ?? thisMonth.endDate };
+  const dateFilters = {
+    startDate: periodAllTime ? '' : (dateRange.startDate ?? ''),
+    endDate: periodAllTime ? '' : (dateRange.endDate ?? ''),
+    periodAllTime,
+  };
+
   const pageData = (async () => {
-    const [overviewRes, usersRes, orgRes] = await Promise.all([
+    const [overviewRes, usersRes, orgRes, statusCountsRes] = await Promise.all([
       apiRequest<{ result?: { data?: BranchOverview } }>(
         `/trpc/branches.overview?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
         { method: 'GET', cookie },
@@ -604,6 +621,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ),
       apiRequest<{ result?: { data?: BranchOrgStructurePayload } }>(
         `/trpc/branches.listBranchOrgStructure?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<{ result?: { data?: Record<string, number> } }>(
+        `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify({ branchId, ...dateRange }))}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -647,7 +668,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const teamSettingsByTeamId: Record<string, TeamSettingsBundle | null> =
       Object.fromEntries(teamSettingsEntries);
 
-    return { overview, allUsers, teams, orgStructure, teamSettingsByTeamId };
+    const statusCounts: Record<string, number> = statusCountsRes.ok
+      ? (statusCountsRes.data?.result?.data ?? {})
+      : {};
+
+    return { overview, allUsers, teams, orgStructure, teamSettingsByTeamId, statusCounts, dateFilters };
   })();
 
   return defer({ pageData, loadingVisibility });
@@ -1229,99 +1254,133 @@ function BranchMembersPanel({
               );
             })()}
 
-          {/* CompactTable mirrors the Team-card member table shape (Member /
-              Role / Supervisor / actions) but adds a Team column scoped to the
-              department, plus row-selection for bulk add. */}
-          <div className="list-panel">
-            <div className="overflow-x-auto">
-              <CompactTable
-                withCard={false}
-                className="min-w-[680px]"
-                rows={pageRows}
-                rowKey={(m) => m.userId}
-                selection={
-                  bulkEnabled
-                    ? {
-                        selectedIds: selectedUserIds,
-                        getRowId: (m) => m.userId,
-                        onToggle: (rowId, selected) =>
-                          setSelectedUserIds((prev) => {
-                            const next = new Set(prev);
-                            if (selected) next.add(rowId);
-                            else next.delete(rowId);
-                            return next;
-                          }),
-                        onToggleAll: (selectAll) =>
-                          setSelectedUserIds((prev) => {
-                            const next = new Set(prev);
-                            if (selectAll) for (const m of pageRows) next.add(m.userId);
-                            else for (const m of pageRows) next.delete(m.userId);
-                            return next;
-                          }),
-                      }
-                    : undefined
-                }
-                columns={[
-                  {
-                    key: 'member',
-                    header: 'Member',
-                    render: (m) => {
-                      const isHead = m.effectiveRole.startsWith('HEAD_OF_');
-                      const isSupervisor = supervisorUserIds?.has(m.userId) ?? false;
-                      return (
-                        <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 truncate">{m.name}</Link>
-                          {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
-                          {isSupervisor && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-micro font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
-                              Supervisor
-                            </span>
-                          )}
-                        </div>
-                      );
-                    },
-                  },
-                  {
-                    key: 'team',
-                    header: 'Team',
-                    hideOnMobile: true,
-                    render: (m) => {
-                      const teamName = teamByUserId[m.userId];
-                      return teamName ? (
-                        <span className="text-sm text-app-fg">{teamName}</span>
-                      ) : (
-                        <span className="text-app-fg-muted text-sm">—</span>
-                      );
-                    },
-                  },
-                  {
-                    key: 'actions',
-                    header: '',
-                    mobileLabel: 'Actions',
-                    align: 'right',
-                    tight: true,
-                    nowrap: true,
-                    mobileShowLabel: false,
-                    render: (m) => (
-                      <div className="inline-flex flex-nowrap items-center justify-end gap-3 shrink-0">
-                        <CompactTableActionButton to={`/hr/users/${m.userId}`}>
-                          Profile
-                        </CompactTableActionButton>
-                        {canManageBranchMembership ? (
-                          <CompactTableActionButton
-                            tone="danger"
-                            onClick={() => setRemoveTarget(m)}
-                          >
-                            Remove
-                          </CompactTableActionButton>
-                        ) : null}
+          {/* Members table — responsive cards on mobile, table on desktop */}
+          <CompactTable
+            rows={pageRows}
+            rowKey={(m) => m.userId}
+            selection={
+              bulkEnabled
+                ? {
+                    selectedIds: selectedUserIds,
+                    getRowId: (m) => m.userId,
+                    onToggle: (rowId, selected) =>
+                      setSelectedUserIds((prev) => {
+                        const next = new Set(prev);
+                        if (selected) next.add(rowId);
+                        else next.delete(rowId);
+                        return next;
+                      }),
+                    onToggleAll: (selectAll) =>
+                      setSelectedUserIds((prev) => {
+                        const next = new Set(prev);
+                        if (selectAll) for (const m of pageRows) next.add(m.userId);
+                        else for (const m of pageRows) next.delete(m.userId);
+                        return next;
+                      }),
+                  }
+                : undefined
+            }
+            columns={[
+              {
+                key: 'member',
+                header: 'Member',
+                render: (m) => {
+                  const isHead = m.effectiveRole.startsWith('HEAD_OF_');
+                  const isSupervisor = supervisorUserIds?.has(m.userId) ?? false;
+                  return (
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 truncate">{m.name}</Link>
+                      {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
+                      {isSupervisor && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-micro font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
+                          Supervisor
+                        </span>
+                      )}
+                    </div>
+                  );
+                },
+              },
+              {
+                key: 'team',
+                header: 'Team',
+                hideOnMobile: true,
+                render: (m) => {
+                  const teamName = teamByUserId[m.userId];
+                  return teamName ? (
+                    <span className="text-sm text-app-fg">{teamName}</span>
+                  ) : (
+                    <span className="text-app-fg-muted text-sm">—</span>
+                  );
+                },
+              },
+              {
+                key: 'actions',
+                header: '',
+                mobileLabel: 'Actions',
+                align: 'right',
+                tight: true,
+                nowrap: true,
+                mobileShowLabel: false,
+                render: (m) => (
+                  <div className="inline-flex flex-nowrap items-center justify-end gap-3 shrink-0">
+                    <CompactTableActionButton to={`/hr/users/${m.userId}`}>
+                      Profile
+                    </CompactTableActionButton>
+                    {canManageBranchMembership ? (
+                      <CompactTableActionButton
+                        tone="danger"
+                        onClick={() => setRemoveTarget(m)}
+                      >
+                        Remove
+                      </CompactTableActionButton>
+                    ) : null}
+                  </div>
+                ),
+              },
+            ]}
+            renderMobileCard={(m, _i, { rowSelection }) => {
+              const isHead = m.effectiveRole.startsWith('HEAD_OF_');
+              const isSupervisor = supervisorUserIds?.has(m.userId) ?? false;
+              const teamName = teamByUserId[m.userId];
+              return (
+                <div className="card !p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    {rowSelection}
+                    <div className="flex-1 min-w-0">
+                      <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 truncate block">{m.name}</Link>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
+                        {isSupervisor && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-micro font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
+                            Supervisor
+                          </span>
+                        )}
+                        {teamName && (
+                          <span className="text-xs text-app-fg-muted">{teamName}</span>
+                        )}
+                        {!teamName && (
+                          <span className="text-xs text-warning-600 dark:text-warning-400">Unassigned</span>
+                        )}
                       </div>
-                    ),
-                  },
-                ]}
-              />
-            </div>
-          </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1 border-t border-app-border">
+                    <CompactTableActionButton to={`/hr/users/${m.userId}`}>
+                      Profile
+                    </CompactTableActionButton>
+                    {canManageBranchMembership && (
+                      <CompactTableActionButton
+                        tone="danger"
+                        onClick={() => setRemoveTarget(m)}
+                      >
+                        Remove
+                      </CompactTableActionButton>
+                    )}
+                  </div>
+                </div>
+              );
+            }}
+          />
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
             <p className="text-sm text-app-fg-muted">
@@ -2372,30 +2431,61 @@ function BranchSupervisorTeamsPanel({
       ) : (
         // ── Detail view: one dept's members + roster + squads ──
         <>
-          <div>
-            <button
-              type="button"
-              onClick={() => setSelectedDeptId(null)}
-              className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline mb-1 inline-flex items-center gap-1"
-            >
-              ← Back to departments
-            </button>
-            <h2 className="text-lg font-semibold text-app-fg">
-              {DEPT_TEAM_LABEL[selectedDept.department.department]} department
-            </h2>
-          </div>
-
-          {/* Inner tabs — Overview / Members / Teams. The "+ Create team"
-              button lives beside the tabs (CEO 2026-05-10) so it's always
-              reachable regardless of which tab is active. Counts in labels. */}
           {(() => {
             const deptMemberCount = branchMembers.filter(
               (m) => m.department === selectedDept.department.department,
             ).length;
             const canCreateTeam = canManageForDept(selectedDept.department.department);
             return (
-              <div className="flex items-center justify-between gap-3 flex-wrap border-b border-app-border">
-                <div className="flex-1 min-w-0 -mb-px">
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDeptId(null)}
+                      className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline mb-1 inline-flex items-center gap-1"
+                    >
+                      ← Back to departments
+                    </button>
+                    <h2 className="text-lg font-semibold text-app-fg">
+                      {DEPT_TEAM_LABEL[selectedDept.department.department]} department
+                    </h2>
+                  </div>
+                  {canCreateTeam && (
+                    <PageHeaderMobileTools
+                      sheetTitle="Department tools"
+                      triggerAriaLabel="Department actions"
+                      showMobileRefresh={false}
+                      desktop={
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => setCreateTeamOpen(true)}
+                        >
+                          + Create team
+                        </Button>
+                      }
+                      sheet={({ closeSheet }) => (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="h-12 w-full justify-center"
+                          onClick={() => {
+                            closeSheet();
+                            setCreateTeamOpen(true);
+                          }}
+                        >
+                          + Create team
+                        </Button>
+                      )}
+                    />
+                  )}
+                </div>
+
+                {/* Inner tabs — Overview / Members / Teams */}
+                <div className="border-b border-app-border -mb-px">
                   <Tabs
                     value={deptTab}
                     onChange={(v) => setDeptTab(v as 'overview' | 'members' | 'teams')}
@@ -2407,18 +2497,7 @@ function BranchSupervisorTeamsPanel({
                     ]}
                   />
                 </div>
-                {canCreateTeam && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setCreateTeamOpen(true)}
-                    className="mb-2"
-                  >
-                    + Create team
-                  </Button>
-                )}
-              </div>
+              </>
             );
           })()}
 
@@ -2922,12 +3001,16 @@ function BranchOverviewPage({
   teams,
   orgStructure,
   teamSettingsByTeamId,
+  statusCounts,
+  dateFilters,
 }: {
   overview: BranchOverview;
   allUsers: UserOption[];
   teams: BranchTeamWithMembers[];
   orgStructure: BranchOrgStructurePayload;
   teamSettingsByTeamId: Record<string, TeamSettingsBundle | null>;
+  statusCounts: Record<string, number>;
+  dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
 }) {
   const { branch } = overview;
   const canManageBranchPage = overview.viewer?.canManageBranchPage ?? false;
@@ -3043,20 +3126,82 @@ function BranchOverviewPage({
                 ) : null}
               </div>
             }
-            sheet={
-              canManageBranchPage ? (
-                <Button variant="primary" size="sm" className="w-full justify-center" onClick={() => setEditOpen(true)}>
-                  Edit
-                </Button>
-              ) : null
-            }
+            sheet={({ closeSheet }) => (
+              <>
+                {canManageBranchPage && (
+                  <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setEditOpen(true); }}>
+                    Edit branch
+                  </Button>
+                )}
+                {canManageBranchPage && (
+                  <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setAddMemberOpen(true); }}>
+                    Add member
+                  </Button>
+                )}
+              </>
+            )}
           />
         </div>
       </div>
 
-      {/* KPI strip + Tabs both removed (CEO directive 2026-05-10) — branch
-          page is now header + departments only. The HoM gets the same numbers
-          via the Marketing dashboard / Ad spend listing. */}
+      {/* ── Branch Report / Overview ── */}
+      {(() => {
+        const { counts } = overview;
+        const totalOrders = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+        const confirmed = (statusCounts['CONFIRMED'] ?? 0) + (statusCounts['AGENT_ASSIGNED'] ?? 0) + (statusCounts['DISPATCHED'] ?? 0) + (statusCounts['IN_TRANSIT'] ?? 0);
+        const delivered = statusCounts['DELIVERED'] ?? 0;
+        const remitted = statusCounts['REMITTED'] ?? 0;
+        const deliveryRate = totalOrders > 0 ? Math.round(((delivered + remitted) / totalOrders) * 100) : 0;
+        // Heads: find the first HEAD_OF_MARKETING and HEAD_OF_CS in members
+        const headOfMarketing = overview.members.find((m) => m.effectiveRole === 'HEAD_OF_MARKETING');
+        const headOfCS = overview.members.find((m) => m.effectiveRole === 'HEAD_OF_CS');
+        const teamCount = orgStructure.departments.reduce((sum, d) => sum + d.teams.length, 0);
+
+        return (
+          <div className="space-y-4">
+            {/* Branch overview strip */}
+            <OverviewStatStrip
+              mobileGrid
+              items={[
+                { label: 'Members', value: counts.totalMembers, valueClassName: 'text-app-fg' },
+                { label: 'Teams', value: teamCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                { label: 'HoM', value: headOfMarketing?.name ?? '—', valueClassName: headOfMarketing ? 'text-app-fg text-sm' : 'text-app-fg-muted' },
+                { label: 'HoCS', value: headOfCS?.name ?? '—', valueClassName: headOfCS ? 'text-app-fg text-sm' : 'text-app-fg-muted' },
+              ]}
+            />
+
+            {/* Performance for the period */}
+            <div className="card !p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold text-app-fg">Performance</h3>
+                <div className="hidden md:block">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                    chrome="pill"
+                  />
+                </div>
+              </div>
+              <MobileDateFilterRow
+                startDate={dateFilters.startDate}
+                endDate={dateFilters.endDate}
+                periodAllTime={dateFilters.periodAllTime}
+              />
+              <OverviewStatStrip
+                mobileGrid
+                items={[
+                  { label: 'Orders', value: totalOrders, valueClassName: 'text-app-fg' },
+                  { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                  { label: 'Delivered', value: delivered + remitted, valueClassName: 'text-success-600 dark:text-success-400' },
+                  { label: 'Delivery rate', value: `${deliveryRate}%`, valueClassName: deliveryRate >= 50 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400' },
+                ]}
+              />
+            </div>
+          </div>
+        );
+      })()}
+
       <BranchSupervisorTeamsPanel
         orgStructure={orgStructure}
         branchMembers={overview.members}
@@ -3292,6 +3437,8 @@ export default function BranchDetailRoute() {
           teams={data.teams}
           orgStructure={data.orgStructure}
           teamSettingsByTeamId={data.teamSettingsByTeamId}
+          statusCounts={data.statusCounts}
+          dateFilters={data.dateFilters}
         />
       )}
     </CachedAwait>

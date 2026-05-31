@@ -97,7 +97,7 @@ export const settingsRouter = router({
       fontScalePreference = row?.fontScale ?? null;
     }
     const effectiveAppTheme = appThemePreference ?? defaultAppTheme;
-    const effectiveFontScale = fontScalePreference ?? 'base';
+    const effectiveFontScale = fontScalePreference ?? 'large';
     return {
       defaultAppTheme,
       appThemePreference,

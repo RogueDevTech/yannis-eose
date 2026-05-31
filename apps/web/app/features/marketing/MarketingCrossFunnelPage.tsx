@@ -294,10 +294,78 @@ export function MarketingCrossFunnelPage({
             sheetTitle="Duplicate tools"
             sheetSubtitle={<span>Filters and refresh</span>}
             triggerAriaLabel="Duplicate attempts toolbar"
+            filtersBadgeCount={filterBadgeCount}
             desktop={
               <>
                 <PageRefreshButton />
                 <DateFilterBar chrome="pill" />
+              </>
+            }
+            filters={
+              <>
+                {showMbFilter && mediaBuyersForFilter.length > 0 && (
+                  <SearchableSelect
+                    id="cf-mobile-buyer"
+                    value={searchParams.get('mediaBuyerId') || 'ALL'}
+                    onChange={(v) => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                        else next.delete('mediaBuyerId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All media buyers' },
+                      ...mediaBuyersForFilter.map((u) => ({ value: u.id, label: u.name })),
+                    ]}
+                    placeholder="All media buyers"
+                    searchPlaceholder="Search buyers…"
+                  />
+                )}
+                {productsForFilter.length > 0 && (
+                  <SearchableSelect
+                    id="cf-mobile-product"
+                    value={searchParams.get('productId') || 'ALL'}
+                    onChange={(v) => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('productId', v);
+                        else next.delete('productId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All products' },
+                      ...productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    placeholder="All products"
+                    searchPlaceholder="Search products…"
+                  />
+                )}
+                {campaignsForFilter.length > 0 && (
+                  <SearchableSelect
+                    id="cf-mobile-form"
+                    value={searchParams.get('campaignId') || 'ALL'}
+                    onChange={(v) => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('campaignId', v);
+                        else next.delete('campaignId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All forms' },
+                      ...campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                    ]}
+                    placeholder="All forms"
+                    searchPlaceholder="Search forms…"
+                  />
+                )}
               </>
             }
           />
@@ -555,11 +623,11 @@ function CompareRow({
           <div className="text-micro font-bold uppercase tracking-wider text-app-fg-muted mb-1.5">{label}</div>
           <div className="space-y-1">
             <div className="flex items-baseline gap-2">
-              <span className="text-micro font-semibold uppercase text-danger-500 dark:text-danger-400 w-12 shrink-0">Old</span>
+              <span className="text-micro font-semibold uppercase text-danger-500 dark:text-danger-400 w-12 shrink-0">New</span>
               <span className={`text-sm ${match ? 'text-app-fg' : 'text-danger-600 dark:text-danger-400 font-medium'}`}>{left}</span>
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-micro font-semibold uppercase text-success-500 dark:text-success-400 w-12 shrink-0">New</span>
+              <span className="text-micro font-semibold uppercase text-success-500 dark:text-success-400 w-12 shrink-0">Old</span>
               <span className={`text-sm ${match ? 'text-app-fg' : 'text-success-600 dark:text-success-400 font-medium'}`}>{right}</span>
             </div>
           </div>

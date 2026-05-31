@@ -278,7 +278,8 @@ export function RoleTemplatesPage({
               <Button
                 type="button"
                 variant="primary"
-                className="w-full justify-center"
+                size="sm"
+                className="h-12 w-full justify-center"
                 onClick={() => {
                   closeSheet();
                   openCreate();

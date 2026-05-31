@@ -855,7 +855,6 @@ export function DisbursementsPage({
                       options={[
                         { value: 'ALL', label: 'All roles' },
                         { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-                        { value: 'MEDIA_BUYER', label: 'Media Buyer' },
                       ]}
                       controlSize="lg"
                       className="!bg-app-hover text-center"
@@ -891,7 +890,7 @@ export function DisbursementsPage({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);
@@ -903,7 +902,7 @@ export function DisbursementsPage({
                   <Button
                     variant="primary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setShowForm(true);
@@ -1238,7 +1237,6 @@ export function DisbursementsPage({
                       options={[
                         { value: 'ALL', label: 'All roles' },
                         { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-                        { value: 'MEDIA_BUYER', label: 'Media Buyer' },
                       ]}
                       controlSize="sm"
                       wrapperClassName="w-full md:w-52"

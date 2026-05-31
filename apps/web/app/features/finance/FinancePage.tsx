@@ -1,14 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigation, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { FormField } from '~/components/ui/form-field';
-import { Spinner } from '~/components/ui/spinner';
 import { Tabs } from '~/components/ui/tabs';
 import { FinanceCashRemittanceSection, FinancePayrollSection, FinanceDisbursementSection } from './finance-overview-pulse';
 import type { FinanceOverviewLoaderData } from './types';
@@ -17,8 +15,7 @@ type FinanceTab = 'remittance' | 'disbursements' | 'payroll';
 
 export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
   const { pulse, filters, branches = [], fundingSummary, byProduct = [], byLocation = [] } = data;
-  usePersistedFilters('finance-overview');
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<FinanceTab>('remittance');
 
@@ -53,6 +50,8 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
     [branches],
   );
 
+  const filtersBadgeCount = (filters.branchId ? 1 : 0);
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -62,11 +61,28 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
         actions={
           <PageHeaderMobileTools
             sheetTitle="Finance tools"
-            sheetSubtitle={<span>Date range</span>}
-            triggerAriaLabel="Finance toolbar and date range"
+            sheetSubtitle={<span>Filters and date range</span>}
+            triggerAriaLabel="Finance toolbar and filters"
+            filtersBadgeCount={filtersBadgeCount}
             desktop={
               <>
                 <PageRefreshButton />
+                {branches.length > 0 && (
+                  <div className="relative">
+                    {filters.branchId && (
+                      <FilterDismiss onClear={() => setFilter('branchId', '')} />
+                    )}
+                    <SearchableSelect
+                      id="finance-overview-branch"
+                      value={filters.branchId ?? ''}
+                      onChange={(v) => setFilter('branchId', v)}
+                      options={branchOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches..."
+                      disabled={branchSwitching}
+                    />
+                  </div>
+                )}
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
@@ -74,6 +90,24 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
                     endTime={filters.endTime ?? ''}
                     periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
               </>
+            }
+            filters={
+              branches.length > 0 ? (
+                <div className="relative w-full">
+                  {filters.branchId && (
+                    <FilterDismiss onClear={() => setFilter('branchId', '')} />
+                  )}
+                  <SearchableSelect
+                    id="finance-overview-branch-mobile"
+                    value={filters.branchId ?? ''}
+                    onChange={(v) => setFilter('branchId', v)}
+                    options={branchOptions}
+                    placeholder="All branches"
+                    searchPlaceholder="Search branches..."
+                    disabled={branchSwitching}
+                  />
+                </div>
+              ) : undefined
             }
           />
         }
@@ -86,51 +120,6 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
         endTime={filters.endTime ?? ''}
         periodAllTime={filters.periodAllTime ?? false}
       />
-
-      {branches.length > 0 && (
-        <div className="card !p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <FormField
-            label={
-              <span className="inline-flex items-center gap-2">
-                Branch
-                {branchSwitching && (
-                  <span className="inline-flex items-center gap-1 text-xs font-normal text-app-fg-muted">
-                    <Spinner size="sm" />
-                    Loading…
-                  </span>
-                )}
-              </span>
-            }
-            htmlFor="finance-overview-branch"
-          >
-            <SearchableSelect
-              id="finance-overview-branch"
-              value={filters.branchId ?? ''}
-              onChange={(v) => setFilter('branchId', v)}
-              options={branchOptions}
-              placeholder="All branches"
-              searchPlaceholder="Search branches..."
-              disabled={branchSwitching}
-            />
-          </FormField>
-          {filters.branchId && (
-            <p className="sm:col-span-2 text-xs text-app-fg-muted">
-              Branch filter applied.{' '}
-              <button
-                type="button"
-                className="text-brand-600 dark:text-brand-400 hover:underline"
-                onClick={() => {
-                  const next = new URLSearchParams(searchParams);
-                  next.delete('branchId');
-                  setSearchParams(next, { preventScrollReset: true });
-                }}
-              >
-                Clear
-              </button>
-            </p>
-          )}
-        </div>
-      )}
 
       <Tabs
         variant="underline"

@@ -536,49 +536,64 @@ export function DeliveryRemittancesPage({
             filtersBadgeCount={viewTab === 'remittances' ? remittanceToolbarFilterBadge : 0}
             filters={
               <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Location</span>
-                  <div className="relative">
-                    {!!filters.location && (
-                      <FilterDismiss onClear={() => handleLocationChange('')} />
-                    )}
-                    <SearchableSelect
-                      id="delivery-remittance-location-filter-kebab"
-                      value={filters.location}
-                      onChange={handleLocationChange}
-                      wrapperClassName="w-full"
-                      placeholder="All locations"
-                      searchPlaceholder="Search locations..."
-                      options={[
-                        { value: '', label: 'All locations' },
-                        ...locations.map((loc) => ({
-                          value: loc.id,
-                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                        })),
-                      ]}
-                    />
-                  </div>
+                {viewTab === 'remittances' && (
+                  <SearchableSelect
+                    id="delivery-remittance-status-filter-kebab"
+                    value={pendingStatus}
+                    onChange={handleStatusChange}
+                    controlSize="lg"
+                    triggerClassName="!bg-app-hover text-center"
+                    wrapperClassName="w-full"
+                    placeholder="All statuses"
+                    options={[
+                      { value: '', label: 'All statuses' },
+                      { value: 'SENT', label: 'Pending' },
+                      { value: 'RECEIVED', label: 'Received' },
+                      { value: 'DISPUTED', label: 'Disputed' },
+                    ]}
+                  />
+                )}
+                <div className="relative">
+                  {!!filters.location && (
+                    <FilterDismiss onClear={() => handleLocationChange('')} />
+                  )}
+                  <SearchableSelect
+                    id="delivery-remittance-location-filter-kebab"
+                    value={filters.location}
+                    onChange={handleLocationChange}
+                    controlSize="lg"
+                    triggerClassName="!bg-app-hover text-center"
+                    wrapperClassName="w-full"
+                    placeholder="All locations"
+                    searchPlaceholder="Search locations..."
+                    options={[
+                      { value: '', label: 'All locations' },
+                      ...locations.map((loc) => ({
+                        value: loc.id,
+                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                      })),
+                    ]}
+                  />
                 </div>
                 {viewTab === 'remittances' && (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
-                    <div className="relative">
-                      {!!filters.sentBy && (
-                        <FilterDismiss onClear={() => handleSentByChange('')} />
-                      )}
-                      <SearchableSelect
-                        id="delivery-remittance-sent-by-filter-kebab"
-                        value={filters.sentBy}
-                        onChange={handleSentByChange}
-                        wrapperClassName="w-full"
-                        placeholder="Sent by anyone"
-                        searchPlaceholder="Search accountants..."
-                        options={[
-                          { value: '', label: 'Sent by anyone' },
-                          ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                        ]}
-                      />
-                    </div>
+                  <div className="relative">
+                    {!!filters.sentBy && (
+                      <FilterDismiss onClear={() => handleSentByChange('')} />
+                    )}
+                    <SearchableSelect
+                      id="delivery-remittance-sent-by-filter-kebab"
+                      value={filters.sentBy}
+                      onChange={handleSentByChange}
+                      controlSize="lg"
+                      triggerClassName="!bg-app-hover text-center"
+                      wrapperClassName="w-full"
+                      placeholder="Sent by anyone"
+                      searchPlaceholder="Search accountants..."
+                      options={[
+                        { value: '', label: 'Sent by anyone' },
+                        ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                    />
                   </div>
                 )}
               </>
@@ -600,7 +615,7 @@ export function DeliveryRemittancesPage({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);

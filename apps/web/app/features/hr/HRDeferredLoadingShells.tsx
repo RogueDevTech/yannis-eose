@@ -143,7 +143,7 @@ export function MonthlyPayrollsLoadingShell() {
                 </Button>
               </div>
             }
-            sheet={<Button variant="primary" size="sm" className="w-full justify-center" disabled>+ Add-on</Button>}
+            sheet={<Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>+ Add-on</Button>}
           />
         }
       />
@@ -228,7 +228,7 @@ export function CommissionPlansLoadingShell() {
                 </Button>
               </>
             }
-            sheet={<Button variant="primary" size="sm" className="w-full justify-center" disabled>+ New Commission Plan</Button>}
+            sheet={<Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>+ New Commission Plan</Button>}
           />
         }
       />
@@ -272,7 +272,7 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
               </>
             }
             sheet={
-              <Button variant="primary" size="sm" className="w-full justify-center" disabled>
+              <Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                 {staffAccounts ? 'Export' : '+ Add User'}
               </Button>
             }

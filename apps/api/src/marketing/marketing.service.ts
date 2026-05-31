@@ -996,6 +996,16 @@ export class MarketingService {
     if (input.receiverId) {
       conditions.push(eq(schema.marketingFunding.receiverId, input.receiverId));
     }
+    if (input.receiverRole) {
+      const roleReceiverIds = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.role, input.receiverRole as typeof schema.users.role.enumValues[number]));
+      if (roleReceiverIds.length === 0) {
+        return { records: [], pagination: { total: 0, page: input.page, limit: input.limit, totalPages: 0 } };
+      }
+      conditions.push(inArray(schema.marketingFunding.receiverId, roleReceiverIds.map((r) => r.id)));
+    }
     if (input.senderId) {
       conditions.push(eq(schema.marketingFunding.senderId, input.senderId));
     }
@@ -1674,6 +1684,13 @@ export class MarketingService {
       for (const id of ids) supervisorIdsSet.add(id);
     }
 
+    // Resolve the set of user-ids that belong to the requester's branch via
+    // both `user_branches` (multi-branch assignments) AND `primaryBranchId`.
+    // This ensures a HoM assigned to Lagos + Remote appears for Remote MBs
+    // even when their primary branch is Lagos.
+    const branchUserIds = branchId ? await this.getBranchUserIds(branchId) : null;
+    const branchUserIdSet = branchUserIds ? new Set(branchUserIds) : null;
+
     const rows = await this.db
       .select({
         id: schema.users.id,
@@ -1697,10 +1714,10 @@ export class MarketingService {
         if (requesterRole !== 'MEDIA_BUYER') return false;
         // Marketing-team supervisor on this branch — the new preferred path.
         if (r.role === 'MEDIA_BUYER') return supervisorIdsSet.has(r.id);
-        // HoM target — branch must match.
+        // HoM target — branch must match (via user_branches OR primaryBranchId).
         if (r.role !== 'HEAD_OF_MARKETING') return false;
-        if (!branchId) return true;
-        return r.primaryBranchId === branchId;
+        if (!branchUserIdSet) return true;
+        return branchUserIdSet.has(r.id);
       })
       .map((r) => {
         const isFinance = r.role === 'FINANCE_OFFICER';
@@ -1802,8 +1819,10 @@ export class MarketingService {
       }
       // Branch check for HoM targets only — Finance is org-wide; the supervisor
       // path already enforced same-branch via `isMarketingSupervisorOf`.
+      // Check both `user_branches` and `primaryBranchId` so a HoM assigned to
+      // multiple branches is reachable from any of them.
       if (targetIsHoM && branchId) {
-        if (target.primaryBranchId && target.primaryBranchId !== branchId) {
+        if (branchUserIds && !branchUserIds.includes(target.id)) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'Recipient is not in your branch',

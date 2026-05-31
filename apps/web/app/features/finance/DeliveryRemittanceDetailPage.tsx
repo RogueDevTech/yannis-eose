@@ -22,6 +22,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import type { DeliveryRemittanceDetail } from './DeliveryRemittancesPage';
 
 interface DeliveryRemittanceDetailPageProps {
@@ -171,11 +172,19 @@ export function DeliveryRemittanceDetailPage({
         tight: true,
         mobileShowLabel: false,
         render: (o) => (
-          <CompactTableActions className="justify-end">
-            <TableActionButton to={`/admin/orders/${o.id}`} variant="primary">
-              View
-            </TableActionButton>
-          </CompactTableActions>
+          <TableRowActionsSheet
+            ariaLabel={`Actions for ${o.customerName}`}
+            sheetTitle={o.customerName}
+            actions={[
+              { key: 'view', kind: 'link', label: 'View order', to: `/admin/orders/${o.id}` },
+              ...(o.invoice
+                ? [
+                    { key: 'invoice', kind: 'button' as const, label: 'View invoice', onClick: () => setInvoicePreview(o.invoice) },
+                    { key: 'pdf', kind: 'button' as const, label: 'Download PDF', onClick: () => { if (o.invoice) void generateInvoicePdf(o.invoice); } },
+                  ]
+                : []),
+            ]}
+          />
         ),
       },
     ];
@@ -238,12 +247,9 @@ export function DeliveryRemittanceDetailPage({
         />
       )}
 
-      <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-4">
-        {/* Status + all metadata in a single flex-wrap row. Each pair is inline
-            (label + value), separators are vertical bars. Wraps on narrow
-            viewports — order matches the visual hierarchy: status first, then
-            who/when sent it, then identifying fields, then settlement timing. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+      <div className="rounded-xl border border-app-border bg-app-elevated p-4 md:p-5 shadow-sm space-y-4">
+        {/* Desktop: single flex-wrap row. Mobile: stacked grid for readability. */}
+        <div className="hidden md:flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
           <StatusBadge status={detail.status} label={STATUS_LABEL[detail.status] ?? detail.status} />
           <span className="text-app-fg-muted">
             Sent {new Date(detail.sentAt).toLocaleString('en-NG')} · by {recordedByLabel}
@@ -275,6 +281,32 @@ export function DeliveryRemittanceDetailPage({
               </span>
             </>
           ) : null}
+        </div>
+        {/* Mobile: compact stacked layout */}
+        <div className="md:hidden space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <StatusBadge status={detail.status} label={STATUS_LABEL[detail.status] ?? detail.status} />
+            <span className="text-xs text-app-fg-muted">{new Date(detail.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+            <div>
+              <dt className="text-app-fg-muted/80 font-medium">Location</dt>
+              <dd className="text-app-fg mt-0.5">{locationLine}</dd>
+            </div>
+            <div>
+              <dt className="text-app-fg-muted/80 font-medium">Recorded by</dt>
+              <dd className="text-app-fg mt-0.5">{recordedByLabel}</dd>
+            </div>
+            {detail.receivedAt ? (
+              <div className="col-span-2">
+                <dt className="text-app-fg-muted/80 font-medium">Received</dt>
+                <dd className="text-app-fg mt-0.5">
+                  {new Date(detail.receivedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                  {detail.receivedByName ? ` · ${detail.receivedByName}` : ''}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
         </div>
         {detail.notes?.trim() ? (
           <div className="text-sm text-app-fg-muted">
@@ -429,7 +461,10 @@ export function DeliveryRemittanceDetailPage({
           rowKey={(o) => o.id}
           emptyTitle="No orders on this remittance"
           renderMobileCard={(o) => (
-            <div className="space-y-1.5">
+            <Link
+              to={`/admin/orders/${o.id}`}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
+            >
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-app-fg truncate" title={o.customerName}>
@@ -458,22 +493,11 @@ export function DeliveryRemittanceDetailPage({
               </div>
               <div className="flex items-center justify-between gap-2">
                 <OrderStatusBadge status={o.status} showDot={false} className="!text-xs" />
-                <div className="flex items-center gap-1.5">
-                  {o.invoice ? (
-                    <TableActionButton
-                      variant="neutral"
-                      title="View invoice"
-                      onClick={() => setInvoicePreview(o.invoice)}
-                    >
-                      Invoice
-                    </TableActionButton>
-                  ) : null}
-                  <TableActionButton to={`/admin/orders/${o.id}`} variant="primary">
-                    View
-                  </TableActionButton>
-                </div>
+                <span className="text-xs text-app-fg-muted">
+                  {o.invoice ? o.invoice.referenceFormatted : 'No invoice'}
+                </span>
               </div>
-            </div>
+            </Link>
           )}
         />
       </div>

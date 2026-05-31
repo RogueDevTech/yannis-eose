@@ -215,7 +215,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowExportModal(true);

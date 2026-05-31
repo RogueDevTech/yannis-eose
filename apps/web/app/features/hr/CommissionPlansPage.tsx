@@ -295,7 +295,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                 <Button
                   variant="primary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowCreate(true);

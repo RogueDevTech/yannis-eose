@@ -1440,6 +1440,7 @@ export const marketingRouter = router({
       const listFundingInput = {
         page: input.page,
         limit: input.limit,
+        receiverRole: 'HEAD_OF_MARKETING' as const,
         ...(input.startDate && { startDate: input.startDate }),
         ...(input.endDate && { endDate: input.endDate }),
         ...(input.status && { status: input.status }),
@@ -1464,11 +1465,16 @@ export const marketingRouter = router({
         ...(seesAllRequests ? {} : { targetUserId: ctx.user.id }),
       };
 
-      const [funding, balances, summary, requests, requestsCounts, users] =
+      // Pre-fetch HoM IDs so we can scope the summary to Finance→HoM transfers only.
+      const homBalances = await getMarketingService().listFundingBalances(ctx.user, branchId);
+      const homUserIds = homBalances
+        .filter((b) => b.role === 'HEAD_OF_MARKETING')
+        .map((b) => b.userId);
+
+      const [funding, summary, requests, requestsCounts, users] =
         await Promise.all([
           getMarketingService().listFunding(listFundingInput, branchId),
-          getMarketingService().listFundingBalances(ctx.user, branchId),
-          getMarketingService().getFundingSummary(branchId),
+          getMarketingService().getFundingSummary(branchId, { restrictToReceiverIds: homUserIds }),
           getMarketingService().listFundingRequests(requestsInput, branchId),
           getMarketingService().fundingRequestStatusCounts(
             {
@@ -1491,6 +1497,7 @@ export const marketingRouter = router({
             branchId,
           ),
         ]);
+      const balances = homBalances;
 
       return {
         funding,

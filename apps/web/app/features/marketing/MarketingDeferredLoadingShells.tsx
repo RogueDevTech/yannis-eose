@@ -367,18 +367,15 @@ export function MarketingFundingLoadingShell({
             sheet={({ closeSheet }) => (
               <>
                 {canRequestFunding && (
-                  <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                     + Request Funds
                   </Button>
                 )}
                 {canSendFunding && (
-                  <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                  <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                     + Send Funding
                   </Button>
                 )}
-                <Button type="button" variant="ghost" size="sm" className="w-full" onClick={closeSheet}>
-                  Done
-                </Button>
               </>
             )}
           />
@@ -669,7 +666,7 @@ export function MarketingAdSpendLoadingShell({
                 to="/admin/marketing/ad-spend/new"
                 actionLabel="adding ad spend"
                 onClick={() => closeSheet()}
-                className="btn-primary btn-sm w-full justify-center inline-flex items-center"
+                className="btn-primary btn-sm h-12 w-full justify-center inline-flex items-center"
               >
                 + Add Expense
               </BranchScopedLink>
@@ -887,7 +884,7 @@ export function MarketingTeamLoadingShell({
               </>
             }
             sheet={
-              <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+              <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                 Generate report
               </Button>
             }
@@ -1247,6 +1244,7 @@ export function MarketingCrossFunnelLoadingShell({
             sheetTitle="Duplicate tools"
             sheetSubtitle={<span>Filters and refresh</span>}
             triggerAriaLabel="Duplicate attempts toolbar"
+            filtersBadgeCount={filterBadgeCount}
             desktop={
               <>
                 <PageRefreshButton />
@@ -1254,6 +1252,36 @@ export function MarketingCrossFunnelLoadingShell({
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
+              </>
+            }
+            filters={
+              <>
+                {showMbFilter && (
+                  <SearchableSelect
+                    id="cf-shell-buyer"
+                    value={mediaBuyerIdParam}
+                    onChange={(v) => setParam('mediaBuyerId', v)}
+                    options={mediaBuyerOptions}
+                    placeholder="All media buyers"
+                    searchPlaceholder="Search buyers…"
+                  />
+                )}
+                <SearchableSelect
+                  id="cf-shell-product"
+                  value={productIdParam}
+                  onChange={(v) => setParam('productId', v)}
+                  options={productOptions}
+                  placeholder="All products"
+                  searchPlaceholder="Search products…"
+                />
+                <SearchableSelect
+                  id="cf-shell-form"
+                  value={campaignIdParam}
+                  onChange={(v) => setParam('campaignId', v)}
+                  options={campaignOptions}
+                  placeholder="All forms"
+                  searchPlaceholder="Search forms…"
+                />
               </>
             }
           />
@@ -1397,7 +1425,7 @@ export function MarketingFormsLoadingShell({
               </>
             }
             sheet={
-              <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+              <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                 + New Form
               </Button>
             }

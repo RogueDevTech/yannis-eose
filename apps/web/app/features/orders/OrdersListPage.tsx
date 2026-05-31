@@ -1,6 +1,5 @@
 import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { SmartPick } from '~/components/ui/smart-pick';
@@ -338,7 +337,6 @@ function OrdersListPageImpl({
   bulkSelectAllMatchingInput,
   branchesForMove,
 }: OrdersListPageImplProps) {
-  usePersistedFilters('sales-orders');
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
     (orderId: string) => orderDetailHref('/admin/orders', orderId, orderDetailFrom ?? undefined),
@@ -1015,8 +1013,8 @@ function OrdersListPageImpl({
         key: 'customer',
         header: 'Customer',
         render: (order) => (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-medium text-app-fg">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate font-medium text-app-fg" title={order.customerName ?? undefined}>
               {order.customerName}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>

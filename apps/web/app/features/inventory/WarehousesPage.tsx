@@ -430,7 +430,7 @@ export function WarehousesPage({
                   />
                 </div>
                 {canManage ? (
-                  <Button variant="primary" size="sm" className="w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
+                  <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
                     Add warehouse
                   </Button>
                 ) : null}

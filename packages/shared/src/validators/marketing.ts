@@ -40,6 +40,7 @@ export type VerifyFundingInput = z.infer<typeof verifyFundingSchema>;
 export const listFundingSchema = z.object({
   status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
   receiverId: z.string().uuid().optional(),
+  receiverRole: z.string().optional(),
   senderId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),

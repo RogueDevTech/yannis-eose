@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -9,6 +8,7 @@ import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import {
@@ -70,7 +70,6 @@ export function TransfersPage({
     error: string | null;
   }>();
   const navigation = useNavigation();
-  usePersistedFilters('transfers');
   const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const [viewTransfer, setViewTransfer] = useState<Transfer | null>(null);
@@ -593,10 +592,11 @@ export function TransfersPage({
   // Every sheet control — filter boxes, date box, buttons — shares this height
   // so the tools sheet reads as one evenly-spaced column.
   const mobileFilterBoxClass =
-    'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+    'relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
   const mobileTransferFiltersBody = (
     <div className="space-y-2">
       <div className={mobileFilterBoxClass}>
+        {fromLocationFilter && <FilterDismiss onClear={() => updateFilter('fromLocationId', '')} />}
         <SearchableSelect
           id="transfer-filter-from-mobile"
           value={fromLocationFilter}
@@ -614,6 +614,7 @@ export function TransfersPage({
         />
       </div>
       <div className={mobileFilterBoxClass}>
+        {toLocationFilter && <FilterDismiss onClear={() => updateFilter('toLocationId', '')} />}
         <SearchableSelect
           id="transfer-filter-to-mobile"
           value={toLocationFilter}
@@ -631,6 +632,7 @@ export function TransfersPage({
         />
       </div>
       <div className={mobileFilterBoxClass}>
+        {productFilter && <FilterDismiss onClear={() => updateFilter('productId', '')} />}
         <SearchableSelect
           id="transfer-filter-product-mobile"
           value={productFilter}
@@ -644,17 +646,6 @@ export function TransfersPage({
           wrapperClassName="w-full"
         />
       </div>
-      {hasFilters && (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="h-12 w-full justify-center"
-          onClick={clearFilters}
-        >
-          Clear filters
-        </Button>
-      )}
     </div>
   );
 
@@ -670,7 +661,7 @@ export function TransfersPage({
             sheetSubtitle={<span>Date range and new transfer</span>}
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
             filters={mobileTransferFiltersBody}
-            filtersBadgeCount={hasFilters ? 1 : 0}
+            filtersBadgeCount={(fromLocationFilter ? 1 : 0) + (toLocationFilter ? 1 : 0) + (productFilter ? 1 : 0)}
             desktop={
               <>
                 <PageRefreshButton />

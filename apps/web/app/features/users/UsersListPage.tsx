@@ -633,7 +633,7 @@ export function UsersListPage({
                     <Button
                       variant="secondary"
                       size="sm"
-                      className="w-full justify-center"
+                      className="h-12 w-full justify-center"
                       onClick={() => {
                         closeSheet();
                         setShowExportModal(true);
@@ -647,7 +647,7 @@ export function UsersListPage({
                     <BranchScopedLink
                       to={`${usersBasePath}/new`}
                       actionLabel="creating a user"
-                      className="btn-primary btn-sm w-full justify-center"
+                      className="btn-primary btn-sm h-12 flex items-center justify-center w-full"
                       onClick={() => closeSheet()}
                     >
                       Add User
@@ -656,7 +656,7 @@ export function UsersListPage({
                       to="/hr/users/import"
                       prefetch="intent"
                       onClick={closeSheet}
-                      className="btn-secondary btn-sm w-full justify-center"
+                      className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
                     >
                       Import users
                     </Link>

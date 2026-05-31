@@ -24,7 +24,7 @@ export function BranchesListLoadingShell() {
                 </Button>
               </>
             }
-            sheet={<Button variant="primary" size="sm" className="w-full justify-center" disabled>+ New Branch</Button>}
+            sheet={<Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>+ New Branch</Button>}
           />
         }
       />

@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -192,7 +191,6 @@ export function MarketingOrdersPage({
   isCartAbandonmentView = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
-  usePersistedFilters('marketing-orders');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
 
   // On pagination-only loads (page > 1) the loader skips the secondary bundle
@@ -728,7 +726,7 @@ export function MarketingOrdersPage({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowChartView((v) => !v);
@@ -740,7 +738,7 @@ export function MarketingOrdersPage({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setShowExportModal(true);

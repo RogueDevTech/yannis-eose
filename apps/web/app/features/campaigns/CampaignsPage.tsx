@@ -314,8 +314,9 @@ export function FormsPage({
                 to="/admin/marketing/forms/new"
                 actionLabel="creating a form"
                 prefetch="intent"
+                className="block"
               >
-                <Button variant="primary" size="sm" className="w-full justify-center">
+                <Button variant="primary" size="sm" className="h-12 w-full justify-center">
                   + New Form
                 </Button>
               </BranchScopedLink>

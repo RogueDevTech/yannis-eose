@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -8,6 +8,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Pagination } from '~/components/ui/pagination';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -140,7 +141,7 @@ export function FollowUpPage({
       setSearchParams((p) => {
         const params = new URLSearchParams(p);
         if (isCartView) {
-          params.set('statuses', 'DELETED');
+          params.delete('statuses');
         } else {
           params.set('statuses', ABANDONED_CART_STATUS);
         }
@@ -164,10 +165,10 @@ export function FollowUpPage({
     next.delete(ABANDONED_CART_STATUS);
     if (next.has(status)) next.delete(status);
     else next.add(status);
-    if (next.size === 0) next.add('DELETED');
     setSearchParams((p) => {
       const params = new URLSearchParams(p);
-      params.set('statuses', [...next].join(','));
+      if (next.size === 0) params.delete('statuses');
+      else params.set('statuses', [...next].join(','));
       params.set('page', '1');
       return params;
     });
@@ -287,12 +288,18 @@ export function FollowUpPage({
         key: 'actions',
         header: '',
         align: 'right',
+        tight: true,
+        mobileShowLabel: false,
         render: showSkeletonRows
           ? () => null
           : (order) => (
-              <CompactTableActionButton to={`/admin/orders/${order.id}`} tone="brand">
-                View
-              </CompactTableActionButton>
+              <TableRowActionsSheet
+                ariaLabel={`Actions for ${order.customerName}`}
+                sheetTitle={order.customerName}
+                actions={[
+                  { key: 'view', kind: 'link', label: 'View order', to: `/admin/orders/${order.id}` },
+                ]}
+              />
             ),
       },
     ],
@@ -408,10 +415,31 @@ export function FollowUpPage({
         description="Pull orders from any status back into the pipeline."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Tools"
+            sheetTitle="Follow-up tools"
+            sheetSubtitle={<span>Filters and actions</span>}
             triggerAriaLabel="Follow-up tools"
+            filtersBadgeCount={activeFilterCount}
             desktop={<PageRefreshButton />}
-            sheet={null}
+            filters={
+              <>
+                {!isCartView && (
+                  <SearchableSelect
+                    id="follow-up-mobile-closer"
+                    value={filters.assignedCsId}
+                    onChange={handleCloserChange}
+                    options={closerOptions}
+                    placeholder="All closers"
+                    searchPlaceholder="Search closers…"
+                  />
+                )}
+                <FormSelect
+                  id="follow-up-mobile-age"
+                  value={filters.olderThanDays}
+                  onChange={(e) => handleAgeChange(e.target.value)}
+                  options={AGE_OPTIONS}
+                />
+              </>
+            }
           />
         }
       />
@@ -435,10 +463,12 @@ export function FollowUpPage({
                     : 'bg-app-canvas text-app-fg-muted border-app-border hover:border-app-fg-muted/50',
                 ].join(' ')}
               >
-                {active && (
+                {active ? (
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
+                ) : (
+                  <span className="w-3 h-3 rounded-sm border border-current opacity-50" />
                 )}
                 {s.label}
                 <span className={`tabular-nums ${active ? 'text-white/70' : 'text-app-fg-muted/60'}`}>
@@ -602,7 +632,10 @@ export function FollowUpPage({
             },
           }}
           renderMobileCard={(order) => (
-            <div className="space-y-1.5">
+            <Link
+              to={`/admin/orders/${order.id}`}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-app-fg truncate">
                   {order.customerName}
@@ -620,7 +653,7 @@ export function FollowUpPage({
                 <span>{order.assignedCsName ?? 'Unassigned'}</span>
                 <span>{new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}</span>
               </div>
-            </div>
+            </Link>
           )}
         />
       )}

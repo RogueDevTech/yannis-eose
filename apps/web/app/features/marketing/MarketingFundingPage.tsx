@@ -667,7 +667,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <Button
             variant={canSendFunding ? 'secondary' : 'primary'}
             size="sm"
-            className="md:inline-flex w-full justify-center md:w-auto"
+            className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
             onClick={() => {
               closeMobileSheet();
               setShowRequestForm(true);
@@ -680,7 +680,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <Button
             variant="primary"
             size="sm"
-            className="md:inline-flex w-full justify-center md:w-auto"
+            className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
             onClick={() => {
               closeMobileSheet();
               setShowSendForm(true);

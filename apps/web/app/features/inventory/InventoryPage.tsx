@@ -814,28 +814,26 @@ export function InventoryPage(props: InventoryStreamData) {
             }
             sheet={({ closeSheet }) => (
               <>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  disabled={!canEditLowStock}
                   onClick={() => {
                     if (canEditLowStock) {
                       closeSheet();
                       setShowThresholdModal(true);
                     }
                   }}
-                  disabled={!canEditLowStock}
-                  className={`inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-app-border bg-app-elevated px-3 py-2 text-sm ${
-                    canEditLowStock
-                      ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong'
-                      : 'cursor-default text-app-fg-muted opacity-60'
-                  }`}
                 >
                   Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units
-                </button>
+                </Button>
                 {canIntake && (
                   <Button
                     variant="primary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       window.location.href = '/admin/shipments/receive';
@@ -848,7 +846,7 @@ export function InventoryPage(props: InventoryStreamData) {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setShowExportModal(true);

@@ -331,6 +331,36 @@ export function PermissionRequestsPage({
           rowKey={(r) => r.id}
           emptyTitle={emptyTitle}
           emptyDescription={emptyDescription}
+          renderMobileCard={(req) => (
+            <button
+              type="button"
+              onClick={() => setViewing(req)}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+                  {req.requesterName}
+                </span>
+                <StatusBadge status={req.status} />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-app-fg-muted truncate">
+                  {REQUEST_TYPE_LABELS[req.type] ?? req.type}
+                </span>
+                <span className="shrink-0 text-xs text-app-fg-muted">
+                  {formatDateTime(req.createdAt)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-app-fg truncate">
+                  {targetSummary(req)}
+                </span>
+                <span className="shrink-0 text-xs text-app-fg-muted truncate max-w-[8rem]">
+                  {requestedSummary(req)}
+                </span>
+              </div>
+            </button>
+          )}
         />
       </div>
 
@@ -525,6 +555,28 @@ export function PermissionRequestsPage({
               </h3>
               <ModalFetcherInlineError message={permissionReqSurface.errorMatchingIntent(['approve', 'reject'])} />
               <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+                {(() => {
+                  const req = requests.find((r) => r.id === modal.requestId);
+                  if (!req) return null;
+                  return (
+                    <div className="rounded-lg border border-app-border bg-app-bg p-3 space-y-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-app-fg-muted">Type</span>
+                        <span className="font-medium text-app-fg">{REQUEST_TYPE_LABELS[req.type] ?? req.type}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-app-fg-muted">Requester</span>
+                        <span className="font-medium text-app-fg">{req.requesterName}</span>
+                      </div>
+                      {req.reason && (
+                        <div className="pt-1 border-t border-app-border">
+                          <span className="text-app-fg-muted text-xs">Reason for request</span>
+                          <p className="whitespace-pre-wrap text-app-fg mt-0.5">{req.reason}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <Textarea
                   label="Reason"
                   hint="Minimum 5 characters"

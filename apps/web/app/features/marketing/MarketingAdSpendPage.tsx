@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cpaColorClass } from '~/lib/rate-color';
 import { formatNaira } from '~/lib/format-amount';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
-import { usePersistedFilters } from '~/hooks/usePersistedFilters';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -191,7 +190,6 @@ export function MarketingAdSpendPage({
   const mediaBuyersForFilter = mediaBuyersForFilterProp ?? [];
   const marketingTeams = marketingTeamsProp ?? [];
   const dateFilters = filters;
-  usePersistedFilters('ad-spend', { exclude: ['status'] });
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const secondaryFetcher = useFetcher<SecondaryResponse>();
@@ -780,6 +778,30 @@ export function MarketingAdSpendPage({
             filtersBadgeCount={adSpendToolbarFilterBadge}
             filters={
               <>
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => handleAdSpendStatusChange(e.target.value)}
+                  options={AD_SPEND_STATUS_OPTIONS}
+                  controlSize="lg"
+                  className="!bg-app-hover text-center"
+                  wrapperClassName="w-full"
+                />
+                {products.length > 0 && (
+                  <SearchableSelect
+                    id="marketing-adspend-product-filter-sheet"
+                    value={selectedProductId}
+                    onChange={handleAdSpendProductChange}
+                    options={[
+                      { value: 'ALL', label: 'All products' },
+                      ...products.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    controlSize="lg"
+                    triggerClassName="!bg-app-hover text-center"
+                    wrapperClassName="w-full"
+                    placeholder="All products"
+                    searchPlaceholder="Search products..."
+                  />
+                )}
                 {viewMode !== 'media_buyer' && marketingTeams.length > 1 && (
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Team</span>
@@ -839,7 +861,7 @@ export function MarketingAdSpendPage({
                 to="/admin/marketing/ad-spend/new"
                 actionLabel="adding ad spend"
                 onClick={() => closeSheet()}
-                className="btn-primary btn-sm w-full justify-center inline-flex items-center"
+                className="btn-primary btn-sm h-12 w-full justify-center inline-flex items-center"
               >
                 + Add Expense
               </BranchScopedLink>
@@ -868,10 +890,11 @@ export function MarketingAdSpendPage({
           mobileGrid
           items={[
             {
-              label: 'Total spend',
-              value: <>{'\u20A6'}{Math.round(metrics.totalSpend).toLocaleString()}</>,
+              label: 'Approved spend',
+              value: <>{'\u20A6'}{Math.round(metrics.approvedSpend ?? 0).toLocaleString()}</>,
               valueClassName: 'text-app-fg',
-              onClick: () => handleAdSpendStatusChange('ALL'),
+              onClick: () => handleAdSpendStatusChange('APPROVED'),
+              active: selectedStatus === 'APPROVED',
             },
             {
               label: 'Orders',
@@ -883,7 +906,7 @@ export function MarketingAdSpendPage({
               label: 'CPA',
               value: metrics.cpa > 0 ? <>{'\u20A6'}{Math.round(metrics.cpa).toLocaleString()}</> : '\u2014',
               valueClassName: metrics.cpa > 0 ? cpaColorClass(metrics.cpa) : 'text-app-fg-muted',
-              title: 'Total spend / total orders',
+              title: 'Approved spend / total orders',
               onClick: () => handleAdSpendStatusChange('ALL'),
             },
             {
@@ -893,17 +916,10 @@ export function MarketingAdSpendPage({
               onClick: () => handleAdSpendStatusChange('PENDING'),
               active: selectedStatus === 'PENDING',
             },
-            {
-              label: `Approved (${statusCounts?.APPROVED ?? 0})`,
-              value: <>{'\u20A6'}{Math.round(metrics.approvedSpend ?? 0).toLocaleString()}</>,
-              valueClassName: 'text-success-600 dark:text-success-400',
-              onClick: () => handleAdSpendStatusChange('APPROVED'),
-              active: selectedStatus === 'APPROVED',
-            },
           ]}
         />
       ) : (
-        <OverviewStatStripSkeleton count={5} />
+        <OverviewStatStripSkeleton count={4} />
       )}
 
       {/* High-CPA warning banner removed (CEO directive 2026-05-08) — the

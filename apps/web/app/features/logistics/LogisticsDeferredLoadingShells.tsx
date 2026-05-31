@@ -787,7 +787,7 @@ function TransfersWorkspaceLoadingShell({
               </>
             }
             sheet={
-              <Button variant="primary" size="sm" className="w-full justify-center" disabled>
+              <Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                 {initiateCta}
               </Button>
             }

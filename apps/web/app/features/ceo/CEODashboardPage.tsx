@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { useToast } from '~/components/ui/toast';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -322,23 +323,27 @@ export function CEODashboardPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <div className="space-y-2">
-                <button
+              <>
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowChartView((v) => !v);
                   }}
-                  className="btn-secondary btn-sm w-full justify-center"
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
-                </button>
+                </Button>
                 <refreshFetcher.Form method="post" className="block">
                   <input type="hidden" name="intent" value="refreshExecutiveData" />
-                  <button
+                  <Button
                     type="submit"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
                     disabled={isRefreshing}
-                    className="btn-secondary btn-sm w-full justify-center inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isRefreshing ? (
                       <>
@@ -348,14 +353,14 @@ export function CEODashboardPage({
                     ) : (
                       'Refresh data'
                     )}
-                  </button>
+                  </Button>
                 </refreshFetcher.Form>
                 {showBackToDashboard && (
-                  <Link to="/admin" className="btn-secondary btn-sm w-full justify-center">
+                  <Link to="/admin" className="btn-secondary btn-sm h-12 flex items-center justify-center w-full">
                     Back to Dashboard
                   </Link>
                 )}
-              </div>
+              </>
             )}
           />
         }

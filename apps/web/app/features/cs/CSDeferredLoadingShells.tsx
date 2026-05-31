@@ -1042,10 +1042,10 @@ export function CSMessageTemplatesLoadingShell() {
             }
             sheet={
               <>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Preview all
                 </Button>
-                <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
                   + New Template
                 </Button>
               </>
