@@ -3,6 +3,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -96,6 +97,24 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
               <span className="text-xs text-app-fg-muted">
                 {new Date(item.addedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
+            ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        align: 'right',
+        tight: true,
+        mobileShowLabel: false,
+        render: showSkeleton
+          ? () => null
+          : (item) => (
+              <TableRowActionsSheet
+                ariaLabel={`Actions for ${item.customerName}`}
+                sheetTitle={item.customerName}
+                actions={[
+                  { key: 'view', kind: 'link', label: 'View order', to: `/admin/orders/${item.orderId}` },
+                ]}
+              />
             ),
       },
     ],
