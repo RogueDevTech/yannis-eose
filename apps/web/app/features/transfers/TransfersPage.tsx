@@ -657,8 +657,7 @@ export function TransfersPage({
         description={pageDescription}
         actions={
           <PageHeaderMobileTools
-            sheetTitle={`${pageTitle} — tools`}
-            sheetSubtitle={<span>Date range and new transfer</span>}
+            sheetTitle="Actions"
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
             filters={mobileTransferFiltersBody}
             filtersBadgeCount={(fromLocationFilter ? 1 : 0) + (toLocationFilter ? 1 : 0) + (productFilter ? 1 : 0)}

@@ -197,8 +197,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         description="Review payroll payout batches."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Payout tools"
-            sheetSubtitle={<span>Refresh and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Payout toolbar"
             desktop={
               <>

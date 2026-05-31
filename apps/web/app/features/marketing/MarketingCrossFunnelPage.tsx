@@ -291,8 +291,7 @@ export function MarketingCrossFunnelPage({
         description="All duplicate order submissions across your funnels."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Duplicate tools"
-            sheetSubtitle={<span>Filters and refresh</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Duplicate attempts toolbar"
             filtersBadgeCount={filterBadgeCount}
             desktop={
@@ -304,67 +303,79 @@ export function MarketingCrossFunnelPage({
             filters={
               <>
                 {showMbFilter && mediaBuyersForFilter.length > 0 && (
-                  <SearchableSelect
-                    id="cf-mobile-buyer"
-                    value={searchParams.get('mediaBuyerId') || 'ALL'}
-                    onChange={(v) => {
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                        else next.delete('mediaBuyerId');
-                        return next;
-                      });
-                    }}
-                    options={[
-                      { value: 'ALL', label: 'All media buyers' },
-                      ...mediaBuyersForFilter.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                    placeholder="All media buyers"
-                    searchPlaceholder="Search buyers…"
-                  />
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <SearchableSelect
+                      id="cf-mobile-buyer"
+                      value={searchParams.get('mediaBuyerId') || 'ALL'}
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                          else next.delete('mediaBuyerId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All media buyers' },
+                        ...mediaBuyersForFilter.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                      placeholder="All media buyers"
+                      searchPlaceholder="Search buyers…"
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 )}
                 {productsForFilter.length > 0 && (
-                  <SearchableSelect
-                    id="cf-mobile-product"
-                    value={searchParams.get('productId') || 'ALL'}
-                    onChange={(v) => {
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('productId', v);
-                        else next.delete('productId');
-                        return next;
-                      });
-                    }}
-                    options={[
-                      { value: 'ALL', label: 'All products' },
-                      ...productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                    ]}
-                    placeholder="All products"
-                    searchPlaceholder="Search products…"
-                  />
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <SearchableSelect
+                      id="cf-mobile-product"
+                      value={searchParams.get('productId') || 'ALL'}
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('productId', v);
+                          else next.delete('productId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All products' },
+                        ...productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                      ]}
+                      placeholder="All products"
+                      searchPlaceholder="Search products…"
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 )}
                 {campaignsForFilter.length > 0 && (
-                  <SearchableSelect
-                    id="cf-mobile-form"
-                    value={searchParams.get('campaignId') || 'ALL'}
-                    onChange={(v) => {
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('campaignId', v);
-                        else next.delete('campaignId');
-                        return next;
-                      });
-                    }}
-                    options={[
-                      { value: 'ALL', label: 'All forms' },
-                      ...campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                    ]}
-                    placeholder="All forms"
-                    searchPlaceholder="Search forms…"
-                  />
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <SearchableSelect
+                      id="cf-mobile-form"
+                      value={searchParams.get('campaignId') || 'ALL'}
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('campaignId', v);
+                          else next.delete('campaignId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All forms' },
+                        ...campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                      ]}
+                      placeholder="All forms"
+                      searchPlaceholder="Search forms…"
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 )}
               </>
             }

@@ -900,12 +900,13 @@ function OrdersListPageImpl({
     setBulkResult(null);
     ensureBranchForAction({
       actionLabel: `transitioning selected orders to ${formatStatus(newStatus)}`,
-      onProceed: () =>
+      onProceed: (branchId) =>
         fetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus,
+            branchId,
           },
           { method: 'post' },
         ),
@@ -948,12 +949,13 @@ function OrdersListPageImpl({
         assignModalKind === 'reassign'
           ? 'reassigning selected orders to closers'
           : 'assigning selected orders to closers',
-      onProceed: () =>
+      onProceed: (branchId) =>
         assignFetcher.submit(
           {
             intent: 'bulkAssign',
             orderIds: JSON.stringify([...selectedIds]),
             csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
+            branchId,
           },
           { method: 'post' },
         ),
@@ -964,13 +966,14 @@ function OrdersListPageImpl({
     setBulkResult(null);
     ensureBranchForAction({
       actionLabel: 'assigning selected orders for delivery at a 3PL location',
-      onProceed: () =>
+      onProceed: (branchId) =>
         allocateFetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus: 'AGENT_ASSIGNED',
             logisticsLocationId: allocateLocationId,
+            branchId,
           },
           { method: 'post' },
         ),
@@ -982,13 +985,14 @@ function OrdersListPageImpl({
     setCancelModalOpen(false);
     ensureBranchForAction({
       actionLabel: 'deleting selected orders',
-      onProceed: () =>
+      onProceed: (branchId) =>
         fetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus: 'DELETED',
             reason: cancelReason,
+            branchId,
           },
           { method: 'post' },
         ),
@@ -1393,8 +1397,7 @@ function OrdersListPageImpl({
         description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
           <PageHeaderMobileTools
-              sheetTitle="Sales orders tools"
-              sheetSubtitle={<span>Chart, offline order, and export</span>}
+              sheetTitle="Actions"
               triggerAriaLabel="Sales orders toolbar"
               filtersBadgeCount={ordersListToolbarFilterBadge}
               filters={
@@ -2004,7 +2007,6 @@ function OrdersListPageImpl({
           className="!border-0"
           hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
-          sheetSubtitle={<span>Status and closer apply immediately</span>}
           searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form

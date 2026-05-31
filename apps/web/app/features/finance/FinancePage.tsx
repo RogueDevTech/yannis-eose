@@ -60,8 +60,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
         description="Cash remittance, disbursements, and payroll."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Finance tools"
-            sheetSubtitle={<span>Filters and date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Finance toolbar and filters"
             filtersBadgeCount={filtersBadgeCount}
             desktop={
@@ -93,7 +92,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
             }
             filters={
               branches.length > 0 ? (
-                <div className="relative w-full">
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                   {filters.branchId && (
                     <FilterDismiss onClear={() => setFilter('branchId', '')} />
                   )}
@@ -105,6 +104,8 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
                     placeholder="All branches"
                     searchPlaceholder="Search branches..."
                     disabled={branchSwitching}
+                    triggerClassName="!bg-transparent !border-transparent !text-center"
+                    wrapperClassName="w-full"
                   />
                 </div>
               ) : undefined

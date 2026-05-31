@@ -153,7 +153,7 @@ export function parseCampaigns(res: { ok: boolean; data: unknown }): Campaign[] 
   return data?.campaigns ?? [];
 }
 
-/** Campaigns + products for `/admin/marketing/ad-spend/new` (shared with ad-spend list filtering). */
+/** Campaigns + products for `/admin/marketing/expenses/new` (shared with ad-spend list filtering). */
 export async function loadAdSpendExpenseFormData(
   cookie: string,
   opts: { mediaBuyerId?: string },
@@ -542,6 +542,33 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
 
 export async function runMarketingAdSpendAction(cookie: string, formData: FormData) {
   const intent = formData.get('intent')?.toString();
+
+  // Simplified expense creation for non-AD_SPEND categories (amount + description only).
+  if (intent === 'createSimpleExpense') {
+    const spendDate = formData.get('spendDate')?.toString() ?? '';
+    const category = formData.get('category')?.toString() ?? '';
+    const spendAmount = formData.get('spendAmount')?.toString() ?? '';
+    const description = formData.get('description')?.toString() || undefined;
+    if (!spendDate || !category || !spendAmount) {
+      return json({ error: 'Date, category, and amount are required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.createAdSpend', {
+      method: 'POST',
+      cookie,
+      body: {
+        spendDate,
+        spendAmount,
+        category,
+        description,
+        platform: 'OTHER',
+        platformCustomLabel: category,
+      },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to log expense') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
 
   if (intent === 'createAdSpend') {
     const screenshotUrl = formData.get('screenshotUrl')?.toString() ?? '';

@@ -34,7 +34,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
   const firstName = userName?.split(' ')[0] ?? 'Admin';
 
   const revenue = data?.revenue ?? 0;
-  const trueProfit = data?.trueProfit ?? 0;
   const marketingSafe = {
     totalSpend: data?.marketing?.totalSpend ?? 0,
     cpa: data?.marketing?.cpa ?? 0,
@@ -46,10 +45,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     total: data?.orderPipeline?.total ?? 0,
     statusCounts: data?.orderPipeline?.statusCounts ?? {},
   };
-  const revenueByPeriod = data?.revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 };
   // Deliveries per Brand + Stock Available per Product removed 2026-05-19 per
   // CEO directive; backend still returns them but this view no longer renders.
-  const activeStaffCount = data?.activeStaffCount ?? 0;
 
   return (
     <div className="space-y-6">
@@ -59,8 +56,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         description="Executive dashboard — key business metrics at a glance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Dashboard tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Dashboard date range"
             desktop={
               <>
@@ -81,9 +77,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         periodAllTime={filters?.periodAllTime ?? false}
       />
 
+
       {/* ── HERO: ROAS on Ad Spend ────────────────────────── */}
-      {/* Uses the standard `.card` chrome (CEO 2026-05-19) — same surface as
-          every other admin card so the dashboard doesn't visually drift. */}
       <div className="card">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -109,19 +104,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               Deep Analysis
               <span aria-hidden>→</span>
             </Link>
-          </div>
-          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
-            <KeyMetricTile label="Revenue" value={fmt(revenue)} to="/admin/marketing/orders?status=DELIVERED" />
-            <KeyMetricTile
-              label="Profit"
-              value={fmt(trueProfit)}
-              valueClassName={
-                trueProfit >= 0
-                  ? 'text-success-600 dark:text-success-400'
-                  : 'text-danger-600 dark:text-danger-400'
-              }
-              to="/admin/ceo"
-            />
           </div>
         </div>
       </div>
@@ -221,7 +203,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               value: fmt(marketingSafe.totalSpend),
               valueClassName: 'text-danger-600 dark:text-danger-400',
               title: 'Total approved ad spend in the selected period',
-              to: '/admin/marketing/ad-spend',
+              to: '/admin/marketing/expenses',
             },
             {
               label: 'Total Orders',
@@ -235,7 +217,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               value: fmt(marketingSafe.cpa),
               valueClassName: cpaColorClass(marketingSafe.cpa),
               title: 'Ad spend ÷ total orders',
-              to: '/admin/marketing/ad-spend',
+              to: '/admin/marketing/expenses',
             },
           ]}
         />
@@ -251,28 +233,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           tileClassName="!py-2.5"
           items={[
             {
-              label: "Today's Revenue",
-              value: fmt(revenueByPeriod.today),
-              valueClassName: revenueByPeriod.today > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              title: 'Revenue from delivered orders today',
-            },
-            {
-              label: "This Week's Revenue",
-              value: fmt(revenueByPeriod.thisWeek),
-              valueClassName: revenueByPeriod.thisWeek > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              title: 'Revenue from delivered orders this week (Mon–Sun)',
-            },
-            {
-              label: "This Month's Revenue",
-              value: fmt(revenueByPeriod.thisMonth),
-              valueClassName: revenueByPeriod.thisMonth > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              title: 'Revenue from delivered orders this month',
-            },
-            {
-              label: 'Active Staff',
-              value: activeStaffCount.toLocaleString(),
-              valueClassName: 'text-app-fg',
-              title: 'Total active staff across all branches',
+              label: 'Revenue',
+              value: fmt(revenue),
+              valueClassName: revenue > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              title: 'Revenue from delivered orders in selected period',
             },
           ]}
         />
@@ -300,43 +264,3 @@ function QuickJump({ to, label }: { to: string; label: string }) {
   );
 }
 
-/**
- * One cell in the Key Metrics grid. Renders label + value stacked vertically
- * inside a rounded chip; sits at 2-per-row on mobile and 5-per-row on desktop.
- */
-function KeyMetricTile({
-  label,
-  value,
-  valueClassName,
-  to,
-}: {
-  label: string;
-  value: string;
-  valueClassName?: string;
-  to?: string;
-}) {
-  const inner = (
-    <>
-      <p className="text-mini font-medium text-app-fg-muted">{label}</p>
-      <p
-        className={`mt-1 text-sm sm:text-base font-bold tabular-nums leading-tight break-all ${
-          valueClassName ?? 'text-app-fg'
-        }`}
-      >
-        {value}
-      </p>
-    </>
-  );
-  if (to) {
-    return (
-      <Link to={to} prefetch="intent" className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0 hover:bg-app-hover transition-colors">
-        {inner}
-      </Link>
-    );
-  }
-  return (
-    <div className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
-      {inner}
-    </div>
-  );
-}

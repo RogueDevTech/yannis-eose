@@ -38,8 +38,9 @@ async function _ceoOverviewFetch(params: {
   startDate: string | undefined;
   endDate: string | undefined;
   branchId: string | null | undefined;
+  effectiveBranchIds: string[] | null;
 }) {
-  const { startDate, endDate, branchId } = params;
+  const { startDate, endDate, branchId, effectiveBranchIds } = params;
 
   const logErr = (label: string) => (err: unknown) => {
     console.error(`[ceoOverview] ${label} failed:`, err instanceof Error ? err.message : err);
@@ -65,13 +66,13 @@ async function _ceoOverviewFetch(params: {
     activeStaffCount,
   ] = await Promise.all([
     financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
-    hasDateRange ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId).catch(logErr('statusCounts')) : Promise.resolve(undefined),
+    hasDateRange ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(logErr('statusCounts')) : Promise.resolve(undefined),
     financeService!.getInvoiceSummary().catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary().catch(logErr('payoutSummary')),
     ordersService!.getCSCloserWorkloads(branchId).catch(logErr('csWorkloads')),
-    ordersService!.getRevenueByPeriod(branchId).catch(logErr('revenueByPeriod')),
-    ordersService!.getDeliveriesByProduct(branchId).catch(logErr('deliveriesByProduct')),
+    ordersService!.getRevenueByPeriod(branchId, effectiveBranchIds).catch(logErr('revenueByPeriod')),
+    ordersService!.getDeliveriesByProduct(branchId, effectiveBranchIds).catch(logErr('deliveriesByProduct')),
     inventoryService!.getStockPerProduct().catch(logErr('stockPerProduct')),
     hrService!.countActiveStaff().catch(logErr('activeStaffCount')),
   ]);
@@ -117,7 +118,7 @@ async function _ceoOverviewFetch(params: {
   } else if (!branchId && fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
     statusCounts = fastProfitResult.statusCounts as Record<string, number>;
   } else {
-    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId).catch(logErr('statusCounts'));
+    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(logErr('statusCounts'));
     statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
   }
 
@@ -232,12 +233,14 @@ export const dashboardRouter = router({
       const endDate = input?.endDate;
       const branchId = ctx.currentBranchId;
 
+      const eIds = ctx.effectiveBranchIds;
+
       if (cacheService) {
-        const cacheKey = `cache:ceo:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate })}`;
-        return cacheService.getOrSet(cacheKey, 60, () => _ceoOverviewFetch({ startDate, endDate, branchId }));
+        const cacheKey = `cache:ceo:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate, eIds })}`;
+        return cacheService.getOrSet(cacheKey, 60, () => _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds }));
       }
 
-      return _ceoOverviewFetch({ startDate, endDate, branchId });
+      return _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds });
     }),
 
   /**
@@ -272,11 +275,12 @@ export const dashboardRouter = router({
       const endDate = input?.endDate;
       const branchScope = input?.branchScope ?? 'marketing';
       const branchId = ctx.currentBranchId;
+      const eIds = ctx.effectiveBranchIds;
       const ordersSvc = ordersService;
 
       const fetchBundle = async () => {
         const [overview, branchBreakdown] = await Promise.all([
-          _ceoOverviewFetch({ startDate, endDate, branchId }),
+          _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds }),
           ordersSvc.getBranchBreakdown(startDate, endDate, branchScope),
         ]);
         return { overview, branchBreakdown };
@@ -347,9 +351,10 @@ export const dashboardRouter = router({
       const endDate = input?.endDate;
       const branchId = ctx.currentBranchId;
 
+      const eIds = ctx.effectiveBranchIds;
       const [deliveredBuckets, createdBuckets] = await Promise.all([
-        ordersService.getDeliveredOrdersTimeSeries(startDate, endDate, branchId),
-        ordersService.getOrdersTimeSeriesByCreated(startDate, endDate, branchId),
+        ordersService.getDeliveredOrdersTimeSeries(startDate, endDate, branchId, eIds),
+        ordersService.getOrdersTimeSeriesByCreated(startDate, endDate, branchId, undefined, 'servicing', eIds),
       ]);
 
       // Merge by date: union of all dates, each bucket has revenue, orderCount (delivered), createdCount
@@ -397,7 +402,7 @@ export const dashboardRouter = router({
       if (!ordersService) {
         throw new Error('Dashboard services not initialized');
       }
-      return ordersService.getOrderPipelineChart(input?.startDate, input?.endDate, ctx.currentBranchId);
+      return ordersService.getOrderPipelineChart(input?.startDate, input?.endDate, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -422,7 +427,7 @@ export const dashboardRouter = router({
     const endIso = nigeriaDayEnd(todayWat).toISOString();
 
     const [todayCounts, pendingApprovals] = await Promise.all([
-      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
+      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({})),
       financeService.countPendingApprovalRequests().catch(() => 0),
     ]);
 

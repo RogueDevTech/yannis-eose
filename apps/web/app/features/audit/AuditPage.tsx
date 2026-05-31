@@ -1223,8 +1223,7 @@ export function AuditPage({
         description="Complete history of all data changes. Every mutation is permanently recorded."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Audit trail tools"
-            sheetSubtitle={<span>Date range, polling, and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Audit toolbar and date range"
             desktop={
               <>

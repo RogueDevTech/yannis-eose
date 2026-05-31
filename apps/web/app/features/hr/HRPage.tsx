@@ -107,8 +107,7 @@ export function HRPage({
         description="Run monthly payroll and manage staff adjustments."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="HR tools"
-            sheetSubtitle={<span>Refresh and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="HR toolbar"
             desktop={
               <div className="flex items-center gap-2 flex-wrap">

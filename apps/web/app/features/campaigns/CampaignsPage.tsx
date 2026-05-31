@@ -292,8 +292,7 @@ export function FormsPage({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Forms"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Forms toolbar"
             desktop={
               <>

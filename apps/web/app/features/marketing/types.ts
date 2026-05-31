@@ -105,6 +105,7 @@ export type DistributingFundingEntry =
   | DistributingFundingRequestEntry;
 
 export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE' | 'OTHER';
+export type ExpenseCategory = 'AD_SPEND' | 'AD_ACCOUNT' | 'RECRUITMENT_AD' | 'WHATSAPP_CAMPAIGN' | 'UGC_PRODUCTION';
 
 export interface AdSpendRecord {
   id: string;
@@ -116,6 +117,8 @@ export interface AdSpendRecord {
   adUrl?: string | null;
   platform?: AdPlatform;
   platformCustomLabel?: string | null;
+  category?: ExpenseCategory;
+  description?: string | null;
   spendDate: string;
   status: string;
   approvedAt: string | null;
@@ -372,6 +375,8 @@ export interface AdSpendGroupLine {
   adUrl: string | null;
   platform: AdPlatform;
   platformCustomLabel?: string | null;
+  category?: ExpenseCategory;
+  description?: string | null;
   spendDate: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   rejectionReason: string | null;
@@ -398,7 +403,7 @@ export interface AdSpendGroup {
   lines: AdSpendGroupLine[];
 }
 
-/** `/admin/marketing/ad-spend` loader + component props */
+/** `/admin/marketing/expenses` loader + component props */
 export interface MarketingAdSpendLoaderData {
   adSpend: AdSpendRecord[];
   totalAdSpend: number;
@@ -407,6 +412,7 @@ export interface MarketingAdSpendLoaderData {
   limit: number;
   totalPages: number;
   statusFilter?: AdSpendStatusFilter;
+  categoryFilter?: string;
   searchFilter?: string;
   /** Currently selected product filter — narrows the list to one product so HoM can audit
    * spend product-by-product. `undefined` = all products. */

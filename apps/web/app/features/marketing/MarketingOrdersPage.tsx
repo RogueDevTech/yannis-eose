@@ -617,14 +617,17 @@ export function MarketingOrdersPage({
             filtersBadgeCount={ordersToolbarFilterBadge}
             filters={
               <>
-                <FormSelect
-                  value={selectedStatus}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  options={statusOptionsBase}
-                  controlSize="lg"
-                  className="!bg-app-hover text-center"
-                  wrapperClassName="w-full"
-                />
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                  <FormSelect
+                    value={selectedStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={statusOptionsBase}
+                    controlSize="sm"
+                    className="!bg-transparent !border-transparent !text-center"
+                    openAs="modal"
+                    wrapperClassName="w-full"
+                  />
+                </div>
                 {showMediaBuyerColumn && secondary.mediaBuyersForFilter.length > 0 ? (
                   <div className="relative">
                     {(searchParams.get('mediaBuyerId') || 'ALL') !== 'ALL' && (
@@ -632,28 +635,29 @@ export function MarketingOrdersPage({
                         setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
                       }} />
                     )}
-                    <SearchableSelect
-                      id="marketing-orders-filter-buyer-sheet"
-                      value={searchParams.get('mediaBuyerId') || 'ALL'}
-                      onChange={(v) => {
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                          else next.delete('mediaBuyerId');
-                          return next;
-                        });
-                      }}
-                      options={[
-                        { value: 'ALL', label: 'All media buyers' },
-                        ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-                      ]}
-                      controlSize="lg"
-                      triggerClassName="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      placeholder="All media buyers"
-                      searchPlaceholder="Search buyers…"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <SearchableSelect
+                        id="marketing-orders-filter-buyer-sheet"
+                        value={searchParams.get('mediaBuyerId') || 'ALL'}
+                        onChange={(v) => {
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                            else next.delete('mediaBuyerId');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All media buyers' },
+                          ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                        ]}
+                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        placeholder="All media buyers"
+                        searchPlaceholder="Search buyers…"
+                      />
+                    </div>
                   </div>
                 ) : null}
                 {secondary.productsForFilter.length > 0 ? (
@@ -663,28 +667,29 @@ export function MarketingOrdersPage({
                         setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
                       }} />
                     )}
-                    <SearchableSelect
-                      id="marketing-orders-filter-product-sheet"
-                      value={searchParams.get('productId') || 'ALL'}
-                      onChange={(v) => {
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('productId', v);
-                          else next.delete('productId');
-                          return next;
-                        });
-                      }}
-                      options={[
-                        { value: 'ALL', label: 'All products' },
-                        ...secondary.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                      ]}
-                      controlSize="lg"
-                      triggerClassName="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      placeholder="All products"
-                      searchPlaceholder="Search products…"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <SearchableSelect
+                        id="marketing-orders-filter-product-sheet"
+                        value={searchParams.get('productId') || 'ALL'}
+                        onChange={(v) => {
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('productId', v);
+                            else next.delete('productId');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All products' },
+                          ...secondary.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                        ]}
+                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        placeholder="All products"
+                        searchPlaceholder="Search products…"
+                      />
+                    </div>
                   </div>
                 ) : null}
                 {secondary.campaignsForFilter.length > 0 ? (
@@ -694,28 +699,29 @@ export function MarketingOrdersPage({
                         setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
                       }} />
                     )}
-                    <SearchableSelect
-                      id="marketing-orders-filter-form-sheet"
-                      value={searchParams.get('campaignId') || 'ALL'}
-                      onChange={(v) => {
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('campaignId', v);
-                          else next.delete('campaignId');
-                          return next;
-                        });
-                      }}
-                      options={[
-                        { value: 'ALL', label: 'All forms' },
-                        ...secondary.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                      ]}
-                      controlSize="lg"
-                      triggerClassName="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      placeholder="All forms"
-                      searchPlaceholder="Search forms…"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <SearchableSelect
+                        id="marketing-orders-filter-form-sheet"
+                        value={searchParams.get('campaignId') || 'ALL'}
+                        onChange={(v) => {
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('campaignId', v);
+                            else next.delete('campaignId');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All forms' },
+                          ...secondary.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                        ]}
+                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        placeholder="All forms"
+                        searchPlaceholder="Search forms…"
+                      />
+                    </div>
                   </div>
                 ) : null}
               </>
@@ -912,7 +918,6 @@ export function MarketingOrdersPage({
                 <ToolbarFiltersCollapsible
                   hideMobileSheet
                   badgeCount={ordersToolbarFilterBadge}
-                  sheetSubtitle={<span>Status and media buyer apply immediately</span>}
                   searchRow={
                     <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
                       <SearchInput

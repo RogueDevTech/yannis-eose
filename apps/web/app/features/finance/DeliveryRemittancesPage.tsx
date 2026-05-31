@@ -530,30 +530,30 @@ export function DeliveryRemittancesPage({
         description="Review and record cash remittances."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Cash remittances tools"
-            sheetSubtitle={<span>Date range, export, and pick orders</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Cash remittances toolbar and date range"
             filtersBadgeCount={viewTab === 'remittances' ? remittanceToolbarFilterBadge : 0}
             filters={
               <>
                 {viewTab === 'remittances' && (
-                  <SearchableSelect
-                    id="delivery-remittance-status-filter-kebab"
-                    value={pendingStatus}
-                    onChange={handleStatusChange}
-                    controlSize="lg"
-                    triggerClassName="!bg-app-hover text-center"
-                    wrapperClassName="w-full"
-                    placeholder="All statuses"
-                    options={[
-                      { value: '', label: 'All statuses' },
-                      { value: 'SENT', label: 'Pending' },
-                      { value: 'RECEIVED', label: 'Received' },
-                      { value: 'DISPUTED', label: 'Disputed' },
-                    ]}
-                  />
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <SearchableSelect
+                      id="delivery-remittance-status-filter-kebab"
+                      value={pendingStatus}
+                      onChange={handleStatusChange}
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                      placeholder="All statuses"
+                      options={[
+                        { value: '', label: 'All statuses' },
+                        { value: 'SENT', label: 'Pending' },
+                        { value: 'RECEIVED', label: 'Received' },
+                        { value: 'DISPUTED', label: 'Disputed' },
+                      ]}
+                    />
+                  </div>
                 )}
-                <div className="relative">
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                   {!!filters.location && (
                     <FilterDismiss onClear={() => handleLocationChange('')} />
                   )}
@@ -561,8 +561,7 @@ export function DeliveryRemittancesPage({
                     id="delivery-remittance-location-filter-kebab"
                     value={filters.location}
                     onChange={handleLocationChange}
-                    controlSize="lg"
-                    triggerClassName="!bg-app-hover text-center"
+                    triggerClassName="!bg-transparent !border-transparent !text-center"
                     wrapperClassName="w-full"
                     placeholder="All locations"
                     searchPlaceholder="Search locations..."
@@ -576,7 +575,7 @@ export function DeliveryRemittancesPage({
                   />
                 </div>
                 {viewTab === 'remittances' && (
-                  <div className="relative">
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                     {!!filters.sentBy && (
                       <FilterDismiss onClear={() => handleSentByChange('')} />
                     )}
@@ -584,8 +583,7 @@ export function DeliveryRemittancesPage({
                       id="delivery-remittance-sent-by-filter-kebab"
                       value={filters.sentBy}
                       onChange={handleSentByChange}
-                      controlSize="lg"
-                      triggerClassName="!bg-app-hover text-center"
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
                       wrapperClassName="w-full"
                       placeholder="Sent by anyone"
                       searchPlaceholder="Search accountants..."
@@ -759,7 +757,6 @@ export function DeliveryRemittancesPage({
               className="!border-0"
               hideMobileSheet
               badgeCount={remittanceToolbarFilterBadge}
-              sheetSubtitle={<span>Location and sent-by apply immediately</span>}
               desktopInlineFilters={
                 <>
                   <div className="relative">

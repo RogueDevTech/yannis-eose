@@ -279,8 +279,7 @@ export function CEODashboardPage({
         description="Real-time business intelligence across all departments."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Executive overview tools"
-            sheetSubtitle={<span>Date range, chart toggle &amp; refresh</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Executive overview toolbar"
             desktop={
               <>
@@ -528,17 +527,14 @@ export function CEODashboardPage({
         </div>
       </div>
 
-      {/* ── Revenue Generated: Day / Week / Month — stacked column ── */}
+      {/* ── Revenue Generated — follows the page date filter ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue Generated
         </h2>
         <div className="card px-4 py-2">
           <StatRowGroup divided>
-            <StatRow label="Today" value={fmt(revenueByPeriod.today)} />
-            <StatRow label="This Week" value={fmt(revenueByPeriod.thisWeek)} />
-            <StatRow label="This Month" value={fmt(revenueByPeriod.thisMonth)} />
-            <StatRow label="Period Total" value={fmt(revenue)} variant="highlight" />
+            <StatRow label="Revenue" value={fmt(revenue)} variant="highlight" />
           </StatRowGroup>
         </div>
       </div>
@@ -837,7 +833,7 @@ export function CEODashboardPage({
               <span className="text-app-fg-muted" aria-hidden>
                 ·
               </span>
-              <Link to="/admin/marketing/ad-spend" className="text-brand-500 hover:text-brand-600">Ad spend</Link>
+              <Link to="/admin/marketing/expenses" className="text-brand-500 hover:text-brand-600">Ad spend</Link>
             </div>
           </div>
           <div className="space-y-3">

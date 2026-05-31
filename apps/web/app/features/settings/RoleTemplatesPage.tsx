@@ -263,8 +263,7 @@ export function RoleTemplatesPage({
         description="Create and manage permission presets for staff roles."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Role template tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Role template toolbar"
             desktop={
               <>

@@ -598,8 +598,7 @@ function CSQueueStaticHeader({
       description="Queue and closer activity."
       actions={
         <PageHeaderMobileTools
-          sheetTitle="Sales queue tools"
-          sheetSubtitle={<span>Create offline orders and refresh the queue</span>}
+          sheetTitle="Actions"
           triggerAriaLabel="Sales queue tools"
           mobileLeading={
             liveEvents != null && liveEvents.length > 0 ? (

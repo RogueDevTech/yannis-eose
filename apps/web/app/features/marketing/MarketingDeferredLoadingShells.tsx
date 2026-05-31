@@ -342,8 +342,7 @@ export function MarketingFundingLoadingShell({
         description="Track funds received and sent."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Funding tools"
-            sheetSubtitle={<span>Request, send, and date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Filters and funding actions"
             desktop={
               <>
@@ -415,7 +414,6 @@ export function MarketingFundingLoadingShell({
 
         <ToolbarFiltersCollapsible
           badgeCount={badgeCount}
-          sheetSubtitle={<span>Type, status, and search apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
@@ -642,8 +640,7 @@ export function MarketingAdSpendLoadingShell({
         description="Log daily ad spend."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Ads Expense tools"
-            sheetSubtitle={<span>Date range and new expense entry</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Date, add expense, and more"
             desktop={
               <>
@@ -653,7 +650,7 @@ export function MarketingAdSpendLoadingShell({
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
                 <BranchScopedLink
-                  to="/admin/marketing/ad-spend/new"
+                  to="/admin/marketing/expenses/new"
                   actionLabel="adding ad spend"
                   className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
                 >
@@ -663,10 +660,10 @@ export function MarketingAdSpendLoadingShell({
             }
             sheet={({ closeSheet }) => (
               <BranchScopedLink
-                to="/admin/marketing/ad-spend/new"
+                to="/admin/marketing/expenses/new"
                 actionLabel="adding ad spend"
                 onClick={() => closeSheet()}
-                className="btn-primary btn-sm h-12 w-full justify-center inline-flex items-center"
+                className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
               >
                 + Add Expense
               </BranchScopedLink>
@@ -707,7 +704,6 @@ export function MarketingAdSpendLoadingShell({
         <ToolbarFiltersCollapsible
           hideMobileSheet
           badgeCount={badgeCount}
-          sheetSubtitle={<span>Status, product, campaign, and buyer filters apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
@@ -868,8 +864,7 @@ export function MarketingTeamLoadingShell({
         description="View media buyer performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Team analysis tools"
-            sheetSubtitle={<span>Date range and export</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Team analysis toolbar and date range"
             desktop={
               <>
@@ -917,7 +912,6 @@ export function MarketingTeamLoadingShell({
           className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={badgeCount}
-          sheetSubtitle={<span>Sort options apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
@@ -1058,8 +1052,7 @@ export function MarketingLeaderboardLoadingShell({
         description="Compare media buyer performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Leaderboard tools"
-            sheetSubtitle={<span>Date range and refresh</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Leaderboard toolbar and date range"
             desktop={
               <>
@@ -1241,8 +1234,7 @@ export function MarketingCrossFunnelLoadingShell({
         description="All duplicate order submissions across your funnels."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Duplicate tools"
-            sheetSubtitle={<span>Filters and refresh</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Duplicate attempts toolbar"
             filtersBadgeCount={filterBadgeCount}
             desktop={
@@ -1413,8 +1405,7 @@ export function MarketingFormsLoadingShell({
         description={isMediaBuyer ? 'Manage your campaign forms.' : 'Manage campaign forms.'}
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Forms"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Forms toolbar"
             desktop={
               <>
@@ -1694,7 +1685,6 @@ export function MarketingOrdersLoadingShell({
         <ToolbarFiltersCollapsible
           className="!border-0"
           badgeCount={ordersToolbarFilterBadge}
-          sheetSubtitle={<span>Status and search apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput

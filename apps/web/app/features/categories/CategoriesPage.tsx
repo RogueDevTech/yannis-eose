@@ -393,8 +393,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         description="Manage product categories."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Category tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Category toolbar"
             desktop={
               <>

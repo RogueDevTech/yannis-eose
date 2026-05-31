@@ -1772,6 +1772,8 @@ function BranchSupervisorTeamsPanel({
   canManageMarketingTeams,
   canManageBranchPage,
   teamSettingsByTeamId,
+  statusCounts,
+  dateFilters,
 }: {
   orgStructure: BranchOrgStructurePayload;
   branchMembers: OverviewMember[];
@@ -1779,6 +1781,8 @@ function BranchSupervisorTeamsPanel({
   canManageMarketingTeams: boolean;
   canManageBranchPage: boolean;
   teamSettingsByTeamId: Record<string, TeamSettingsBundle | null>;
+  statusCounts: Record<string, number>;
+  dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
 }) {
   // Master/detail navigation: null = master (department list), string = drilled
   // into that BranchDepartment id (manage members + roster + squads).
@@ -2517,6 +2521,13 @@ function BranchSupervisorTeamsPanel({
               const unassignedCount = deptMembers.filter(
                 (m) => !inTeamUserIds.has(m.userId),
               ).length;
+
+              const totalOrders = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+              const confirmed = (statusCounts['CONFIRMED'] ?? 0) + (statusCounts['AGENT_ASSIGNED'] ?? 0) + (statusCounts['DISPATCHED'] ?? 0) + (statusCounts['IN_TRANSIT'] ?? 0);
+              const delivered = statusCounts['DELIVERED'] ?? 0;
+              const remitted = statusCounts['REMITTED'] ?? 0;
+              const deliveryRate = totalOrders > 0 ? Math.round(((delivered + remitted) / totalOrders) * 100) : 0;
+
               return (
                 <div className="space-y-4">
                   <OverviewStatStrip
@@ -2539,6 +2550,36 @@ function BranchSupervisorTeamsPanel({
                       },
                     ]}
                   />
+
+                  {/* Performance for the period */}
+                  <div className="card !p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <h3 className="text-sm font-semibold text-app-fg">Performance</h3>
+                      <div className="hidden md:block">
+                        <DateFilterBar
+                          startDate={dateFilters.startDate}
+                          endDate={dateFilters.endDate}
+                          periodAllTime={dateFilters.periodAllTime}
+                          chrome="pill"
+                        />
+                      </div>
+                    </div>
+                    <MobileDateFilterRow
+                      startDate={dateFilters.startDate}
+                      endDate={dateFilters.endDate}
+                      periodAllTime={dateFilters.periodAllTime}
+                    />
+                    <OverviewStatStrip
+                      mobileGrid
+                      items={[
+                        { label: 'Orders', value: totalOrders, valueClassName: 'text-app-fg' },
+                        { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                        { label: 'Delivered', value: delivered + remitted, valueClassName: 'text-success-600 dark:text-success-400' },
+                        { label: 'Delivery rate', value: `${deliveryRate}%`, valueClassName: deliveryRate >= 50 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400' },
+                      ]}
+                    />
+                  </div>
+
                   {unassignedCount > 0 && (
                     <div className="rounded-md border border-warning-300 dark:border-warning-700/50 bg-warning-50/50 dark:bg-warning-900/20 px-3 py-2 text-sm text-warning-800 dark:text-warning-300">
                       {unassignedCount} member{unassignedCount === 1 ? '' : 's'} not on a team yet —
@@ -3144,63 +3185,6 @@ function BranchOverviewPage({
         </div>
       </div>
 
-      {/* ── Branch Report / Overview ── */}
-      {(() => {
-        const { counts } = overview;
-        const totalOrders = Object.values(statusCounts).reduce((a, b) => a + b, 0);
-        const confirmed = (statusCounts['CONFIRMED'] ?? 0) + (statusCounts['AGENT_ASSIGNED'] ?? 0) + (statusCounts['DISPATCHED'] ?? 0) + (statusCounts['IN_TRANSIT'] ?? 0);
-        const delivered = statusCounts['DELIVERED'] ?? 0;
-        const remitted = statusCounts['REMITTED'] ?? 0;
-        const deliveryRate = totalOrders > 0 ? Math.round(((delivered + remitted) / totalOrders) * 100) : 0;
-        // Heads: find the first HEAD_OF_MARKETING and HEAD_OF_CS in members
-        const headOfMarketing = overview.members.find((m) => m.effectiveRole === 'HEAD_OF_MARKETING');
-        const headOfCS = overview.members.find((m) => m.effectiveRole === 'HEAD_OF_CS');
-        const teamCount = orgStructure.departments.reduce((sum, d) => sum + d.teams.length, 0);
-
-        return (
-          <div className="space-y-4">
-            {/* Branch overview strip */}
-            <OverviewStatStrip
-              mobileGrid
-              items={[
-                { label: 'Members', value: counts.totalMembers, valueClassName: 'text-app-fg' },
-                { label: 'Teams', value: teamCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-                { label: 'HoM', value: headOfMarketing?.name ?? '—', valueClassName: headOfMarketing ? 'text-app-fg text-sm' : 'text-app-fg-muted' },
-                { label: 'HoCS', value: headOfCS?.name ?? '—', valueClassName: headOfCS ? 'text-app-fg text-sm' : 'text-app-fg-muted' },
-              ]}
-            />
-
-            {/* Performance for the period */}
-            <div className="card !p-4 space-y-3">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <h3 className="text-sm font-semibold text-app-fg">Performance</h3>
-                <div className="hidden md:block">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                    chrome="pill"
-                  />
-                </div>
-              </div>
-              <MobileDateFilterRow
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-              <OverviewStatStrip
-                mobileGrid
-                items={[
-                  { label: 'Orders', value: totalOrders, valueClassName: 'text-app-fg' },
-                  { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
-                  { label: 'Delivered', value: delivered + remitted, valueClassName: 'text-success-600 dark:text-success-400' },
-                  { label: 'Delivery rate', value: `${deliveryRate}%`, valueClassName: deliveryRate >= 50 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400' },
-                ]}
-              />
-            </div>
-          </div>
-        );
-      })()}
 
       <BranchSupervisorTeamsPanel
         orgStructure={orgStructure}
@@ -3209,6 +3193,8 @@ function BranchOverviewPage({
         canManageMarketingTeams={overview.viewer?.canManageMarketingTeams ?? canManageBranchPage}
         canManageBranchPage={canManageBranchPage}
         teamSettingsByTeamId={teamSettingsByTeamId}
+        statusCounts={statusCounts}
+        dateFilters={dateFilters}
       />
 
       {/* ── Edit branch modal ── */}

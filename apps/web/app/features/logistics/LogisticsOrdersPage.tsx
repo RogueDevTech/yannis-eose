@@ -655,40 +655,44 @@ function LogisticsOrdersPageImpl({
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss onClear={() => handleStatusChange('ALL')} />
                     )}
-                    <FormSelect
-                      value={selectedStatus}
-                      onChange={(e) => handleStatusChange(e.target.value)}
-                      options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-                        value: status,
-                        label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-                      }))}
-                      controlSize="lg"
-                      className="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <FormSelect
+                        value={selectedStatus}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                          value: status,
+                          label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                        }))}
+                        controlSize="sm"
+                        openAs="modal"
+                        className="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
                   </div>
                   {!isTplManagerScoped && locations.length > 0 && (
                     <div className="relative w-full">
                       {!!selectedLocation && (
                         <FilterDismiss onClear={() => handleLocationChange('')} />
                       )}
-                      <SearchableSelect
-                        id="logistics-location-filter-mobile"
-                        value={selectedLocation}
-                        onChange={handleLocationChange}
-                        options={[
-                          { value: '', label: 'All locations' },
-                          ...locations.map((loc) => ({
-                            value: loc.id,
-                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                          })),
-                        ]}
-                        controlSize="lg"
-                        triggerClassName="!bg-app-hover text-center"
-                        wrapperClassName="w-full"
-                        placeholder="All locations"
-                        searchPlaceholder="Search locations..."
-                      />
+                      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                        <SearchableSelect
+                          id="logistics-location-filter-mobile"
+                          value={selectedLocation}
+                          onChange={handleLocationChange}
+                          options={[
+                            { value: '', label: 'All locations' },
+                            ...locations.map((loc) => ({
+                              value: loc.id,
+                              label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            })),
+                          ]}
+                          triggerClassName="!bg-transparent !border-transparent !text-center"
+                          wrapperClassName="w-full"
+                          placeholder="All locations"
+                          searchPlaceholder="Search locations..."
+                        />
+                      </div>
                     </div>
                   )}
                 </>

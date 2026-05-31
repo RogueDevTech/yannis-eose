@@ -132,8 +132,7 @@ export function MonthlyPayrollsLoadingShell() {
         description="Run monthly payroll and manage staff adjustments."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="HR tools"
-            sheetSubtitle={<span>Refresh and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="HR toolbar"
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
@@ -176,8 +175,7 @@ export function GeneratePayrollLoadingShell() {
         description="Generate payroll for a selected month and scope."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Payroll tools"
-            sheetSubtitle={<span>Navigation</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Payroll generator toolbar"
             showMobileRefresh={false}
             desktop={
@@ -217,8 +215,7 @@ export function CommissionPlansLoadingShell() {
         description="Set base pay and commission rules for roles or staff."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Commission plan tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Commission plan toolbar"
             desktop={
               <>
@@ -258,11 +255,8 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle={staffAccounts ? 'Staff accounts' : 'Users tools'}
-            sheetSubtitle={
-              <span>{staffAccounts ? 'Filters, refresh and export' : 'Filters, refresh and add user'}</span>
-            }
-            triggerAriaLabel={staffAccounts ? 'Staff accounts toolbar' : 'Users toolbar'}
+            sheetTitle="Actions"
+            triggerAriaLabel="Filters and actions"
             desktop={
               <>
                 <PageRefreshButton />

@@ -277,8 +277,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Commission plan tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Commission plan toolbar"
             desktop={
               <>

@@ -575,8 +575,7 @@ export function StaffOnboardingPage({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Onboarding tools"
-            sheetSubtitle={<span>Status and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Onboarding toolbar"
             desktop={
               <div className="flex items-center gap-2">

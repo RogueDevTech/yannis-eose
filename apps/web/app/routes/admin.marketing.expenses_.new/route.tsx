@@ -8,7 +8,7 @@ export const meta: MetaFunction = () => [{ title: 'Log Spend — Ads Expense —
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.adSpend');
-  const guard = ensureBranchScopeOrRedirect(request, user, '/admin/marketing/ad-spend');
+  const guard = ensureBranchScopeOrRedirect(request, user, '/admin/marketing/expenses');
   if (guard) return guard;
   return json({});
 }

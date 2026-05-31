@@ -532,69 +532,53 @@ export function UsersListPage({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle={staffAccounts ? 'Staff accounts' : 'Users tools'}
-            sheetSubtitle={
-              <span>{staffAccounts ? 'Filters, refresh and export' : 'Filters, refresh and add user'}</span>
-            }
-            triggerAriaLabel={staffAccounts ? 'Staff accounts toolbar' : 'Users toolbar'}
+            sheetTitle="Actions"
+            triggerAriaLabel="Filters and actions"
             filtersBadgeCount={filtersToolbarBadge}
             filters={
               <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                  <div className="relative">
-                    {currentStatusParam !== 'ALL' && (
-                      <FilterDismiss onClear={() => handleStatusChange('ALL')} />
-                    )}
-                    <FormSelect
-                      value={currentStatusParam}
-                      onChange={(e) => handleStatusChange(e.target.value)}
-                      options={[
-                        { value: 'ALL', label: 'All Status' },
-                        { value: 'PENDING', label: 'Pending' },
-                        { value: 'ACTIVE', label: 'Active' },
-                        { value: 'INACTIVE', label: 'Inactive' },
-                        { value: 'ARCHIVED', label: 'Archived' },
-                        { value: 'DEACTIVATED', label: 'Deactivated' },
-                      ]}
-                      wrapperClassName="w-full"
-                    />
-                  </div>
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                  <FormSelect
+                    value={currentStatusParam}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={[
+                      { value: 'ALL', label: 'All Status' },
+                      { value: 'PENDING', label: 'Pending' },
+                      { value: 'ACTIVE', label: 'Active' },
+                      { value: 'INACTIVE', label: 'Inactive' },
+                      { value: 'ARCHIVED', label: 'Archived' },
+                      { value: 'DEACTIVATED', label: 'Deactivated' },
+                    ]}
+                    className="!bg-transparent !border-transparent !text-center"
+                    controlSize="sm"
+                    openAs="modal"
+                    wrapperClassName="w-full"
+                  />
                 </div>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Role</span>
-                  <div className="relative">
-                    {currentRoleParam !== 'ALL' && (
-                      <FilterDismiss onClear={() => handleRoleChange('ALL')} />
-                    )}
-                    <SearchableSelect
-                      id="users-role-filter-kebab"
-                      value={currentRoleParam}
-                      onChange={handleRoleChange}
-                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
-                      placeholder="All Roles"
-                      searchPlaceholder="Search roles…"
-                      wrapperClassName="w-full"
-                    />
-                  </div>
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                  <SearchableSelect
+                    id="users-role-filter-kebab"
+                    value={currentRoleParam}
+                    onChange={handleRoleChange}
+                    options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    placeholder="All Roles"
+                    searchPlaceholder="Search roles…"
+                    triggerClassName="!bg-transparent !border-transparent !text-center"
+                    wrapperClassName="w-full"
+                  />
                 </div>
                 {branchPickerVisible ? (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Branch</span>
-                    <div className="relative">
-                      {currentBranchParam !== 'ALL' && (
-                        <FilterDismiss onClear={() => handleBranchChange('ALL')} />
-                      )}
-                      <SearchableSelect
-                        id="users-branch-filter-kebab"
-                        value={currentBranchParam}
-                        onChange={handleBranchChange}
-                        options={branchPickerOptions}
-                        placeholder="All branches"
-                        searchPlaceholder="Search branches…"
-                        wrapperClassName="w-full"
-                      />
-                    </div>
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <SearchableSelect
+                      id="users-branch-filter-kebab"
+                      value={currentBranchParam}
+                      onChange={handleBranchChange}
+                      options={branchPickerOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches…"
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                    />
                   </div>
                 ) : null}
               </>
@@ -733,9 +717,6 @@ export function UsersListPage({
             className="!border-0"
             hideMobileSheet
             badgeCount={filtersToolbarBadge}
-            sheetSubtitle={
-              <span>Search runs on the full roster server-side. Status and role reload the list.</span>
-            }
             searchRow={searchRow}
             desktopInlineFilters={
               <>

@@ -13,8 +13,7 @@ export function BranchesListLoadingShell() {
         description="Manage company branches."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Branch tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Branch toolbar"
             desktop={
               <>

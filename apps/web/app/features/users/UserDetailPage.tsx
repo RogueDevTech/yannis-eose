@@ -1014,8 +1014,7 @@ export function UserDetailPage({
                     </div>
                     <div className="flex-shrink-0 hidden md:block">
                       <PageHeaderMobileTools
-                        sheetTitle="Profile tools"
-                        sheetSubtitle={<span>Refresh and account actions</span>}
+                        sheetTitle="Actions"
                         triggerAriaLabel="Profile toolbar"
                         desktop={
                           <div className="flex flex-wrap items-center gap-2">
@@ -1868,7 +1867,7 @@ export function UserDetailPage({
             )
           )}
           {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
-            <BranchScopedLink to={`/hr/users/${user.id}/edit`} actionLabel="editing this user" prefetch="intent" className="btn-primary btn-sm w-full justify-center" onClick={() => setMobileProfileSheetOpen(false)}>Edit user</BranchScopedLink>
+            <BranchScopedLink to={`/hr/users/${user.id}/edit`} actionLabel="editing this user" prefetch="intent" className="btn-secondary btn-sm w-full justify-center" onClick={() => setMobileProfileSheetOpen(false)}>Edit user</BranchScopedLink>
           )}
           {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
             <>

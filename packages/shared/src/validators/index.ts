@@ -253,6 +253,8 @@ export {
   createAdSpendBatchWithBranchSchema,
   adPlatformSchema,
   adPlatformValues,
+  expenseCategorySchema,
+  expenseCategoryValues,
   listAdSpendSchema,
   listAdSpendGroupedSchema,
   adSpendStatusCountsSchema,

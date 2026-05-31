@@ -783,8 +783,7 @@ export function DisbursementsPage({
         description="Send and track marketing disbursements."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Disbursement tools"
-            sheetSubtitle={<span>Date range and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Disbursement toolbar"
             filtersBadgeCount={activeFilterBadge}
             desktop={
@@ -811,35 +810,39 @@ export function DisbursementsPage({
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss onClear={() => handleStatusChange('ALL')} />
                     )}
-                    <FormSelect
-                      id="disbursement-status-filter-sheet"
-                      value={selectedStatus}
-                      onChange={(e) => handleStatusChange(e.target.value)}
-                      options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
-                      controlSize="lg"
-                      className="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      aria-label="Filter by status"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <FormSelect
+                        id="disbursement-status-filter-sheet"
+                        value={selectedStatus}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
+                        controlSize="sm"
+                        openAs="modal"
+                        className="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        aria-label="Filter by status"
+                      />
+                    </div>
                   </div>
                   <div className="relative">
                     {selectedReceiver !== 'ALL' && (
                       <FilterDismiss onClear={() => handleReceiverChange('ALL')} />
                     )}
-                    <SearchableSelect
-                      id="disbursement-recipient-filter-sheet"
-                      value={selectedReceiver}
-                      onChange={handleReceiverChange}
-                      options={[
-                        { value: 'ALL', label: 'All recipients' },
-                        ...recipients.map((u) => ({ value: u.id, label: u.name })),
-                      ]}
-                      controlSize="lg"
-                      triggerClassName="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      placeholder="All recipients"
-                      searchPlaceholder="Search recipients..."
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <SearchableSelect
+                        id="disbursement-recipient-filter-sheet"
+                        value={selectedReceiver}
+                        onChange={handleReceiverChange}
+                        options={[
+                          { value: 'ALL', label: 'All recipients' },
+                          ...recipients.map((u) => ({ value: u.id, label: u.name })),
+                        ]}
+                        triggerClassName="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        placeholder="All recipients"
+                        searchPlaceholder="Search recipients..."
+                      />
+                    </div>
                   </div>
                 </>
               ) : mainTab === 'balances' ? (
@@ -848,39 +851,45 @@ export function DisbursementsPage({
                     {balancesRoleFilter !== 'ALL' && (
                       <FilterDismiss onClear={() => handleBalancesRoleChange('ALL')} />
                     )}
-                    <FormSelect
-                      id="balances-role-filter-sheet"
-                      value={balancesRoleFilter}
-                      onChange={(e) => handleBalancesRoleChange(e.target.value)}
-                      options={[
-                        { value: 'ALL', label: 'All roles' },
-                        { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-                      ]}
-                      controlSize="lg"
-                      className="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      aria-label="Filter balances by role"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <FormSelect
+                        id="balances-role-filter-sheet"
+                        value={balancesRoleFilter}
+                        onChange={(e) => handleBalancesRoleChange(e.target.value)}
+                        options={[
+                          { value: 'ALL', label: 'All roles' },
+                          { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+                        ]}
+                        controlSize="sm"
+                        openAs="modal"
+                        className="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        aria-label="Filter balances by role"
+                      />
+                    </div>
                   </div>
                   <div className="relative">
                     {balancesStatusFilter !== 'ALL' && (
                       <FilterDismiss onClear={() => handleBalancesStatusChange('ALL')} />
                     )}
-                    <FormSelect
-                      id="balances-status-filter-sheet"
-                      value={balancesStatusFilter}
-                      onChange={(e) => handleBalancesStatusChange(e.target.value)}
-                      options={[
-                        { value: 'ALL', label: 'All balances' },
-                        { value: 'POSITIVE', label: 'Positive' },
-                        { value: 'ZERO', label: 'Zero' },
-                        { value: 'NEGATIVE', label: 'Negative' },
-                      ]}
-                      controlSize="lg"
-                      className="!bg-app-hover text-center"
-                      wrapperClassName="w-full"
-                      aria-label="Filter by balance status"
-                    />
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <FormSelect
+                        id="balances-status-filter-sheet"
+                        value={balancesStatusFilter}
+                        onChange={(e) => handleBalancesStatusChange(e.target.value)}
+                        options={[
+                          { value: 'ALL', label: 'All balances' },
+                          { value: 'POSITIVE', label: 'Positive' },
+                          { value: 'ZERO', label: 'Zero' },
+                          { value: 'NEGATIVE', label: 'Negative' },
+                        ]}
+                        controlSize="sm"
+                        openAs="modal"
+                        className="!bg-transparent !border-transparent !text-center"
+                        wrapperClassName="w-full"
+                        aria-label="Filter by balance status"
+                      />
+                    </div>
                   </div>
                 </>
               ) : undefined

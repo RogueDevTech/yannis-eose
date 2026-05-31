@@ -409,8 +409,7 @@ export function MarketingOverviewPage({
         description="Track marketing activity and funding."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Marketing overview tools"
-            sheetSubtitle={<span>Date range and refresh</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Marketing overview tools"
             mobileLeading={
               liveEvents != null && liveEvents.length > 0 ? (

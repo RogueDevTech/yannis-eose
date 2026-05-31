@@ -440,8 +440,7 @@ export function LogisticsTeamPage({
         description="View provider delivery performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Logistics agent tools"
-            sheetSubtitle={<span>Sort and date range</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Logistics agent toolbar and date range"
             filtersBadgeCount={logisticsTeamToolbarFilterBadge}
             filters={
@@ -514,7 +513,6 @@ export function LogisticsTeamPage({
           className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={logisticsTeamToolbarFilterBadge}
-          sheetSubtitle={<span>Sort options apply immediately</span>}
           searchRow={
             <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput

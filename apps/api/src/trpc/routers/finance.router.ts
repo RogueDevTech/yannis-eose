@@ -110,8 +110,8 @@ export const financeRouter = router({
   // Profit reports
   profitReport: permissionProcedure('finance.read')
     .input(profitReportSchema)
-    .query(async ({ input }) => {
-      return getFinanceService().getProfitReport(input);
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().getProfitReport(input, ctx.effectiveBranchIds);
     }),
 
   /** Per-shipment unit economics — costs in vs estimated revenue from sold qty. */
@@ -225,7 +225,7 @@ export const financeRouter = router({
       };
 
       const [profit, remit, payroll, approvals, branches, buyers, fundingSummary, byProduct, byLocation] = await Promise.all([
-        getFinanceService().getProfitReport(profitInput),
+        getFinanceService().getProfitReport(profitInput, ctx.effectiveBranchIds),
         getLogisticsService()
           .listDeliveryRemittances({ page: 1, limit: 1 }, ctx.user)
           .catch(() => null),
@@ -255,10 +255,10 @@ export const financeRouter = router({
           .getFundingSummary(input.branchId ?? null)
           .catch(() => ({ totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 })),
         getLogisticsService()
-          .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate)
+          .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
           .catch(() => []),
         getLogisticsService()
-          .deliveredOrdersByLocation(input.branchId, input.startDate, input.endDate)
+          .deliveredOrdersByLocation(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
           .catch(() => []),
       ]);
 

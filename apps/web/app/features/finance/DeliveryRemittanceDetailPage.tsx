@@ -218,8 +218,7 @@ export function DeliveryRemittanceDetailPage({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Cash remittance tools"
-            sheetSubtitle={<span>Refresh and navigation</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Cash remittance toolbar"
             desktop={
               <>

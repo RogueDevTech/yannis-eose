@@ -415,29 +415,38 @@ export function FollowUpPage({
         description="Pull orders from any status back into the pipeline."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Follow-up tools"
-            sheetSubtitle={<span>Filters and actions</span>}
+            sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
             filtersBadgeCount={activeFilterCount}
             desktop={<PageRefreshButton />}
             filters={
               <>
                 {!isCartView && (
-                  <SearchableSelect
-                    id="follow-up-mobile-closer"
-                    value={filters.assignedCsId}
-                    onChange={handleCloserChange}
-                    options={closerOptions}
-                    placeholder="All closers"
-                    searchPlaceholder="Search closers…"
-                  />
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <SearchableSelect
+                      id="follow-up-mobile-closer"
+                      value={filters.assignedCsId}
+                      onChange={handleCloserChange}
+                      options={closerOptions}
+                      placeholder="All closers"
+                      searchPlaceholder="Search closers…"
+                      triggerClassName="!bg-transparent !border-transparent !text-center"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 )}
-                <FormSelect
-                  id="follow-up-mobile-age"
-                  value={filters.olderThanDays}
-                  onChange={(e) => handleAgeChange(e.target.value)}
-                  options={AGE_OPTIONS}
-                />
+                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                  <FormSelect
+                    id="follow-up-mobile-age"
+                    value={filters.olderThanDays}
+                    onChange={(e) => handleAgeChange(e.target.value)}
+                    options={AGE_OPTIONS}
+                    className="!bg-transparent !border-transparent !text-center"
+                    controlSize="sm"
+                    openAs="modal"
+                    wrapperClassName="w-full"
+                  />
+                </div>
               </>
             }
           />
