@@ -349,7 +349,6 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   },
   {
     label: 'Schedule date',
-    suppressAfterConfirm: true,
     getValue: (o) => o.preferredDeliveryDate,
     format: (v) => (v ? formatScheduleDateDisplay(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
@@ -3822,6 +3821,9 @@ function EditOrderDetailsModal({
   const [deliveryState, setDeliveryState] = useState(order.deliveryState ?? '');
   const [deliveryNotes, setDeliveryNotes] = useState(order.deliveryNotes ?? '');
   const [customerEmail, setCustomerEmail] = useState(order.customerEmail ?? '');
+  const [preferredDeliveryDate, setPreferredDeliveryDate] = useState(
+    order.preferredDeliveryDate?.slice(0, 10) ?? '',
+  );
 
   useCloseOnFetcherSuccess(fetcher, onClose);
 
@@ -3869,6 +3871,14 @@ function EditOrderDetailsModal({
             { value: '', label: 'Select state' },
             ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
           ]}
+        />
+
+        <TextInput
+          label="Scheduled delivery date"
+          name="preferredDeliveryDate"
+          type="date"
+          value={preferredDeliveryDate}
+          onChange={(e) => setPreferredDeliveryDate(e.target.value)}
         />
 
         <Textarea
