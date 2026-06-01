@@ -3512,13 +3512,20 @@ export class OrdersService {
       ).trim();
     }
 
-    // Clear lock when order moves past CS engagement
+    // Clear lock when order moves past CS engagement.
     if (
       newStatus === 'CONFIRMED' ||
       newStatus === 'CANCELLED'
     ) {
       updateFields['lockedUntil'] = null;
       updateFields['lockedBy'] = null;
+    }
+
+    // Any status change clears the scheduled callback — once the closer acts
+    // on the order (confirm, engage, transition, delete, etc.) the reminder
+    // is no longer relevant.
+    if (newStatus !== currentStatus) {
+      updateFields['callbackScheduledAt'] = null;
     }
 
     // Restoring a cancelled or deleted order — send it back to the unassigned pool:
@@ -6882,27 +6889,54 @@ export class OrdersService {
 
   /**
    * Cron: every 2 minutes, check for callbacks that are due and notify the assigned Sales closer.
-   * Uses a Redis set to avoid duplicate notifications for the same order.
+   * Max 3 reminders per callback schedule — after 3 the callback is auto-cleared.
    */
   @Cron('0 */2 * * * *')
   async handleDueCallbacks(): Promise<void> {
+    const MAX_REMINDERS = 3;
     try {
       const dueOrders = await this.getCallbackQueue();
       for (const order of dueOrders) {
         if (!order.assignedCsId) continue;
 
-        // Prevent duplicate notifications — Redis key expires after 30 minutes
+        // Track how many reminders have been sent for this callback schedule.
+        // Key resets when a new callback is scheduled (callbackAttempts changes).
+        const counterKey = `callback_reminders:${order.id}:${order.callbackAttempts ?? 0}`;
+        const sent = Number(await this.redis.get(counterKey) ?? 0);
+
+        if (sent >= MAX_REMINDERS) {
+          // Max reminders reached — clear the callback so cron stops picking it up.
+          await this.db
+            .update(schema.orders)
+            .set({ callbackScheduledAt: null })
+            .where(eq(schema.orders.id, order.id));
+          await this.redis.del(counterKey);
+          continue;
+        }
+
+        // Reminder gap scales with the original callback delay:
+        // gap = delay / 3, floored at 5 min, capped at 30 min.
+        // e.g. 10-min callback → reminders every ~3 min; 2-hr callback → every 30 min.
+        const callbackDue = order.callbackScheduledAt ? new Date(order.callbackScheduledAt).getTime() : 0;
+        const updatedMs = order.updatedAt ? new Date(order.updatedAt).getTime() : callbackDue;
+        const originalDelayMs = Math.max(callbackDue - updatedMs, 0);
+        const gapSeconds = Math.max(300, Math.min(1800, Math.round(originalDelayMs / 3 / 1000)));
+
         const dedupKey = `callback_notified:${order.id}:${order.callbackAttempts ?? 0}`;
         const alreadyNotified = await this.redis.get(dedupKey);
         if (alreadyNotified) continue;
 
-        await this.redis.set(dedupKey, '1', 'EX', 1800);
+        await this.redis.set(dedupKey, '1', 'EX', gapSeconds);
+        await this.redis.incr(counterKey);
+        // Expire counter after 24h as a safety net
+        await this.redis.expire(counterKey, 86400);
 
+        const reminderNum = sent + 1;
         this.notifications.enqueueCreate({
           userId: order.assignedCsId,
           type: 'order:callback_due',
           title: 'Callback due now',
-          body: `Order ${order.id.slice(0, 8)}... is due for a callback. Attempt ${order.callbackAttempts ?? 0}/3.`,
+          body: `Order ${order.id.slice(0, 8)}… is due for a callback (reminder ${reminderNum}/${MAX_REMINDERS}).`,
           data: { orderId: order.id },
         });
 

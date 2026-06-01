@@ -4432,22 +4432,21 @@ export class MarketingService {
         )!,
       );
     }
-    // Duplicate type filter — classification uses MB comparison + campaign comparison.
-    // The campaign comparison needs the orders join, so we add these as raw SQL
-    // conditions that reference both tables (the main query already LEFT JOINs orders).
+    // Duplicate type filter — campaign match takes priority (forms are 1:1 with MBs).
+    // Same campaign = resubmission regardless of MB; cross-funnel requires different campaign + different MB.
     const typeConditions: SQL[] = [];
     if (input.duplicateType === 'resubmission') {
       typeConditions.push(
-        sql`${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
         sql`${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId}`,
       );
     } else if (input.duplicateType === 'same-mb') {
       typeConditions.push(
-        sql`${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
         sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId}`,
+        sql`${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
       );
     } else if (input.duplicateType === 'cross-funnel') {
       typeConditions.push(
+        sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId}`,
         or(
           sql`${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
           isNull(schema.crossFunnelAttempts.originalMediaBuyerId),
@@ -4471,6 +4470,7 @@ export class MarketingService {
     const ownerAlias = alias(schema.users, 'cfa_owner');
 
     const campaignAlias = alias(schema.campaigns, 'cfa_campaign');
+    const originalCampaignAlias = alias(schema.campaigns, 'cfa_orig_campaign');
 
     const rows = await this.db
       .select({
@@ -4488,6 +4488,7 @@ export class MarketingService {
         originalMediaBuyerId: schema.crossFunnelAttempts.originalMediaBuyerId,
         originalMediaBuyerName: winnerAlias.name,
         originalCampaignId: schema.orders.campaignId,
+        originalCampaignName: originalCampaignAlias.name,
         originalOrderStatus: schema.orders.status,
         originalOrderAmount: schema.orders.totalAmount,
         originalOrderNumber: schema.orders.orderNumber,
@@ -4499,6 +4500,7 @@ export class MarketingService {
       .leftJoin(ownerAlias, eq(schema.crossFunnelAttempts.mediaBuyerId, ownerAlias.id))
       .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
       .leftJoin(campaignAlias, eq(schema.crossFunnelAttempts.campaignId, campaignAlias.id))
+      .leftJoin(originalCampaignAlias, eq(schema.orders.campaignId, originalCampaignAlias.id))
       .where(whereClause)
       .orderBy(desc(schema.crossFunnelAttempts.attemptedAt))
       .limit(limit)
@@ -4549,14 +4551,17 @@ export class MarketingService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     // Total + unique + per-type breakdown in one query using CASE.
-    // Type logic: same MB + same campaign = resubmission, same MB + different campaign = same-mb, different MB = cross-funnel.
+    // Type logic: campaign match takes priority (forms are 1:1 with MBs).
+    //   same campaign = resubmission (regardless of MB attribution)
+    //   different campaign + same MB = same-mb
+    //   different campaign + different MB = cross-funnel
     const [totals = { totalAttempts: 0, uniqueCustomers: 0, resubmissions: 0, sameMb: 0, crossFunnel: 0 }] = await this.db
       .select({
         totalAttempts: count(),
         uniqueCustomers: sql<number>`COUNT(DISTINCT ${schema.crossFunnelAttempts.customerPhoneHash})`,
-        resubmissions: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId} AND ${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId})`,
-        sameMb: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId} AND ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId})`,
-        crossFunnel: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId} OR ${schema.crossFunnelAttempts.originalMediaBuyerId} IS NULL)`,
+        resubmissions: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId})`,
+        sameMb: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId} AND ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId})`,
+        crossFunnel: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId} AND (${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId} OR ${schema.crossFunnelAttempts.originalMediaBuyerId} IS NULL))`,
       })
       .from(schema.crossFunnelAttempts)
       .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))

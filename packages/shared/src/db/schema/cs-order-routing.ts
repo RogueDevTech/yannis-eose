@@ -3,7 +3,7 @@ import { branches } from './branches';
 import { branchTeams } from './branch-teams';
 import { products } from './products';
 import { csOrderRoutingStrategyEnum, csRoutingRelationshipModeEnum } from './enums';
-import { uuidv7Pk, timestampColumns } from './helpers';
+import { uuidv7Pk, timestampColumns, temporalColumns } from './helpers';
 
 /**
  * Per-branch CS auto-dispatch routing: match orders (by owning branch + optional product)
@@ -21,6 +21,7 @@ export const csOrderRoutingRules = pgTable('cs_order_routing_rules', {
   priority: integer('priority').notNull().default(0),
   enabled: boolean('enabled').notNull().default(true),
   strategy: csOrderRoutingStrategyEnum('strategy').notNull().default('EQUAL'),
+  ...temporalColumns,
   ...timestampColumns,
 });
 
@@ -33,6 +34,7 @@ export const csOrderRoutingBranchSettings = pgTable('cs_order_routing_branch_set
     .primaryKey()
     .references(() => branches.id, { onDelete: 'cascade' }),
   relationshipMode: csRoutingRelationshipModeEnum('relationship_mode').notNull().default('BRANCH_DEFAULT'),
+  ...temporalColumns,
   ...timestampColumns,
 });
 
@@ -49,5 +51,6 @@ export const csOrderRoutingRuleTargets = pgTable('cs_order_routing_rule_targets'
   teamId: uuid('team_id').references(() => branchTeams.id, { onDelete: 'cascade' }),
   /** Used when strategy = WEIGHTED; minimum 1 at validation time. */
   weight: integer('weight').notNull().default(1),
+  ...temporalColumns,
   ...timestampColumns,
 });

@@ -1,6 +1,6 @@
 import { boolean, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { branchTeamDepartmentEnum } from './enums';
-import { uuidv7Pk, timestampColumns } from './helpers';
+import { uuidv7Pk, timestampColumns, temporalColumns } from './helpers';
 import { branches } from './branches';
 import { users } from './users';
 
@@ -52,6 +52,7 @@ export const branchTeams = pgTable('branch_teams', {
     .references(() => branchDepartments.id),
   department: branchTeamDepartmentEnum('department').notNull(),
   name: text('name'),
+  ...temporalColumns,
   ...timestampColumns,
 });
 
@@ -88,6 +89,7 @@ export const branchTeamSettings = pgTable(
     key: text('key').notNull(),
     value: jsonb('value').notNull().$type<Record<string, unknown>>(),
     updatedBy: uuid('updated_by').references(() => users.id),
+    ...temporalColumns,
     ...timestampColumns,
   },
   (t) => ({

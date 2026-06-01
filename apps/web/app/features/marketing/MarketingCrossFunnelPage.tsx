@@ -42,6 +42,7 @@ export interface CrossFunnelAttemptRow {
   originalMediaBuyerId: string | null;
   originalMediaBuyerName: string | null;
   originalCampaignId: string | null;
+  originalCampaignName: string | null;
   originalOrderStatus: string | null;
   originalOrderAmount: string | null;
   originalOrderNumber: number | null;
@@ -76,8 +77,10 @@ interface PageProps {
 type DuplicateKind = 'resubmission' | 'same-mb' | 'cross-funnel';
 
 function getDuplicateKind(row: CrossFunnelAttemptRow): DuplicateKind {
-  if (!row.originalMediaBuyerId || row.mediaBuyerId !== row.originalMediaBuyerId) return 'cross-funnel';
+  // Campaign match takes priority: same form = resubmission, regardless of MB attribution.
+  // Forms are 1:1 with MBs, so a same-campaign-different-MB is a data edge case, not cross-funnel.
   if (row.campaignId && row.originalCampaignId && row.campaignId === row.originalCampaignId) return 'resubmission';
+  if (!row.originalMediaBuyerId || row.mediaBuyerId !== row.originalMediaBuyerId) return 'cross-funnel';
   return 'same-mb';
 }
 
@@ -764,7 +767,7 @@ function DuplicateCompareOverlay({
             <CompareRow
               label="Form"
               left={row.campaignName ?? '—'}
-              right={row.campaignName ?? '—'}
+              right={row.originalCampaignName ?? row.campaignName ?? '—'}
             />
           </tbody>
         </table>

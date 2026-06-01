@@ -10,6 +10,7 @@ import type {
   UpdateCsRoutingRuleInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 export type CsRoutingDispatchResolution = {
@@ -92,19 +93,21 @@ export class CsOrderRoutingService {
 
   async setRelationshipMode(actor: SessionUser, ownerBranchId: string, mode: CsRoutingRelationshipMode) {
     assertRoutingBranchScope(actor, ownerBranchId);
-    await this.db
-      .insert(schema.csOrderRoutingBranchSettings)
-      .values({
-        ownerBranchId,
-        relationshipMode: mode,
-      })
-      .onConflictDoUpdate({
-        target: schema.csOrderRoutingBranchSettings.ownerBranchId,
-        set: {
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .insert(schema.csOrderRoutingBranchSettings)
+        .values({
+          ownerBranchId,
           relationshipMode: mode,
-          updatedAt: new Date(),
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: schema.csOrderRoutingBranchSettings.ownerBranchId,
+          set: {
+            relationshipMode: mode,
+            updatedAt: new Date(),
+          },
+        });
+    });
     return { ok: true as const };
   }
 
@@ -158,29 +161,33 @@ export class CsOrderRoutingService {
       }
     }
 
-    const [rule] = await this.db
-      .insert(schema.csOrderRoutingRules)
-      .values({
-        ownerBranchId: input.ownerBranchId,
-        productId: input.productId ?? null,
-        priority: input.priority ?? 0,
-        enabled: input.enabled ?? true,
-        strategy,
-      })
-      .returning();
+    const rule = await withActor(this.db, actor, async (tx) => {
+      const [created] = await tx
+        .insert(schema.csOrderRoutingRules)
+        .values({
+          ownerBranchId: input.ownerBranchId,
+          productId: input.productId ?? null,
+          priority: input.priority ?? 0,
+          enabled: input.enabled ?? true,
+          strategy,
+        })
+        .returning();
 
-    if (!rule) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create routing rule' });
-    }
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create routing rule' });
+      }
 
-    await this.db.insert(schema.csOrderRoutingRuleTargets).values(
-      input.targets.map((t) => ({
-        ruleId: rule.id,
-        servicingBranchId: t.servicingBranchId,
-        teamId: t.teamId ?? null,
-        weight: t.weight ?? 1,
-      })),
-    );
+      await tx.insert(schema.csOrderRoutingRuleTargets).values(
+        input.targets.map((t) => ({
+          ruleId: created.id,
+          servicingBranchId: t.servicingBranchId,
+          teamId: t.teamId ?? null,
+          weight: t.weight ?? 1,
+        })),
+      );
+
+      return created;
+    });
 
     return rule;
   }
@@ -212,30 +219,32 @@ export class CsOrderRoutingService {
       }
     }
 
-    await this.db
-      .update(schema.csOrderRoutingRules)
-      .set({
-        ...(input.productId !== undefined ? { productId: input.productId } : {}),
-        ...(input.priority !== undefined ? { priority: input.priority } : {}),
-        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
-        ...(input.strategy !== undefined ? { strategy: input.strategy } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.csOrderRoutingRules.id, input.ruleId));
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.csOrderRoutingRules)
+        .set({
+          ...(input.productId !== undefined ? { productId: input.productId } : {}),
+          ...(input.priority !== undefined ? { priority: input.priority } : {}),
+          ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+          ...(input.strategy !== undefined ? { strategy: input.strategy } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.csOrderRoutingRules.id, input.ruleId));
 
-    if (input.targets?.length) {
-      await this.db
-        .delete(schema.csOrderRoutingRuleTargets)
-        .where(eq(schema.csOrderRoutingRuleTargets.ruleId, input.ruleId));
-      await this.db.insert(schema.csOrderRoutingRuleTargets).values(
-        input.targets.map((t) => ({
-          ruleId: input.ruleId,
-          servicingBranchId: t.servicingBranchId,
-          teamId: t.teamId ?? null,
-          weight: t.weight ?? 1,
-        })),
-      );
-    }
+      if (input.targets?.length) {
+        await tx
+          .delete(schema.csOrderRoutingRuleTargets)
+          .where(eq(schema.csOrderRoutingRuleTargets.ruleId, input.ruleId));
+        await tx.insert(schema.csOrderRoutingRuleTargets).values(
+          input.targets.map((t) => ({
+            ruleId: input.ruleId,
+            servicingBranchId: t.servicingBranchId,
+            teamId: t.teamId ?? null,
+            weight: t.weight ?? 1,
+          })),
+        );
+      }
+    });
 
     const [row] = await this.db
       .select()
@@ -253,7 +262,9 @@ export class CsOrderRoutingService {
       .limit(1);
     if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Routing rule not found' });
     assertRoutingBranchScope(actor, existing.ownerBranchId);
-    await this.db.delete(schema.csOrderRoutingRules).where(eq(schema.csOrderRoutingRules.id, ruleId));
+    await withActor(this.db, actor, async (tx) => {
+      await tx.delete(schema.csOrderRoutingRules).where(eq(schema.csOrderRoutingRules.id, ruleId));
+    });
     return { ok: true as const };
   }
 
