@@ -562,11 +562,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const deliveryState = formData.get('deliveryState')?.toString()?.trim();
     const deliveryNotes = formData.get('deliveryNotes')?.toString()?.trim();
     const customerEmail = formData.get('customerEmail')?.toString()?.trim();
+    const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString()?.trim();
     if (customerName !== undefined && customerName !== '') body.customerName = customerName;
     if (deliveryAddress !== undefined) body.deliveryAddress = deliveryAddress;
     if (deliveryState !== undefined) body.deliveryState = deliveryState;
     if (deliveryNotes !== undefined) body.deliveryNotes = deliveryNotes;
     if (customerEmail !== undefined && customerEmail !== '') body.customerEmail = customerEmail;
+    if (preferredDeliveryDate !== undefined) body.preferredDeliveryDate = preferredDeliveryDate || null;
     const res = await apiRequest<unknown>('/trpc/orders.update', {
       method: 'POST',
       cookie,

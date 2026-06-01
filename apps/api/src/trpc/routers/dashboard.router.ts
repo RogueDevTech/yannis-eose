@@ -123,9 +123,9 @@ async function _ceoOverviewFetch(params: {
   }
 
   const safeMarketingMetrics = marketingMetrics ?? {
-    totalSpend: 0, totalOrders: 0, deliveredOrders: 0,
-    deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0,
-    cpa: 0, trueRoas: 0, deliveryRate: 0,
+    totalSpend: 0, approvedSpend: 0, pendingSpend: 0, totalOrders: 0,
+    deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0,
+    confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0,
   };
   const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
   const safeCSWorkloads = csWorkloads ?? [];
@@ -188,6 +188,8 @@ async function _ceoOverviewFetch(params: {
     },
     marketing: {
       totalSpend: safeMarketingMetrics.totalSpend ?? 0,
+      approvedSpend: safeMarketingMetrics.approvedSpend ?? 0,
+      deliveredRevenue: safeMarketingMetrics.deliveredRevenue ?? 0,
       cpa: safeMarketingMetrics.cpa ?? 0,
       roas: safeMarketingMetrics.trueRoas ?? 0,
       confirmationRate: safeMarketingMetrics.confirmationRate ?? 0,

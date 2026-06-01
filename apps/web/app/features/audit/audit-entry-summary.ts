@@ -67,6 +67,11 @@ export const AUDIT_TABLE_LABELS: Record<string, string> = {
   permissions: 'Permissions',
   user_permissions: 'User Permissions',
   mirror_sessions: 'Mirror Mode',
+  cs_order_routing_rules: 'CS Routing Rules',
+  cs_order_routing_rule_targets: 'CS Routing Targets',
+  cs_order_routing_branch_settings: 'CS Routing Branch Settings',
+  branch_teams: 'Branch Teams',
+  branch_team_settings: 'Branch Team Settings',
 };
 
 export function formatAuditTableName(name: string): string {

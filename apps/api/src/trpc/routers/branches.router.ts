@@ -1151,7 +1151,7 @@ export const branchesRouter = router({
       const dept = await loadTeamDepartment(input.teamId);
       // Supervisor of this team can rename it; deletion stays Head-only.
       await assertCanManageTeamOrSupervisor(ctx.user, input.teamId, dept);
-      return getBranchTeamsService().updateTeam(input.teamId, { name: input.name });
+      return getBranchTeamsService().updateTeam(input.teamId, { name: input.name }, ctx.user);
     }),
 
   deleteBranchTeam: authedProcedure
@@ -1159,7 +1159,7 @@ export const branchesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const dept = await loadTeamDepartment(input.teamId);
       assertCanManageTeamDept(ctx.user, dept);
-      await getBranchTeamsService().deleteTeam(input.teamId);
+      await getBranchTeamsService().deleteTeam(input.teamId, ctx.user);
       return { success: true as const };
     }),
 
