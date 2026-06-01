@@ -1,5 +1,6 @@
 import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { SmartPick } from '~/components/ui/smart-pick';
@@ -1003,7 +1004,7 @@ function OrdersListPageImpl({
   // cart-abandonment view, where the rows are carts, not orders.
   const canBulkAction =
     !isCartAbandonmentView &&
-    (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER');
+    (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER');
 
   const ordersListColumns = useMemo((): CompactTableColumn<Order>[] => {
     const cols: CompactTableColumn<Order>[] = [
@@ -1019,7 +1020,7 @@ function OrdersListPageImpl({
         render: (order) => (
           <div className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 truncate font-medium text-app-fg" title={order.customerName ?? undefined}>
-              {order.customerName}
+              {clipName(order.customerName)}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
@@ -1192,8 +1193,8 @@ function OrdersListPageImpl({
       const body = (
         <>
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
-              {order.customerName || '—'}
+            <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={order.customerName ?? undefined}>
+              {clipName(order.customerName)}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}

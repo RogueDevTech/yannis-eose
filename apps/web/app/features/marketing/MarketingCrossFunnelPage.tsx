@@ -1,6 +1,7 @@
 import { Suspense, useState, useMemo } from 'react';
 import { Await, Link, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { clipName } from '~/lib/clip-name';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -189,8 +190,8 @@ export function MarketingCrossFunnelPage({
       key: 'customer',
       header: 'Customer',
       render: (row) => (
-        <span className="font-medium text-app-fg">
-          {row.customerName}
+        <span className="font-medium text-app-fg" title={row.customerName ?? undefined}>
+          {clipName(row.customerName)}
           {/^test([^a-zA-Z]|$)/i.test(row.customerName?.trim() ?? '') && (
             <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
           )}
@@ -571,8 +572,8 @@ export function MarketingCrossFunnelPage({
             className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-sm font-medium text-app-fg">
-                {row.customerName}
+              <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={row.customerName ?? undefined}>
+                {clipName(row.customerName)}
                 <DuplicateTag row={row} />
               </span>
               {row.originalOrderNumber && (

@@ -103,13 +103,19 @@ export function CashRemittanceCreateModal({
       : null;
   }, [selectedOrders]);
 
-  const totalAmount = useMemo(
+  const totalOrderAmount = useMemo(
+    () => selectedOrders.reduce((acc, o) => acc + lineAmount(o), 0),
+    [selectedOrders],
+  );
+
+  const totalDeliveryFees = useMemo(
     () => selectedOrders.reduce((acc, o) => {
-      const fee = parseFloat(deliveryFees[o.id] ?? '0') || 0;
-      return acc + lineAmount(o) + fee;
+      return acc + (parseFloat(deliveryFees[o.id] ?? '0') || 0);
     }, 0),
     [selectedOrders, deliveryFees],
   );
+
+  const totalAmount = totalOrderAmount - totalDeliveryFees;
 
   const submitting = fetcher.state !== 'idle';
 
@@ -190,20 +196,24 @@ export function CashRemittanceCreateModal({
             <ul className="rounded-lg border border-app-border divide-y divide-app-border overflow-hidden">
               {selectedOrders.map((o) => {
                 const fee = parseFloat(deliveryFees[o.id] ?? '0') || 0;
-                const lineTotal = lineAmount(o) + fee;
+                const orderAmt = lineAmount(o);
+                const lineTotal = orderAmt - fee;
                 return (
                   <li key={o.id} className="bg-app-elevated px-3 py-2.5 space-y-2">
+                    {/* Invoice reference + order amount */}
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-mono text-sm font-medium text-app-fg min-w-0 truncate">
                         {o.invoice ? o.invoice.referenceFormatted : 'No invoice'}
                       </span>
-                      <span className="shrink-0 tabular-nums">
-                        {lineTotal > 0 ? <NairaPrice amount={lineTotal} /> : '—'}
+                      <span className="shrink-0 tabular-nums text-sm text-app-fg">
+                        {orderAmt > 0 ? <NairaPrice amount={orderAmt} /> : '—'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 flex-1">
+                    {/* Delivery cost input */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-app-fg-muted whitespace-nowrap shrink-0">Delivery cost</span>
                       <AmountInput
-                        placeholder="Delivery fee"
+                        placeholder="0"
                         value={deliveryFees[o.id] ?? ''}
                         onChange={(raw) =>
                           setDeliveryFees((prev) => ({ ...prev, [o.id]: raw }))
@@ -212,17 +222,44 @@ export function CashRemittanceCreateModal({
                         className="input input-sm w-full"
                       />
                     </div>
+                    {/* Net remittance for this line (only when there's a fee) */}
+                    {fee > 0 && (
+                      <div className="flex items-center justify-between gap-3 pt-1 border-t border-app-border/50">
+                        <span className="text-xs text-app-fg-muted">Net remittance</span>
+                        <span className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">
+                          {lineTotal > 0 ? <NairaPrice amount={lineTotal} /> : '—'}
+                        </span>
+                      </div>
+                    )}
                   </li>
                 );
               })}
             </ul>
           )}
 
-          <div className="flex items-center justify-between rounded-md bg-app-hover px-3 py-2">
-            <span className="text-sm text-app-fg-muted">Total</span>
-            <span className="font-semibold">
-              <NairaPrice amount={totalAmount} />
-            </span>
+          <div className="rounded-md bg-app-hover px-3 py-2 space-y-1">
+            {totalDeliveryFees > 0 && (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-app-fg-muted">Order total</span>
+                  <span className="text-sm tabular-nums text-app-fg-muted">
+                    <NairaPrice amount={totalOrderAmount} />
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-app-fg-muted">Delivery costs</span>
+                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                    -<NairaPrice amount={totalDeliveryFees} />
+                  </span>
+                </div>
+              </>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-app-fg">Remittance due</span>
+              <span className="font-semibold">
+                <NairaPrice amount={totalAmount} />
+              </span>
+            </div>
           </div>
 
           {multiLocationError && (

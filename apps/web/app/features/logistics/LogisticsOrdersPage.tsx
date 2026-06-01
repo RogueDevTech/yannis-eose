@@ -1,5 +1,6 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
@@ -422,7 +423,7 @@ function LogisticsOrdersPageImpl({
       {
         key: 'customer',
         header: 'Customer',
-        render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+        render: (order) => <span className="font-medium text-app-fg" title={order.customerName}>{clipName(order.customerName)}</span>,
       },
       {
         key: 'status',
@@ -598,8 +599,8 @@ function LogisticsOrdersPageImpl({
       >
         {/* Row 1: customer + order ID */}
         <div className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-sm font-medium text-app-fg">
-            {order.customerName || '—'}
+          <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={order.customerName ?? undefined}>
+            {clipName(order.customerName)}
           </span>
           <OrderIdBadge
             id={order.id}
@@ -1128,7 +1129,7 @@ function LogisticsOrdersPageImpl({
             <div className="space-y-4">
               {/* Header */}
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-app-fg truncate min-w-0">{o.customerName || '—'}</p>
+                <p className="text-sm font-semibold text-app-fg truncate min-w-0" title={o.customerName ?? undefined}>{clipName(o.customerName)}</p>
                 <OrderIdBadge id={o.id} orderNumber={o.orderNumber} textClassName="text-sm font-medium text-app-fg" />
               </div>
 

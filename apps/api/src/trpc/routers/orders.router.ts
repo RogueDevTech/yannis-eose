@@ -1272,6 +1272,7 @@ export const ordersRouter = router({
           scope.supervisorScope,
           bundleBranchScope,
           ctx.effectiveBranchIds,
+          false, // exclude follow-up orders — matches orders.list default
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(

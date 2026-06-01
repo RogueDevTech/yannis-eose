@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
+import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -365,8 +366,8 @@ export function MarketingOrdersPage({
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />
           : (order) => (
-              <span className="font-medium text-app-fg">
-                {order.customerName}
+              <span className="font-medium text-app-fg" title={order.customerName ?? undefined}>
+                {clipName(order.customerName)}
                 {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
@@ -508,8 +509,8 @@ export function MarketingOrdersPage({
       const body = (
         <>
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
-              {order.customerName || '—'}
+            <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={order.customerName ?? undefined}>
+              {clipName(order.customerName)}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
@@ -1246,7 +1247,7 @@ export function MarketingOrdersPage({
             <div className="space-y-4">
               {/* Header: customer + order ID */}
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-app-fg truncate min-w-0">{o.customerName || '—'}</p>
+                <p className="text-sm font-semibold text-app-fg truncate min-w-0" title={o.customerName ?? undefined}>{clipName(o.customerName)}</p>
                 <OrderIdBadge id={o.id} orderNumber={o.orderNumber} textClassName="text-sm font-medium text-app-fg" />
               </div>
 

@@ -138,12 +138,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canCreateOffline =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
+    user.role === 'SUPPORT' ||
     user.role === 'HEAD_OF_CS' ||
     user.role === 'CS_CLOSER' ||
     userPerms.includes(canonicalPermissionCode('orders.createOffline'));
   const canExport =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
+    user.role === 'SUPPORT' ||
     userPerms.includes(canonicalPermissionCode('orders.export'));
   // SmartPick (bulk N-pick toolbar) requires BOTH `orders.bulkAssign` AND
   // `orders.reassign`. `bulkAssignToCS` calls `assignToCS` per order and that
@@ -154,6 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canBulkPick =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
+    user.role === 'SUPPORT' ||
     (userPerms.includes(canonicalPermissionCode('orders.bulkAssign')) &&
       userPerms.includes(canonicalPermissionCode('orders.reassign')));
 
@@ -177,7 +180,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fromCart = fromCartParam && canFilterFromCart;
 
   const testOrdersParam = url.searchParams.get('testOrders') === '1';
-  const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
   const testOrders = testOrdersParam && canFilterTestOrders;
 
   const productIdParam = url.searchParams.get('productId') || undefined;
@@ -232,7 +235,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     isCSCloser,
     showCSCloserColumn,
-    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
+    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
     currentUserId: user.id,
     canCreateOffline,
     canExport,
@@ -276,12 +279,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let total = 0;
   let totalPages = 0;
   if (fromCart) {
-    // Cart abandonment view shows the full open backlog — no date filter.
-    // Only search narrows the results.
+    // Cart abandonment list respects the same date window as the stat strip
+    // count so the KPI and the list always agree.
     const cartsInput = encodeURIComponent(JSON.stringify({
       page,
       limit: ORDERS_PER_PAGE,
       ...(search && { search }),
+      ...(apiStartDate && { startDate: apiStartDate }),
+      ...(apiEndDate && { endDate: apiEndDate }),
     }));
     const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
       method: 'GET',
@@ -402,7 +407,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch branches for the "Move to branch" bulk action (Admin / HoCS only).
   const canMoveToBranch =
-    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT' || user.role === 'HEAD_OF_CS';
   let branchesForMove: Array<{ id: string; name: string }> | undefined;
   if (canMoveToBranch) {
     const branchesRes = await apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie });
@@ -425,7 +430,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isCartAbandonmentView: fromCart,
     isCSCloser,
     showCSCloserColumn,
-    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
+    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
     currentUserId: user.id,
     canCreateOffline,
     canExport,
@@ -481,7 +486,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'createOffline') {
     const createOfflineUser = await requirePermission(request, 'orders.read');
-    if (!['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(createOfflineUser.role)) {
+    if (!['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(createOfflineUser.role)) {
       return json({ error: 'Only closers and Head of CS can create offline orders' }, { status: 403 });
     }
     const customerName = form.get('customerName')?.toString()?.trim() ?? '';
@@ -674,7 +679,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'purgeTestOrders') {
     const purgeUser = await requirePermission(request, 'orders.read');
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(purgeUser.role)) {
+    if (!['SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(purgeUser.role)) {
       return json({ error: 'SuperAdmin only' }, { status: 403 });
     }
     const res = await apiRequest<unknown>('/trpc/orders.purgeTestOrders', {
@@ -775,7 +780,7 @@ export default function CSOrdersRoute() {
                 : ['REMITTED', 'DELETED']
           }
           enableFromCartStatusOption={isHoCSPlus}
-          enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN'}
+          enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT'}
         />
       )}
     </CachedAwait>
