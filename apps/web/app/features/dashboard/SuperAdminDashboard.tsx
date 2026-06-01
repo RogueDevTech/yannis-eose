@@ -36,6 +36,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
   const revenue = data?.revenue ?? 0;
   const marketingSafe = {
     totalSpend: data?.marketing?.totalSpend ?? 0,
+    approvedSpend: (data?.marketing as Record<string, number> | undefined)?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
+    deliveredRevenue: (data?.marketing as Record<string, number> | undefined)?.deliveredRevenue ?? 0,
     cpa: data?.marketing?.cpa ?? 0,
     roas: data?.marketing?.roas ?? 0,
     confirmationRate: (data?.marketing as Record<string, number> | undefined)?.confirmationRate ?? 0,
@@ -95,7 +97,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               {marketingSafe.roas.toFixed(2)}x
             </p>
             <p className="text-sm text-app-fg-muted mt-1">
-              Revenue / Ad Spend = {fmt(revenue)} / {fmt(marketingSafe.totalSpend)}
+              Delivered Revenue / Ad Spend = {fmt(marketingSafe.deliveredRevenue)} / {fmt(marketingSafe.approvedSpend)}
             </p>
             <Link
               to="/admin/ceo"

@@ -49,6 +49,9 @@ const AUDITABLE_TABLES = [
   'email_change_requests', 'user_product_assignments',
   'permission_requests', 'system_settings',
   'permissions', 'user_permissions',
+  'cs_order_routing_rules', 'cs_order_routing_rule_targets',
+  'cs_order_routing_branch_settings',
+  'branch_teams', 'branch_team_settings',
   // mirror_sessions is append-only (no _history twin) — globalLog SELECTs from it
   // directly using started_at/ended_at as the temporal markers.
   'mirror_sessions',
@@ -126,6 +129,7 @@ const HISTORY_TABLES_WITH_BRANCH_ID = new Set<string>([
   'commission_plans',
   'payout_records',
   'logistics_locations',
+  'branch_teams',
 ]);
 
 export interface FieldDiff {

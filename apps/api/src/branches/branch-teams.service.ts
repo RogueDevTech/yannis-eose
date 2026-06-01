@@ -8,6 +8,7 @@ import { db as schema } from '@yannis/shared';
 type BranchTeamsDbExecutor = Pick<PostgresJsDatabase<typeof schema>, 'select' | 'insert'>;
 import { TRPCError } from '@trpc/server';
 import { DRIZZLE } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
 import { CacheService } from '../common/cache/cache.service';
@@ -239,7 +240,7 @@ export class BranchTeamsService {
     branchId: string,
     department: BranchTeamDepartment,
     name: string | undefined,
-    _actor: SessionUser,
+    actor: SessionUser,
   ) {
     return this.safeBranchTeamsWrite(async () => {
       await this.ensureBranchDepartmentsRows(branchId, this.db);
@@ -259,35 +260,39 @@ export class BranchTeamsService {
           message: 'Branch department row missing after ensure',
         });
       }
-      const [row] = await this.db
-        .insert(schema.branchTeams)
-        .values({
-          branchId,
-          branchDepartmentId: deptRow.id,
-          department,
-          name: name?.trim() || null,
-        })
-        .returning();
+      const [row] = await withActor(this.db, actor, async (tx) => {
+        return tx
+          .insert(schema.branchTeams)
+          .values({
+            branchId,
+            branchDepartmentId: deptRow.id,
+            department,
+            name: name?.trim() || null,
+          })
+          .returning();
+      });
       return row;
     });
   }
 
-  async updateTeam(teamId: string, input: { name?: string | null }) {
+  async updateTeam(teamId: string, input: { name?: string | null }, actor: SessionUser) {
     return this.safeBranchTeamsWrite(async () => {
-      const [row] = await this.db
-        .update(schema.branchTeams)
-        .set({
-          ...(input.name !== undefined ? { name: input.name?.trim() || null } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.branchTeams.id, teamId))
-        .returning();
+      const [row] = await withActor(this.db, actor, async (tx) => {
+        return tx
+          .update(schema.branchTeams)
+          .set({
+            ...(input.name !== undefined ? { name: input.name?.trim() || null } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.branchTeams.id, teamId))
+          .returning();
+      });
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
       return row;
     });
   }
 
-  async deleteTeam(teamId: string) {
+  async deleteTeam(teamId: string, actor: SessionUser) {
     // Capture supervisor user IDs BEFORE the cascade so we can resync their
     // user-level supervisor flag after the team's rows are gone (an ex-
     // supervisor whose only team just got deleted should drop the flag).
@@ -305,7 +310,9 @@ export class BranchTeamsService {
           ),
     );
     await this.safeBranchTeamsWrite(async () => {
-      await this.db.delete(schema.branchTeams).where(eq(schema.branchTeams.id, teamId));
+      await withActor(this.db, actor, async (tx) => {
+        await tx.delete(schema.branchTeams).where(eq(schema.branchTeams.id, teamId));
+      });
     });
     for (const row of supervisorRows) {
       await this.syncUserSupervisorFlag(row.userId);
