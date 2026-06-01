@@ -899,19 +899,25 @@ function OrdersListPageImpl({
       return;
     }
     setBulkResult(null);
-    ensureBranchForAction({
-      actionLabel: `transitioning selected orders to ${formatStatus(newStatus)}`,
-      onProceed: (branchId) =>
-        fetcher.submit(
-          {
-            intent: 'bulkTransition',
-            orderIds: JSON.stringify([...selectedIds]),
-            newStatus,
-            branchId,
-          },
-          { method: 'post' },
-        ),
-    });
+    const doSubmit = (branchId: string) =>
+      fetcher.submit(
+        {
+          intent: 'bulkTransition',
+          orderIds: JSON.stringify([...selectedIds]),
+          newStatus,
+          branchId,
+        },
+        { method: 'post' },
+      );
+
+    if (derivedBranchFromSelection) {
+      doSubmit(derivedBranchFromSelection);
+    } else {
+      ensureBranchForAction({
+        actionLabel: `transitioning selected orders to ${formatStatus(newStatus)}`,
+        onProceed: doSubmit,
+      });
+    }
   };
 
   // Eligibility: initial queue assign — only unprocessed orders.
@@ -943,61 +949,87 @@ function OrdersListPageImpl({
     label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
   }));
 
+  /** Derive branch from selected orders — avoids the branch-picker modal for
+   *  org-wide heads when all selected orders share a single branch. */
+  const derivedBranchFromSelection = useMemo(() => {
+    const branches = [...new Set(selectedOrders.map((o) => o.branchId).filter(Boolean))];
+    return branches.length === 1 ? branches[0]! : null;
+  }, [selectedOrders]);
+
   const submitBulkAssign = () => {
     setBulkResult(null);
-    ensureBranchForAction({
-      actionLabel:
-        assignModalKind === 'reassign'
-          ? 'reassigning selected orders to closers'
-          : 'assigning selected orders to closers',
-      onProceed: (branchId) =>
-        assignFetcher.submit(
-          {
-            intent: 'bulkAssign',
-            orderIds: JSON.stringify([...selectedIds]),
-            csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
-            branchId,
-          },
-          { method: 'post' },
-        ),
-    });
+
+    const doSubmit = (branchId: string) =>
+      assignFetcher.submit(
+        {
+          intent: 'bulkAssign',
+          orderIds: JSON.stringify([...selectedIds]),
+          csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
+          branchId,
+        },
+        { method: 'post' },
+      );
+
+    if (derivedBranchFromSelection) {
+      doSubmit(derivedBranchFromSelection);
+    } else {
+      ensureBranchForAction({
+        actionLabel:
+          assignModalKind === 'reassign'
+            ? 'reassigning selected orders to closers'
+            : 'assigning selected orders to closers',
+        onProceed: doSubmit,
+      });
+    }
   };
 
   const submitBulkAllocate = () => {
     setBulkResult(null);
-    ensureBranchForAction({
-      actionLabel: 'assigning selected orders for delivery at a 3PL location',
-      onProceed: (branchId) =>
-        allocateFetcher.submit(
-          {
-            intent: 'bulkTransition',
-            orderIds: JSON.stringify([...selectedIds]),
-            newStatus: 'AGENT_ASSIGNED',
-            logisticsLocationId: allocateLocationId,
-            branchId,
-          },
-          { method: 'post' },
-        ),
-    });
+    const doSubmit = (branchId: string) =>
+      allocateFetcher.submit(
+        {
+          intent: 'bulkTransition',
+          orderIds: JSON.stringify([...selectedIds]),
+          newStatus: 'AGENT_ASSIGNED',
+          logisticsLocationId: allocateLocationId,
+          branchId,
+        },
+        { method: 'post' },
+      );
+
+    if (derivedBranchFromSelection) {
+      doSubmit(derivedBranchFromSelection);
+    } else {
+      ensureBranchForAction({
+        actionLabel: 'assigning selected orders for delivery at a 3PL location',
+        onProceed: doSubmit,
+      });
+    }
   };
 
   const submitBulkCancel = () => {
     setBulkResult(null);
     setCancelModalOpen(false);
-    ensureBranchForAction({
-      actionLabel: 'deleting selected orders',
-      onProceed: (branchId) =>
-        fetcher.submit(
-          {
-            intent: 'bulkTransition',
-            orderIds: JSON.stringify([...selectedIds]),
-            newStatus: 'DELETED',
-            reason: cancelReason,
-            branchId,
-          },
-          { method: 'post' },
-        ),
-    });
+    const doSubmit = (branchId: string) =>
+      fetcher.submit(
+        {
+          intent: 'bulkTransition',
+          orderIds: JSON.stringify([...selectedIds]),
+          newStatus: 'DELETED',
+          reason: cancelReason,
+          branchId,
+        },
+        { method: 'post' },
+      );
+
+    if (derivedBranchFromSelection) {
+      doSubmit(derivedBranchFromSelection);
+    } else {
+      ensureBranchForAction({
+        actionLabel: 'deleting selected orders',
+        onProceed: doSubmit,
+      });
+    }
   };
 
   // Bulk transition / assign / cancel act on orders — disabled entirely in the
