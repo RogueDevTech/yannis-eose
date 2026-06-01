@@ -56,6 +56,7 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
     id: string;
     customerName: string;
     totalAmount: string | null;
+    deliveryFee: string | null;
     deliveredAt: string | null;
     status: string;
     invoice: OrderInvoice | null;

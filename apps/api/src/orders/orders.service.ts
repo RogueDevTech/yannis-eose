@@ -4300,6 +4300,11 @@ export class OrdersService {
       orderId,
       customerName: updated.customerName,
     }, updated.servicingBranchId ?? null);
+    // Notify marketing-all so HoM stat strip (Unassigned count) refreshes
+    this.events.emitToRoom('marketing-all', 'order:assigned', {
+      orderId,
+      customerName: updated.customerName,
+    }, updated.branchId ?? null);
     this.notifications.enqueueCreate({
       userId: csCloserId,
       type: 'order:assigned',

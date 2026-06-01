@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Link, useFetcher, useNavigate, useSearchParams } from '@remix-run/react';
+import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -27,6 +28,7 @@ import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { Checkbox } from '~/components/ui/checkbox';
 import type { PendingCart } from '~/features/cs/types';
 import type { CartPrefill } from '~/features/orders/CreateOfflineOrderModal';
+import { STATUS_LABELS } from '~/features/shared/order-status';
 
 const CreateOfflineOrderModal = lazy(() =>
   import('~/features/orders/CreateOfflineOrderModal').then((m) => ({ default: m.CreateOfflineOrderModal })),
@@ -76,13 +78,13 @@ interface FollowUpPageProps extends FollowUpPageData {
 }
 
 const STATUS_CHOICES = [
-  { value: 'DELETED', label: 'Deleted' },
-  { value: 'CS_ASSIGNED', label: 'CS Assigned' },
-  { value: 'CS_ENGAGED', label: 'CS Engaged' },
-  { value: 'CONFIRMED', label: 'Confirmed' },
-  { value: 'AGENT_ASSIGNED', label: 'Agent Assigned' },
-  { value: 'DELIVERED', label: 'Delivered' },
-  { value: 'REMITTED', label: 'Remitted' },
+  { value: 'DELETED', label: STATUS_LABELS.DELETED },
+  { value: 'CS_ASSIGNED', label: STATUS_LABELS.CS_ASSIGNED },
+  { value: 'CS_ENGAGED', label: STATUS_LABELS.CS_ENGAGED },
+  { value: 'CONFIRMED', label: STATUS_LABELS.CONFIRMED },
+  { value: 'AGENT_ASSIGNED', label: STATUS_LABELS.AGENT_ASSIGNED },
+  { value: 'DELIVERED', label: STATUS_LABELS.DELIVERED },
+  { value: 'REMITTED', label: STATUS_LABELS.REMITTED },
   { value: ABANDONED_CART_STATUS, label: 'Abandoned Carts' },
 ] as const;
 
@@ -284,8 +286,8 @@ export function FollowUpPage({
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem]" />
           : (order) => (
-              <span className="text-sm font-medium text-app-fg">
-                {order.customerName}
+              <span className="text-sm font-medium text-app-fg" title={order.customerName}>
+                {clipName(order.customerName)}
                 {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
@@ -374,8 +376,8 @@ export function FollowUpPage({
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem]" />
           : (cart) => (
-              <span className="text-sm font-medium text-app-fg">
-                {cart.customerName || '(No name)'}
+              <span className="text-sm font-medium text-app-fg" title={cart.customerName || undefined}>
+                {clipName(cart.customerName) === '—' ? '(No name)' : clipName(cart.customerName)}
               </span>
             ),
       },
@@ -725,7 +727,7 @@ export function FollowUpPage({
           renderMobileCard={(cart) => (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-app-fg truncate">{cart.customerName || '(No name)'}</span>
+                <span className="text-sm font-medium text-app-fg truncate" title={cart.customerName || undefined}>{cart.customerName ? clipName(cart.customerName) : '(No name)'}</span>
                 <span className="shrink-0 rounded-full bg-warning-50 dark:bg-warning-900/30 border border-warning-200 dark:border-warning-700 px-2 py-0.5 text-micro font-medium text-warning-700 dark:text-warning-400">Abandoned</span>
               </div>
               <p className="text-xs text-app-fg-muted truncate">{cart.productName ?? '—'}{cart.offerLabel ? ` (${cart.offerLabel})` : ''}</p>
@@ -776,8 +778,8 @@ export function FollowUpPage({
               className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-app-fg truncate">
-                  {order.customerName}
+                <span className="text-sm font-medium text-app-fg truncate" title={order.customerName}>
+                  {clipName(order.customerName)}
                   {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                     <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                   )}
@@ -819,7 +821,7 @@ export function FollowUpPage({
         >
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-base font-semibold text-app-fg truncate">{peekOrder.customerName}</h3>
+              <h3 className="text-base font-semibold text-app-fg truncate" title={peekOrder.customerName}>{clipName(peekOrder.customerName)}</h3>
               <OrderStatusBadge status={peekOrder.status} expanded />
             </div>
             {peekOrder.orderNumber && (

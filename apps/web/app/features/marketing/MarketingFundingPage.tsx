@@ -1513,7 +1513,7 @@ function FundingMetricsStrip({
             label: 'Current balance',
             value: <NairaPrice amount={Number(fundingBalance.balance)} />,
             valueClassName: 'text-success-600 dark:text-success-400',
-            title: `Received ₦${Number(fundingBalance.totalReceived).toLocaleString()} − distributed ₦${Number(fundingBalance.totalDistributed).toLocaleString()} − ad spend ₦${Number(fundingBalance.totalSpend).toLocaleString()}.`,
+            title: `Received ₦${Number(fundingBalance.totalReceived).toLocaleString()} − distributed ₦${Number(fundingBalance.totalDistributed).toLocaleString()} − expenses ₦${Number(fundingBalance.totalSpend).toLocaleString()} (pending + approved).`,
           },
         ]
       : []),

@@ -1277,6 +1277,7 @@ export class LogisticsService {
           // Logistics works the order in its CS servicing branch (migration 0150).
           branchId: schema.orders.servicingBranchId,
           totalAmount: schema.orders.totalAmount,
+          deliveryFee: schema.orders.deliveryFee,
         })
         .from(schema.orders)
         .where(inArray(schema.orders.id, input.orderIds));
@@ -1393,7 +1394,13 @@ export class LogisticsService {
       let completedAmountTotal = 0;
       if (markReceivedNow) {
         for (const orderRow of orderRows) {
-          completedAmountTotal += Number(orderRow.totalAmount ?? 0);
+          const orderTotal = Number(orderRow.totalAmount ?? 0);
+          // Use the input fee (just written above) since orderRows were fetched
+          // before the delivery fee update. Fall back to the DB value for orders
+          // where no override was provided.
+          const inputFee = input.deliveryFees?.[orderRow.id];
+          const fee = inputFee != null ? parseFloat(inputFee) : Number(orderRow.deliveryFee ?? 0);
+          completedAmountTotal += orderTotal - (Number.isFinite(fee) ? fee : 0);
         }
         await tx
           .update(schema.orders)
@@ -1517,7 +1524,7 @@ export class LogisticsService {
         this.db
           .select({
             count: count(),
-            amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+            amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
           })
           .from(schema.deliveryRemittanceOrders)
           .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -1581,8 +1588,8 @@ export class LogisticsService {
     // Finance marks received, orders move to REMITTED and must still count toward batch totals.
     const baseSummaryQuery = this.db
       .select({
-        totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
-        pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittances.id} END)::text`,
       })
@@ -1623,7 +1630,7 @@ export class LogisticsService {
 
     const awaitingSummaryQuery = this.db
       .select({
-        awaitingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        awaitingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
         awaitingCount: sql<string>`COUNT(*)::text`,
       })
       .from(schema.orders)
@@ -1742,7 +1749,7 @@ export class LogisticsService {
 
       const [totals] = await tx
         .select({
-          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
           orderCount: count(),
         })
         .from(schema.deliveryRemittanceOrders)
@@ -1838,7 +1845,7 @@ export class LogisticsService {
 
       const [totals] = await tx
         .select({
-          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
           orderCount: count(),
         })
         .from(schema.deliveryRemittanceOrders)
@@ -1938,7 +1945,7 @@ export class LogisticsService {
       .select({
         locationId: schema.orders.logisticsLocationId,
         locationName: schema.logisticsLocations.name,
-        totalAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        totalAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
         orderCount: sql<number>`COUNT(*)::int`,
       })
       .from(schema.orders)
@@ -1948,7 +1955,7 @@ export class LogisticsService {
       )
       .where(and(...conditions))
       .groupBy(schema.orders.logisticsLocationId, schema.logisticsLocations.name)
-      .orderBy(sql`SUM(${schema.orders.totalAmount}) DESC`)
+      .orderBy(sql`SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) DESC`)
       .limit(10);
 
     return rows;
@@ -2205,6 +2212,7 @@ export class LogisticsService {
       id: string;
       customerName: string;
       totalAmount: string | null;
+      deliveryFee: string | null;
       deliveredAt: string | null;
       status: string;
       invoice: {
@@ -2228,6 +2236,7 @@ export class LogisticsService {
           id: schema.orders.id,
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
+          deliveryFee: schema.orders.deliveryFee,
           deliveredAt: schema.orders.deliveredAt,
           status: schema.orders.status,
           invoiceId: schema.invoices.id,
@@ -2247,6 +2256,7 @@ export class LogisticsService {
         id: o.id,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+        deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         status: o.status,
         invoice:
@@ -2701,9 +2711,9 @@ export class LogisticsService {
     const remittanceRows = await this.db
       .select({
         providerId: schema.logisticsLocations.providerId,
-        remittedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        pendingRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        disputedRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        remittedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
+        pendingRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
+        disputedRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
