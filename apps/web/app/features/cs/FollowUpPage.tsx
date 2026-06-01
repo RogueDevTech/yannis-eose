@@ -100,15 +100,15 @@ const AGE_OPTIONS = [
 ];
 
 export function FollowUpPage({
-  orders,
-  total,
-  totalPages,
-  closers,
-  statusCounts,
-  products,
-  abandonedCarts,
-  abandonedCartsTotal,
-  abandonedCartsTotalPages,
+  orders = [],
+  total = 0,
+  totalPages = 1,
+  closers = [],
+  statusCounts = {},
+  products = [],
+  abandonedCarts = [],
+  abandonedCartsTotal = 0,
+  abandonedCartsTotalPages = 1,
   filters,
   deferredLoading = false,
 }: FollowUpPageProps) {

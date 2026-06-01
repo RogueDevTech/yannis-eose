@@ -1446,76 +1446,39 @@ export function AuditPage({
           />
         </div>
 
-        {/* Mobile cards */}
+        {/* Mobile cards — tap to peek detail */}
         <div className="md:hidden space-y-3 px-1">
           {rows.length === 0 ? (
             <EmptyState title="No audit entries found" description="Try adjusting your filters." />
           ) : (
             rows.map((entry, idx) => (
-              <div
+              <button
                 key={`${entry.recordId}-${entry.validFrom}-${idx}`}
-                className={`rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 ${stockTransferAuditRowClass(entry)}`}
+                type="button"
+                onClick={() => setSelectedEntry(entry)}
+                className={`w-full text-left rounded-lg border border-app-border bg-app-elevated p-4 space-y-1.5 transition-colors active:opacity-80 ${stockTransferAuditRowClass(entry)}`}
               >
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-app-fg-muted">
-                    {formatDate(entry.validFrom)}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg min-w-0 break-words">
+                    {actorNamesLoading ? (
+                      <span className="text-app-fg-muted">Loading…</span>
+                    ) : (
+                      <AuditDescription
+                        entry={entry}
+                        actorNames={actorNames}
+                        locationNames={locationNames}
+                        permissionNames={permissionNames}
+                      />
+                    )}
                   </span>
                 </div>
-                <div className="text-sm text-app-fg-muted break-words min-w-0">
-                  {actorNamesLoading ? (
-                    <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
-                      <Spinner className="w-4 h-4" />
-                      <span>Loading…</span>
-                    </span>
-                  ) : (
-                    <AuditDescription
-                      entry={entry}
-                      actorNames={actorNames}
-                      locationNames={locationNames}
-                      permissionNames={permissionNames}
-                    />
-                  )}
+                <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+                  <span>
+                    {actorNamesLoading ? '…' : getActorDisplay(entry.changedBy, actorNames, entry.validFrom)}
+                  </span>
+                  <span className="shrink-0">{formatDate(entry.validFrom)}</span>
                 </div>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  {(() => {
-                    if (actorNamesLoading) {
-                      return (
-                        <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
-                          <Spinner className="w-4 h-4" />
-                          <span>Loading…</span>
-                        </span>
-                      );
-                    }
-                    const display = getActorDisplay(entry.changedBy, actorNames, entry.validFrom);
-                    const known = isActorKnown(entry.changedBy, actorNames);
-                    const actorNode = known && entry.changedBy ? (
-                      <Link
-                        to={`/hr/users/${entry.changedBy}`}
-                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2 text-sm"
-                      >
-                        {display}
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
-                        className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer text-sm"
-                      >
-                        {display}
-                      </button>
-                    );
-                    return <div className="flex items-center gap-2 flex-wrap">{actorNode}</div>;
-                  })()}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedEntry(entry)}
-                    className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium h-auto py-0 shrink-0"
-                  >
-                    View
-                  </Button>
-                </div>
-              </div>
+              </button>
             ))
           )}
         </div>

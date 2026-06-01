@@ -37,11 +37,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // ── Batches view (default) ──────────────────────────────────
   if (view === 'batches') {
     const batchesPage = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+    // Default to this month if no date params
+    const now = new Date();
+    const defaultStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const defaultEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    const startDate = url.searchParams.get('startDate') || defaultStart;
+    const endDate = url.searchParams.get('endDate') || defaultEnd;
+
     const emptyBatches = { batches: [] as Array<{ id: string; name: string; source: string; branchName: string | null; createdByName: string | null; orderCount: number; confirmed: number; delivered: number; deliveredRevenue: string; confirmationRate: number; deliveryRate: number; createdAt: string }>, pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } };
     const batchesData = (async () => {
       try {
         const res = await apiRequest<unknown>(
-          `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20 }))}`,
+          `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20, startDate, endDate }))}`,
           { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
         );
         if (!res.ok) return emptyBatches;
@@ -51,7 +59,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     })();
     return defer({
-      shell: { view: 'batches' as const, page: batchesPage },
+      shell: { view: 'batches' as const, page: batchesPage, startDate, endDate },
       batchesData,
     });
   }
@@ -129,7 +137,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: cartData?.items ?? [], abandonedCartsTotal: cartData?.total ?? 0, abandonedCartsTotalPages: Math.max(1, Math.ceil((cartData?.total ?? 0) / limit)) };
     }
 
-    const listInput: Record<string, unknown> = { page, limit, sortBy: 'createdAt', sortOrder: 'desc' };
+    const listInput: Record<string, unknown> = { page, limit, sortBy: 'createdAt', sortOrder: 'desc', excludeFollowUp: false };
     const orderStatuses = statuses.filter((s) => s !== ABANDONED_CART_STATUS);
     if (orderStatuses.length === 1) listInput.status = orderStatuses[0];
     else if (orderStatuses.length > 1) listInput.statuses = orderStatuses;
@@ -373,6 +381,8 @@ export default function FollowUpRoute() {
             batches={[]}
             pagination={{ page: 1, limit: 20, total: 0, totalPages: 1 }}
             page={batchesPage}
+            startDate={shell?.startDate ?? ''}
+            endDate={shell?.endDate ?? ''}
             deferredLoading
           />
         }
@@ -383,6 +393,8 @@ export default function FollowUpRoute() {
           <FollowUpBatchesPage
             {...data}
             page={batchesPage}
+            startDate={shell?.startDate ?? ''}
+            endDate={shell?.endDate ?? ''}
           />
         )}
       </CachedAwait>

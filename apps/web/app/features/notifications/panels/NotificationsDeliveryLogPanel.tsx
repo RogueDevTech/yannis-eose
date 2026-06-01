@@ -2,6 +2,8 @@ import { useFetcher } from '@remix-run/react';
 import { useState, useCallback, useMemo } from 'react';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
+import { Modal } from '~/components/ui/modal';
+import { Button } from '~/components/ui/button';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 
 export interface DeliveryLogEntry {
@@ -115,6 +117,7 @@ export function NotificationsDeliveryLogPanel({
 }: NotificationsDeliveryLogPanelProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [peekEntry, setPeekEntry] = useState<DeliveryLogEntry | null>(null);
 
   const currentStatus = searchParams.get('logStatus') ?? '';
   const currentTrigger = searchParams.get('logTrigger') ?? '';
@@ -336,19 +339,24 @@ export function NotificationsDeliveryLogPanel({
           onToggleAll: onSelectionToggleAll,
           getRowId: (entry) => entry.id,
         }}
-        pagination={{
-          page: currentPage,
-          totalPages: Math.max(1, pagination.totalPages),
-          onPageChange: goToPage,
-          summary: (
-            <span>
-              Page {currentPage} of {pagination.totalPages} — {pagination.total} total
-            </span>
-          ),
-          showWhenSinglePage: pagination.totalPages > 1,
-          wrapperClassName: 'flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-app-fg-muted',
-          controlsClassName: 'sm:justify-end',
-        }}
+        renderMobileCard={(entry) => (
+          <button
+            type="button"
+            onClick={() => setPeekEntry(entry)}
+            className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left active:opacity-80"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-app-fg truncate">{entry.userName}</span>
+              <StatusBadge status={entry.status} />
+            </div>
+            <p className="text-xs text-app-fg-muted truncate">{entry.title}</p>
+            <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+              <TriggerBadge type={entry.triggerType} />
+              <span>{relativeTime(entry.sentAt)}</span>
+            </div>
+          </button>
+        )}
+        pagination={undefined}
         emptyState={
           <div className="flex flex-col items-center justify-center py-16 text-app-fg-muted">
             <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1.2} stroke="currentColor">
@@ -363,6 +371,58 @@ export function NotificationsDeliveryLogPanel({
           </div>
         }
       />
+
+      {/* Peek modal */}
+      {peekEntry && (
+        <Modal open onClose={() => setPeekEntry(null)} maxWidth="max-w-sm" contentClassName="p-5 space-y-4">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-app-fg truncate">{peekEntry.userName}</h3>
+              <StatusBadge status={peekEntry.status} />
+            </div>
+            <p className="text-sm text-app-fg">{peekEntry.title}</p>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="block text-xs text-app-fg-muted">Trigger</span>
+                <TriggerBadge type={peekEntry.triggerType} />
+              </div>
+              <div>
+                <span className="block text-xs text-app-fg-muted">Sent</span>
+                <span className="text-app-fg">{relativeTime(peekEntry.sentAt)}</span>
+              </div>
+              <div>
+                <span className="block text-xs text-app-fg-muted">Shown at</span>
+                <span className="text-app-fg">{formatTime(peekEntry.shownAt)}</span>
+              </div>
+              <div>
+                <span className="block text-xs text-app-fg-muted">Clicked at</span>
+                <span className="text-app-fg">{formatTime(peekEntry.clickedAt)}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-app-border">
+            {isResendVisible(peekEntry) && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="flex-1"
+                disabled={isSubmitting}
+                loading={isSubmitting}
+                loadingText="Resending…"
+                onClick={() => {
+                  handleResend(peekEntry.id);
+                  setPeekEntry(null);
+                }}
+              >
+                Resend
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" className={isResendVisible(peekEntry) ? '' : 'flex-1'} onClick={() => setPeekEntry(null)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

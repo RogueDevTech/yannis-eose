@@ -313,6 +313,7 @@ export class FinanceService {
     // received. Excluding it dropped revenue for any order the accountant
     // had already marked received within the window.
     orderConditions.push(inArray(schema.orders.status, ['DELIVERED', 'REMITTED']));
+    orderConditions.push(eq(schema.orders.isFollowUp, false));
     const orderWhere = and(...orderConditions);
 
     // ── 2. Ad spend date range (only APPROVED counts toward profit) ───────────────────────────

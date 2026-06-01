@@ -2755,6 +2755,12 @@ export class OrdersService {
       ? []
       : [isNull(schema.orders.deletedAt), sql`${schema.orders.status} != 'CANCELLED'`];
 
+    // Follow-up isolation: default excludes follow-up orders from normal list views.
+    // Explicitly pass `excludeFollowUp: false` to include follow-up orders (follow-up page).
+    if (input.excludeFollowUp !== false) {
+      conditions.push(eq(schema.orders.isFollowUp, false));
+    }
+
     if (input.status) {
       // CEO directive 2026-05-23: CANCELLED is legacy — merge into DELETED tab.
       // When user requests DELETED, show both DELETED and legacy CANCELLED.
@@ -4740,12 +4746,18 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
+    /** When true, count only follow-up orders. When false, exclude them. When undefined, count all. */
+    isFollowUp?: boolean,
   ) {
     // Status counts always include every status (including DELETED) so the
     // stat strip can show the Deleted count. CANCELLED is merged into DELETED
     // post-query (CEO directive 2026-05-23). The frontend excludes DELETED
     // from the "Total" by using `total` from listOrders (which filters them).
     const conditions: Parameters<typeof and>[0][] = [];
+    // Follow-up isolation: when explicitly set, filter by follow-up flag. When undefined, show all.
+    if (isFollowUp !== undefined) {
+      conditions.push(eq(schema.orders.isFollowUp, isFollowUp));
+    }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId,
       assignedCsId,
@@ -4835,6 +4847,7 @@ export class OrdersService {
       sql`(timezone('Africa/Lagos', ${schema.orderTimelineEvents.createdAt}))::date = (timezone('Africa/Lagos', now()))::date`,
       sql`${schema.orders.assignedCsId} IS NOT NULL`,
       isNull(schema.orders.deletedAt),
+      eq(schema.orders.isFollowUp, false),
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
@@ -4907,6 +4920,7 @@ export class OrdersService {
         .where(
           and(
             isNull(schema.orders.deletedAt),
+            eq(schema.orders.isFollowUp, false),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
             ...(branchId && !pendingCountsAcrossAllBranches ? [eq(schema.orders.servicingBranchId, branchId)] : []),
           ),
@@ -5565,11 +5579,13 @@ export class OrdersService {
 
     const orderWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
+      eq(schema.orders.isFollowUp, false),
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
+      eq(schema.orders.isFollowUp, false),
       deliveredOrRemitted,
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
@@ -7678,7 +7694,7 @@ export class OrdersService {
     deliveredOrders: number;
     activeOrders: number;
   }>> {
-    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
+    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt), eq(schema.orders.isFollowUp, false)];
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = and(...conditions);
@@ -7888,10 +7904,21 @@ export class OrdersService {
         },
       );
 
-      // 3. Batch-insert timeline events
+      // 3. Resolve branch name for human-readable timeline
+      let targetBranchName: string | null = null;
+      if (targetBranch) {
+        const [br] = await this.db
+          .select({ name: schema.branches.name })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, targetBranch))
+          .limit(1);
+        targetBranchName = br?.name ?? null;
+      }
+
+      // 4. Batch-insert timeline events
       const timelineRows = toUpdate.map((o) => {
         const branchChanged = targetBranch && targetBranch !== o.previousBranchId;
-        const branchNote = branchChanged ? ` Moved to branch ${targetBranch}.` : '';
+        const branchNote = branchChanged ? ` Moved to ${targetBranchName ?? 'another branch'}.` : '';
         return {
           orderId: o.id,
           eventType: 'ORDER_RESTORED' as const,
@@ -7908,6 +7935,20 @@ export class OrdersService {
       if (timelineRows.length > 0) {
         await this.db.insert(schema.orderTimelineEvents).values(timelineRows);
       }
+
+      // 4. Update existing ORDER_RECEIVED events to reflect follow-up origin
+      await this.db
+        .update(schema.orderTimelineEvents)
+        .set({
+          description: 'Order recreated as follow-up',
+          actorName: actor.name ?? 'Follow Up',
+        })
+        .where(
+          and(
+            inArray(schema.orderTimelineEvents.orderId, updateIds),
+            eq(schema.orderTimelineEvents.eventType, 'ORDER_RECEIVED'),
+          ),
+        );
 
       for (const o of toUpdate) results.push({ orderId: o.id, success: true });
     }
@@ -7958,8 +7999,12 @@ export class OrdersService {
   }
 
   /** List all follow-up batches with summary stats. */
-  async listFollowUpBatches(input: { page: number; limit: number }) {
+  async listFollowUpBatches(input: { page: number; limit: number; startDate?: string; endDate?: string }) {
     const offset = (input.page - 1) * input.limit;
+    const dateConditions: SQL[] = [];
+    if (input.startDate) dateConditions.push(gte(schema.followUpBatches.createdAt, new Date(`${input.startDate}T00:00:00+01:00`)));
+    if (input.endDate) dateConditions.push(lte(schema.followUpBatches.createdAt, new Date(`${input.endDate}T23:59:59+01:00`)));
+    const whereClause = dateConditions.length > 0 ? and(...dateConditions) : undefined;
 
     const [batches, countRows] = await Promise.all([
       this.db
@@ -7973,12 +8018,14 @@ export class OrdersService {
           createdAt: schema.followUpBatches.createdAt,
         })
         .from(schema.followUpBatches)
+        .where(whereClause)
         .orderBy(desc(schema.followUpBatches.createdAt))
         .limit(input.limit)
         .offset(offset),
       this.db
         .select({ count: sql<number>`count(*)::int` })
-        .from(schema.followUpBatches),
+        .from(schema.followUpBatches)
+        .where(whereClause),
     ]);
 
     const total = countRows[0]?.count ?? 0;
