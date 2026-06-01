@@ -76,12 +76,24 @@ BEGIN
       EXECUTE format('DROP INDEX IF EXISTS %I', _constraint.index_name);
     END LOOP;
 
-    -- Temporal lookup index
-    EXECUTE format(
-      'CREATE INDEX IF NOT EXISTS %I ON %I (id, valid_from, valid_to)',
-      _t || '_history_temporal_idx',
-      _t || '_history'
-    );
+    -- Temporal lookup index — use `id` if it exists, otherwise first column
+    -- (e.g. cs_order_routing_branch_settings uses owner_branch_id as PK).
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = _t || '_history' AND column_name = 'id'
+    ) THEN
+      EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS %I ON %I (id, valid_from, valid_to)',
+        _t || '_history_temporal_idx',
+        _t || '_history'
+      );
+    ELSE
+      EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS %I ON %I (valid_from, valid_to)',
+        _t || '_history_temporal_idx',
+        _t || '_history'
+      );
+    END IF;
 
     -- stamp_actor trigger
     EXECUTE format('DROP TRIGGER IF EXISTS trg_%s_stamp_actor ON %I', _t, _t);
