@@ -915,6 +915,8 @@ export const ordersRouter = router({
           // Accept ISO datetime in addition to date — see listOrdersSchema.
           startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
           endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+          /** When true, return counts for follow-up orders only. When false/omitted, exclude them. */
+          isFollowUp: z.boolean().optional(),
         })
         .optional(),
     )
@@ -940,6 +942,8 @@ export const ordersRouter = router({
         effectiveBranchId,
       );
 
+      const isFollowUp = input?.isFollowUp;
+
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
           narrowed.mediaBuyerId,
@@ -952,6 +956,7 @@ export const ordersRouter = router({
           narrowed.supervisorScope,
           branchScope,
           ctx.effectiveBranchIds,
+          isFollowUp,
         );
       }
 
@@ -962,6 +967,7 @@ export const ordersRouter = router({
           viewerId: ctx.user.id,
           viewerRole: ctx.user.role,
           narrowed,
+          isFollowUp,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -976,6 +982,7 @@ export const ordersRouter = router({
           narrowed.supervisorScope,
           branchScope,
           ctx.effectiveBranchIds,
+          isFollowUp,
         ),
       );
     }),
@@ -2042,7 +2049,12 @@ export const ordersRouter = router({
     }),
 
   listFollowUpBatches: permissionProcedure('orders.followUp')
-    .input(z.object({ page: z.number().int().min(1).default(1), limit: z.number().int().min(1).max(100).default(20) }))
+    .input(z.object({
+      page: z.number().int().min(1).default(1),
+      limit: z.number().int().min(1).max(100).default(20),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+    }))
     .query(async ({ input }) => {
       return getOrdersService().listFollowUpBatches(input);
     }),

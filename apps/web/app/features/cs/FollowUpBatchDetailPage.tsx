@@ -160,12 +160,11 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: `Total (${data?.orderCount ?? 0})`, value: formatNaira(Number(analytics?.totalRevenue ?? 0)), valueClassName: 'text-app-fg tabular-nums' },
-          { label: `Unprocessed (${unprocessed})`, value: data ? `${unprocessed}` : '—', valueClassName: unprocessed > 0 ? 'text-warning-600 dark:text-warning-400 tabular-nums' : 'text-app-fg tabular-nums' },
-          { label: `In progress (${csEngaged})`, value: data ? `${csEngaged}` : '—', valueClassName: 'text-info-600 dark:text-info-400 tabular-nums' },
-          { label: `Confirmed (${analytics?.confirmed ?? 0})`, value: data ? `${analytics?.confirmationRate ?? 0}%` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
-          { label: `Delivered (${analytics?.delivered ?? 0})`, value: data ? `${analytics?.deliveryRate ?? 0}%` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
-          { label: 'Revenue recovered', value: formatNaira(Number(analytics?.deliveredRevenue ?? 0)), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
+          { label: `Total`, value: (data?.orderCount ?? 0).toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
+          { label: `Unprocessed`, value: data ? unprocessed.toLocaleString() : '—', valueClassName: unprocessed > 0 ? 'text-warning-600 dark:text-warning-400 tabular-nums' : 'text-app-fg tabular-nums' },
+          { label: `In progress`, value: data ? csEngaged.toLocaleString() : '—', valueClassName: 'text-info-600 dark:text-info-400 tabular-nums' },
+          { label: `Confirmed`, value: data ? `${analytics?.confirmed ?? 0} (${analytics?.confirmationRate ?? 0}%)` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
+          { label: `Delivered`, value: data ? `${analytics?.delivered ?? 0} (${analytics?.deliveryRate ?? 0}%)` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
         ]}
       />
 

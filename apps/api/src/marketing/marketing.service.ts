@@ -329,6 +329,7 @@ export class MarketingService {
       hasProductLine,
       lte(schema.orders.createdAt, now),
       sql`${schema.orders.status} != 'DELETED'`,
+      eq(schema.orders.isFollowUp, false),
     ];
     if (params.windowStartExclusive) {
       orderConditions.push(gt(schema.orders.createdAt, params.windowStartExclusive));
@@ -3936,6 +3937,7 @@ export class MarketingService {
       // Exclude DELETED orders (editorial) from all marketing metrics.
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
+      eq(schema.orders.isFollowUp, false),
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -3951,6 +3953,7 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      eq(schema.orders.isFollowUp, false),
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -3976,6 +3979,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
+      eq(schema.orders.isFollowUp, false),
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4200,6 +4204,7 @@ export class MarketingService {
           and(
             inArray(schema.orders.mediaBuyerId, buyerIds),
             sql`${schema.orders.status} != 'DELETED'`,
+            eq(schema.orders.isFollowUp, false),
             branchId ? eq(schema.orders.branchId, branchId) : undefined,
           ),
         )

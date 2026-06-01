@@ -313,6 +313,8 @@ export const listOrdersSchema = z
      * order is attributed to. Marketing pages (MB / HoM) pass `'marketing'`.
      */
     branchScope: z.enum(['servicing', 'marketing']).optional(),
+    /** When true, exclude follow-up orders from results. Default true — normal pages never see follow-ups. */
+    excludeFollowUp: z.boolean().optional(),
     sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount', 'preferredDeliveryDate']).default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).default('desc'),
   })

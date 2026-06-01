@@ -508,12 +508,11 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
     'block w-full rounded-lg border border-app-border bg-app-elevated py-2 pl-3 pr-8 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-semibold text-app-fg">Broadcast push</h2>
-        <p className="mt-0.5 text-sm text-app-fg-muted">
-          Send a Web Push to subscribed devices. In-app notification rows are not created for broadcasts—only push
-          delivery log entries.
+        <h2 className="text-base font-semibold text-app-fg">Broadcast push</h2>
+        <p className="mt-0.5 text-xs text-app-fg-muted">
+          Send a Web Push to subscribed devices.
         </p>
       </div>
 
@@ -538,9 +537,9 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
         <InlineNotification variant="danger" message={humanizeZodIssuesString(actionData.error)} />
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
-        <div className="space-y-6 lg:col-span-7 min-w-0">
-          <fetcher.Form method="post" className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-12 lg:items-start">
+        <div className="space-y-4 lg:col-span-7 min-w-0">
+          <fetcher.Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="broadcast" />
             {targetType === 'USER' && targetUser && (
               <input type="hidden" name="targetUserId" value={targetUser.id} />
@@ -548,30 +547,12 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
 
             {/* ── Audience card ── */}
             <div className="card overflow-visible p-0">
-              <div className="flex items-center gap-3 rounded-t-xl border-b border-app-border px-5 py-4">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 dark:bg-brand-900/40">
-                  <svg
-                    className="h-5 w-5 text-brand-600 dark:text-brand-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.8}
-                    stroke="currentColor"
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
-                    />
-                  </svg>
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-app-fg">Audience</h3>
-                  <p className="text-xs text-app-fg-muted">Who receives this push (scoped by your role).</p>
-                </div>
+              <div className="px-4 py-3 border-b border-app-border">
+                <h3 className="text-sm font-semibold text-app-fg">Audience</h3>
+                <p className="text-xs text-app-fg-muted">Who receives this push.</p>
               </div>
 
-              <div className="space-y-4 rounded-b-xl px-5 py-4">
+              <div className="space-y-3 px-4 py-3">
                 {/* Target type pills */}
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
                   {(
@@ -632,29 +613,11 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
 
             {/* ── Message card ── */}
             <div className="card overflow-hidden p-0">
-              <div className="flex items-center gap-3 border-b border-app-border px-5 py-4">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-info-50 dark:bg-info-900/30">
-                  <svg
-                    className="h-5 w-5 text-info-600 dark:text-info-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.8}
-                    stroke="currentColor"
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-                    />
-                  </svg>
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-app-fg">Message</h3>
-                  <p className="text-xs text-app-fg-muted">Shown on the lock screen and notification tray.</p>
-                </div>
+              <div className="px-4 py-3 border-b border-app-border">
+                <h3 className="text-sm font-semibold text-app-fg">Message</h3>
+                <p className="text-xs text-app-fg-muted">Shown on the lock screen.</p>
               </div>
-              <div className="space-y-4 px-5 py-4">
+              <div className="space-y-3 px-4 py-3">
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <label htmlFor={titleId} className="text-sm font-medium text-app-fg-muted">
