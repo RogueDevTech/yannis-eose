@@ -5,6 +5,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
+import { Pagination } from '~/components/ui/pagination';
 
 export interface DeliveryLogEntry {
   id: string;
@@ -371,6 +372,15 @@ export function NotificationsDeliveryLogPanel({
           </div>
         }
       />
+
+      {pagination.totalPages > 1 && (
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            Showing {((currentPage - 1) * pagination.limit) + 1}&ndash;{Math.min(currentPage * pagination.limit, pagination.total)} of {pagination.total} entries
+          </p>
+          <Pagination page={currentPage} totalPages={pagination.totalPages} pageParam="logPage" />
+        </div>
+      )}
 
       {/* Peek modal */}
       {peekEntry && (

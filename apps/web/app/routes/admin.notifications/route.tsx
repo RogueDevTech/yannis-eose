@@ -12,6 +12,8 @@ import { useEffect } from 'react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, getCurrentUser, parsePerPage } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
@@ -427,7 +429,13 @@ export default function AdminNotificationsRoute() {
         title="Notifications"
         mobileInlineActions
         description="Manage alerts and delivery logs."
-        actions={<PageRefreshButton />}
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Notification tools"
+            desktop={<PageRefreshButton />}
+          />
+        }
       />
 
       <div className="sticky top-0 z-10 -mx-4 lg:-mx-6 border-b border-app-border bg-app-canvas/95 backdrop-blur supports-[backdrop-filter]:bg-app-canvas/80">
