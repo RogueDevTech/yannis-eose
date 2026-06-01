@@ -7,6 +7,7 @@ cd apps/edge-worker && pnpm turbo dev
 
 pnpm turbo dev
 
+docker restart yannis-eose-api-1
 
 pnpm --filter @yannis/api dev
 START NEW DB
