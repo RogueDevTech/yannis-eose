@@ -70,10 +70,16 @@ export function DeliveryRemittanceDetailPage({
   }, [actionError]);
 
   const isSubmitting = fetcher.state === 'submitting';
-  const remittanceTotal = detail.orders.reduce(
+
+  const totalOrderAmount = detail.orders.reduce(
     (sum, order) => sum + (order.totalAmount != null ? Number(order.totalAmount) : 0),
     0,
   );
+  const totalDeliveryFees = detail.orders.reduce(
+    (sum, order) => sum + (order.deliveryFee != null ? Number(order.deliveryFee) : 0),
+    0,
+  );
+  const remittanceTotal = totalOrderAmount - totalDeliveryFees;
 
   const recordedByLabel =
     detail.sentByName?.trim() || userMap[detail.sentBy] || `${detail.sentBy.slice(0, 8)}…`;
@@ -130,12 +136,21 @@ export function DeliveryRemittanceDetailPage({
         header: 'Amount',
         align: 'right',
         nowrap: true,
-        render: (o) =>
-          o.totalAmount != null ? (
-            <NairaPrice amount={Number(o.totalAmount)} className="text-sm font-medium tabular-nums" />
-          ) : (
-            <span className="text-app-fg-muted">—</span>
-          ),
+        render: (o) => {
+          const amt = o.totalAmount != null ? Number(o.totalAmount) : 0;
+          const fee = o.deliveryFee != null ? Number(o.deliveryFee) : 0;
+          if (amt === 0) return <span className="text-app-fg-muted">—</span>;
+          return (
+            <div className="text-right">
+              <NairaPrice amount={amt} className="text-sm font-medium tabular-nums" />
+              {fee > 0 && (
+                <p className="text-xs tabular-nums text-danger-600 dark:text-danger-400">
+                  -<NairaPrice amount={fee} /> delivery
+                </p>
+              )}
+            </div>
+          );
+        },
       },
       {
         key: 'invoice',
@@ -313,15 +328,33 @@ export function DeliveryRemittanceDetailPage({
             <span className="text-app-fg">{detail.notes}</span>
           </div>
         ) : null}
-        <div className="pt-1 border-t border-app-border">
+        <div className="pt-1 border-t border-app-border space-y-2">
           <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">
             Remittance total
           </p>
-          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
+          {totalDeliveryFees > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-app-fg-muted">Order total</span>
+                <span className="text-sm tabular-nums text-app-fg-muted">
+                  <NairaPrice amount={totalOrderAmount} />
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-app-fg-muted">Delivery costs</span>
+                <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                  -<NairaPrice amount={totalDeliveryFees} />
+                </span>
+              </div>
+            </div>
+          )}
+          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300">
             <NairaPrice amount={remittanceTotal} />
           </p>
-          <p className="text-xs text-brand-500 dark:text-brand-400 mt-0.5">
-            Sum of {detail.orders.length} linked order(s) (includes REMITTED after settlement)
+          <p className="text-xs text-brand-500 dark:text-brand-400">
+            {totalDeliveryFees > 0
+              ? `Net from ${detail.orders.length} order(s) after delivery costs`
+              : `Sum of ${detail.orders.length} linked order(s)`}
           </p>
         </div>
         {detail.status === 'DISPUTED' && detail.disputeReason ? (
@@ -479,6 +512,11 @@ export function DeliveryRemittanceDetailPage({
                     />
                   ) : (
                     <span className="text-sm text-app-fg-muted">—</span>
+                  )}
+                  {o.deliveryFee != null && Number(o.deliveryFee) > 0 && (
+                    <p className="text-mini tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={Number(o.deliveryFee)} /> delivery
+                    </p>
                   )}
                   <p className="text-mini text-app-fg-muted">
                     {o.deliveredAt

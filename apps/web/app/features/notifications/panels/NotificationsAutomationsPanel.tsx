@@ -1,4 +1,4 @@
-import { useFetcher } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { useState } from 'react';
 import {
   CompactTable,
@@ -272,16 +272,15 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
           <h2 className="text-xl font-semibold text-app-fg">Push automation rules</h2>
           <p className="mt-0.5 text-sm text-app-fg-muted">Scheduled and event-driven push notifications.</p>
         </div>
-        <button
-          type="button"
-          onClick={openCreate}
+        <Link
+          to="/admin/notifications/automations/new"
           className="shrink-0 flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
           New rule
-        </button>
+        </Link>
       </div>
 
       <div className="list-panel">

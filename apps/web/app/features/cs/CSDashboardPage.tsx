@@ -1,5 +1,6 @@
 import { Suspense, lazy, useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
 import { Await, Link, useFetcher, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
+import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { StripToolbar } from '~/components/ui/strip-toolbar';
 import { Modal } from '~/components/ui/modal';
@@ -785,7 +786,7 @@ function CSDashboardPageLoaded({
     {
       key: 'customer',
       header: 'Customer',
-      render: (order) => <p className="text-sm font-medium text-app-fg">{order.customerName}</p>,
+      render: (order) => <p className="text-sm font-medium text-app-fg" title={order.customerName}>{clipName(order.customerName)}</p>,
     },
     {
       key: 'phone',

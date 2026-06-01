@@ -199,7 +199,7 @@ export class MarketingService {
 
   /**
    * HoM / marketing-supervisor disbursable pool: COMPLETED funding received minus all outbound
-   * ledger rows (SENT, COMPLETED, DISPUTED) minus APPROVED ad spend (branch-scoped when branchId is set).
+   * ledger rows (SENT, COMPLETED, DISPUTED) minus non-REJECTED ad spend (branch-scoped when branchId is set).
    * Run inside the same transaction as the outbound insert so checks align with concurrent sends.
    */
   private async computeMarketingDisbursableInTx(
@@ -239,7 +239,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            ne(schema.adSpendLogs.status, 'REJECTED'),
             branchCampaignIds
               ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds)
               : undefined,
@@ -1339,10 +1339,9 @@ export class MarketingService {
   }
 
   /**
-   * Funding balance for one user: COMPLETED received − COMPLETED distributed − APPROVED ad spend.
-   * Distributed only ever applies to upstream funders (HoM, admin); MB rows are 0 there. Ad
-   * spend deducts for anyone whose user-id appears as `ad_spend_logs.media_buyer_id` — HoM
-   * included, since HoMs can log their own ad spend.
+   * Funding balance for one user: COMPLETED received − COMPLETED distributed − non-REJECTED ad spend.
+   * Expenses deduct immediately on creation (PENDING + APPROVED both count); only REJECTED
+   * entries are excluded — effectively "returned" to the balance.
    */
   async getFundingBalance(
     userId: string,
@@ -1380,7 +1379,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            ne(schema.adSpendLogs.status, 'REJECTED'),
             branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
           ),
         )
@@ -1523,7 +1522,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            ne(schema.adSpendLogs.status, 'REJECTED'),
             branchCampaignIds
               ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds)
               : undefined,
