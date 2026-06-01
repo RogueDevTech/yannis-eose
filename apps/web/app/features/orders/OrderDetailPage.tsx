@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useNavigate, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
@@ -891,6 +891,7 @@ export function OrderDetailPage({
   const invoiceFetcher = useFetcher<{ ok: boolean; invoice: OrderInvoice | null; error?: string }>();
   const timelineFetcher = useFetcher<{ ok: boolean; timeline: TimelineEvent[]; error?: string }>();
   const csCommentFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const navigate = useNavigate();
   const revalidator = useRevalidator();
 
   // Hold the in-flight transition target through the submit→loading→idle gap so the
@@ -1584,12 +1585,18 @@ export function OrderDetailPage({
 
   return (
     <div className="space-y-4 overflow-x-hidden min-w-0">
-      {/* Breadcrumb — `?from=logistics|cs|marketing` wins (set by list pages) so admins
-          return to the list they opened from; else fall back to role-based home list. */}
+      {/* Back — uses browser history so users return to whichever list they came from. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <Link to={ordersListHref} className="text-app-fg-muted hover:text-brand-500">
-          Orders
-        </Link>
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-1.5 text-app-fg-muted hover:text-brand-500"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          </svg>
+          Back
+        </button>
         <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>

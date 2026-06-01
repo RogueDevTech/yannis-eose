@@ -1,16 +1,20 @@
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from '@remix-run/react';
-import { Button } from '~/components/ui/button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { Modal } from '~/components/ui/modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { Spinner } from '~/components/ui/spinner';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
-import { useMemo } from 'react';
+import type { FollowUpBatchDetailData } from './FollowUpBatchDetailPage';
 
 export interface FollowUpBatchesPageData {
   batches: Array<{
@@ -32,15 +36,21 @@ export interface FollowUpBatchesPageData {
 
 interface Props extends FollowUpBatchesPageData {
   page: number;
+  startDate?: string;
+  endDate?: string;
   deferredLoading?: boolean;
 }
 
 export function FollowUpBatchesPage({
-  batches,
-  pagination,
+  batches: batchesRaw,
+  pagination: paginationRaw,
   page,
+  startDate = '',
+  endDate = '',
   deferredLoading = false,
 }: Props) {
+  const batches = batchesRaw ?? [];
+  const pagination = paginationRaw ?? { page: 1, limit: 20, total: 0, totalPages: 1 };
   const showSkeleton = deferredLoading;
 
   // Aggregate stats across all visible batches
@@ -51,6 +61,31 @@ export function FollowUpBatchesPage({
 
   type BatchRow = FollowUpBatchesPageData['batches'][number];
 
+  // ── Peek modal state ──────────────────────────────────
+  const [peekBatchId, setPeekBatchId] = useState<string | null>(null);
+  const [peekData, setPeekData] = useState<FollowUpBatchDetailData | null>(null);
+  const [peekLoading, setPeekLoading] = useState(false);
+
+  const openPeek = useCallback((id: string) => {
+    setPeekBatchId(id);
+    setPeekData(null);
+    setPeekLoading(true);
+    const input = encodeURIComponent(JSON.stringify({ batchId: id }));
+    fetch(`${window.__ENV?.API_URL ?? ''}/trpc/orders.getFollowUpBatchDetail?input=${input}`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((json) => {
+        const d = (json as { result?: { data?: FollowUpBatchDetailData } })?.result?.data ?? null;
+        setPeekData(d);
+      })
+      .catch(() => setPeekData(null))
+      .finally(() => setPeekLoading(false));
+  }, []);
+
+  const closePeek = useCallback(() => {
+    setPeekBatchId(null);
+    setPeekData(null);
+  }, []);
+
   const columns: CompactTableColumn<BatchRow>[] = useMemo(
     () => [
       {
@@ -59,9 +94,9 @@ export function FollowUpBatchesPage({
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[10rem]" />
           : (b) => (
-              <Link to={`/admin/cs/follow-up/${b.id}`} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline">
+              <button type="button" onClick={() => openPeek(b.id)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
                 {b.name}
-              </Link>
+              </button>
             ),
       },
       {
@@ -144,7 +179,7 @@ export function FollowUpBatchesPage({
                 ariaLabel={`Actions for ${b.name}`}
                 sheetTitle={b.name}
                 actions={[
-                  { key: 'view', kind: 'link', label: 'View orders', to: `/admin/cs/follow-up/${b.id}` },
+                  { key: 'view', kind: 'button', label: 'View orders', onClick: () => openPeek(b.id) },
                 ]}
               />
             ),
@@ -168,6 +203,7 @@ export function FollowUpBatchesPage({
             triggerAriaLabel="Follow-up tools"
             desktop={
               <>
+                <DateFilterBar startDate={startDate} endDate={endDate} chrome="pill" />
                 <PageRefreshButton />
                 <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
                   + Create follow-up
@@ -227,7 +263,6 @@ export function FollowUpBatchesPage({
                 <span className="text-brand-600 dark:text-brand-400">{b.deliveryRate}% delivered</span>
               </div>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                <NairaPrice amount={Number(b.deliveredRevenue) || 0} />
                 <span>{new Date(b.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}</span>
               </div>
             </Link>
@@ -243,6 +278,93 @@ export function FollowUpBatchesPage({
           <Pagination page={page} totalPages={pagination.totalPages} pageParam="page" />
         </div>
       )}
+      {/* ── Batch detail peek modal ────────────────────── */}
+      <Modal
+        open={!!peekBatchId}
+        onClose={closePeek}
+        maxWidth="max-w-lg"
+        contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-app-border shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-app-fg">{peekData?.name ?? 'Loading…'}</h3>
+            {peekData && (
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                {peekData.orderCount} orders · {peekData.source} · {peekData.branchName ?? 'No branch'}
+              </p>
+            )}
+          </div>
+          <button type="button" onClick={closePeek} className="text-app-fg-muted hover:text-app-fg p-1">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {peekLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Spinner size="md" />
+            </div>
+          ) : peekData ? (
+            <div className="space-y-0">
+              {/* Stats */}
+              <div className="grid grid-cols-2 gap-px bg-app-border">
+                {[
+                  { label: 'Confirmed', value: `${peekData.analytics.confirmed} (${peekData.analytics.confirmationRate}%)`, cls: 'text-success-600 dark:text-success-400' },
+                  { label: 'Delivered', value: `${peekData.analytics.delivered} (${peekData.analytics.deliveryRate}%)`, cls: 'text-brand-600 dark:text-brand-400' },
+                ].map((s) => (
+                  <div key={s.label} className="bg-app-elevated px-4 py-2.5 text-center">
+                    <p className="text-micro font-medium text-app-fg-muted uppercase tracking-wider">{s.label}</p>
+                    <p className={`text-sm font-semibold tabular-nums ${s.cls}`}>{s.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Order items */}
+              <div className="divide-y divide-app-border">
+                {peekData.items.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-sm text-app-fg-muted">No orders in this batch.</p>
+                ) : (
+                  peekData.items.map((item) => (
+                    <Link
+                      key={item.itemId}
+                      to={`/admin/orders/${item.orderId}`}
+                      onClick={closePeek}
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-app-hover transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-app-fg truncate">{item.customerName}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <OrderStatusBadge status={item.originalStatus} />
+                          <svg className="w-3 h-3 text-app-fg-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                          </svg>
+                          <OrderStatusBadge status={item.orderStatus} />
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <NairaPrice amount={item.totalAmount ? Number(item.totalAmount) : null} />
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="px-4 py-6 text-center text-sm text-app-fg-muted">Batch not found.</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-app-border p-3 shrink-0">
+          <button type="button" onClick={closePeek} className="btn-secondary btn-sm w-full justify-center">
+            Close
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

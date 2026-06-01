@@ -50,6 +50,8 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - Never hand-roll optimistic UI — use `useOptimisticListMerge`, `useOptimisticListPatches`, `useCloseOnFetcherSuccess`, `useFetcherToast`.
 - Never close modal in onSubmit. Close on `fetcher.data.success === true` via `useCloseOnFetcherSuccess`.
 - Mobile-first: `mobileInlineActions` on PageHeader, concise descriptions, dense cards.
+- Mobile list cards: entire card is a tappable `<Link>` (navigable detail) or `<button>` (peek modal). Never use kebab/action-sheet as the primary mobile card interaction. Desktop rows keep `<TableRowActionsSheet>` in an actions column.
+- Peek pattern: for non-navigable lists (audit, batch items), tap card opens detail modal. For navigable lists (orders, batches), tap card navigates to the detail page.
 
 ## Data Loading
 - `defer({ shell, pageData })` + `<CachedAwait>` + `cachedClientLoader` for read-mostly lists.

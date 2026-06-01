@@ -20,7 +20,7 @@ export const MV_PROFIT_SUMMARY = `
     COUNT(*)::integer AS order_count,
     DATE_TRUNC('day', delivered_at) AS delivery_date
   FROM orders
-  WHERE status IN ('DELIVERED', 'REMITTED') AND delivered_at IS NOT NULL
+  WHERE status IN ('DELIVERED', 'REMITTED') AND delivered_at IS NOT NULL AND is_follow_up = false
   GROUP BY DATE_TRUNC('day', delivered_at)
   WITH DATA
 `;
@@ -53,6 +53,7 @@ export const MV_ORDER_PIPELINE = `
     COUNT(*)::integer AS order_count,
     COALESCE(SUM(CAST(total_amount AS numeric)), 0) AS total_amount
   FROM orders
+  WHERE is_follow_up = false
   GROUP BY status
   WITH DATA
 `;
