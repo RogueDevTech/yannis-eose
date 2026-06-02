@@ -273,49 +273,39 @@ export function MarketingOrdersPage({
     [cartDetailFetcher],
   );
 
-  const buildQueryString = (overrides: { page?: number; status?: string; search?: string; mediaBuyerId?: string }) => {
-    const params = new URLSearchParams(searchParams);
-    if (overrides.page !== undefined) params.set('page', String(overrides.page));
-    // Always pass `status` when changing the status filter (including ALL) so the URL stays in sync.
-    // The "Cart abandonment" pseudo-status maps to `?fromCart=1` (and drops `status`);
-    // selecting any real status clears `fromCart`.
-    if (overrides.status !== undefined) {
-      if (overrides.status === FROM_CART_STATUS_VALUE) {
-        params.delete('status');
-        params.delete('testOrders');
-        params.set('fromCart', '1');
-      } else if (overrides.status === TEST_ORDERS_STATUS_VALUE) {
-        params.delete('status');
-        params.delete('fromCart');
-        params.set('testOrders', '1');
-      } else {
-        params.delete('fromCart');
-        params.delete('testOrders');
-        if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
-        else params.set('status', overrides.status);
-      }
-    }
-    // Always pass `search` when submitting the search form (including empty to clear).
-    if (overrides.search !== undefined) {
-      if (overrides.search) params.set('search', overrides.search);
-      else params.delete('search');
-    }
-    if (overrides.mediaBuyerId !== undefined) {
-      if (overrides.mediaBuyerId && overrides.mediaBuyerId !== 'ALL') params.set('mediaBuyerId', overrides.mediaBuyerId);
-      else params.delete('mediaBuyerId');
-    }
-    const qs = params.toString();
-    return qs ? `?${qs}` : '?';
-  };
-
   const handleStatusChange = (status: string) => {
     setSelectedStatus(status);
-    setSearchParams(buildQueryString({ status, page: 1 }));
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      if (status === FROM_CART_STATUS_VALUE) {
+        next.delete('status');
+        next.delete('testOrders');
+        next.set('fromCart', '1');
+      } else if (status === TEST_ORDERS_STATUS_VALUE) {
+        next.delete('status');
+        next.delete('fromCart');
+        next.set('testOrders', '1');
+      } else {
+        next.delete('fromCart');
+        next.delete('testOrders');
+        if (status === 'ALL' || !status) next.delete('status');
+        else next.set('status', status);
+      }
+      return next;
+    });
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSearchParams(buildQueryString({ search: searchQuery.trim(), page: 1 }));
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      const q = searchQuery.trim();
+      if (q) next.set('search', q);
+      else next.delete('search');
+      return next;
+    });
   };
 
   // Status dropdown options shown before streamed counts hydrate — with the
