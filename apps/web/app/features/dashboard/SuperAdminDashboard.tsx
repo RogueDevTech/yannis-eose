@@ -97,7 +97,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               {marketingSafe.roas.toFixed(2)}x
             </p>
             <p className="text-sm text-app-fg-muted mt-1">
-              Delivered Revenue / Ad Spend = {fmt(marketingSafe.deliveredRevenue)} / {fmt(marketingSafe.totalSpend)}
+              Delivered Revenue / Ad Spend = <span className="font-semibold text-success-600 dark:text-success-400">{fmt(marketingSafe.deliveredRevenue)}</span> / <span className="font-semibold text-danger-600 dark:text-danger-400">{fmt(marketingSafe.totalSpend)}</span>
             </p>
             <Link
               to="/admin/ceo"

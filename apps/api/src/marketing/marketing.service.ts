@@ -1216,7 +1216,7 @@ export class MarketingService {
 
   async getFundingSummary(
     branchId?: string | null,
-    opts?: { restrictToReceiverIds?: string[] },
+    opts?: { restrictToReceiverIds?: string[]; startDate?: string; endDate?: string },
   ) {
     const emptyFundingSummary = {
       totalSent: '0', totalCompleted: '0', totalDisputed: '0',
@@ -1241,6 +1241,14 @@ export class MarketingService {
       receiverScope = inArray(schema.marketingFunding.receiverId, restrict);
     }
 
+    const dateConditions: SQL[] = [];
+    if (opts?.startDate) {
+      dateConditions.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(opts.startDate)));
+    }
+    if (opts?.endDate) {
+      dateConditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(opts.endDate)));
+    }
+
     const rows = await this.db
       .select({
         totalSent: sql<string>`COALESCE(SUM(CASE WHEN ${schema.marketingFunding.status} = 'SENT' THEN ${schema.marketingFunding.amount} ELSE 0 END), 0)::text`,
@@ -1251,7 +1259,7 @@ export class MarketingService {
         disputedCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.marketingFunding.status} = 'DISPUTED')::int`,
       })
       .from(schema.marketingFunding)
-      .where(receiverScope);
+      .where(and(receiverScope, ...dateConditions));
 
     const r = rows[0];
     return {
@@ -1307,6 +1315,7 @@ export class MarketingService {
             and(
               eq(schema.marketingFunding.receiverId, actorId),
               eq(schema.marketingFunding.status, 'SENT'),
+              ...dateConditions,
             ),
           ),
         this.db
@@ -1316,6 +1325,7 @@ export class MarketingService {
             and(
               eq(schema.marketingFunding.receiverId, actorId),
               eq(schema.marketingFunding.status, 'DISPUTED'),
+              ...dateConditions,
             ),
           ),
         this.db
@@ -1325,6 +1335,7 @@ export class MarketingService {
             and(
               eq(schema.marketingFunding.senderId, actorId),
               eq(schema.marketingFunding.status, 'DISPUTED'),
+              ...dateConditions,
             ),
           ),
       ]);

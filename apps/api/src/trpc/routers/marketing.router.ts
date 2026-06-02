@@ -1208,15 +1208,17 @@ export const marketingRouter = router({
       const branchId = ctx.currentBranchId;
       const viewer = await resolveMarketingTeamViewerScope(ctx);
       const restrictMbIds = viewer.restrictMediaBuyerIds;
-      const fundingOpts =
-        restrictMbIds && restrictMbIds.length > 0 ? { restrictToReceiverIds: restrictMbIds } : undefined;
+      const fundingOpts: { restrictToReceiverIds?: string[]; startDate?: string; endDate?: string } =
+        restrictMbIds && restrictMbIds.length > 0 ? { restrictToReceiverIds: restrictMbIds } : {};
+      if (input.startDate) fundingOpts.startDate = input.startDate;
+      if (input.endDate) fundingOpts.endDate = input.endDate;
 
       const [balances, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
         // Team Analysis roster — ACTIVE only, so it lines up with the
         // ACTIVE-only leaderboard and a deactivated account never shows as a
         // metric-less ghost row.
         getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true }),
-        getMarketingService().getFundingSummary(branchId, fundingOpts),
+        getMarketingService().getFundingSummary(branchId, Object.keys(fundingOpts).length > 0 ? fundingOpts : undefined),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,
           input.startDate,
@@ -1488,7 +1490,11 @@ export const marketingRouter = router({
       const [funding, summary, requests, requestsCounts, users] =
         await Promise.all([
           getMarketingService().listFunding(listFundingInput, branchId),
-          getMarketingService().getFundingSummary(branchId, { restrictToReceiverIds: homUserIds }),
+          getMarketingService().getFundingSummary(branchId, {
+            restrictToReceiverIds: homUserIds,
+            ...(input.startDate && { startDate: input.startDate }),
+            ...(input.endDate && { endDate: input.endDate }),
+          }),
           getMarketingService().listFundingRequests(requestsInput, branchId),
           getMarketingService().fundingRequestStatusCounts(
             {
