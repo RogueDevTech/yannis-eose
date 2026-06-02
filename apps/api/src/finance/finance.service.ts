@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, gte, lte, count, sum, sql, inArray, isNotNull, type SQL } from 'drizzle-orm';
+import { eq, ne, and, desc, gte, lte, count, sum, sql, inArray, isNotNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -19,7 +19,6 @@ import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
-import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
 @Injectable()
 export class FinanceService {
@@ -316,8 +315,11 @@ export class FinanceService {
     orderConditions.push(eq(schema.orders.isFollowUp, false));
     const orderWhere = and(...orderConditions);
 
-    // ── 2. Ad spend date range (only APPROVED counts toward profit) ───────────────────────────
-    const adSpendConditions = [eq(schema.adSpendLogs.status, 'APPROVED')];
+    // ── 2. Ad spend date range — PENDING + APPROVED count toward profit ───────────────────────
+    // PENDING spend is real money the MB already spent on ads; excluding it
+    // under-counts costs and inflates profit until the HoM clicks Approve.
+    // Only REJECTED entries are excluded (same rule as balance deduction).
+    const adSpendConditions: Parameters<typeof and>[0][] = [ne(schema.adSpendLogs.status, 'REJECTED')];
     if (input.startDate) {
       adSpendConditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
     }
@@ -343,17 +345,17 @@ export class FinanceService {
     }
     const commissionWhere = and(...commissionConditions);
 
-    // ── 4. Fulfillment cost — verified/disputed transfers ──
-    const transferConditions = [
-      inArray(schema.stockTransfers.transferStatus, ['RECEIVED', 'DISPUTED']),
-    ];
-    if (input.startDate) {
-      transferConditions.push(gte(schema.stockTransfers.verifiedAt, new Date(input.startDate)));
-    }
-    if (input.endDate) {
-      transferConditions.push(lte(schema.stockTransfers.verifiedAt, new Date(input.endDate)));
-    }
-    const transferWhere = and(...transferConditions);
+    // ── 4. Fulfillment cost ──
+    // stockTransfers.transferCost stores the FIFO landed cost of goods moved
+    // between internal warehouses — this is NOT a P&L expense, it's an
+    // inventory transfer at book value. The actual cost of sold goods is
+    // already captured in orders.landedCost (Landed COGS above). Summing
+    // transferCost here double-counts product cost and inflates total costs
+    // by the entire value of all warehouse-to-warehouse movements.
+    //
+    // Fulfillment cost should represent logistics fees (shipping, handling)
+    // which are not yet tracked as a separate column. Until that column
+    // exists, fulfillment = 0 to keep the P&L accurate.
 
     // ── 5. Operational loss — write-offs + shrinkage ──────
     const writeOffConditions = [
@@ -411,11 +413,9 @@ export class FinanceService {
         .from(schema.payoutRecords)
         .where(commissionWhere),
 
-      // Total fulfillment cost (transfer costs)
-      this.db
-        .select({ total: sum(schema.stockTransfers.transferCost) })
-        .from(schema.stockTransfers)
-        .where(transferWhere),
+      // Fulfillment cost — see note above; zeroed until a real logistics-fee
+      // column is introduced.
+      Promise.resolve([{ total: '0' }]),
 
       // Write-off loss: quantity × avg batch cost per product
       // Join write-off movements with stock batches to get cost
@@ -943,6 +943,11 @@ export class FinanceService {
     const { MV_PROFIT_SUMMARY, MV_AD_SPEND_SUMMARY, MV_ORDER_PIPELINE, MV_COMMISSION_SUMMARY, MV_INDEXES } = await import('./materialized-views');
 
     try {
+      // Drop + recreate ad spend MV: definition changed from
+      // `status = 'APPROVED' AND category = 'AD_SPEND'` to `status != 'REJECTED'`
+      // so PENDING spend and all expense categories are included. `IF NOT EXISTS`
+      // on the CREATE won't pick up the new definition otherwise.
+      await this.pgClient.unsafe('DROP MATERIALIZED VIEW IF EXISTS mv_ad_spend_summary CASCADE');
       await this.pgClient.unsafe(MV_PROFIT_SUMMARY);
       await this.pgClient.unsafe(MV_AD_SPEND_SUMMARY);
       await this.pgClient.unsafe(MV_ORDER_PIPELINE);
@@ -1008,14 +1013,7 @@ export class FinanceService {
         );
       }
 
-      const fulfillmentConditions = [
-        inArray(schema.stockTransfers.transferStatus, ['RECEIVED', 'DISPUTED']),
-      ];
-      if (startDate) fulfillmentConditions.push(gte(schema.stockTransfers.verifiedAt, nigeriaDayStart(startDate)));
-      if (endDate) fulfillmentConditions.push(lte(schema.stockTransfers.verifiedAt, nigeriaDayEnd(endDate)));
-      const fulfillmentWhere = and(...fulfillmentConditions);
-
-      // Get ad spend, commission, pipeline from MVs; fulfillment from direct sum (lightweight, no correlated subquery)
+      // Get ad spend, commission, pipeline from MVs; fulfillment zeroed (see getProfitReport note)
       const [adSpendRows, commissionRows, pipelineRows, fulfillmentRows] = await Promise.all([
         this.pgClient.unsafe(
           startDate && endDate
@@ -1038,10 +1036,7 @@ export class FinanceService {
         this.pgClient.unsafe(
           `SELECT status, order_count, total_amount FROM mv_order_pipeline`,
         ),
-        this.db
-          .select({ total: sum(schema.stockTransfers.transferCost) })
-          .from(schema.stockTransfers)
-          .where(fulfillmentWhere),
+        Promise.resolve([{ total: '0' }]),
       ]);
 
       const revenue = Number(profitRows[0]?.revenue ?? 0);

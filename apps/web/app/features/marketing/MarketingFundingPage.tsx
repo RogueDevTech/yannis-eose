@@ -865,6 +865,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             <UnifiedDistributingTable
               slice={unifiedDistributingSlice}
               users={users}
+              balancesList={balancesList}
               onViewReceipt={setFundingReceiptModal}
               onOpenDetails={setRequestDetailsEntry}
               onApprove={setApprovingRequestId}
@@ -1522,7 +1523,9 @@ function FundingMetricsStrip({
           {
             label: 'Ad Spend Balance',
             value: <NairaPrice amount={adSpendBalance} />,
-            valueClassName: 'text-app-fg',
+            valueClassName: adSpendBalance > 0
+              ? 'text-blue-600 dark:text-blue-400'
+              : 'text-app-fg',
             title: 'Sum of unspent funding sitting with all Media Buyers (received − approved ad spend).',
           },
         ]
@@ -1532,7 +1535,9 @@ function FundingMetricsStrip({
           {
             label: 'Overall Balance',
             value: <NairaPrice amount={overallBalance} />,
-            valueClassName: 'text-app-fg font-semibold',
+            valueClassName: overallBalance > 0
+              ? 'text-purple-600 dark:text-purple-400 font-semibold'
+              : 'text-app-fg font-semibold',
             title: 'Ad Spend Balance + Balance with Manager — total marketing capital still in the system.',
           },
         ]
@@ -1540,7 +1545,9 @@ function FundingMetricsStrip({
     {
       label: 'Total Received',
       value: <NairaPrice amount={Number(summary.totalReceived)} />,
-      valueClassName: 'text-app-fg',
+      valueClassName: Number(summary.totalReceived) > 0
+        ? 'text-success-600 dark:text-success-400'
+        : 'text-app-fg',
       title: 'Sum of incoming ledger transfers (any status) in the selected period',
       onClick: () => onFilter({ section: 'received', entryType: 'transfer' }),
       active: isActive('received', 'transfer'),
@@ -1550,7 +1557,9 @@ function FundingMetricsStrip({
           {
             label: 'Total Distributed',
             value: <NairaPrice amount={Number(summary.totalDistributed)} />,
-            valueClassName: 'text-app-fg',
+            valueClassName: Number(summary.totalDistributed) > 0
+              ? 'text-orange-600 dark:text-orange-400'
+              : 'text-app-fg',
             title: 'Sum of transfers you have sent in the selected period',
             onClick: () => onFilter({ section: 'distributing', entryType: 'transfer' }),
             active: isActive('distributing', 'transfer'),
@@ -1841,6 +1850,7 @@ function UnifiedDistributingFilterBar({
 function UnifiedDistributingTable({
   slice,
   users,
+  balancesList,
   onViewReceipt,
   onOpenDetails,
   onApprove,
@@ -1851,6 +1861,7 @@ function UnifiedDistributingTable({
 }: {
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   users: User[];
+  balancesList?: MarketingFundingLoaderData['balancesList'];
   onViewReceipt: (rec: FundingRecord) => void;
   onOpenDetails: (entry: DistributingFundingEntry) => void;
   onApprove: (id: string) => void;
@@ -1861,6 +1872,15 @@ function UnifiedDistributingTable({
   loading?: boolean;
 }) {
   const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
+
+  const balanceByUserId = useMemo(() => {
+    if (!balancesList) return new Map<string, number>();
+    return new Map(balancesList.map((b) => [b.userId, Number(b.balance)]));
+  }, [balancesList]);
+
+  /** Resolve the "subject" user id — the person whose balance matters for this row. */
+  const subjectUserId = (entry: DistributingFundingEntry) =>
+    entry.entryType === 'request' ? entry.requesterId : entry.receiverId;
 
   const columns = useMemo<CompactTableColumn<DistributingFundingEntry>[]>(
     () => [
@@ -1922,6 +1942,30 @@ function UnifiedDistributingTable({
           </span>
         ),
       },
+      ...(balancesList
+        ? [
+            {
+              key: 'balance' as const,
+              header: 'Balance',
+              align: 'right' as const,
+              render: (entry: DistributingFundingEntry) => {
+                const bal = balanceByUserId.get(subjectUserId(entry));
+                if (bal == null) return <span className="text-app-fg-muted text-sm">—</span>;
+                return (
+                  <span
+                    className={`text-sm font-medium tabular-nums ${
+                      bal <= 0
+                        ? 'text-danger-600 dark:text-danger-400'
+                        : 'text-success-600 dark:text-success-400'
+                    }`}
+                  >
+                    <NairaPrice amount={bal} />
+                  </span>
+                );
+              },
+            },
+          ]
+        : []),
       {
         key: 'status',
         header: 'Status',
@@ -1947,6 +1991,7 @@ function UnifiedDistributingTable({
           const entryLabel = entry.entryType === 'request'
             ? (entry.requesterName ?? 'Request')
             : (entry.receiverName ?? userNameById(entry.receiverId) ?? 'Transfer');
+          const userId = subjectUserId(entry);
           return (
             <TableRowActionsSheet
               ariaLabel={`Actions for ${entryLabel}`}
@@ -1957,6 +2002,12 @@ function UnifiedDistributingTable({
                   kind: 'button',
                   label: entry.entryType === 'request' ? 'View' : 'View flow',
                   onClick: () => onOpenDetails(entry),
+                },
+                {
+                  key: 'expenses',
+                  kind: 'link',
+                  label: 'View Expenses',
+                  to: `/admin/marketing/expenses?mediaBuyerId=${userId}`,
                 },
                 {
                   key: 'receipt',
@@ -2001,7 +2052,7 @@ function UnifiedDistributingTable({
         },
       },
     ],
-    [users, canApproveFunding, onViewReceipt, onOpenDetails, onApprove, onReject],
+    [users, balancesList, balanceByUserId, canApproveFunding, onViewReceipt, onOpenDetails, onApprove, onReject],
   );
 
   return (
@@ -2034,6 +2085,17 @@ function UnifiedDistributingTable({
               <NairaPrice amount={Number(entry.amount)} />
             </span>
           </div>
+          {balancesList && (() => {
+            const bal = balanceByUserId.get(subjectUserId(entry));
+            return bal != null ? (
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-app-fg-muted">Balance</span>
+                <span className={`font-medium tabular-nums ${bal <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                  <NairaPrice amount={bal} />
+                </span>
+              </div>
+            ) : null;
+          })()}
           <div className="text-xs text-app-fg-muted">
             {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
           </div>

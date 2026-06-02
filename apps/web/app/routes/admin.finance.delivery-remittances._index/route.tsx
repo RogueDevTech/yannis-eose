@@ -13,7 +13,7 @@ import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemi
 import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
 
 const REMITTANCES_PAGE_SIZE = 50;
-const ELIGIBLE_PAGE_SIZE = 20;
+const ELIGIBLE_PAGE_SIZE = 50;
 
 export const meta: MetaFunction = () => [
   { title: 'Cash Remittances — Finance — Yannis EOSE' },
