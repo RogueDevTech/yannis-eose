@@ -26,6 +26,7 @@ import { SmartPick } from '~/components/ui/smart-pick';
 import { TextInput } from '~/components/ui/text-input';
 import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { Checkbox } from '~/components/ui/checkbox';
+import { fetchOrdersMatchingIds, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
 import type { PendingCart } from '~/features/cs/types';
 import type { CartPrefill } from '~/features/orders/CreateOfflineOrderModal';
 import { STATUS_LABELS } from '~/features/shared/order-status';
@@ -75,6 +76,7 @@ interface FollowUpFilters {
 interface FollowUpPageProps extends FollowUpPageData {
   filters: FollowUpFilters;
   deferredLoading?: boolean;
+  bulkSelectAllMatchingInput?: string;
 }
 
 const STATUS_CHOICES = [
@@ -113,6 +115,7 @@ export function FollowUpPage({
   abandonedCartsTotalPages = 1,
   filters,
   deferredLoading = false,
+  bulkSelectAllMatchingInput,
 }: FollowUpPageProps) {
   const navigate = useNavigate();
   const branchesCatalog = useBranchesCatalog();
@@ -132,6 +135,10 @@ export function FollowUpPage({
   const noStatusSelected = activeStatuses.size === 0;
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectAllMatchingActive, setSelectAllMatchingActive] = useState(false);
+  const [selectAllMatchingLoading, setSelectAllMatchingLoading] = useState(false);
+  const [selectAllMatchingCapped, setSelectAllMatchingCapped] = useState(false);
+  const [selectAllMatchingError, setSelectAllMatchingError] = useState<string | null>(null);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(filters.search);
   const [convertCartPrefill, setConvertCartPrefill] = useState<CartPrefill | null>(null);
@@ -143,7 +150,12 @@ export function FollowUpPage({
   const [targetBranchId, setTargetBranchId] = useState('');
   const [batchName, setBatchName] = useState('');
 
-  useEffect(() => { setSelectedIds(new Set()); }, [filters.statuses, filters.assignedCsId, filters.olderThanDays]);
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setSelectAllMatchingActive(false);
+    setSelectAllMatchingCapped(false);
+    setSelectAllMatchingError(null);
+  }, [filters.statuses, filters.assignedCsId, filters.olderThanDays, filters.search, filters.startDate, filters.endDate, filters.page]);
 
   const reopenFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
   useFetcherToast(reopenFetcher.data, {
@@ -153,7 +165,7 @@ export function FollowUpPage({
   });
   useCloseOnFetcherSuccess(reopenFetcher, () => {
     setReopenModalOpen(false);
-    setSelectedIds(new Set());
+    clearSelection();
     navigate('/admin/cs/follow-up');
   });
 
@@ -269,6 +281,40 @@ export function FollowUpPage({
     ],
     [closers],
   );
+
+  // Current view data — hoisted before smartPickCeiling so it's available.
+  const viewTotal = isCartView ? abandonedCartsTotal : total;
+  const viewTotalPages = isCartView ? abandonedCartsTotalPages : totalPages;
+  const viewItems = isCartView ? abandonedCarts : orders;
+
+  const smartPickCeiling = Math.min(viewTotal, isCartView ? abandonedCarts.length : ORDERS_DEEP_SELECT_MAX);
+
+  async function selectAllMatchingFilter() {
+    if (!bulkSelectAllMatchingInput || isCartView) return;
+    setSelectAllMatchingLoading(true);
+    setSelectAllMatchingError(null);
+    try {
+      const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput);
+      if (ids.length === 0) {
+        setSelectAllMatchingError('Could not load matching orders. Try again.');
+        return;
+      }
+      setSelectedIds(new Set(ids));
+      setSelectAllMatchingActive(true);
+      setSelectAllMatchingCapped(capped);
+    } catch {
+      setSelectAllMatchingError('Failed to load matching orders.');
+    } finally {
+      setSelectAllMatchingLoading(false);
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectAllMatchingActive(false);
+    setSelectAllMatchingCapped(false);
+    setSelectAllMatchingError(null);
+  }
 
   // ── Order columns ──
   const orderColumns: CompactTableColumn<FollowUpPageData['orders'][number]>[] = useMemo(
@@ -463,11 +509,6 @@ export function FollowUpPage({
     (filters.olderThanDays || hasCustomDateRange ? 1 : 0) +
     (filters.search ? 1 : 0);
 
-  // Current view data
-  const viewTotal = isCartView ? abandonedCartsTotal : total;
-  const viewTotalPages = isCartView ? abandonedCartsTotalPages : totalPages;
-  const viewItems = isCartView ? abandonedCarts : orders;
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -516,24 +557,60 @@ export function FollowUpPage({
       />
 
       {/* ── Summary strip ────────────────────────────────── */}
-      <OverviewStatStrip
-        mobileGrid
-        items={[
-          { label: `Deleted (${(statusCounts['DELETED'] ?? 0).toLocaleString()})`, value: (statusCounts['DELETED'] ?? 0).toLocaleString(), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums', active: activeStatuses.has('DELETED'), onClick: () => selectStatuses(['DELETED']) },
-          { label: `Assigned (${(statusCounts['CS_ASSIGNED'] ?? 0).toLocaleString()})`, value: (statusCounts['CS_ASSIGNED'] ?? 0).toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums', active: activeStatuses.has('CS_ASSIGNED') && !activeStatuses.has('CS_ENGAGED'), onClick: () => selectStatuses(['CS_ASSIGNED']) },
-          { label: `Engaged (${(statusCounts['CS_ENGAGED'] ?? 0).toLocaleString()})`, value: (statusCounts['CS_ENGAGED'] ?? 0).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400 tabular-nums', active: activeStatuses.has('CS_ENGAGED') && !activeStatuses.has('CS_ASSIGNED'), onClick: () => selectStatuses(['CS_ENGAGED']) },
-          { label: `Unconfirmed (${((statusCounts['CS_ASSIGNED'] ?? 0) + (statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString()})`, value: ((statusCounts['CS_ASSIGNED'] ?? 0) + (statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400 tabular-nums', active: activeStatuses.has('CS_ASSIGNED') && activeStatuses.has('CS_ENGAGED') && activeStatuses.size === 2, onClick: () => selectStatuses(['CS_ASSIGNED', 'CS_ENGAGED']) },
-          { label: `Confirmed (${(statusCounts['CONFIRMED'] ?? 0).toLocaleString()})`, value: (statusCounts['CONFIRMED'] ?? 0).toLocaleString(), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums', active: activeStatuses.has('CONFIRMED'), onClick: () => selectStatuses(['CONFIRMED']) },
-          { label: `Delivered (${(statusCounts['DELIVERED'] ?? 0).toLocaleString()})`, value: (statusCounts['DELIVERED'] ?? 0).toLocaleString(), valueClassName: 'text-info-600 dark:text-info-400 tabular-nums', active: activeStatuses.has('DELIVERED'), onClick: () => selectStatuses(['DELIVERED']) },
-          { label: `Carts (${(statusCounts['ABANDONED_CART'] ?? 0).toLocaleString()})`, value: (statusCounts['ABANDONED_CART'] ?? 0).toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums', active: isCartView, onClick: () => selectStatuses(['ABANDONED_CART']) },
-          { label: 'Selected', value: selectedIds.size.toLocaleString(), valueClassName: selectedIds.size > 0 ? 'text-brand-500 tabular-nums' : 'tabular-nums' },
-        ]}
-      />
+      {(() => {
+        const allOrderStatuses = STATUS_CHOICES.filter((s) => s.value !== ABANDONED_CART_STATUS).map((s) => s.value);
+        const isAllOrders = !isCartView && allOrderStatuses.every((s) => activeStatuses.has(s));
+        return (
+          <OverviewStatStrip
+            mobileGrid
+            items={[
+              { label: 'All Orders', value: total.toLocaleString(), valueClassName: 'text-app-fg tabular-nums', active: isAllOrders, onClick: () => selectStatuses(isAllOrders ? [] : [...allOrderStatuses]) },
+              { label: `Deleted (${(statusCounts['DELETED'] ?? 0).toLocaleString()})`, value: (statusCounts['DELETED'] ?? 0).toLocaleString(), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums', active: !isAllOrders && activeStatuses.has('DELETED'), onClick: () => selectStatuses(['DELETED']) },
+              { label: `Assigned (${(statusCounts['CS_ASSIGNED'] ?? 0).toLocaleString()})`, value: (statusCounts['CS_ASSIGNED'] ?? 0).toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums', active: !isAllOrders && activeStatuses.has('CS_ASSIGNED') && !activeStatuses.has('CS_ENGAGED'), onClick: () => selectStatuses(['CS_ASSIGNED']) },
+              { label: `Engaged (${(statusCounts['CS_ENGAGED'] ?? 0).toLocaleString()})`, value: (statusCounts['CS_ENGAGED'] ?? 0).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400 tabular-nums', active: !isAllOrders && activeStatuses.has('CS_ENGAGED') && !activeStatuses.has('CS_ASSIGNED'), onClick: () => selectStatuses(['CS_ENGAGED']) },
+              { label: `Unconfirmed (${((statusCounts['CS_ASSIGNED'] ?? 0) + (statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString()})`, value: ((statusCounts['CS_ASSIGNED'] ?? 0) + (statusCounts['CS_ENGAGED'] ?? 0)).toLocaleString(), valueClassName: 'text-amber-600 dark:text-amber-400 tabular-nums', active: !isAllOrders && activeStatuses.has('CS_ASSIGNED') && activeStatuses.has('CS_ENGAGED') && activeStatuses.size === 2, onClick: () => selectStatuses(['CS_ASSIGNED', 'CS_ENGAGED']) },
+              { label: `Confirmed (${(statusCounts['CONFIRMED'] ?? 0).toLocaleString()})`, value: (statusCounts['CONFIRMED'] ?? 0).toLocaleString(), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums', active: !isAllOrders && activeStatuses.has('CONFIRMED'), onClick: () => selectStatuses(['CONFIRMED']) },
+              { label: `Delivered (${(statusCounts['DELIVERED'] ?? 0).toLocaleString()})`, value: (statusCounts['DELIVERED'] ?? 0).toLocaleString(), valueClassName: 'text-info-600 dark:text-info-400 tabular-nums', active: !isAllOrders && activeStatuses.has('DELIVERED'), onClick: () => selectStatuses(['DELIVERED']) },
+              { label: `Carts (${(statusCounts['ABANDONED_CART'] ?? 0).toLocaleString()})`, value: (statusCounts['ABANDONED_CART'] ?? 0).toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums', active: isCartView, onClick: () => selectStatuses(['ABANDONED_CART']) },
+              { label: 'Selected', value: selectedIds.size.toLocaleString(), valueClassName: selectedIds.size > 0 ? 'text-brand-500 tabular-nums' : 'tabular-nums' },
+            ]}
+          />
+        );
+      })()}
 
       {/* ── Status chips with counts ─────────────────────── */}
       <div className="space-y-2">
         <p className="text-xs font-medium text-app-fg-muted">Filter by status</p>
         <div className="flex flex-wrap gap-2">
+          {/* Select All orders chip */}
+          {(() => {
+            const allOrderStatuses = STATUS_CHOICES.filter((s) => s.value !== ABANDONED_CART_STATUS).map((s) => s.value);
+            const allOrderSelected = !isCartView && allOrderStatuses.every((s) => activeStatuses.has(s));
+            return (
+              <button
+                type="button"
+                onClick={() => {
+                  if (allOrderSelected) selectStatuses([]);
+                  else selectStatuses([...allOrderStatuses]);
+                }}
+                className={[
+                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors border',
+                  allOrderSelected
+                    ? 'bg-brand-500 text-white border-brand-500'
+                    : 'bg-app-canvas text-app-fg-muted border-app-border hover:border-app-fg-muted/50',
+                ].join(' ')}
+              >
+                {allOrderSelected ? (
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <span className="w-3 h-3 rounded-sm border border-current opacity-50" />
+                )}
+                All Orders
+              </button>
+            );
+          })()}
           {STATUS_CHOICES.map((s) => {
             const active = activeStatuses.has(s.value);
             const count = statusCounts[s.value] ?? 0;
@@ -606,34 +683,106 @@ export function FollowUpPage({
 
       {/* ── Smart Pick ─────────────────────────────────── */}
       {viewItems.length > 0 && !noStatusSelected && (
-        <div className="card">
+        <div className={`rounded-lg border px-3 py-2 ${
+          selectAllMatchingActive
+            ? 'border-warning-400 bg-warning-50 dark:border-warning-700 dark:bg-warning-900/20'
+            : 'border-app-border bg-app-elevated'
+        }`}>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <SmartPick
-              total={Math.min(viewTotal, isCartView ? abandonedCarts.length : orders.length)}
+              total={smartPickCeiling}
               selectedCount={selectedIds.size}
-              onPick={(count) => {
+              onPick={async (count) => {
                 const items = isCartView ? abandonedCarts : orders;
-                setSelectedIds(new Set(items.slice(0, count).map((o) => o.id)));
+                // Fast path: requested count fits on the current page
+                if (count <= items.length) {
+                  if (selectAllMatchingActive) {
+                    setSelectAllMatchingActive(false);
+                    setSelectAllMatchingCapped(false);
+                  }
+                  setSelectedIds(new Set(items.slice(0, count).map((o) => o.id)));
+                  return;
+                }
+                // Cross-page path: fetch matching IDs from the server
+                if (!bulkSelectAllMatchingInput || isCartView) {
+                  setSelectedIds(new Set(items.map((o) => o.id)));
+                  return;
+                }
+                setSelectAllMatchingLoading(true);
+                setSelectAllMatchingError(null);
+                try {
+                  const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput);
+                  if (ids.length === 0) {
+                    setSelectAllMatchingError('Could not load matching orders. Try again.');
+                    return;
+                  }
+                  const picked = ids.slice(0, count);
+                  setSelectedIds(new Set(picked));
+                  setSelectAllMatchingActive(picked.length > items.length);
+                  setSelectAllMatchingCapped(capped);
+                } catch {
+                  setSelectAllMatchingError('Failed to load matching orders.');
+                } finally {
+                  setSelectAllMatchingLoading(false);
+                }
               }}
-              onClear={() => setSelectedIds(new Set())}
+              onClear={clearSelection}
               itemNoun={isCartView ? 'carts' : 'orders'}
             />
-            {viewTotal > 0 && (
+            {!isCartView && bulkSelectAllMatchingInput && viewTotal > 0 && (
               <label className="flex items-center gap-1.5 text-sm">
                 <Checkbox
-                  checked={selectedIds.size === (isCartView ? abandonedCarts : orders).length && (isCartView ? abandonedCarts : orders).length > 0}
+                  checked={selectAllMatchingActive}
+                  disabled={selectAllMatchingLoading}
                   onChange={(e) => {
-                    const items = isCartView ? abandonedCarts : orders;
-                    if (e.target.checked) setSelectedIds(new Set(items.map((o) => o.id)));
+                    if (e.target.checked) selectAllMatchingFilter();
+                    else clearSelection();
+                  }}
+                />
+                <span className="font-medium text-app-fg">
+                  {selectAllMatchingActive
+                    ? `${selectedIds.size.toLocaleString()} selected across filter`
+                    : `Select all ${viewTotal.toLocaleString()} matching`}
+                </span>
+                <span
+                  className="inline-flex shrink-0 text-app-fg-muted"
+                  title={selectAllMatchingActive
+                    ? `Bulk actions will affect all ${selectedIds.size.toLocaleString()} selected orders.${
+                        selectedIds.size > orders.length ? ` ${(selectedIds.size - orders.length).toLocaleString()} are not visible on this page.` : ''
+                      }${selectAllMatchingCapped ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} of ${viewTotal.toLocaleString()} matching.` : ''}`
+                    : `Selects every order matching the current filter.${
+                        viewTotal > ORDERS_DEEP_SELECT_MAX ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} — narrow the filter to process more.` : ''
+                      }`}
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                {selectAllMatchingLoading && (
+                  <span className="text-xs text-app-fg-muted">Loading…</span>
+                )}
+              </label>
+            )}
+            {isCartView && viewTotal > 0 && (
+              <label className="flex items-center gap-1.5 text-sm">
+                <Checkbox
+                  checked={selectedIds.size === abandonedCarts.length && abandonedCarts.length > 0}
+                  onChange={(e) => {
+                    if (e.target.checked) setSelectedIds(new Set(abandonedCarts.map((c) => c.id)));
                     else setSelectedIds(new Set());
                   }}
                 />
                 <span className="font-medium text-app-fg">
-                  {selectedIds.size === (isCartView ? abandonedCarts : orders).length && (isCartView ? abandonedCarts : orders).length > 0
+                  {selectedIds.size === abandonedCarts.length && abandonedCarts.length > 0
                     ? `${selectedIds.size.toLocaleString()} selected`
-                    : `Select all ${viewTotal.toLocaleString()} matching`}
+                    : `Select all ${abandonedCarts.length.toLocaleString()} on page`}
                 </span>
               </label>
+            )}
+            {selectAllMatchingError && (
+              <p className="w-full text-xs text-danger-600 dark:text-danger-400">
+                {selectAllMatchingError}
+              </p>
             )}
           </div>
         </div>
@@ -647,7 +796,7 @@ export function FollowUpPage({
               <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
                 {selectedIds.size} {isCartView ? 'cart' : 'order'}{selectedIds.size !== 1 ? 's' : ''} selected
               </span>
-              <button onClick={() => setSelectedIds(new Set())} className="text-xs text-brand-500 hover:text-brand-600 underline">
+              <button onClick={clearSelection} className="text-xs text-brand-500 hover:text-brand-600 underline">
                 Clear
               </button>
             </div>
@@ -759,6 +908,10 @@ export function FollowUpPage({
           selection={{
             selectedIds,
             onToggle: (id, selected) => {
+              if (selectAllMatchingActive) {
+                setSelectAllMatchingActive(false);
+                setSelectAllMatchingCapped(false);
+              }
               setSelectedIds((prev) => {
                 const next = new Set(prev);
                 if (selected) next.add(id);
@@ -767,6 +920,10 @@ export function FollowUpPage({
               });
             },
             onToggleAll: (selectAll) => {
+              if (selectAllMatchingActive) {
+                setSelectAllMatchingActive(false);
+                setSelectAllMatchingCapped(false);
+              }
               if (selectAll) setSelectedIds(new Set(orders.map((o) => o.id)));
               else setSelectedIds(new Set());
             },

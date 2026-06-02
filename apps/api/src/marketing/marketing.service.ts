@@ -241,7 +241,7 @@ export class MarketingService {
             eq(schema.adSpendLogs.mediaBuyerId, userId),
             ne(schema.adSpendLogs.status, 'REJECTED'),
             branchCampaignIds
-              ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds)
+              ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
               : undefined,
           ),
         );
@@ -1352,6 +1352,12 @@ export class MarketingService {
       return { totalReceived: '0', totalDistributed: '0', totalSpend: '0', balance: '0' };
     }
 
+    // Match the enforcement logic in computeMarketingDisbursableInTx:
+    // - Received: SENT + COMPLETED (funds in-flight count as received)
+    // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
+    // - Spend: non-REJECTED (PENDING + APPROVED)
+    // Without this, the displayed balance is higher than the enforceable
+    // disbursable — users see funds that the system won't let them move.
     const [receivedRow, distributedRow, spendRow] = await Promise.all([
       this.db
         .select({ total: sum(schema.marketingFunding.amount) })
@@ -1359,7 +1365,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.marketingFunding.receiverId, userId),
-            eq(schema.marketingFunding.status, 'COMPLETED'),
+            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
           ),
         )
         .then((r) => r[0]),
@@ -1369,7 +1375,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.marketingFunding.senderId, userId),
-            eq(schema.marketingFunding.status, 'COMPLETED'),
+            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
           ),
         )
         .then((r) => r[0]),
@@ -1380,7 +1386,7 @@ export class MarketingService {
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
             ne(schema.adSpendLogs.status, 'REJECTED'),
-            branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
+            branchCampaignIds ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId)) : undefined,
           ),
         )
         .then((r) => r[0]),
@@ -1486,6 +1492,9 @@ export class MarketingService {
 
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
 
+    // Match the enforcement logic in computeMarketingDisbursableInTx:
+    // - Received: SENT + COMPLETED (funds in-flight count as received)
+    // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
     const [fundingByReceiver, fundingBySender, spendByMediaBuyer, userRows] = await Promise.all([
       this.db
         .select({
@@ -1496,7 +1505,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.marketingFunding.receiverId, recipientUserIds),
-            eq(schema.marketingFunding.status, 'COMPLETED'),
+            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
           ),
         )
         .groupBy(schema.marketingFunding.receiverId),
@@ -1509,7 +1518,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.marketingFunding.senderId, recipientUserIds),
-            eq(schema.marketingFunding.status, 'COMPLETED'),
+            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
           ),
         )
         .groupBy(schema.marketingFunding.senderId),
@@ -1524,7 +1533,7 @@ export class MarketingService {
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
             ne(schema.adSpendLogs.status, 'REJECTED'),
             branchCampaignIds
-              ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds)
+              ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
               : undefined,
           ),
         )

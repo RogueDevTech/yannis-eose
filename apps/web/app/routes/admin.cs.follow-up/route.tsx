@@ -83,6 +83,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
   const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: ALL_FOLLOW_UP_STATUSES }));
 
+  // Build the order list input upfront so it can be serialized for deep-select.
+  const listInput: Record<string, unknown> = { page, limit, sortBy: 'createdAt', sortOrder: 'desc', excludeFollowUp: false };
+  if (!isCartView && statuses.length > 0) {
+    const orderStatuses = statuses.filter((s) => s !== ABANDONED_CART_STATUS);
+    if (orderStatuses.length === 1) listInput.status = orderStatuses[0];
+    else if (orderStatuses.length > 1) listInput.statuses = orderStatuses;
+    if (search) listInput.search = search;
+    if (assignedCsId) listInput.assignedCsId = assignedCsId;
+    if (customStartDate || customEndDate) {
+      if (customStartDate) listInput.startDate = customStartDate;
+      if (customEndDate) listInput.endDate = customEndDate;
+    } else if (olderThanDays) {
+      const days = parseInt(olderThanDays, 10);
+      if (Number.isFinite(days) && days > 0) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        listInput.endDate = cutoff.toISOString().slice(0, 10);
+      }
+    }
+  }
+
   const pageData = (async (): Promise<FollowUpPageData> => {
     const [closersRes, countsRes, productsRes, cartStatsRes] = await Promise.all([
       apiRequest<unknown>('/trpc/orders.listCSClosers', deferredOpt),
@@ -137,24 +158,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: cartData?.items ?? [], abandonedCartsTotal: cartData?.total ?? 0, abandonedCartsTotalPages: Math.max(1, Math.ceil((cartData?.total ?? 0) / limit)) };
     }
 
-    const listInput: Record<string, unknown> = { page, limit, sortBy: 'createdAt', sortOrder: 'desc', excludeFollowUp: false };
-    const orderStatuses = statuses.filter((s) => s !== ABANDONED_CART_STATUS);
-    if (orderStatuses.length === 1) listInput.status = orderStatuses[0];
-    else if (orderStatuses.length > 1) listInput.statuses = orderStatuses;
-    if (search) listInput.search = search;
-    if (assignedCsId) listInput.assignedCsId = assignedCsId;
-    if (customStartDate || customEndDate) {
-      if (customStartDate) listInput.startDate = customStartDate;
-      if (customEndDate) listInput.endDate = customEndDate;
-    } else if (olderThanDays) {
-      const days = parseInt(olderThanDays, 10);
-      if (Number.isFinite(days) && days > 0) {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - days);
-        listInput.endDate = cutoff.toISOString().slice(0, 10);
-      }
-    }
-
     const ordersRes = await apiRequest<unknown>(
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(listInput))}`,
       deferredOpt,
@@ -164,6 +167,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : null;
     return { orders: ordersData?.orders ?? [], total: ordersData?.pagination?.total ?? 0, totalPages: ordersData?.pagination?.totalPages ?? 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1 };
   })();
+
+  // Serialize the listInput so the component can use it for deep-select
+  // (cross-page "Select all matching" via fetchOrdersMatchingIds).
+  const bulkSelectAllMatchingInput = !isCartView && statuses.length > 0
+    ? JSON.stringify(listInput)
+    : undefined;
 
   return defer({
     shell: {
@@ -175,6 +184,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       startDate: customStartDate ?? '',
       endDate: customEndDate ?? '',
       page,
+      bulkSelectAllMatchingInput,
     },
     pageData,
   });
@@ -411,6 +421,7 @@ export default function FollowUpRoute() {
     endDate: shell?.endDate ?? '',
     page: shell?.page ?? 1,
   };
+  const bulkSelectAllMatchingInput: string | undefined = shell?.bulkSelectAllMatchingInput;
   return (
     <CachedAwait<FollowUpPageData>
       resolve={loaderData.pageData as Promise<FollowUpPageData>}
@@ -436,6 +447,7 @@ export default function FollowUpRoute() {
         <FollowUpPage
           {...data}
           filters={filters}
+          bulkSelectAllMatchingInput={bulkSelectAllMatchingInput}
         />
       )}
     </CachedAwait>
