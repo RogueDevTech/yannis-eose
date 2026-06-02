@@ -148,7 +148,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
   type BundleData = {
     funding: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } | null;
-    balances: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>;
+    balances: Array<{ userId: string; name: string; role: string; totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }>;
     summary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
     requests: { records: FundingRequestRecord[]; pagination: { page: number; limit: number; total: number } };
     requestsCounts: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number };

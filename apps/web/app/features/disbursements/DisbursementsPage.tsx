@@ -32,6 +32,8 @@ import { Tabs } from '~/components/ui/tabs';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 
+const DATE_TIME_FMT: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
+
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -112,6 +114,7 @@ export interface DisbursementsPageData {
     name: string;
     role: string;
     totalReceived: string;
+    totalDistributed: string;
     totalSpend: string;
     balance: string;
   }>;
@@ -539,7 +542,7 @@ export function DisbursementsPage({
         header: 'Reference',
         render: (f) => (
           <span className="text-sm text-app-fg-muted">
-            {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
           </span>
         ),
       },
@@ -588,7 +591,7 @@ export function DisbursementsPage({
         header: 'Sent',
         render: (f) => (
           <span className="text-sm text-app-fg-muted">
-            {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
           </span>
         ),
       },
@@ -598,7 +601,7 @@ export function DisbursementsPage({
         render: (f) => (
           <span className="text-sm text-app-fg-muted">
             {f.verifiedAt
-              ? new Date(f.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
+              ? new Date(f.verifiedAt).toLocaleString('en-NG', DATE_TIME_FMT)
               : '—'}
           </span>
         ),
@@ -649,7 +652,7 @@ export function DisbursementsPage({
         header: 'Requested',
         render: (r) => (
           <span className="text-sm text-app-fg-muted">
-            {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {new Date(r.createdAt).toLocaleString('en-NG', DATE_TIME_FMT)}
           </span>
         ),
       },
@@ -658,7 +661,7 @@ export function DisbursementsPage({
         header: 'Resolved',
         render: (r) => (
           <span className="text-sm text-app-fg-muted">
-            {r.resolvedAt ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+            {r.resolvedAt ? new Date(r.resolvedAt).toLocaleString('en-NG', DATE_TIME_FMT) : '—'}
           </span>
         ),
       },
@@ -724,11 +727,14 @@ export function DisbursementsPage({
         header: 'Spent',
         align: 'right',
         headerClassName: 'text-right',
-        render: (b) => (
-          <span className="text-sm">
-            <NairaPrice amount={Number(b.totalSpend)} />
-          </span>
-        ),
+        render: (b) => {
+          const spent = Number(b.totalDistributed || '0') + Number(b.totalSpend || '0');
+          return (
+            <span className="text-sm">
+              <NairaPrice amount={spent} />
+            </span>
+          );
+        },
       },
       {
         key: 'balance',
@@ -1120,7 +1126,7 @@ export function DisbursementsPage({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium text-app-fg-muted">
-                        {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
                       </span>
                       <StatusBadge status={f.status} />
                     </div>
@@ -1133,7 +1139,7 @@ export function DisbursementsPage({
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                      <span>{new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      <span>{new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}</span>
                     </div>
                   </div>
                 )}
@@ -1183,9 +1189,9 @@ export function DisbursementsPage({
                         </p>
                         {r.reason ? <p className="text-sm text-app-fg-muted">{r.reason}</p> : null}
                         <p className="text-xs text-app-fg-muted">
-                          {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {new Date(r.createdAt).toLocaleString('en-NG', DATE_TIME_FMT)}
                           {r.resolvedAt
-                            ? ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`
+                            ? ` — Resolved ${new Date(r.resolvedAt).toLocaleString('en-NG', DATE_TIME_FMT)}`
                             : null}
                         </p>
                         {r.status === 'PENDING' ? (
@@ -1356,7 +1362,7 @@ export function DisbursementsPage({
                           Received: <NairaPrice amount={Number(b.totalReceived)} />
                         </div>
                         <div>
-                          Spent: <NairaPrice amount={Number(b.totalSpend)} />
+                          Spent: <NairaPrice amount={Number(b.totalDistributed || '0') + Number(b.totalSpend || '0')} />
                         </div>
                       </div>
                       {canSendFundsToRecipient ? (

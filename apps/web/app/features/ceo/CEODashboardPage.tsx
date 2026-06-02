@@ -203,7 +203,7 @@ export function CEODashboardPage({
     setLastRefreshSeen(refreshFetcher.data);
     if (refreshFetcher.data.success) {
       revalidator.revalidate();
-    } else if (refreshFetcher.data.error) {
+    } else if (refreshFetcher.data.error && !/read-only/i.test(refreshFetcher.data.error)) {
       toast.error('Refresh failed', refreshFetcher.data.error);
     }
   }, [refreshFetcher.state, refreshFetcher.data, lastRefreshSeen, revalidator, toast]);
