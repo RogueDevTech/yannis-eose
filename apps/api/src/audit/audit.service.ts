@@ -63,6 +63,15 @@ function isAuditableTable(name: string): name is AuditableTable {
   return (AUDITABLE_TABLES as readonly string[]).includes(name);
 }
 
+/** Tables whose PK is not called `id`. Maps table name → actual PK column. */
+const NON_ID_PK: Record<string, string> = {
+  cs_order_routing_branch_settings: 'owner_branch_id',
+};
+
+function pkColumn(table: string): string {
+  return NON_ID_PK[table] ?? 'id';
+}
+
 /**
  * One slice of a user's name+role lifetime — pulled from `users` (current) and `users_history`.
  * The audit UI uses `validFrom`/`validTo` to pick the slice covering an audit row's `validFrom`,
@@ -498,8 +507,9 @@ export class AuditService {
         } else {
           // Always cast `modified_by` to text in the SELECT so the UNION succeeds
           // even if a history table declares it as text instead of uuid (drift).
+          const pk = pkColumn(table);
           dataUnionParts.push(
-            `(SELECT '${table}' AS _table_name, id, modified_by::text AS modified_by,
+            `(SELECT '${table}' AS _table_name, ${pk} AS id, modified_by::text AS modified_by,
                      valid_from, valid_to,
                      row_to_json(${table}_history.*) AS _row_data
               FROM ${table}_history

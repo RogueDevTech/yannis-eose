@@ -30,6 +30,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { Tabs } from '~/components/ui/tabs';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
+import { FilteredTotalsRow } from '~/components/ui/filtered-totals-row';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 
 const DATE_TIME_FMT: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
@@ -88,6 +89,8 @@ export interface FundingRequestRecord {
 
 export interface DisbursementsPageData {
   funding: DisbursementRecord[];
+  /** Total amount for the current filter set (all pages, not just visible). */
+  filteredTotalAmount?: string;
   totalFunding: number;
   totalPages: number;
   page: number;
@@ -272,6 +275,7 @@ function CreateDisbursementModal({
 
 export function DisbursementsPage({
   funding,
+  filteredTotalAmount = '0',
   totalFunding,
   totalPages,
   page,
@@ -1108,6 +1112,11 @@ export function DisbursementsPage({
                   </div>
                 </>
               }
+            />
+
+            <FilteredTotalsRow
+              totalAmount={Number(filteredTotalAmount)}
+              recordCount={totalFunding}
             />
 
             <TableLoadingOverlay show={isFilterLoading}>
