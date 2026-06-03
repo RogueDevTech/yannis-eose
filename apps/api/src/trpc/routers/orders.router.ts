@@ -1759,7 +1759,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(
       z.object({
-        orderIds: z.array(z.string().uuid()).min(1).max(100),
+        orderIds: z.array(z.string().uuid()).min(1).max(2000),
         newStatus: z.string(),
         metadata: z.record(z.unknown()).optional(),
         branchId: z.string().uuid().optional(),
@@ -1838,7 +1838,7 @@ export const ordersRouter = router({
   reopenForFollowUp: permissionProcedure('orders.followUp')
     .input(
       z.object({
-        orderIds: z.array(z.string().uuid()).min(1).max(100),
+        orderIds: z.array(z.string().uuid()).min(1).max(2000),
         targetBranchId: z.string().uuid().optional(),
       }),
     )
@@ -1863,7 +1863,7 @@ export const ordersRouter = router({
     .input(
       z
         .object({
-          orderIds: z.array(z.string().uuid()).min(1).max(100),
+          orderIds: z.array(z.string().uuid()).min(1).max(2000),
           csCloserId: z.string().uuid().optional(),
           csCloserIds: z.array(z.string().uuid()).min(1).max(50).optional(),
           branchId: z.string().uuid().optional(),
@@ -2039,7 +2039,7 @@ export const ordersRouter = router({
         items: z.array(z.object({
           orderId: z.string().uuid(),
           originalStatus: z.string(),
-        })).min(1).max(500),
+        })).min(1).max(2000),
       }),
     )
     .mutation(async ({ input, ctx }) => {

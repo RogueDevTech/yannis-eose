@@ -10,4 +10,5 @@ export const EXPENSE_CATEGORY_OPTIONS: Array<{ value: ExpenseCategory; label: st
 
 export const EXPENSE_CATEGORY_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   ...EXPENSE_CATEGORY_OPTIONS,
+  { value: 'NOT_AD_SPEND', label: 'All Others (excl. Ad Spend)' },
 ];

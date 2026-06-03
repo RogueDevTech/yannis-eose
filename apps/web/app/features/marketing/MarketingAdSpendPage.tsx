@@ -34,6 +34,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn, type CompactTableMobileCardHelpers } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
+import { SortMenu, type SortMenuValue } from '~/components/ui/sort-menu';
 import { fetchAdSpendIntervalPreview } from '~/lib/trpc-browser';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
@@ -171,6 +172,8 @@ export function MarketingAdSpendPage({
   productIdFilter,
   campaignIdFilter,
   mediaBuyerIdFilter,
+  sortBy: sortByProp,
+  sortDir: sortDirProp,
   mediaBuyersForFilter: mediaBuyersForFilterProp,
   marketingTeams: marketingTeamsProp,
   statusCounts: statusCountsProp,
@@ -398,6 +401,30 @@ export function MarketingAdSpendPage({
       setAdSpendPreviewLoading(false);
     };
   }, [showAdSpendForm, formCampaignId, formProductId, formSpendDate, formSpendAmount]);
+
+  const AD_SPEND_SORT_DEFAULT: SortMenuValue = { sortBy: 'spendDate', sortDir: 'desc' };
+  const AD_SPEND_SORT_OPTIONS = [
+    { value: 'spendDate', label: 'Date', defaultDir: 'desc' as const, ascLabel: 'Oldest first', descLabel: 'Newest first' },
+    { value: 'spendAmount', label: 'Amount', defaultDir: 'desc' as const, ascLabel: 'Lowest first', descLabel: 'Highest first' },
+    { value: 'status', label: 'Status', defaultDir: 'asc' as const, ascLabel: 'Pending first', descLabel: 'Approved first' },
+    { value: 'createdAt', label: 'Created', defaultDir: 'desc' as const, ascLabel: 'Oldest first', descLabel: 'Newest first' },
+  ];
+  const currentSort: SortMenuValue = {
+    sortBy: sortByProp ?? 'spendDate',
+    sortDir: sortDirProp ?? 'desc',
+  };
+  const handleSortChange = (next: SortMenuValue) => {
+    const params = new URLSearchParams(searchParams);
+    if (next.sortBy === 'spendDate' && next.sortDir === 'desc') {
+      params.delete('sortBy');
+      params.delete('sortDir');
+    } else {
+      params.set('sortBy', next.sortBy);
+      params.set('sortDir', next.sortDir);
+    }
+    params.set('page', '1');
+    setSearchParams(params);
+  };
 
   const getListParams = (overrides: {
     page?: number;
@@ -981,14 +1008,14 @@ export function MarketingAdSpendPage({
                 label: `Others (${!secondary && !otherCountsRef.current ? '—' : otherCounts.APPROVED})`,
                 value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.totalSpend).toLocaleString()}</>,
                 valueClassName: otherCounts.totalSpend > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
-                onClick: () => handleOverviewClick('AD_ACCOUNT', 'APPROVED'),
+                onClick: () => handleOverviewClick('NOT_AD_SPEND', 'APPROVED'),
                 active: isFilteringNonAdSpend && selectedStatus === 'APPROVED',
               },
               {
                 label: `Others Pending (${!secondary && !otherCountsRef.current ? '—' : otherCounts.PENDING})`,
                 value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.pendingSpend).toLocaleString()}</>,
                 valueClassName: 'text-amber-600 dark:text-amber-400',
-                onClick: () => handleOverviewClick('AD_ACCOUNT', 'PENDING'),
+                onClick: () => handleOverviewClick('NOT_AD_SPEND', 'PENDING'),
                 active: isFilteringNonAdSpend && selectedStatus === 'PENDING',
               },
             ]}
@@ -1242,6 +1269,12 @@ export function MarketingAdSpendPage({
                   />
                 )
               ) : null}
+              <SortMenu
+                value={currentSort}
+                onChange={handleSortChange}
+                options={AD_SPEND_SORT_OPTIONS}
+                defaultValue={AD_SPEND_SORT_DEFAULT}
+              />
             </>
           }
           sheetFilterBody={null}
