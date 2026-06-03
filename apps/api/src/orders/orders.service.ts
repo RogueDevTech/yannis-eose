@@ -4794,6 +4794,39 @@ export class OrdersService {
     return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
   }
 
+  /** Like listCSClosers but includes branch memberships for filtering in the UI. */
+  async listCSClosersWithBranches(actor: SessionUser): Promise<Array<{
+    agentId: string;
+    agentName: string;
+    branches: Array<{ branchId: string; branchName: string }>;
+  }>> {
+    const closers = await this.listCSClosers(actor);
+    if (closers.length === 0) return [];
+
+    const agentIds = closers.map((c) => c.agentId);
+    const memberships = await this.db
+      .select({
+        userId: schema.userBranches.userId,
+        branchId: schema.userBranches.branchId,
+        branchName: schema.branches.name,
+      })
+      .from(schema.userBranches)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
+      .where(inArray(schema.userBranches.userId, agentIds));
+
+    const branchesByUser = new Map<string, Array<{ branchId: string; branchName: string }>>();
+    for (const m of memberships) {
+      const list = branchesByUser.get(m.userId) ?? [];
+      list.push({ branchId: m.branchId, branchName: m.branchName });
+      branchesByUser.set(m.userId, list);
+    }
+
+    return closers.map((c) => ({
+      ...c,
+      branches: branchesByUser.get(c.agentId) ?? [],
+    }));
+  }
+
   /**
    * Branch-scoping WHERE fragment for order queries (migration 0150).
    *

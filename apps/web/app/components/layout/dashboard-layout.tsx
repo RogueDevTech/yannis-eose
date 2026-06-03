@@ -922,13 +922,15 @@ function DashboardLayoutInner({
 
   // If permission was already granted (e.g. returning user), sync the subscription to the DB once.
   // Guarded by a ref so it only fires once per mount even if subscribePush identity changes.
+  // SUPPORT role is read-only — skip the mutation to avoid a 403.
+  const isReadOnlyRole = user?.role === 'SUPPORT';
   const didAutoSubscribeRef = useRef(false);
   useEffect(() => {
-    if (permissionState === 'granted' && !didAutoSubscribeRef.current) {
+    if (permissionState === 'granted' && !didAutoSubscribeRef.current && !isReadOnlyRole) {
       didAutoSubscribeRef.current = true;
       subscribePush().catch(() => {});
     }
-  }, [permissionState, subscribePush]);
+  }, [permissionState, subscribePush, isReadOnlyRole]);
 
   // Unlock notification sound on first user interaction (required by browser autoplay policy)
   // Keep audio context alive — browsers re-suspend it after inactivity,
