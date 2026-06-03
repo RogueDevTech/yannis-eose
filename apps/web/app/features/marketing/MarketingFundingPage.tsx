@@ -388,7 +388,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   };
 
   const updateSliceParam = (
-    key: 'status' | 'requestStatus' | 'search' | 'entryType' | 'entryStatus',
+    key: 'status' | 'requestStatus' | 'search' | 'entryType' | 'entryStatus' | 'senderId',
     value: string | undefined,
   ) => {
     const params = new URLSearchParams(searchParams);
@@ -500,7 +500,30 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         : { ...rawRequestsSlice, records: applyOptimisticPatches(rawRequestsSlice.records, fundingRequestPatches) },
     [rawRequestsSlice, fundingRequestPatches],
   );
-  const unifiedDistributingSlice = distributingEntries;
+  // Sender filter — lets admin/SuperAdmin scope the distributing tab to a specific HoM.
+  const senderFilter = searchParams.get('senderId') ?? 'ALL';
+  const unifiedDistributingSlice = useMemo(() => {
+    if (!distributingEntries) return distributingEntries;
+    if (senderFilter === 'ALL') return distributingEntries;
+    const filtered = distributingEntries.records.filter((e) =>
+      e.entryType === 'transfer' ? e.senderId === senderFilter : true,
+    );
+    return { ...distributingEntries, records: filtered, total: filtered.length };
+  }, [distributingEntries, senderFilter]);
+
+  // Unique senders for the filter dropdown (from unfiltered data).
+  const distributingSenders = useMemo(() => {
+    if (!distributingEntries) return [];
+    const seen = new Map<string, string>();
+    for (const e of distributingEntries.records) {
+      if (e.entryType === 'transfer' && e.senderId && !seen.has(e.senderId)) {
+        seen.set(e.senderId, e.senderName ?? e.senderId);
+      }
+    }
+    return [...seen.entries()]
+      .map(([id, name]) => ({ value: id, label: name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [distributingEntries]);
 
   /**
    * Section 1 ("Funds I've Received") merged slice — incoming transfers plus
@@ -869,6 +892,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               onSearchSubmit={submitSearch}
               onTypeChange={(v) => updateSliceParam('entryType', v)}
               onStatusChange={(v) => updateSliceParam('entryStatus', v)}
+              senders={distributingSenders}
+              senderFilter={senderFilter}
+              onSenderChange={(v) => updateSliceParam('senderId', v === 'ALL' ? '' : v)}
             />
             <UnifiedDistributingTable
               slice={unifiedDistributingSlice}
@@ -1876,6 +1902,9 @@ function UnifiedDistributingFilterBar({
   onSearchSubmit,
   onTypeChange,
   onStatusChange,
+  senders,
+  senderFilter,
+  onSenderChange,
 }: {
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   searchQuery: string;
@@ -1883,6 +1912,9 @@ function UnifiedDistributingFilterBar({
   onSearchSubmit: (e: React.FormEvent) => void;
   onTypeChange: (val: string) => void;
   onStatusChange: (val: string) => void;
+  senders?: Array<{ value: string; label: string }>;
+  senderFilter?: string;
+  onSenderChange?: (val: string) => void;
 }) {
   const filterBadge = ledgerFilterBadgeCount(slice.typeFilter, slice.statusFilter);
 
@@ -1945,6 +1977,25 @@ function UnifiedDistributingFilterBar({
               wrapperClassName="w-auto min-w-[13rem]"
             />
           </div>
+          {senders && senders.length > 1 && onSenderChange && (
+            <div className="relative">
+              {senderFilter && senderFilter !== 'ALL' && (
+                <FilterDismiss onClear={() => onSenderChange('ALL')} />
+              )}
+              <SearchableSelect
+                id="distributing-sender-filter"
+                value={senderFilter ?? 'ALL'}
+                onChange={onSenderChange}
+                options={[
+                  { value: 'ALL', label: 'All senders' },
+                  ...senders,
+                ]}
+                placeholder="All senders"
+                searchPlaceholder="Search sender..."
+                wrapperClassName="w-auto min-w-[12rem]"
+              />
+            </div>
+          )}
         </>
       }
       sheetFilterBody={null}

@@ -1049,10 +1049,16 @@ export class MarketingService {
       .leftJoin(fundingReceiver, eq(schema.marketingFunding.receiverId, fundingReceiver.id))
       .where(whereClause);
 
-    const [records, totalRows] = await Promise.all([
+    const [records, totalRows, sumRows] = await Promise.all([
       baseFrom.orderBy(desc(schema.marketingFunding.sentAt)).limit(input.limit).offset(offset),
       this.db
         .select({ count: count() })
+        .from(schema.marketingFunding)
+        .leftJoin(fundingSender, eq(schema.marketingFunding.senderId, fundingSender.id))
+        .leftJoin(fundingReceiver, eq(schema.marketingFunding.receiverId, fundingReceiver.id))
+        .where(whereClause),
+      this.db
+        .select({ total: sql<string>`COALESCE(SUM(${schema.marketingFunding.amount}), 0)::text` })
         .from(schema.marketingFunding)
         .leftJoin(fundingSender, eq(schema.marketingFunding.senderId, fundingSender.id))
         .leftJoin(fundingReceiver, eq(schema.marketingFunding.receiverId, fundingReceiver.id))
@@ -1064,6 +1070,7 @@ export class MarketingService {
     return {
       records,
       pagination: { page: input.page, limit: input.limit, total },
+      filteredTotalAmount: sumRows[0]?.total ?? '0',
     };
   }
 
@@ -1217,7 +1224,7 @@ export class MarketingService {
 
   async getFundingSummary(
     branchId?: string | null,
-    opts?: { restrictToReceiverIds?: string[]; startDate?: string; endDate?: string },
+    opts?: { restrictToReceiverIds?: string[]; restrictToReceiverRole?: string; startDate?: string; endDate?: string },
   ) {
     const emptyFundingSummary = {
       totalSent: '0', totalCompleted: '0', totalDisputed: '0',
@@ -1228,7 +1235,21 @@ export class MarketingService {
       return emptyFundingSummary;
     }
 
-    const restrict = opts?.restrictToReceiverIds;
+    // Resolve role restriction to IDs if provided
+    let restrict = opts?.restrictToReceiverIds;
+    if (opts?.restrictToReceiverRole) {
+      const roleUsers = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.role, opts.restrictToReceiverRole as typeof schema.users.role.enumValues[number]));
+      const roleIds = roleUsers.map((u) => u.id);
+      if (roleIds.length === 0) return emptyFundingSummary;
+      restrict = restrict?.length
+        ? restrict.filter((id) => roleIds.includes(id))
+        : roleIds;
+      if (restrict.length === 0) return emptyFundingSummary;
+    }
+
     let receiverScope: SQL | undefined;
     if (branchUserIds && restrict?.length) {
       const intersect = branchUserIds.filter((id) => restrict.includes(id));
@@ -1502,8 +1523,6 @@ export class MarketingService {
       return [];
     }
 
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-
     // Match the enforcement logic in computeMarketingDisbursableInTx:
     // - Received: SENT + COMPLETED (funds in-flight count as received)
     // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
@@ -1534,6 +1553,11 @@ export class MarketingService {
           ),
         )
         .groupBy(schema.marketingFunding.senderId),
+      // Ad spend is NOT branch-filtered here — each user's balance must match
+      // what they see on their own Funding page (which uses getFundingBalance
+      // under their own branch context). Applying the CALLER's branch would
+      // exclude spend logged under a different branch's campaigns and inflate
+      // the balance compared to the recipient's own view.
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -1544,9 +1568,6 @@ export class MarketingService {
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
             ne(schema.adSpendLogs.status, 'REJECTED'),
-            branchCampaignIds
-              ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
-              : undefined,
           ),
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),

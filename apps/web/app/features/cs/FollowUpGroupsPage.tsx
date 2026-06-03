@@ -11,7 +11,6 @@ import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
 import { Checkbox } from '~/components/ui/checkbox';
 import { SearchInput } from '~/components/ui/search-input';
-import { Spinner } from '~/components/ui/spinner';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
@@ -36,10 +35,51 @@ interface Props {
   deferredLoading?: boolean;
 }
 
+/**
+ * Embeddable panel — groups table + create/edit/delete modals, no PageHeader.
+ * Used as a tab inside FollowUpBatchesPage.
+ */
+export function FollowUpGroupsPanel({ groups, closers, deferredLoading = false }: Props) {
+  return <FollowUpGroupsBody groups={groups} closers={closers} deferredLoading={deferredLoading} />;
+}
+
 export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }: Props) {
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Follow Up — Groups"
+        mobileInlineActions
+        description="Manage follow-up groups — teams of closers that work reopened orders."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Follow-up tools"
+            desktop={
+              <>
+                <Link to="/admin/cs/follow-up" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                  Batches
+                </Link>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <Link to="/admin/cs/follow-up" className="btn-secondary w-full inline-flex items-center justify-center">
+                Batches
+              </Link>
+            }
+          />
+        }
+      />
+      <FollowUpGroupsBody groups={groups} closers={closers} deferredLoading={deferredLoading} />
+    </div>
+  );
+}
+
+function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editGroup, setEditGroup] = useState<FollowUpGroupItem | null>(null);
   const [deleteGroup, setDeleteGroup] = useState<FollowUpGroupItem | null>(null);
+  const [peekGroup, setPeekGroup] = useState<FollowUpGroupItem | null>(null);
 
   const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(createFetcher, { successMessage: 'Group created' });
@@ -58,7 +98,11 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
       {
         key: 'name',
         header: 'Group',
-        render: (g) => <span className="text-sm font-medium text-app-fg">{g.name}</span>,
+        render: (g) => (
+          <button type="button" onClick={() => setPeekGroup(g)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
+            {g.name}
+          </button>
+        ),
       },
       {
         key: 'members',
@@ -103,6 +147,7 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
             ariaLabel={`Actions for ${g.name}`}
             sheetTitle={g.name}
             actions={[
+              { key: 'view', kind: 'button', label: 'View members', onClick: () => setPeekGroup(g) },
               { key: 'edit', kind: 'button', label: 'Edit group', onClick: () => setEditGroup(g) },
               { key: 'delete', kind: 'button', label: 'Delete group', tone: 'danger', onClick: () => setDeleteGroup(g) },
             ]}
@@ -115,38 +160,11 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Follow Up"
-        mobileInlineActions
-        description="Manage follow-up groups — teams of closers that work reopened orders."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Actions"
-            triggerAriaLabel="Follow-up tools"
-            desktop={
-              <>
-                <Link to="/admin/cs/follow-up" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                  Batches
-                </Link>
-                <PageRefreshButton />
-                <button type="button" onClick={() => setCreateOpen(true)} className="btn-primary btn-sm inline-flex items-center gap-1.5">
-                  + New group
-                </button>
-              </>
-            }
-            sheet={
-              <>
-                <Link to="/admin/cs/follow-up" className="btn-secondary w-full inline-flex items-center justify-center">
-                  Batches
-                </Link>
-                <button type="button" onClick={() => setCreateOpen(true)} className="btn-primary w-full inline-flex items-center justify-center mt-2">
-                  + New group
-                </button>
-              </>
-            }
-          />
-        }
-      />
+      <div className="flex items-center justify-end">
+        <button type="button" onClick={() => setCreateOpen(true)} className="btn-primary btn-sm inline-flex items-center gap-1.5">
+          + New group
+        </button>
+      </div>
 
       {groups.length === 0 && !deferredLoading ? (
         <EmptyState
@@ -166,7 +184,7 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
           renderMobileCard={(g) => (
             <button
               type="button"
-              onClick={() => setEditGroup(g)}
+              onClick={() => setPeekGroup(g)}
               className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
             >
               <div className="flex items-center justify-between gap-2">
@@ -233,6 +251,55 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
           >
             Delete
           </Button>
+        </div>
+      </Modal>
+
+      {/* ── Peek Members Modal ────────────────────── */}
+      <Modal
+        open={!!peekGroup}
+        onClose={() => setPeekGroup(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[80dvh]"
+      >
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-app-border shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-app-fg">{peekGroup?.name}</h3>
+            <p className="text-xs text-app-fg-muted mt-0.5">
+              {peekGroup?.memberCount} {peekGroup?.memberCount === 1 ? 'member' : 'members'}
+              {peekGroup?.createdByName ? ` · Created by ${peekGroup.createdByName}` : ''}
+            </p>
+          </div>
+          <button type="button" onClick={() => setPeekGroup(null)} className="text-app-fg-muted hover:text-app-fg p-1">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-app-border">
+          {peekGroup?.members.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-app-fg-muted">No members in this group.</p>
+          ) : (
+            peekGroup?.members.map((m) => (
+              <div key={m.userId} className="flex items-center gap-3 px-4 py-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-semibold shrink-0">
+                  {m.userName.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm text-app-fg">{m.userName}</span>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="border-t border-app-border p-3 shrink-0 flex gap-2">
+          <button
+            type="button"
+            onClick={() => { setPeekGroup(null); if (peekGroup) setEditGroup(peekGroup); }}
+            className="btn-secondary btn-sm flex-1 justify-center"
+          >
+            Edit group
+          </button>
+          <button type="button" onClick={() => setPeekGroup(null)} className="btn-secondary btn-sm flex-1 justify-center">
+            Close
+          </button>
         </div>
       </Modal>
     </div>
