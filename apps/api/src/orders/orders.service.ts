@@ -558,11 +558,11 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED'];
-    if (!allowedStatuses.includes(order.status)) {
+    const blockedStatuses = ['DELIVERED', 'REMITTED'];
+    if (blockedStatuses.includes(order.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'Order items cannot be adjusted once the order has been dispatched.',
+        message: 'Order items cannot be adjusted after delivery.',
       });
     }
 
@@ -620,6 +620,7 @@ export class OrdersService {
 
     const payload = {
       orderId: input.orderId,
+      orderNo: order.orderNumber ?? null,
       items: input.items,
       totalAmount: input.totalAmount,
     };
@@ -734,7 +735,7 @@ export class OrdersService {
       });
     }
 
-    const payload = { orderId: input.orderId };
+    const payload = { orderId: input.orderId, orderNo: order.orderNumber ?? null };
 
     const [req] = await withActor(this.db, actor, async (tx) =>
       tx
@@ -1145,6 +1146,62 @@ export class OrdersService {
           }
           if (tiers.length > 0) {
             tiersByProduct.set(campaignProductId, tiers);
+          }
+        }
+      }
+    }
+
+    // Fallback for products without campaign-scoped offers (e.g. offline orders):
+    // load offer templates or embedded product offers.
+    const missingProductIds = orderProductIds.filter((id) => !tiersByProduct.has(id));
+    if (missingProductIds.length > 0) {
+      // Try offer templates first
+      const templates = await this.db
+        .select({
+          productId: schema.offerTemplates.productId,
+          name: schema.offerTemplates.name,
+          price: schema.offerTemplates.price,
+          quantity: schema.offerTemplates.quantity,
+        })
+        .from(schema.offerTemplates)
+        .where(
+          and(
+            inArray(schema.offerTemplates.productId, missingProductIds),
+            eq(schema.offerTemplates.status, 'ACTIVE'),
+          ),
+        );
+      for (const t of templates) {
+        const list = tiersByProduct.get(t.productId) ?? [];
+        list.push({ label: t.name, quantity: t.quantity ?? 1, unitPrice: Number(t.price) });
+        tiersByProduct.set(t.productId, list);
+      }
+
+      // For any still missing, fall back to embedded product offers
+      const stillMissing = missingProductIds.filter((id) => !tiersByProduct.has(id));
+      if (stillMissing.length > 0) {
+        const products = await this.db
+          .select({
+            id: schema.products.id,
+            baseSalePrice: schema.products.baseSalePrice,
+            offers: schema.products.offers,
+          })
+          .from(schema.products)
+          .where(inArray(schema.products.id, stillMissing));
+        for (const p of products) {
+          const embedded = (p.offers ?? []) as Array<{
+            label?: string;
+            qty?: number;
+            price?: string | number;
+          }>;
+          if (Array.isArray(embedded) && embedded.length > 0) {
+            tiersByProduct.set(
+              p.id,
+              embedded.map((o) => ({
+                label: typeof o.label === 'string' ? o.label : 'Offer',
+                quantity: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1,
+                unitPrice: Number(o.price ?? p.baseSalePrice ?? 0),
+              })),
+            );
           }
         }
       }
@@ -3052,6 +3109,7 @@ export class OrdersService {
         ? this.db
             .select({
               orderId: schema.orderTimelineEvents.orderId,
+              eventType: schema.orderTimelineEvents.eventType,
               description: schema.orderTimelineEvents.description,
               actorName: schema.orderTimelineEvents.actorName,
               createdAt: schema.orderTimelineEvents.createdAt,
@@ -3061,13 +3119,14 @@ export class OrdersService {
             .where(
               and(
                 inArray(schema.orderTimelineEvents.orderId, orderIds),
-                eq(schema.orderTimelineEvents.eventType, 'CS_ORDER_COMMENT'),
+                inArray(schema.orderTimelineEvents.eventType, ['CS_ORDER_COMMENT', 'CALLBACK_SCHEDULED']),
               ),
             )
             .orderBy(desc(schema.orderTimelineEvents.createdAt))
         : Promise.resolve(
             [] as Array<{
               orderId: string;
+              eventType: string;
               description: string;
               actorName: string | null;
               createdAt: Date;
@@ -3105,8 +3164,15 @@ export class OrdersService {
     const lastCommentByOrder = new Map<string, { comment: string; actorName: string | null; at: Date }>();
     for (const c of commentsRes) {
       if (lastCommentByOrder.has(c.orderId)) continue;
-      const meta = c.metadata as { commentBody?: string } | null;
-      const comment = meta?.commentBody ?? c.description.replace(/^Comment:\s*/, '');
+      let comment: string;
+      if (c.eventType === 'CALLBACK_SCHEDULED') {
+        // Extract just the note from "Callback scheduled for ... (note)" or use full description
+        const noteMatch = c.description.match(/\(([^)]+)\)\s*$/);
+        comment = noteMatch ? `Callback: ${noteMatch[1]}` : c.description;
+      } else {
+        const meta = c.metadata as { commentBody?: string } | null;
+        comment = meta?.commentBody ?? c.description.replace(/^Comment:\s*/, '');
+      }
       lastCommentByOrder.set(c.orderId, { comment, actorName: c.actorName, at: c.createdAt });
     }
 
@@ -3810,13 +3876,12 @@ export class OrdersService {
     }
 
     if (input.items !== undefined) {
-      // Items may be adjusted any time before the goods physically leave the 3PL (DISPATCHED+).
-      // Post-dispatch adjustments would conflict with the rider's pick list / stock already in-transit.
-      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED'];
-      if (!allowedStatuses.includes(order.status)) {
+      // Items may be adjusted at any status before delivery.
+      const blockedStatuses = ['DELIVERED', 'REMITTED'];
+      if (blockedStatuses.includes(order.status)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Order items cannot be adjusted once the order has been dispatched.',
+          message: 'Order items cannot be adjusted after delivery.',
         });
       }
     }
@@ -3953,12 +4018,23 @@ export class OrdersService {
       workingInput.preferredDeliveryDate !== undefined ||
       workingInput.customFields !== undefined
     ) {
+      // Build a more descriptive message when the delivery date changes.
+      let description = `Delivery details updated by ${actorName}`;
+      if (workingInput.preferredDeliveryDate !== undefined) {
+        const oldDate = order.preferredDeliveryDate
+          ? new Date(order.preferredDeliveryDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+          : 'not set';
+        const newDate = workingInput.preferredDeliveryDate
+          ? new Date(workingInput.preferredDeliveryDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })
+          : 'removed';
+        description = `Delivery date changed from ${oldDate} to ${newDate} by ${actorName}`;
+      }
       void this.writeTimelineEvent({
         orderId: input.orderId,
         eventType: 'ADDRESS_UPDATED',
         actorId: actor.id,
         actorName: actor.name ?? null,
-        description: `Delivery details updated by ${actorName}`,
+        description,
         branchId: updated.branchId ?? null,
       });
     }
@@ -8012,7 +8088,10 @@ export class OrdersService {
     branchId?: string;
     createdById: string;
     items: Array<{ orderId: string; originalStatus: string }>;
+    groupId?: string;
+    assignmentMode?: 'EQUAL' | 'MANUAL';
   }) {
+    const mode = input.assignmentMode ?? 'MANUAL';
     const [batch] = await this.db
       .insert(schema.followUpBatches)
       .values({
@@ -8021,6 +8100,8 @@ export class OrdersService {
         branchId: input.branchId ?? null,
         createdById: input.createdById,
         orderCount: input.items.length,
+        groupId: input.groupId ?? null,
+        assignmentMode: mode,
       })
       .returning({ id: schema.followUpBatches.id });
 
@@ -8032,6 +8113,11 @@ export class OrdersService {
           originalStatus: item.originalStatus,
         })),
       );
+    }
+
+    // Auto-assign if mode is EQUAL and a group is set
+    if (mode === 'EQUAL' && input.groupId) {
+      await this.autoAssignBatchItems(batch!.id, input.groupId);
     }
 
     return batch!;
@@ -8153,6 +8239,7 @@ export class OrdersService {
         itemId: schema.followUpBatchItems.id,
         orderId: schema.followUpBatchItems.orderId,
         originalStatus: schema.followUpBatchItems.originalStatus,
+        assignedCsId: schema.followUpBatchItems.assignedCsId,
         addedAt: schema.followUpBatchItems.createdAt,
         orderStatus: schema.orders.status,
         customerName: schema.orders.customerName,
@@ -8164,7 +8251,7 @@ export class OrdersService {
       .where(eq(schema.followUpBatchItems.batchId, batchId))
       .orderBy(desc(schema.orders.createdAt));
 
-    // Creator + branch names
+    // Creator + branch + group names
     const [creator] = await this.db
       .select({ name: schema.users.name })
       .from(schema.users)
@@ -8180,6 +8267,32 @@ export class OrdersService {
         .limit(1);
       branchName = br?.name ?? null;
     }
+
+    let groupName: string | null = null;
+    let groupMembers: Array<{ userId: string; userName: string }> = [];
+    if (batch.groupId) {
+      const [grp] = await this.db
+        .select({ name: schema.followUpGroups.name })
+        .from(schema.followUpGroups)
+        .where(eq(schema.followUpGroups.id, batch.groupId))
+        .limit(1);
+      groupName = grp?.name ?? null;
+
+      groupMembers = await this.db
+        .select({ userId: schema.followUpGroupMembers.userId, userName: schema.users.name })
+        .from(schema.followUpGroupMembers)
+        .innerJoin(schema.users, eq(schema.users.id, schema.followUpGroupMembers.userId))
+        .where(eq(schema.followUpGroupMembers.groupId, batch.groupId));
+    }
+
+    // Resolve assigned CS names for batch items
+    const assignedCsIds = [...new Set(items.map((i) => i.assignedCsId).filter(Boolean))] as string[];
+    const assignedCsNames = assignedCsIds.length > 0
+      ? new Map(
+          (await this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, assignedCsIds)))
+            .map((u) => [u.id, u.name]),
+        )
+      : new Map<string, string>();
 
     // Compute funnel
     const statusCounts: Record<string, number> = {};
@@ -8206,8 +8319,15 @@ export class OrdersService {
       branchName,
       createdByName: creator?.name ?? null,
       orderCount: batch.orderCount,
+      assignmentMode: batch.assignmentMode,
+      groupId: batch.groupId,
+      groupName,
+      groupMembers,
       createdAt: batch.createdAt,
-      items,
+      items: items.map((item) => ({
+        ...item,
+        assignedCsName: item.assignedCsId ? assignedCsNames.get(item.assignedCsId) ?? null : null,
+      })),
       analytics: {
         statusCounts,
         confirmed,
@@ -8226,5 +8346,210 @@ export class OrdersService {
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.followUpBatches);
     return `Follow Up #${(row?.count ?? 0) + 1}`;
+  }
+
+  // ── Follow-Up Groups ────────────────────────────────────────
+
+  async createFollowUpGroup(input: { name: string; memberIds: string[]; createdById: string }) {
+    const [group] = await this.db
+      .insert(schema.followUpGroups)
+      .values({ name: input.name, createdById: input.createdById })
+      .returning({ id: schema.followUpGroups.id, name: schema.followUpGroups.name });
+
+    if (input.memberIds.length > 0) {
+      await this.db.insert(schema.followUpGroupMembers).values(
+        input.memberIds.map((userId) => ({ groupId: group!.id, userId })),
+      );
+    }
+
+    return { ...group!, memberCount: input.memberIds.length };
+  }
+
+  async updateFollowUpGroup(groupId: string, input: { name?: string; memberIds?: string[] }) {
+    if (input.name) {
+      await this.db
+        .update(schema.followUpGroups)
+        .set({ name: input.name, updatedAt: new Date() })
+        .where(eq(schema.followUpGroups.id, groupId));
+    }
+
+    if (input.memberIds !== undefined) {
+      // Replace all members
+      await this.db.delete(schema.followUpGroupMembers).where(eq(schema.followUpGroupMembers.groupId, groupId));
+      if (input.memberIds.length > 0) {
+        await this.db.insert(schema.followUpGroupMembers).values(
+          input.memberIds.map((userId) => ({ groupId, userId })),
+        );
+      }
+    }
+
+    return { success: true };
+  }
+
+  async deleteFollowUpGroup(groupId: string) {
+    // Check if any active batches reference this group
+    const [ref] = await this.db
+      .select({ id: schema.followUpBatches.id })
+      .from(schema.followUpBatches)
+      .where(eq(schema.followUpBatches.groupId, groupId))
+      .limit(1);
+    if (ref) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Cannot delete a group that has follow-up batches. Remove the group from batches first.',
+      });
+    }
+
+    await this.db.delete(schema.followUpGroups).where(eq(schema.followUpGroups.id, groupId));
+    return { success: true };
+  }
+
+  async listFollowUpGroups() {
+    const groups = await this.db
+      .select({
+        id: schema.followUpGroups.id,
+        name: schema.followUpGroups.name,
+        createdById: schema.followUpGroups.createdById,
+        createdAt: schema.followUpGroups.createdAt,
+      })
+      .from(schema.followUpGroups)
+      .orderBy(desc(schema.followUpGroups.createdAt));
+
+    // Get member counts + member details
+    const groupIds = groups.map((g) => g.id);
+    const members = groupIds.length > 0
+      ? await this.db
+          .select({
+            groupId: schema.followUpGroupMembers.groupId,
+            userId: schema.followUpGroupMembers.userId,
+            userName: schema.users.name,
+          })
+          .from(schema.followUpGroupMembers)
+          .innerJoin(schema.users, eq(schema.users.id, schema.followUpGroupMembers.userId))
+          .where(inArray(schema.followUpGroupMembers.groupId, groupIds))
+      : [];
+
+    const membersByGroup = new Map<string, Array<{ userId: string; userName: string }>>();
+    for (const m of members) {
+      const list = membersByGroup.get(m.groupId) ?? [];
+      list.push({ userId: m.userId, userName: m.userName });
+      membersByGroup.set(m.groupId, list);
+    }
+
+    // Creator names
+    const creatorIds = [...new Set(groups.map((g) => g.createdById))];
+    const creators = creatorIds.length > 0
+      ? await this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, creatorIds))
+      : [];
+    const creatorNames = new Map(creators.map((u) => [u.id, u.name]));
+
+    return groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      createdByName: creatorNames.get(g.createdById) ?? null,
+      memberCount: membersByGroup.get(g.id)?.length ?? 0,
+      members: membersByGroup.get(g.id) ?? [],
+      createdAt: g.createdAt,
+    }));
+  }
+
+  async getFollowUpGroup(groupId: string) {
+    const [group] = await this.db
+      .select()
+      .from(schema.followUpGroups)
+      .where(eq(schema.followUpGroups.id, groupId))
+      .limit(1);
+    if (!group) return null;
+
+    const members = await this.db
+      .select({
+        userId: schema.followUpGroupMembers.userId,
+        userName: schema.users.name,
+      })
+      .from(schema.followUpGroupMembers)
+      .innerJoin(schema.users, eq(schema.users.id, schema.followUpGroupMembers.userId))
+      .where(eq(schema.followUpGroupMembers.groupId, groupId));
+
+    return { ...group, members };
+  }
+
+  /** Auto-assign batch items equally to group members (round-robin). */
+  async autoAssignBatchItems(batchId: string, groupId: string) {
+    const members = await this.db
+      .select({ userId: schema.followUpGroupMembers.userId })
+      .from(schema.followUpGroupMembers)
+      .where(eq(schema.followUpGroupMembers.groupId, groupId));
+
+    if (members.length === 0) return;
+
+    const items = await this.db
+      .select({ id: schema.followUpBatchItems.id, orderId: schema.followUpBatchItems.orderId })
+      .from(schema.followUpBatchItems)
+      .where(eq(schema.followUpBatchItems.batchId, batchId))
+      .orderBy(asc(schema.followUpBatchItems.createdAt));
+
+    if (items.length === 0) return;
+
+    // Round-robin assignment
+    for (let i = 0; i < items.length; i++) {
+      const member = members[i % members.length]!;
+      await this.db
+        .update(schema.followUpBatchItems)
+        .set({ assignedCsId: member.userId })
+        .where(eq(schema.followUpBatchItems.id, items[i]!.id));
+
+      // Also set assignedCsId on the order itself so CS sees it in their queue
+      await this.db
+        .update(schema.orders)
+        .set({ assignedCsId: member.userId, status: 'CS_ASSIGNED' })
+        .where(eq(schema.orders.id, items[i]!.orderId));
+    }
+  }
+
+  /** Manually assign a batch item to a CS closer. */
+  async assignBatchItem(batchItemId: string, csCloserId: string) {
+    const [item] = await this.db
+      .select({ id: schema.followUpBatchItems.id, orderId: schema.followUpBatchItems.orderId })
+      .from(schema.followUpBatchItems)
+      .where(eq(schema.followUpBatchItems.id, batchItemId))
+      .limit(1);
+    if (!item) throw new TRPCError({ code: 'NOT_FOUND', message: 'Batch item not found' });
+
+    await this.db
+      .update(schema.followUpBatchItems)
+      .set({ assignedCsId: csCloserId })
+      .where(eq(schema.followUpBatchItems.id, batchItemId));
+
+    await this.db
+      .update(schema.orders)
+      .set({ assignedCsId: csCloserId, status: 'CS_ASSIGNED' })
+      .where(eq(schema.orders.id, item.orderId));
+
+    return { success: true };
+  }
+
+  /** Bulk assign batch items to CS closers (round-robin across provided closerIds). */
+  async bulkAssignBatchItems(itemIds: string[], csCloserIds: string[]) {
+    if (csCloserIds.length === 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'No closers provided' });
+
+    const items = await this.db
+      .select({ id: schema.followUpBatchItems.id, orderId: schema.followUpBatchItems.orderId })
+      .from(schema.followUpBatchItems)
+      .where(inArray(schema.followUpBatchItems.id, itemIds));
+
+    for (let i = 0; i < items.length; i++) {
+      const closerId = csCloserIds[i % csCloserIds.length]!;
+      await this.db
+        .update(schema.followUpBatchItems)
+        .set({ assignedCsId: closerId })
+        .where(eq(schema.followUpBatchItems.id, items[i]!.id));
+
+      await this.db
+        .update(schema.orders)
+        .set({ assignedCsId: closerId, status: 'CS_ASSIGNED' })
+        .where(eq(schema.orders.id, items[i]!.orderId));
+    }
+
+    return { succeeded: items.length };
   }
 }

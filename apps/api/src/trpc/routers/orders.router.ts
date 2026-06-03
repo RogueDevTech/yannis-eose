@@ -2036,6 +2036,8 @@ export const ordersRouter = router({
         name: z.string().min(1).max(200),
         source: z.enum(['orders', 'carts']),
         branchId: z.string().uuid().optional(),
+        groupId: z.string().uuid().optional(),
+        assignmentMode: z.enum(['EQUAL', 'MANUAL']).default('MANUAL'),
         items: z.array(z.object({
           orderId: z.string().uuid(),
           originalStatus: z.string(),
@@ -2069,5 +2071,67 @@ export const ordersRouter = router({
   nextFollowUpBatchName: permissionProcedure('orders.followUp')
     .query(async () => {
       return getOrdersService().nextFollowUpBatchName();
+    }),
+
+  // ── Follow-Up Groups ──────────────────────────────────────
+
+  createFollowUpGroup: permissionProcedure('orders.followUp')
+    .input(z.object({
+      name: z.string().min(1).max(200),
+      memberIds: z.array(z.string().uuid()).min(1).max(100),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().createFollowUpGroup({
+        ...input,
+        createdById: ctx.user.id,
+      });
+    }),
+
+  updateFollowUpGroup: permissionProcedure('orders.followUp')
+    .input(z.object({
+      groupId: z.string().uuid(),
+      name: z.string().min(1).max(200).optional(),
+      memberIds: z.array(z.string().uuid()).max(100).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      return getOrdersService().updateFollowUpGroup(input.groupId, {
+        name: input.name,
+        memberIds: input.memberIds,
+      });
+    }),
+
+  deleteFollowUpGroup: permissionProcedure('orders.followUp')
+    .input(z.object({ groupId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      return getOrdersService().deleteFollowUpGroup(input.groupId);
+    }),
+
+  listFollowUpGroups: permissionProcedure('orders.followUp')
+    .query(async () => {
+      return getOrdersService().listFollowUpGroups();
+    }),
+
+  getFollowUpGroup: permissionProcedure('orders.followUp')
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getOrdersService().getFollowUpGroup(input.groupId);
+    }),
+
+  assignBatchItem: permissionProcedure('orders.followUp')
+    .input(z.object({
+      batchItemId: z.string().uuid(),
+      csCloserId: z.string().uuid(),
+    }))
+    .mutation(async ({ input }) => {
+      return getOrdersService().assignBatchItem(input.batchItemId, input.csCloserId);
+    }),
+
+  bulkAssignBatchItems: permissionProcedure('orders.followUp')
+    .input(z.object({
+      itemIds: z.array(z.string().uuid()).min(1).max(2000),
+      csCloserIds: z.array(z.string().uuid()).min(1).max(50),
+    }))
+    .mutation(async ({ input }) => {
+      return getOrdersService().bulkAssignBatchItems(input.itemIds, input.csCloserIds);
     }),
 });

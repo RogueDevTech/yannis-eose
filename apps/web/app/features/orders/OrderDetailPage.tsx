@@ -988,6 +988,8 @@ export function OrderDetailPage({
   const [phoneUnmasked, setPhoneUnmasked] = useState(false);
   const [dismissedError, setDismissedError] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [rescheduleDeliveryModalOpen, setRescheduleDeliveryModalOpen] = useState(false);
+  const [rescheduleDeliveryDate, setRescheduleDeliveryDate] = useState('');
   const [scheduleCallbackModalOpen, setScheduleCallbackModalOpen] = useState(false);
   const [addCommentModalOpen, setAddCommentModalOpen] = useState(false);
   const [csCommentDraft, setCsCommentDraft] = useState('');
@@ -1487,6 +1489,10 @@ export function OrderDetailPage({
       setConfirmModalOpen(false);
       setDeliveryDate('');
     }
+    if (rescheduleDeliveryModalOpen) {
+      setRescheduleDeliveryModalOpen(false);
+      setRescheduleDeliveryDate('');
+    }
     if (cancelModalOpen) {
       setCancelModalOpen(false);
       setCancelReason('');
@@ -1529,6 +1535,7 @@ export function OrderDetailPage({
     }
   }, [
     confirmModalOpen,
+    rescheduleDeliveryModalOpen,
     cancelModalOpen,
     restoreModalOpen,
     allocateModalOpen,
@@ -1799,15 +1806,13 @@ export function OrderDetailPage({
                   );
                 })}
               </div>
-              {order.confirmedAt ? (
+              {order.preferredDeliveryDate?.trim() ? (
                 <div className="mt-4 pt-4 border-t border-app-border">
                   <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
                     Schedule date
                   </p>
                   <p className="mt-1 text-base font-semibold text-app-fg tabular-nums">
-                    {order.preferredDeliveryDate?.trim()
-                      ? formatScheduleDateDisplay(order.preferredDeliveryDate)
-                      : 'Not set'}
+                    {formatScheduleDateDisplay(order.preferredDeliveryDate)}
                   </p>
                 </div>
               ) : null}
@@ -2206,30 +2211,48 @@ export function OrderDetailPage({
                     Edit order details
                   </Button>
 
-                  {/* Confirm order / Schedule callback — CS_ENGAGED */}
-                  {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && (
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      {canConfirm && canTransitionTo('CONFIRMED') && (
-                        <Button
-                          type="button"
-                          variant="primary"
-                          className="w-full sm:flex-1"
-                          onClick={() => setConfirmModalOpen(true)}
-                          disabled={fetcher.state === 'submitting'}
-                        >
-                          Confirm order
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="w-full sm:flex-1"
-                        onClick={() => setScheduleCallbackModalOpen(true)}
-                        disabled={scheduleFetcher.state === 'submitting'}
-                      >
-                        Schedule callback
-                      </Button>
-                    </div>
+                  {/* Confirm order — CS_ENGAGED only */}
+                  {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && canConfirm && canTransitionTo('CONFIRMED') && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => setConfirmModalOpen(true)}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Confirm order
+                    </Button>
+                  )}
+
+                  {/* Schedule / reschedule callback — always visible for pre-terminal statuses */}
+                  {canPerformCSActionsOnOrder &&
+                    order.status !== 'DELIVERED' && order.status !== 'REMITTED' && order.status !== 'DELETED' && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setScheduleCallbackModalOpen(true)}
+                      disabled={scheduleFetcher.state === 'submitting'}
+                    >
+                      {(order.callbackScheduledAt || (order.callbackAttempts ?? 0) > 0) ? 'Reschedule callback' : 'Schedule callback'}
+                    </Button>
+                  )}
+
+                  {/* Reschedule delivery date — visible when order already has a schedule date */}
+                  {order.preferredDeliveryDate?.trim() &&
+                    order.status !== 'DELIVERED' && order.status !== 'REMITTED' && order.status !== 'DELETED' && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setRescheduleDeliveryDate(order.preferredDeliveryDate?.slice(0, 10) ?? '');
+                        setRescheduleDeliveryModalOpen(true);
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Reschedule delivery
+                    </Button>
                   )}
 
                   {/* Call customer — available pre-delivery. For pre-CS_ENGAGED statuses, opening
@@ -2451,15 +2474,13 @@ export function OrderDetailPage({
               return (
                 <div className="card order-[-2] lg:order-none">
                   <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
-                  {order.confirmedAt ? (
+                  {order.preferredDeliveryDate?.trim() ? (
                     <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 mb-3">
                       <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
                         Schedule date
                       </p>
                       <p className="mt-0.5 text-sm font-semibold text-app-fg tabular-nums">
-                        {order.preferredDeliveryDate?.trim()
-                          ? formatScheduleDateDisplay(order.preferredDeliveryDate)
-                          : 'Not set'}
+                        {formatScheduleDateDisplay(order.preferredDeliveryDate)}
                       </p>
                     </div>
                   ) : null}
@@ -2809,6 +2830,61 @@ export function OrderDetailPage({
               </Button>
             </div>
           </scheduleFetcher.Form>
+        </Modal>
+      )}
+
+      {/* Reschedule delivery date modal */}
+      {rescheduleDeliveryModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            setRescheduleDeliveryModalOpen(false);
+            setRescheduleDeliveryDate('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Reschedule delivery</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Pick a new delivery date for this order.
+          </p>
+          <fetcher.Form method="post" className="block space-y-4">
+            <input type="hidden" name="intent" value="editOrderDetails" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+            <input type="hidden" name="customerName" value={order.customerName ?? ''} />
+            <TextInput
+              type="date"
+              label="New delivery date"
+              name="preferredDeliveryDate"
+              value={rescheduleDeliveryDate}
+              onChange={(e) => setRescheduleDeliveryDate(e.target.value)}
+              min={new Date().toISOString().split('T')[0]}
+              required
+            />
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full sm:w-auto"
+                onClick={() => {
+                  setRescheduleDeliveryModalOpen(false);
+                  setRescheduleDeliveryDate('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                className="w-full sm:w-auto"
+                disabled={fetcher.state === 'submitting' || !rescheduleDeliveryDate.trim()}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Saving..."
+              >
+                Update date
+              </Button>
+            </div>
+          </fetcher.Form>
         </Modal>
       )}
 
@@ -3625,6 +3701,7 @@ export function OrderDetailPage({
                           coerce="decimal"
                           min={0}
                           fallbackValue={0}
+                          useGrouping
                           value={item.unitPrice}
                           onValueChange={(v) =>
                             setEditedItems((prev) =>

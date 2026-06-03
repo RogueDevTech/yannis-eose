@@ -394,6 +394,8 @@ export function CreateOfflineOrderModal({
                 const selectedProduct = products.find((p) => p.id === item.productId);
                 const offers = selectedProduct?.offers ?? [];
                 const hasOffers = offers.length > 0;
+                // When an offer is active, qty + price are locked to the offer values.
+                const offerLocked = hasOffers && !!item.offerLabel;
                 return (
                   <div key={index} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-app-hover">
                     <div className="flex-1 min-w-[140px]">
@@ -440,6 +442,7 @@ export function CreateOfflineOrderModal({
                         fallbackValue={1}
                         value={Number(item.quantity) || 1}
                         onValueChange={(n) => updateItem(index, 'quantity', n)}
+                        disabled={offerLocked}
                         controlSize="sm"
                         wrapperClassName="w-full"
                       />
@@ -447,12 +450,13 @@ export function CreateOfflineOrderModal({
                     <div className="w-28">
                       <TextInput
                         type="number"
-                        label="Unit price"
+                        label="Total price"
                         required
                         min={0}
                         step={0.01}
                         value={item.unitPrice}
                         onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
+                        readOnly={offerLocked}
                         controlSize="sm"
                         wrapperClassName="w-full"
                       />

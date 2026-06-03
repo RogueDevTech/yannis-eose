@@ -203,6 +203,9 @@ export function FollowUpBatchesPage({
             triggerAriaLabel="Follow-up tools"
             desktop={
               <>
+                <Link to="/admin/cs/follow-up?view=groups" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                  Groups
+                </Link>
                 <DateFilterBar startDate={startDate} endDate={endDate} chrome="pill" />
                 <PageRefreshButton />
                 <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
@@ -211,9 +214,14 @@ export function FollowUpBatchesPage({
               </>
             }
             sheet={
-              <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center">
-                + Create follow-up
-              </Link>
+              <>
+                <Link to="/admin/cs/follow-up?view=groups" className="btn-secondary w-full inline-flex items-center justify-center">
+                  Groups
+                </Link>
+                <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center mt-2">
+                  + Create follow-up
+                </Link>
+              </>
             }
           />
         }

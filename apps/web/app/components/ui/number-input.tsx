@@ -44,6 +44,8 @@ interface NumberInputProps
    * (only used after blur / external change). Default: max 4 fraction digits.
    */
   maxFractionDigits?: number;
+  /** Show thousand-separator commas in the displayed value. Default false. */
+  useGrouping?: boolean;
 }
 
 /**
@@ -78,6 +80,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       coerce = 'integer',
       maxFractionDigits = 4,
       commitOnChange = false,
+      useGrouping = false,
       onBlur,
       onKeyDown,
       ...rest
@@ -87,10 +90,18 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     const formatNumber = (n: number | null): string => {
       if (n === null) return '';
       if (!Number.isFinite(n)) return '';
-      if (coerce === 'integer') return String(Math.trunc(n));
+      if (coerce === 'integer') {
+        const s = String(Math.trunc(n));
+        return useGrouping ? addThousandSeparators(s) : s;
+      }
       // Avoid scientific notation + trailing zeros the user didn't type.
       const fixed = n.toFixed(maxFractionDigits);
-      return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+      const clean = fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+      if (!useGrouping) return clean;
+      const [intPart, decPart] = clean.split('.');
+      return decPart != null
+        ? `${addThousandSeparators(intPart)}.${decPart}`
+        : addThousandSeparators(intPart);
     };
 
     const [text, setText] = useState<string>(() => formatNumber(value));
@@ -99,7 +110,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     // clamp, optimistic update). We only resync if the parsed text differs from
     // the new value — preserves trailing decimals and leading zeros while typing.
     useEffect(() => {
-      const parsed = parseFinite(text, coerce);
+      const parsed = parseFinite(text.replace(/,/g, ''), coerce);
       if ((parsed === null && value !== null) || (parsed !== null && parsed !== value)) {
         setText(formatNumber(value));
       }
@@ -107,7 +118,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     }, [value, coerce]);
 
     const commit = (raw: string) => {
-      const parsed = parseFinite(raw, coerce);
+      const parsed = parseFinite(raw.replace(/,/g, ''), coerce);
       if (parsed === null && allowEmpty) {
         setText('');
         if (value !== null) onValueCleared?.();
@@ -135,11 +146,12 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           // Allow empty + typing — only filter characters that can never be
           // part of a number for the chosen mode. We don't validate here;
           // commit() does the clamp/coerce on blur.
+          // When useGrouping is on, allow commas in input and strip them for the stored text.
           const allowed =
             coerce === 'integer'
-              ? raw.replace(/[^\d-]/g, '')
-              : raw.replace(/[^\d.\-]/g, '');
-          setText(allowed);
+              ? raw.replace(useGrouping ? /[^\d,-]/g : /[^\d-]/g, '').replace(/,/g, '')
+              : raw.replace(useGrouping ? /[^\d.,-]/g : /[^\d.\-]/g, '').replace(/,/g, '');
+          setText(useGrouping ? addThousandSeparators(allowed) : allowed);
           // Eager mode: report the parsed value immediately so callers can
           // react on type. Text is left as-is (no clamp/format) so the user
           // can keep typing — blur still runs the full commit pass.
@@ -173,4 +185,14 @@ function parseFinite(raw: string, coerce: Coerce): number | null {
   if (trimmed === '' || trimmed === '-' || trimmed === '.') return null;
   const n = coerce === 'integer' ? parseInt(trimmed, 10) : parseFloat(trimmed);
   return Number.isFinite(n) ? n : null;
+}
+
+function addThousandSeparators(s: string): string {
+  if (!s) return s;
+  const negative = s.startsWith('-');
+  const abs = negative ? s.slice(1) : s;
+  const [intPart, ...decParts] = abs.split('.');
+  const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const result = decParts.length > 0 ? `${formatted}.${decParts.join('')}` : formatted;
+  return negative ? `-${result}` : result;
 }

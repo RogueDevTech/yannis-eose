@@ -355,6 +355,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'orders.export',
     'branches.teams.cs',
     'orders.routing',
+    'orders.followUp',
   ],
   CS_CLOSER: [
     'orders.read',
