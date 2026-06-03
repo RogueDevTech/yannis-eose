@@ -24,9 +24,15 @@ export interface FollowUpGroupItem {
   createdAt: string;
 }
 
+export interface CloserWithBranches {
+  agentId: string;
+  agentName: string;
+  branches: Array<{ branchId: string; branchName: string }>;
+}
+
 interface Props {
   groups: FollowUpGroupItem[];
-  closers: Array<{ agentId: string; agentName: string }>;
+  closers: CloserWithBranches[];
   deferredLoading?: boolean;
 }
 
@@ -238,7 +244,7 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
 interface GroupFormModalProps {
   open: boolean;
   onClose: () => void;
-  closers: Array<{ agentId: string; agentName: string }>;
+  closers: CloserWithBranches[];
   fetcher: ReturnType<typeof useFetcher>;
   intent: string;
   title: string;
@@ -251,6 +257,7 @@ function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group 
     new Set(group?.members.map((m) => m.userId) ?? []),
   );
   const [memberSearch, setMemberSearch] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
 
   // Reset state when group changes (edit vs create)
   const groupId = group?.id;
@@ -260,13 +267,33 @@ function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group 
     setName(group?.name ?? '');
     setSelectedMembers(new Set(group?.members.map((m) => m.userId) ?? []));
     setMemberSearch('');
+    setBranchFilter('');
   }
 
+  // Derive unique branches from closers for the filter dropdown
+  const branchOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of closers) {
+      for (const b of c.branches) {
+        if (!map.has(b.branchId)) map.set(b.branchId, b.branchName);
+      }
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ value: id, label: name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [closers]);
+
   const filteredClosers = useMemo(() => {
-    if (!memberSearch) return closers;
-    const q = memberSearch.toLowerCase();
-    return closers.filter((c) => c.agentName.toLowerCase().includes(q));
-  }, [closers, memberSearch]);
+    let result = closers;
+    if (branchFilter) {
+      result = result.filter((c) => c.branches.some((b) => b.branchId === branchFilter));
+    }
+    if (memberSearch) {
+      const q = memberSearch.toLowerCase();
+      result = result.filter((c) => c.agentName.toLowerCase().includes(q));
+    }
+    return result;
+  }, [closers, memberSearch, branchFilter]);
 
   const toggleMember = useCallback((id: string) => {
     setSelectedMembers((prev) => {
@@ -276,6 +303,15 @@ function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group 
       return next;
     });
   }, []);
+
+  // Select all visible (filtered) closers
+  const selectAllVisible = useCallback(() => {
+    setSelectedMembers((prev) => {
+      const next = new Set(prev);
+      for (const c of filteredClosers) next.add(c.agentId);
+      return next;
+    });
+  }, [filteredClosers]);
 
   return (
     <Modal open={open} onClose={onClose} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
@@ -292,13 +328,47 @@ function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group 
         <label className="block text-sm font-medium text-app-fg mb-1.5">
           Members ({selectedMembers.size} selected)
         </label>
-        <SearchInput
-          value={memberSearch}
-          onChange={setMemberSearch}
-          placeholder="Search closers…"
-          controlSize="sm"
-          wrapperClassName="mb-2"
-        />
+
+        {/* Branch filter + search row */}
+        <div className="flex gap-2 mb-2">
+          {branchOptions.length > 1 && (
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="h-8 rounded-lg border border-app-border bg-app-canvas px-2 text-xs text-app-fg min-w-0 flex-shrink-0"
+            >
+              <option value="">All branches</option>
+              {branchOptions.map((b) => (
+                <option key={b.value} value={b.value}>{b.label}</option>
+              ))}
+            </select>
+          )}
+          <SearchInput
+            value={memberSearch}
+            onChange={setMemberSearch}
+            placeholder="Search closers…"
+            controlSize="sm"
+            wrapperClassName="flex-1 min-w-0"
+          />
+        </div>
+
+        {/* Select all visible */}
+        {filteredClosers.length > 0 && (
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-app-fg-muted">
+              {filteredClosers.length} closer{filteredClosers.length !== 1 ? 's' : ''}
+              {branchFilter ? ' in branch' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={selectAllVisible}
+              className="text-xs text-brand-600 dark:text-brand-400 hover:underline"
+            >
+              Select all{branchFilter ? ' in branch' : ' visible'}
+            </button>
+          </div>
+        )}
+
         <div className="max-h-48 overflow-y-auto border border-app-border rounded-lg divide-y divide-app-border">
           {filteredClosers.length === 0 ? (
             <p className="px-3 py-4 text-center text-sm text-app-fg-muted">No closers found</p>
@@ -312,7 +382,14 @@ function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group 
                   checked={selectedMembers.has(c.agentId)}
                   onChange={() => toggleMember(c.agentId)}
                 />
-                <span className="text-sm text-app-fg">{c.agentName}</span>
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm text-app-fg">{c.agentName}</span>
+                  {c.branches.length > 0 && (
+                    <span className="ml-1.5 text-micro text-app-fg-muted">
+                      {c.branches.map((b) => b.branchName).join(', ')}
+                    </span>
+                  )}
+                </div>
               </label>
             ))
           )}

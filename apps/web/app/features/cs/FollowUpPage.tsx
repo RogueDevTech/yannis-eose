@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
-import { Link, useFetcher, useNavigate, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useNavigate, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -128,6 +128,10 @@ export function FollowUpPage({
   bulkSelectAllMatchingInput,
 }: FollowUpPageProps) {
   const navigate = useNavigate();
+  const adminRouteData = useRouteLoaderData('routes/admin') as
+    | { user?: { role?: string } }
+    | undefined;
+  const canEditPrices = adminRouteData?.user?.role === 'SUPER_ADMIN' || adminRouteData?.user?.role === 'ADMIN' || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING';
   const branchesCatalog = useBranchesCatalog();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const showSkeletonRows = deferredLoading || isLoaderRefetchBusy;
@@ -1227,6 +1231,7 @@ export function FollowUpPage({
             onClose={() => setConvertCartPrefill(null)}
             products={products}
             cartPrefill={convertCartPrefill}
+            canEditPrices={canEditPrices}
           />
         </Suspense>
       )}

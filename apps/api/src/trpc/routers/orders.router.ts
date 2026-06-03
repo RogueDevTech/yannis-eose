@@ -882,6 +882,11 @@ export const ordersRouter = router({
     return getOrdersService().listCSClosers(ctx.user);
   }),
 
+  /** Like listCSClosers but includes branch memberships — used by follow-up group modal. */
+  listCSClosersWithBranches: permissionProcedure('orders.followUp').query(async ({ ctx }) => {
+    return getOrdersService().listCSClosersWithBranches(ctx.user);
+  }),
+
   /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).

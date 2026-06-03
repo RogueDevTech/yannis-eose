@@ -874,6 +874,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               slice={unifiedDistributingSlice}
               users={users}
               balancesList={balancesList}
+              filters={filters}
               onViewReceipt={setFundingReceiptModal}
               onOpenDetails={setRequestDetailsEntry}
               onApprove={setApprovingRequestId}
@@ -1955,6 +1956,7 @@ function UnifiedDistributingTable({
   slice,
   users,
   balancesList,
+  filters,
   onViewReceipt,
   onOpenDetails,
   onApprove,
@@ -1966,6 +1968,7 @@ function UnifiedDistributingTable({
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   users: User[];
   balancesList?: MarketingFundingLoaderData['balancesList'];
+  filters: MarketingFundingLoaderData['filters'];
   onViewReceipt: (rec: FundingRecord) => void;
   onOpenDetails: (entry: DistributingFundingEntry) => void;
   onApprove: (id: string) => void;
