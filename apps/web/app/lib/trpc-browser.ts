@@ -258,11 +258,11 @@ export async function fetchOrderCountForDate(
 
 /**
  * Hard cap for "Select all matching this filter" deep-selects. Matches the
- * server-side bulk-action max (`bulkTransition` / `bulkAssignToCS` cap at 100),
+ * server-side bulk-action max (`bulkTransition` / `bulkAssignToCS` cap at 2000),
  * so a single deep-select never exceeds what a follow-up bulk action can process.
  * If you ever raise this, raise the bulk-action caps in lock-step.
  */
-export const ORDERS_DEEP_SELECT_MAX = 100;
+export const ORDERS_DEEP_SELECT_MAX = 2000;
 
 /**
  * GET `orders.list` with the same filter input the loader used, capped at

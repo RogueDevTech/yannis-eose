@@ -271,7 +271,10 @@ export const listAdSpendSchema = z.object({
   endDate: z.string().date().optional(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   category: expenseCategorySchema.optional(),
+  excludeCategory: expenseCategorySchema.optional(),
   search: z.string().trim().max(200).optional(),
+  sortBy: z.enum(['spendDate', 'spendAmount', 'status', 'createdAt']).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });
@@ -287,6 +290,7 @@ export const listAdSpendGroupedSchema = z.object({
   endDate: z.string().date().optional(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   category: expenseCategorySchema.optional(),
+  excludeCategory: expenseCategorySchema.optional(),
   search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(50).default(20),
@@ -302,6 +306,7 @@ export const adSpendStatusCountsSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   category: expenseCategorySchema.optional(),
+  excludeCategory: expenseCategorySchema.optional(),
   search: z.string().trim().max(200).optional(),
 });
 export type AdSpendStatusCountsInput = z.infer<typeof adSpendStatusCountsSchema>;

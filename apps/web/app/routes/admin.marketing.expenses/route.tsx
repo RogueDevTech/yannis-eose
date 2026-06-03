@@ -48,9 +48,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : undefined;
   const EXPENSE_CATEGORIES = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION'] as const;
   const categoryParam = url.searchParams.get('category') ?? undefined;
-  const categoryFilter = categoryParam && (EXPENSE_CATEGORIES as readonly string[]).includes(categoryParam)
-    ? categoryParam
-    : 'AD_SPEND';
+  // NOT_AD_SPEND is a virtual category: shows all expenses except AD_SPEND.
+  const isNotAdSpend = categoryParam === 'NOT_AD_SPEND';
+  const categoryFilter = isNotAdSpend
+    ? 'NOT_AD_SPEND'
+    : categoryParam && (EXPENSE_CATEGORIES as readonly string[]).includes(categoryParam)
+      ? categoryParam
+      : 'AD_SPEND';
   // UUIDv7 is hex-with-dashes; cheap regex avoids passing garbage through to the API.
   const productIdParam = url.searchParams.get('productId')?.trim();
   const productIdFilter = productIdParam && /^[0-9a-f-]{32,36}$/i.test(productIdParam)
@@ -65,13 +69,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     !isMediaBuyer && mediaBuyerIdParam && /^[0-9a-f-]{32,36}$/i.test(mediaBuyerIdParam)
       ? mediaBuyerIdParam
       : undefined;
+  const SORT_KEYS = ['spendDate', 'spendAmount', 'status', 'createdAt'] as const;
+  const sortByParam = url.searchParams.get('sortBy') ?? undefined;
+  const sortBy = sortByParam && (SORT_KEYS as readonly string[]).includes(sortByParam)
+    ? (sortByParam as (typeof SORT_KEYS)[number])
+    : undefined;
+  const sortDirParam = url.searchParams.get('sortDir') ?? undefined;
+  const sortDir = sortDirParam === 'asc' || sortDirParam === 'desc' ? sortDirParam : undefined;
 
+  const categoryScope = isNotAdSpend
+    ? { excludeCategory: 'AD_SPEND' as const }
+    : categoryFilter && categoryFilter !== 'NOT_AD_SPEND' ? { category: categoryFilter } : {};
   const adSpendScope = {
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(statusFilter && { status: statusFilter }),
-    ...(categoryFilter && { category: categoryFilter }),
+    ...categoryScope,
     ...(searchFilter && { search: searchFilter }),
     ...(productIdFilter && { productId: productIdFilter }),
     ...(campaignIdFilter && { campaignId: campaignIdFilter }),
@@ -81,6 +95,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     limit: AD_SPEND_PER_PAGE,
     ...adSpendScope,
+    ...(sortBy && { sortBy }),
+    ...(sortDir && { sortDir }),
   });
   // Phase 17 — accordion grouped view runs alongside the legacy flat list so
   // both renderings can co-exist while the UI migrates. Group page lives on
@@ -93,7 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(statusFilter && { status: statusFilter }),
-    ...(categoryFilter && { category: categoryFilter }),
+    ...categoryScope,
     ...(searchFilter && { search: searchFilter }),
     ...(productIdFilter && { productId: productIdFilter }),
     ...(campaignIdFilter && { campaignId: campaignIdFilter }),
@@ -109,7 +125,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
-      ...(categoryFilter && { category: categoryFilter }),
+      ...categoryScope,
       ...(searchFilter && { search: searchFilter }),
       ...(productIdFilter && { productId: productIdFilter }),
       ...(campaignIdFilter && { campaignId: campaignIdFilter }),
@@ -184,6 +200,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productIdFilter,
     campaignIdFilter,
     mediaBuyerIdFilter,
+    sortBy,
+    sortDir,
     metrics: null,
     users: null,
     products: null,

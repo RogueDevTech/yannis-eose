@@ -256,6 +256,7 @@ export const messagingRouter = router({
       const editorPerms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
       const hasOrgWideTemplateEdit =
         ctx.user.role === 'SUPER_ADMIN' ||
+        ctx.user.role === 'HEAD_OF_CS' ||
         editorPerms.includes(canonicalPermissionCode('cs.scope.global'));
       if (!hasOrgWideTemplateEdit) {
         const [existing] = await db

@@ -691,6 +691,7 @@ export function FollowUpPage({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <SmartPick
               total={smartPickCeiling}
+              presets={[10, 20, 50, 100, 500, 1000]}
               selectedCount={selectedIds.size}
               onPick={async (count) => {
                 const items = isCartView ? abandonedCarts : orders;
