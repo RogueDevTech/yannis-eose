@@ -1426,6 +1426,7 @@ function OrdersListPageImpl({
           onClose={() => setCreateOfflineOpen(false)}
           onSuccess={() => setCreateOfflineOpen(false)}
           products={productsForOfflineOrder}
+          canEditPrices={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_MARKETING'}
         />
       )}
 

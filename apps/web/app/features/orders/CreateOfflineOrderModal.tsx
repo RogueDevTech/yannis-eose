@@ -46,6 +46,8 @@ interface CreateOfflineOrderModalProps {
   cartPrefill?: CartPrefill | null;
   /** SuperAdmin / org-wide heads: session may have no branch — required for `orders.createOffline` middleware. */
   branchId?: string;
+  /** When true, the user can type custom prices for products that have offers. Admin-level only. */
+  canEditPrices?: boolean;
 }
 
 const defaultItem = { productId: '', quantity: 1, unitPrice: '', offerLabel: '' };
@@ -58,6 +60,7 @@ export function CreateOfflineOrderModal({
   initialCustomerName,
   cartPrefill,
   branchId,
+  canEditPrices = false,
 }: CreateOfflineOrderModalProps) {
   const fetcher = useFetcher();
   const fetcherSurface = useFetcherActionSurface(fetcher);
@@ -394,8 +397,8 @@ export function CreateOfflineOrderModal({
                 const selectedProduct = products.find((p) => p.id === item.productId);
                 const offers = selectedProduct?.offers ?? [];
                 const hasOffers = offers.length > 0;
-                // When an offer is active, qty + price are locked to the offer values.
-                const offerLocked = hasOffers && !!item.offerLabel;
+                // When an offer is active (or user can't edit prices), qty + price are locked.
+                const offerLocked = hasOffers && (!!item.offerLabel || !canEditPrices);
                 return (
                   <div key={index} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-app-hover">
                     <div className="flex-1 min-w-[140px]">
@@ -427,7 +430,7 @@ export function CreateOfflineOrderModal({
                               value: o.label,
                               label: `${o.label} — ${o.qty} × ₦${Number(o.price).toLocaleString()}`,
                             })),
-                            { value: '', label: 'Custom' },
+                            ...(canEditPrices ? [{ value: '', label: 'Custom' }] : []),
                           ]}
                           searchPlaceholder="Search offers..."
                           controlSize="sm"

@@ -304,7 +304,7 @@ export const listOrdersSchema = z
     /** Required when scheduleKind is callback_on_day or delivery_on_day (YYYY-MM-DD). */
     scheduleDate: z.string().date().optional(),
     page: z.number().int().min(1).default(1),
-    limit: z.number().int().min(1).max(1000).default(20),
+    limit: z.number().int().min(1).max(2000).default(20),
     /**
      * Branch scoping strategy (migration 0150).
      * `'servicing'` (default) filters by `orders.servicing_branch_id` — the CS

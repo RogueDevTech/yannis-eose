@@ -679,7 +679,7 @@ function CSDashboardPageLoaded({
   const { isClaimMode, claimCap } = shell;
   const liveState = useLiveIndicator(liveEvents ?? []);
   const adminRouteData = useRouteLoaderData('routes/admin') as
-    | { user?: { currentBranchId?: string | null } }
+    | { user?: { currentBranchId?: string | null; role?: string } }
     | undefined;
   const branchesCatalog = useBranchesCatalog();
 
@@ -1611,6 +1611,7 @@ function CSDashboardPageLoaded({
                   cartPrefill={createOfflinePrefill?.cartPrefill ?? null}
                   products={products}
                   branchId={csMutationBranchPayload(unassignedOrders).branchId}
+                  canEditPrices={adminRouteData?.user?.role === 'SUPER_ADMIN' || adminRouteData?.user?.role === 'ADMIN' || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING'}
                 />
               </Suspense>
             )}

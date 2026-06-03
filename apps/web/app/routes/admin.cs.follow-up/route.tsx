@@ -18,7 +18,7 @@ import type { FollowUpPageData } from '~/features/cs/FollowUpPage';
 import { FollowUpBatchesPage } from '~/features/cs/FollowUpBatchesPage';
 import type { FollowUpBatchesPageData } from '~/features/cs/FollowUpBatchesPage';
 import { FollowUpGroupsPage } from '~/features/cs/FollowUpGroupsPage';
-import type { FollowUpGroupItem } from '~/features/cs/FollowUpGroupsPage';
+import type { FollowUpGroupItem, CloserWithBranches } from '~/features/cs/FollowUpGroupsPage';
 import type { PendingCart } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
@@ -52,12 +52,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     })();
 
-    // Also fetch CS closers for the create/edit group modals
-    const closersData = (async () => {
+    // Fetch CS closers with branch memberships for the create/edit group modals
+    type CloserWithBranches = { agentId: string; agentName: string; branches: Array<{ branchId: string; branchName: string }> };
+    const closersData = (async (): Promise<CloserWithBranches[]> => {
       try {
-        const res = await apiRequest<unknown>('/trpc/orders.listCSClosers', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS });
+        const res = await apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS });
         if (!res.ok) return [];
-        return ((res.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } })?.result?.data) ?? [];
+        return ((res.data as { result?: { data?: CloserWithBranches[] } })?.result?.data) ?? [];
       } catch {
         return [];
       }
@@ -481,8 +482,8 @@ export default function FollowUpRoute() {
         deferredKey="groupsData"
       >
         {(groups) => (
-          <CachedAwait<Array<{ agentId: string; agentName: string }>>
-            resolve={loaderData.closersData as Promise<Array<{ agentId: string; agentName: string }>>}
+          <CachedAwait<CloserWithBranches[]>
+            resolve={loaderData.closersData as Promise<CloserWithBranches[]>}
             fallback={<FollowUpGroupsPage groups={groups} closers={[]} />}
             loaderShell={{ shell }}
             deferredKey="closersData"
