@@ -21,6 +21,7 @@ import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { DateInput } from '~/components/ui/date-input';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { FormSelect } from '~/components/ui/form-select';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { TextInput } from '~/components/ui/text-input';
@@ -36,6 +37,13 @@ const CreateOfflineOrderModal = lazy(() =>
 );
 
 const ABANDONED_CART_STATUS = 'ABANDONED_CART';
+
+export interface FollowUpGroupOption {
+  id: string;
+  name: string;
+  memberCount: number;
+  members: Array<{ userId: string; userName: string }>;
+}
 
 export interface FollowUpPageData {
   orders: Array<{
@@ -61,6 +69,7 @@ export interface FollowUpPageData {
   abandonedCarts: PendingCart[];
   abandonedCartsTotal: number;
   abandonedCartsTotalPages: number;
+  groups?: FollowUpGroupOption[];
 }
 
 interface FollowUpFilters {
@@ -113,6 +122,7 @@ export function FollowUpPage({
   abandonedCarts = [],
   abandonedCartsTotal = 0,
   abandonedCartsTotalPages = 1,
+  groups = [],
   filters,
   deferredLoading = false,
   bulkSelectAllMatchingInput,
@@ -149,6 +159,8 @@ export function FollowUpPage({
   const hasCustomDateRange = Boolean(filters.startDate || filters.endDate);
   const [targetBranchId, setTargetBranchId] = useState('');
   const [batchName, setBatchName] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [assignmentMode, setAssignmentMode] = useState<'MANUAL' | 'EQUAL'>('MANUAL');
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -521,7 +533,16 @@ export function FollowUpPage({
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
             filtersBadgeCount={activeFilterCount}
-            desktop={<PageRefreshButton />}
+            desktop={
+              <>
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  chrome="pill"
+                />
+                <PageRefreshButton />
+              </>
+            }
             filters={
               <>
                 {!isCartView && (
@@ -1067,6 +1088,47 @@ export function FollowUpPage({
             ]}
           />
         )}
+        {groups.length > 0 && (
+          <FormSelect
+            label="Assign to group (optional)"
+            value={selectedGroupId}
+            onChange={(e) => {
+              setSelectedGroupId(e.target.value);
+              if (!e.target.value) setAssignmentMode('MANUAL');
+            }}
+            options={[
+              { value: '', label: 'No group — assign later' },
+              ...groups.map((g) => ({ value: g.id, label: `${g.name} (${g.memberCount} members)` })),
+            ]}
+          />
+        )}
+        {selectedGroupId && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-app-fg">Assignment mode</legend>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="assignmentMode"
+                value="EQUAL"
+                checked={assignmentMode === 'EQUAL'}
+                onChange={() => setAssignmentMode('EQUAL')}
+                className="accent-brand-500"
+              />
+              <span className="text-sm text-app-fg">Split equally — auto-assign orders to group members</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="assignmentMode"
+                value="MANUAL"
+                checked={assignmentMode === 'MANUAL'}
+                onChange={() => setAssignmentMode('MANUAL')}
+                className="accent-brand-500"
+              />
+              <span className="text-sm text-app-fg">Manual — assign individually from the batch detail</span>
+            </label>
+          </fieldset>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={() => setReopenModalOpen(false)}>
             Cancel
@@ -1083,13 +1145,20 @@ export function FollowUpPage({
                   if (selectedIds.has(o.id)) originalStatuses[o.id] = o.status;
                 }
               }
+              const submitData: Record<string, string> = {
+                targetBranchId,
+                batchName: batchName.trim(),
+              };
+              if (selectedGroupId) {
+                submitData.groupId = selectedGroupId;
+                submitData.assignmentMode = assignmentMode;
+              }
               if (isCartView) {
                 reopenFetcher.submit(
                   {
                     intent: 'bulkRecoverCarts',
                     cartIds: JSON.stringify([...selectedIds]),
-                    targetBranchId,
-                    batchName: batchName.trim(),
+                    ...submitData,
                   },
                   { method: 'post' },
                 );
@@ -1098,9 +1167,8 @@ export function FollowUpPage({
                   {
                     intent: 'reopenForFollowUp',
                     orderIds: JSON.stringify([...selectedIds]),
-                    targetBranchId,
-                    batchName: batchName.trim(),
                     originalStatuses: JSON.stringify(originalStatuses),
+                    ...submitData,
                   },
                   { method: 'post' },
                 );

@@ -17,6 +17,8 @@ import { FollowUpPage } from '~/features/cs/FollowUpPage';
 import type { FollowUpPageData } from '~/features/cs/FollowUpPage';
 import { FollowUpBatchesPage } from '~/features/cs/FollowUpBatchesPage';
 import type { FollowUpBatchesPageData } from '~/features/cs/FollowUpBatchesPage';
+import { FollowUpGroupsPage } from '~/features/cs/FollowUpGroupsPage';
+import type { FollowUpGroupItem } from '~/features/cs/FollowUpGroupsPage';
 import type { PendingCart } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
@@ -28,14 +30,48 @@ const ABANDONED_CART_STATUS = 'ABANDONED_CART';
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
     permission: 'orders.followUp',
-    roles: ['SUPER_ADMIN', 'ADMIN'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const view = url.searchParams.get('view') || 'batches';
 
+  // ── Groups view ──────────────────────────────────────────────
+  if (view === 'groups') {
+    type GroupItem = { id: string; name: string; createdByName: string | null; memberCount: number; members: Array<{ userId: string; userName: string }>; createdAt: string };
+    const groupsData = (async (): Promise<GroupItem[]> => {
+      try {
+        const res = await apiRequest<unknown>(
+          '/trpc/orders.listFollowUpGroups',
+          { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+        );
+        if (!res.ok) return [];
+        return ((res.data as { result?: { data?: GroupItem[] } })?.result?.data) ?? [];
+      } catch {
+        return [];
+      }
+    })();
+
+    // Also fetch CS closers for the create/edit group modals
+    const closersData = (async () => {
+      try {
+        const res = await apiRequest<unknown>('/trpc/orders.listCSClosers', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS });
+        if (!res.ok) return [];
+        return ((res.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } })?.result?.data) ?? [];
+      } catch {
+        return [];
+      }
+    })();
+
+    return defer({
+      shell: { view: 'groups' as const },
+      groupsData,
+      closersData,
+    });
+  }
+
   // ── Batches view (default) ──────────────────────────────────
-  if (view === 'batches') {
+  if (view === 'batches' || view !== 'create') {
     const batchesPage = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
     // Default to this month if no date params
     const now = new Date();
@@ -105,7 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const pageData = (async (): Promise<FollowUpPageData> => {
-    const [closersRes, countsRes, productsRes, cartStatsRes] = await Promise.all([
+    const [closersRes, countsRes, productsRes, cartStatsRes, groupsRes] = await Promise.all([
       apiRequest<unknown>('/trpc/orders.listCSClosers', deferredOpt),
       apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, deferredOpt),
       apiRequest<unknown>(
@@ -113,6 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         deferredOpt,
       ),
       apiRequest<unknown>('/trpc/cart.getStats?input=%7B%7D', deferredOpt),
+      apiRequest<unknown>('/trpc/orders.listFollowUpGroups', deferredOpt),
     ]);
 
     const closers = closersRes.ok
@@ -128,10 +165,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ((cartStatsRes.data as { result?: { data?: { abandonedOpen: number } } })?.result?.data ?? { abandonedOpen: 0 })
       : { abandonedOpen: 0 };
 
+    type FollowUpGroupOption = { id: string; name: string; memberCount: number; members: Array<{ userId: string; userName: string }> };
+    const groups: FollowUpGroupOption[] = groupsRes.ok
+      ? ((groupsRes.data as { result?: { data?: FollowUpGroupOption[] } })?.result?.data ?? [])
+      : [];
+
     statusCounts[ABANDONED_CART_STATUS] = cartStats.abandonedOpen;
 
     if (statuses.length === 0) {
-      return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1 };
+      return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1, groups };
     }
 
     if (isCartView) {
@@ -155,7 +197,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const cartData = cartRes.ok
         ? (cartRes.data as { result?: { data?: { items: PendingCart[]; total: number; page: number; limit: number } } })?.result?.data
         : null;
-      return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: cartData?.items ?? [], abandonedCartsTotal: cartData?.total ?? 0, abandonedCartsTotalPages: Math.max(1, Math.ceil((cartData?.total ?? 0) / limit)) };
+      return { orders: [], total: 0, totalPages: 1, closers, statusCounts, products, abandonedCarts: cartData?.items ?? [], abandonedCartsTotal: cartData?.total ?? 0, abandonedCartsTotalPages: Math.max(1, Math.ceil((cartData?.total ?? 0) / limit)), groups };
     }
 
     const ordersRes = await apiRequest<unknown>(
@@ -165,7 +207,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: FollowUpPageData['orders']; pagination: { total: number; totalPages: number } } } })?.result?.data
       : null;
-    return { orders: ordersData?.orders ?? [], total: ordersData?.pagination?.total ?? 0, totalPages: ordersData?.pagination?.totalPages ?? 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1 };
+    return { orders: ordersData?.orders ?? [], total: ordersData?.pagination?.total ?? 0, totalPages: ordersData?.pagination?.totalPages ?? 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1, groups };
   })();
 
   // Serialize the listInput so the component can use it for deep-select
@@ -196,7 +238,7 @@ clientLoader.hydrate = false;
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermissionOrRoles(request, {
     permission: 'orders.followUp',
-    roles: ['SUPER_ADMIN', 'ADMIN'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
   });
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
@@ -215,6 +257,8 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const targetBranchId = formData.get('targetBranchId')?.toString() || undefined;
     const batchName = formData.get('batchName')?.toString()?.trim() || '';
+    const groupId = formData.get('groupId')?.toString() || undefined;
+    const assignmentMode = (formData.get('assignmentMode')?.toString() as 'EQUAL' | 'MANUAL') || 'MANUAL';
     let originalStatuses: Record<string, string> = {};
     try { originalStatuses = JSON.parse(formData.get('originalStatuses')?.toString() ?? '{}'); } catch { /* ignore */ }
 
@@ -241,6 +285,8 @@ export async function action({ request }: ActionFunctionArgs) {
           name: batchName,
           source: 'orders',
           ...(targetBranchId ? { branchId: targetBranchId } : {}),
+          ...(groupId ? { groupId } : {}),
+          assignmentMode,
           items: succeededIds.map((id) => ({ orderId: id, originalStatus: originalStatuses[id] ?? 'UNKNOWN' })),
         },
       });
@@ -356,6 +402,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Create batch record for tracking
     const batchName = formData.get('batchName')?.toString()?.trim() || '';
+    const cartGroupId = formData.get('groupId')?.toString() || undefined;
+    const cartAssignmentMode = (formData.get('assignmentMode')?.toString() as 'EQUAL' | 'MANUAL') || 'MANUAL';
     if (batchName && createdOrderIds.length > 0) {
       await apiRequest<unknown>('/trpc/orders.createFollowUpBatch', {
         method: 'POST',
@@ -364,12 +412,55 @@ export async function action({ request }: ActionFunctionArgs) {
           name: batchName,
           source: 'carts',
           ...(targetBranchId ? { branchId: targetBranchId } : {}),
+          ...(cartGroupId ? { groupId: cartGroupId } : {}),
+          assignmentMode: cartAssignmentMode,
           items: createdOrderIds.map((id) => ({ orderId: id, originalStatus: 'ABANDONED_CART' })),
         },
       });
     }
 
     return json({ success: true, succeeded, failed });
+  }
+
+  // ── Group CRUD ──────────────────────────────────────────────
+  if (intent === 'createFollowUpGroup') {
+    const name = formData.get('groupName')?.toString()?.trim() ?? '';
+    if (!name) return json({ error: 'Group name is required' }, { status: 400 });
+    let memberIds: string[];
+    try { memberIds = JSON.parse(formData.get('memberIds')?.toString() ?? '[]'); } catch { memberIds = []; }
+    if (memberIds.length === 0) return json({ error: 'Select at least one member' }, { status: 400 });
+
+    const res = await apiRequest<unknown>('/trpc/orders.createFollowUpGroup', {
+      method: 'POST', cookie, body: { name, memberIds },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to create group') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'updateFollowUpGroup') {
+    const groupId = formData.get('groupId')?.toString();
+    if (!groupId) return json({ error: 'Group ID is required' }, { status: 400 });
+    const name = formData.get('groupName')?.toString()?.trim() || undefined;
+    let memberIds: string[] | undefined;
+    const memberIdsRaw = formData.get('memberIds')?.toString();
+    if (memberIdsRaw) { try { memberIds = JSON.parse(memberIdsRaw); } catch { memberIds = undefined; } }
+
+    const res = await apiRequest<unknown>('/trpc/orders.updateFollowUpGroup', {
+      method: 'POST', cookie, body: { groupId, name, memberIds },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to update group') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'deleteFollowUpGroup') {
+    const groupId = formData.get('groupId')?.toString();
+    if (!groupId) return json({ error: 'Group ID is required' }, { status: 400 });
+
+    const res = await apiRequest<unknown>('/trpc/orders.deleteFollowUpGroup', {
+      method: 'POST', cookie, body: { groupId },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to delete group') }, { status: safeStatus(res.status) });
+    return json({ success: true });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });
@@ -380,6 +471,28 @@ export default function FollowUpRoute() {
   const loaderData = useLoaderData<typeof loader>() as any;
   const shell = loaderData.shell;
   const view: string = shell?.view ?? 'batches';
+
+  if (view === 'groups') {
+    return (
+      <CachedAwait<FollowUpGroupItem[]>
+        resolve={loaderData.groupsData as Promise<FollowUpGroupItem[]>}
+        fallback={<FollowUpGroupsPage groups={[]} closers={[]} deferredLoading />}
+        loaderShell={{ shell }}
+        deferredKey="groupsData"
+      >
+        {(groups) => (
+          <CachedAwait<Array<{ agentId: string; agentName: string }>>
+            resolve={loaderData.closersData as Promise<Array<{ agentId: string; agentName: string }>>}
+            fallback={<FollowUpGroupsPage groups={groups} closers={[]} />}
+            loaderShell={{ shell }}
+            deferredKey="closersData"
+          >
+            {(closers) => <FollowUpGroupsPage groups={groups} closers={closers} />}
+          </CachedAwait>
+        )}
+      </CachedAwait>
+    );
+  }
 
   if (view === 'batches') {
     const batchesPage: number = shell?.page ?? 1;

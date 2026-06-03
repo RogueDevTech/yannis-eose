@@ -165,6 +165,24 @@ export const orderTimelineEvents = pgTable('order_timeline_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ── Follow-Up Groups ──────────────────────────────────────────
+// Named groups of CS closers that can be assigned follow-up batches.
+
+export const followUpGroups = pgTable('follow_up_groups', {
+  id: uuidv7Pk(),
+  name: text('name').notNull(),
+  createdById: uuid('created_by_id').references(() => users.id).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const followUpGroupMembers = pgTable('follow_up_group_members', {
+  id: uuidv7Pk(),
+  groupId: uuid('group_id').references(() => followUpGroups.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ── Follow-Up Batches ──────────────────────────────────────────
 // Tracks groups of orders reopened via the Follow Up page so users
 // can measure conversion/recovery performance per batch.
@@ -181,6 +199,10 @@ export const followUpBatches = pgTable('follow_up_batches', {
   createdById: uuid('created_by_id').references(() => users.id).notNull(),
   /** Denormalized count for list views (avoids COUNT on every row). */
   orderCount: integer('order_count').notNull().default(0),
+  /** Follow-up group assigned to this batch. */
+  groupId: uuid('group_id').references(() => followUpGroups.id),
+  /** EQUAL = auto round-robin assign; MANUAL = user assigns individually. */
+  assignmentMode: text('assignment_mode').notNull().default('MANUAL'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -190,5 +212,7 @@ export const followUpBatchItems = pgTable('follow_up_batch_items', {
   orderId: uuid('order_id').references(() => orders.id).notNull(),
   /** Status of the order at the time it was added to the batch. */
   originalStatus: text('original_status').notNull(),
+  /** CS closer assigned to work this order (set by auto-assign or manual). */
+  assignedCsId: uuid('assigned_cs_id').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

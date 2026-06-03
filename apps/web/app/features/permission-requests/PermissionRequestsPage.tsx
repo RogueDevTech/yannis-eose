@@ -22,6 +22,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { DescriptionList } from '~/components/ui/description-list';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { formatOrderNumber } from '@yannis/shared';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import type { PermissionRequest, PermissionRequestStatusFilter } from './types';
 
@@ -70,12 +71,14 @@ function targetSummary(req: PermissionRequest): string {
     if (name) return name;
   }
   if (req.type === 'ORDER_LINE_PRICE_CHANGE' && req.payload) {
-    const oid = (req.payload as { orderId?: string }).orderId;
-    if (oid) return `Order ${oid.slice(0, 8).toUpperCase()}`;
+    const p = req.payload as { orderId?: string; orderNo?: number | null };
+    if (p.orderNo != null) return `Order ${formatOrderNumber(p.orderNo)}`;
+    if (p.orderId) return `Order ${p.orderId.slice(0, 8).toUpperCase()}`;
   }
   if (req.type === 'ORDER_DELETION' && req.payload) {
-    const oid = (req.payload as { orderId?: string }).orderId;
-    if (oid) return `Order ${oid.slice(0, 8).toUpperCase()}`;
+    const p = req.payload as { orderId?: string; orderNo?: number | null };
+    if (p.orderNo != null) return `Order ${formatOrderNumber(p.orderNo)}`;
+    if (p.orderId) return `Order ${p.orderId.slice(0, 8).toUpperCase()}`;
   }
   if (req.targetUserName) return req.targetUserName;
   return '—';
@@ -641,6 +644,7 @@ interface OrderLineItemPayload {
 
 interface OrderPayload {
   orderId?: string;
+  orderNo?: number | null;
   items?: OrderLineItemPayload[];
   totalAmount?: number;
 }
@@ -703,7 +707,7 @@ function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORD
         {payload.orderId ? (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-app-fg-muted">Order:</span>
-            <OrderIdBadge id={payload.orderId} linkTo={`/admin/orders/${payload.orderId}`} />
+            <OrderIdBadge id={payload.orderId} orderNumber={payload.orderNo} linkTo={`/admin/orders/${payload.orderId}`} />
           </div>
         ) : null}
       </div>
