@@ -39,35 +39,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // ── Groups view ──────────────────────────────────────────────
   if (view === 'groups') {
     type GroupItem = { id: string; name: string; createdByName: string | null; memberCount: number; members: Array<{ userId: string; userName: string }>; createdAt: string };
-    const groupsData = (async (): Promise<GroupItem[]> => {
+    type CloserWithBranchesItem = { agentId: string; agentName: string; branches: Array<{ branchId: string; branchName: string }> };
+    type GroupsBundle = { groups: GroupItem[]; closers: CloserWithBranchesItem[] };
+    const pageData = (async (): Promise<GroupsBundle> => {
       try {
-        const res = await apiRequest<unknown>(
-          '/trpc/orders.listFollowUpGroups',
-          { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
-        );
-        if (!res.ok) return [];
-        return ((res.data as { result?: { data?: GroupItem[] } })?.result?.data) ?? [];
+        const [groupsRes, closersRes] = await Promise.all([
+          apiRequest<unknown>('/trpc/orders.listFollowUpGroups', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
+          apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
+        ]);
+        const groups: GroupItem[] = groupsRes.ok
+          ? ((groupsRes.data as { result?: { data?: GroupItem[] } })?.result?.data ?? [])
+          : [];
+        const closers: CloserWithBranchesItem[] = closersRes.ok
+          ? ((closersRes.data as { result?: { data?: CloserWithBranchesItem[] } })?.result?.data ?? [])
+          : [];
+        return { groups, closers };
       } catch {
-        return [];
-      }
-    })();
-
-    // Fetch CS closers with branch memberships for the create/edit group modals
-    type CloserWithBranches = { agentId: string; agentName: string; branches: Array<{ branchId: string; branchName: string }> };
-    const closersData = (async (): Promise<CloserWithBranches[]> => {
-      try {
-        const res = await apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS });
-        if (!res.ok) return [];
-        return ((res.data as { result?: { data?: CloserWithBranches[] } })?.result?.data) ?? [];
-      } catch {
-        return [];
+        return { groups: [], closers: [] };
       }
     })();
 
     return defer({
       shell: { view: 'groups' as const },
-      groupsData,
-      closersData,
+      pageData,
     });
   }
 
@@ -83,16 +77,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const endDate = url.searchParams.get('endDate') || defaultEnd;
 
     const emptyBatches = { batches: [] as Array<{ id: string; name: string; source: string; branchName: string | null; createdByName: string | null; orderCount: number; confirmed: number; delivered: number; deliveredRevenue: string; confirmationRate: number; deliveryRate: number; createdAt: string }>, pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } };
+    type GroupItem = { id: string; name: string; createdByName: string | null; memberCount: number; members: Array<{ userId: string; userName: string }>; createdAt: string };
+    type CloserWithBranchesItem = { agentId: string; agentName: string; branches: Array<{ branchId: string; branchName: string }> };
     const batchesData = (async () => {
       try {
-        const res = await apiRequest<unknown>(
-          `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20, startDate, endDate }))}`,
-          { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
-        );
-        if (!res.ok) return emptyBatches;
-        return ((res.data as { result?: { data?: typeof emptyBatches } })?.result?.data) ?? emptyBatches;
+        const [batchesRes, groupsRes, closersRes] = await Promise.all([
+          apiRequest<unknown>(
+            `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20, startDate, endDate }))}`,
+            { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+          ),
+          apiRequest<unknown>('/trpc/orders.listFollowUpGroups', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
+          apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
+        ]);
+        const batches = batchesRes.ok
+          ? ((batchesRes.data as { result?: { data?: typeof emptyBatches } })?.result?.data) ?? emptyBatches
+          : emptyBatches;
+        const groups: GroupItem[] = groupsRes.ok
+          ? ((groupsRes.data as { result?: { data?: GroupItem[] } })?.result?.data ?? [])
+          : [];
+        const closers: CloserWithBranchesItem[] = closersRes.ok
+          ? ((closersRes.data as { result?: { data?: CloserWithBranchesItem[] } })?.result?.data ?? [])
+          : [];
+        return { ...batches, groups, closers };
       } catch {
-        return emptyBatches;
+        return { ...emptyBatches, groups: [] as GroupItem[], closers: [] as CloserWithBranchesItem[] };
       }
     })();
     return defer({
@@ -474,32 +482,25 @@ export default function FollowUpRoute() {
   const view: string = shell?.view ?? 'batches';
 
   if (view === 'groups') {
+    type GroupsBundle = { groups: FollowUpGroupItem[]; closers: CloserWithBranches[] };
     return (
-      <CachedAwait<FollowUpGroupItem[]>
-        resolve={loaderData.groupsData as Promise<FollowUpGroupItem[]>}
+      <CachedAwait<GroupsBundle>
+        resolve={loaderData.pageData as Promise<GroupsBundle>}
         fallback={<FollowUpGroupsPage groups={[]} closers={[]} deferredLoading />}
         loaderShell={{ shell }}
-        deferredKey="groupsData"
+        deferredKey="pageData"
       >
-        {(groups) => (
-          <CachedAwait<CloserWithBranches[]>
-            resolve={loaderData.closersData as Promise<CloserWithBranches[]>}
-            fallback={<FollowUpGroupsPage groups={groups} closers={[]} />}
-            loaderShell={{ shell }}
-            deferredKey="closersData"
-          >
-            {(closers) => <FollowUpGroupsPage groups={groups} closers={closers} />}
-          </CachedAwait>
-        )}
+        {(data) => <FollowUpGroupsPage groups={data.groups} closers={data.closers} />}
       </CachedAwait>
     );
   }
 
   if (view === 'batches') {
+    type BatchesBundle = FollowUpBatchesPageData & { groups: FollowUpGroupItem[]; closers: CloserWithBranches[] };
     const batchesPage: number = shell?.page ?? 1;
     return (
-      <CachedAwait<FollowUpBatchesPageData>
-        resolve={loaderData.batchesData as Promise<FollowUpBatchesPageData>}
+      <CachedAwait<BatchesBundle>
+        resolve={loaderData.batchesData as Promise<BatchesBundle>}
         fallback={
           <FollowUpBatchesPage
             batches={[]}
@@ -507,6 +508,8 @@ export default function FollowUpRoute() {
             page={batchesPage}
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
+            groups={[]}
+            closers={[]}
             deferredLoading
           />
         }

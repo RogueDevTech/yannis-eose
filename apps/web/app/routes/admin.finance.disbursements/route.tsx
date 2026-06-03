@@ -147,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   );
   type BundleData = {
-    funding: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } | null;
+    funding: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number }; filteredTotalAmount?: string } | null;
     balances: Array<{ userId: string; name: string; role: string; totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }>;
     summary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
     requests: { records: FundingRequestRecord[]; pagination: { page: number; limit: number; total: number } };
@@ -225,6 +225,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     funding: fundingData?.records ?? [],
+    filteredTotalAmount: fundingData?.filteredTotalAmount ?? '0',
     totalFunding: total,
     totalPages,
     page,

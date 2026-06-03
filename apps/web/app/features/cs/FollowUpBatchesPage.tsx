@@ -4,6 +4,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { Tabs } from '~/components/ui/tabs';
 import { Modal } from '~/components/ui/modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
@@ -13,6 +14,8 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
+import { FollowUpGroupsPanel } from '~/features/cs/FollowUpGroupsPage';
+import type { FollowUpGroupItem, CloserWithBranches } from '~/features/cs/FollowUpGroupsPage';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import type { FollowUpBatchDetailData } from './FollowUpBatchDetailPage';
 
@@ -38,6 +41,8 @@ interface Props extends FollowUpBatchesPageData {
   page: number;
   startDate?: string;
   endDate?: string;
+  groups?: FollowUpGroupItem[];
+  closers?: CloserWithBranches[];
   deferredLoading?: boolean;
 }
 
@@ -47,8 +52,11 @@ export function FollowUpBatchesPage({
   page,
   startDate = '',
   endDate = '',
+  groups = [],
+  closers = [],
   deferredLoading = false,
 }: Props) {
+  const [activeTab, setActiveTab] = useState<'batches' | 'groups'>('batches');
   const batches = batchesRaw ?? [];
   const pagination = paginationRaw ?? { page: 1, limit: 20, total: 0, totalPages: 1 };
   const showSkeleton = deferredLoading;
@@ -203,9 +211,6 @@ export function FollowUpBatchesPage({
             triggerAriaLabel="Follow-up tools"
             desktop={
               <>
-                <Link to="/admin/cs/follow-up?view=groups" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                  Groups
-                </Link>
                 <DateFilterBar startDate={startDate} endDate={endDate} chrome="pill" />
                 <PageRefreshButton />
                 <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
@@ -215,10 +220,7 @@ export function FollowUpBatchesPage({
             }
             sheet={
               <>
-                <Link to="/admin/cs/follow-up?view=groups" className="btn-secondary w-full inline-flex items-center justify-center">
-                  Groups
-                </Link>
-                <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center mt-2">
+                <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center">
                   + Create follow-up
                 </Link>
               </>
@@ -227,6 +229,19 @@ export function FollowUpBatchesPage({
         }
       />
 
+      <Tabs
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as 'batches' | 'groups')}
+        tabs={[
+          { value: 'batches', label: 'Batches' },
+          { value: 'groups', label: 'Groups', badge: groups.length || undefined },
+        ]}
+      />
+
+      {activeTab === 'groups' ? (
+        <FollowUpGroupsPanel groups={groups} closers={closers} deferredLoading={deferredLoading} />
+      ) : (
+      <>
       <OverviewStatStrip
         mobileGrid
         items={[
@@ -285,6 +300,8 @@ export function FollowUpBatchesPage({
           </p>
           <Pagination page={page} totalPages={pagination.totalPages} pageParam="page" />
         </div>
+      )}
+      </>
       )}
       {/* ── Batch detail peek modal ────────────────────── */}
       <Modal

@@ -191,17 +191,15 @@ export function setFullLoaderEntry(key: string, data: unknown): void {
  * the cache gets populated on first visit.
  */
 /**
- * In-flight revalidation tracker — when a cached payload is served, we stamp
- * the URL with a timestamp so the very next loader run (the on-mount revalidate
- * fired by `<CachedAwait>`) bypasses the cache and fetches fresh data. The
- * TTL is a safety net: if the user navigates away before the revalidate fires,
- * the flag becomes stale and the next visit can hit the cache again.
+ * In-flight revalidation tracker — when a cached payload is served, the URL is
+ * flagged so the very next loader run (the on-mount revalidate fired by
+ * `<CachedAwait>`) bypasses the cache and fetches fresh data.
+ *
+ * Uses a simple Set (no TTL) so slow server responses (10s+) don't cause the
+ * flag to expire before the revalidation completes. The flag is consumed (deleted)
+ * on the first revalidation call, so it never blocks more than one fresh fetch.
  */
-const inFlightRevalidations = new Map<string, number>();
-/** Window during which a stamped URL forces a fresh fetch. Long enough for the
- *  revalidator to fire (it runs in a useEffect, ~50ms after mount); short
- *  enough that an interrupted navigation doesn't lock the cache out for long. */
-const REVALIDATE_FLAG_MS = 5_000;
+const inFlightRevalidations = new Set<string>();
 
 /**
  * Type matches Remix's `ClientLoaderFunctionArgs` shape without importing
@@ -224,25 +222,18 @@ const cachedClientLoaderImpl = async (
   const url = new URL(args.request.url);
   const key = url.pathname + url.search;
 
-  // If a fresh revalidation flag exists, fall through to the server (this is
-  // the on-mount revalidate triggered by `<CachedAwait>` after the cached
-  // shape rendered — we want fresh data this time).
-  const flagged = inFlightRevalidations.get(key);
-  if (flagged != null && Date.now() - flagged < REVALIDATE_FLAG_MS) {
+  // If flagged for revalidation, always go to the server — no TTL, so even
+  // slow responses (10s+) still land fresh data.
+  if (inFlightRevalidations.has(key)) {
     inFlightRevalidations.delete(key);
     const fresh = await args.serverLoader();
     return fresh;
   }
-  if (flagged != null) {
-    // Stale flag (user navigated away before revalidate fired) — drop it and
-    // fall through to the cache check below.
-    inFlightRevalidations.delete(key);
-  }
 
   const cached = getFullLoaderEntry(key);
   if (cached !== null) {
-    // Stamp the key so the next revalidation tick fetches fresh data.
-    inFlightRevalidations.set(key, Date.now());
+    // Flag the key so the next call (on-mount revalidate) fetches fresh data.
+    inFlightRevalidations.add(key);
     return cached;
   }
 

@@ -251,8 +251,14 @@ export const financeRouter = router({
             ctx.currentBranchId,
           )
           .catch(() => null),
+        // Scope to HoM receivers only (Finance disburses to HoM, not MBs) and
+        // respect date filters so the summary matches the selected period.
         getMarketingService()
-          .getFundingSummary(input.branchId ?? null)
+          .getFundingSummary(input.branchId ?? null, {
+            restrictToReceiverRole: 'HEAD_OF_MARKETING',
+            startDate: input.startDate,
+            endDate: input.endDate,
+          })
           .catch(() => ({ totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 })),
         getLogisticsService()
           .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
