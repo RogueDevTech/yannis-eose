@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 const COMMENT_BUBBLE_SVG = (
   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
@@ -15,11 +16,11 @@ export const COMMENT_BUBBLE_SVG_SMALL = (
 
 /**
  * Hoverable/tappable comment bubble icon with a popup showing the comment.
- * Used in table action columns on order list pages.
+ * Uses a portal so the tooltip escapes overflow-hidden table containers.
  */
 export function CsCommentIcon({ comment, actorName }: { comment: string; actorName: string | null }) {
   const [show, setShow] = useState(false);
-  const [flipDown, setFlipDown] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; flipDown: boolean } | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -34,8 +35,12 @@ export function CsCommentIcon({ comment, actorName }: { comment: string; actorNa
   const handleShow = () => {
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect();
-      // If less than 80px above the icon, flip tooltip below
-      setFlipDown(rect.top < 80);
+      const flipDown = rect.top < 80;
+      setPos({
+        top: flipDown ? rect.bottom + 8 : rect.top - 8,
+        left: rect.right,
+        flipDown,
+      });
     }
     setShow(true);
   };
@@ -51,12 +56,20 @@ export function CsCommentIcon({ comment, actorName }: { comment: string; actorNa
       title="CS comment"
     >
       {COMMENT_BUBBLE_SVG}
-      {show && (
-        <span className={`absolute right-0 z-50 whitespace-normal rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-lg text-left dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 ${flipDown ? 'top-full mt-2' : 'bottom-full mb-2'}`}
-          style={{ minWidth: '12rem', maxWidth: '18rem' }}
+      {show && pos && createPortal(
+        <span
+          className="fixed z-[9999] whitespace-normal rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-lg text-left dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 pointer-events-none"
+          style={{
+            top: pos.flipDown ? pos.top : undefined,
+            bottom: pos.flipDown ? undefined : `${window.innerHeight - pos.top}px`,
+            right: `${window.innerWidth - pos.left}px`,
+            minWidth: '12rem',
+            maxWidth: '22rem',
+          }}
         >
           <span className="block leading-relaxed">{comment}</span>
-        </span>
+        </span>,
+        document.body,
       )}
     </span>
   );

@@ -10,7 +10,7 @@ import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { withActor } from '../common/db/with-actor';
-import { canonicalPermissionCode } from '@yannis/shared';
+import { canonicalPermissionCode, formatOrderNumber } from '@yannis/shared';
 import { ProductsService } from '../products/products.service';
 import { OrdersService } from '../orders/orders.service';
 
@@ -472,19 +472,19 @@ export class PermissionRequestsService {
       req.type === 'PRODUCT_ARCHIVE'
         ? ((req.payload as { productName?: string } | null)?.productName ?? 'product')
         : null;
-    const priceOrderId =
-      req.type === 'ORDER_LINE_PRICE_CHANGE'
-        ? ((req.payload as { orderId?: string } | null)?.orderId ?? '')
+    const orderPayload = req.payload as { orderId?: string; orderNo?: number | null } | null;
+    const orderLabel = orderPayload?.orderNo != null
+      ? formatOrderNumber(orderPayload.orderNo)
+      : orderPayload?.orderId
+        ? orderPayload.orderId.slice(0, 8).toUpperCase()
         : '';
-    const deletionOrderId =
-      req.type === 'ORDER_DELETION' ? ((req.payload as { orderId?: string } | null)?.orderId ?? '') : '';
     const approvalBody =
       req.type === 'PRODUCT_ARCHIVE' && productName
         ? `Your request to archive product "${productName}" was approved.`
-        : req.type === 'ORDER_LINE_PRICE_CHANGE' && priceOrderId
-          ? `Your request to change line prices on order ${priceOrderId.slice(0, 8).toUpperCase()} was approved.`
-          : req.type === 'ORDER_DELETION' && deletionOrderId
-            ? `Your request to archive order ${deletionOrderId.slice(0, 8).toUpperCase()} was approved.`
+        : req.type === 'ORDER_LINE_PRICE_CHANGE' && orderLabel
+          ? `Your request to change line prices on order ${orderLabel} was approved.`
+          : req.type === 'ORDER_DELETION' && orderLabel
+            ? `Your request to archive order ${orderLabel} was approved.`
             : `Your request (${req.type}) was approved.`;
 
     this.notificationsService.enqueueCreate({
@@ -567,10 +567,20 @@ export class PermissionRequestsService {
       req.type === 'PRODUCT_ARCHIVE'
         ? ((req.payload as { productName?: string } | null)?.productName ?? 'product')
         : null;
+    const rejectPayload = req.payload as { orderId?: string; orderNo?: number | null } | null;
+    const rejectOrderLabel = rejectPayload?.orderNo != null
+      ? formatOrderNumber(rejectPayload.orderNo)
+      : rejectPayload?.orderId
+        ? rejectPayload.orderId.slice(0, 8).toUpperCase()
+        : '';
     const rejectBody =
       req.type === 'PRODUCT_ARCHIVE' && rejectProductName
         ? `Your request to archive product "${rejectProductName}" was rejected. Reason: ${reason}`
-        : `Your request (${req.type}) was rejected. Reason: ${reason}`;
+        : req.type === 'ORDER_LINE_PRICE_CHANGE' && rejectOrderLabel
+          ? `Your request to change line prices on order ${rejectOrderLabel} was rejected. Reason: ${reason}`
+          : req.type === 'ORDER_DELETION' && rejectOrderLabel
+            ? `Your request to archive order ${rejectOrderLabel} was rejected. Reason: ${reason}`
+            : `Your request (${req.type}) was rejected. Reason: ${reason}`;
 
     this.notificationsService.enqueueCreate({
       userId: req.requesterId,

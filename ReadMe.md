@@ -9,8 +9,6 @@ pnpm turbo dev
 
 docker restart yannis-eose-api-1
 
-
-
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
