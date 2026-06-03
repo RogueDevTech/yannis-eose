@@ -237,7 +237,7 @@ export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
  * Funding page section — mirrors the two-tier model so the URL matches the user's
  * mental map: "Funds I've Received" or "Funds I Distribute".
  */
-export type FundingSection = 'received' | 'distributing';
+export type FundingSection = 'received' | 'distributing' | 'balances';
 
 /** Within a section, which list is showing — Transfers (money) or Requests (asks). */
 export type FundingTab = 'transfers' | 'requests';
@@ -421,6 +421,10 @@ export interface MarketingAdSpendLoaderData {
   campaignIdFilter?: string;
   /** Narrow to one media buyer (HoM / admin). */
   mediaBuyerIdFilter?: string;
+  /** Active sort key for the flat list. */
+  sortBy?: 'spendDate' | 'spendAmount' | 'status' | 'createdAt';
+  /** Active sort direction for the flat list. */
+  sortDir?: 'asc' | 'desc';
   /** Active MEDIA_BUYER users for the media-buyer filter dropdown (admin view only). */
   mediaBuyersForFilter?: Array<{ id: string; name: string }>;
   /** Marketing teams for the team filter (HoM / admin). */

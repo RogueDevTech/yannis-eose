@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import {
+  asc,
   eq,
   ne,
   and,
@@ -3356,6 +3357,9 @@ export class MarketingService {
     if (input.category) {
       conditions.push(eq(schema.adSpendLogs.category, input.category));
     }
+    if (input.excludeCategory) {
+      conditions.push(ne(schema.adSpendLogs.category, input.excludeCategory));
+    }
     if (input.startDate) {
       conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
     }
@@ -3404,7 +3408,15 @@ export class MarketingService {
         .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
         .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
         .where(whereClause)
-        .orderBy(desc(schema.adSpendLogs.spendDate))
+        .orderBy((() => {
+          const dirFn = input.sortDir === 'asc' ? asc : desc;
+          switch (input.sortBy) {
+            case 'spendAmount': return dirFn(schema.adSpendLogs.spendAmount);
+            case 'status': return dirFn(schema.adSpendLogs.status);
+            case 'createdAt': return dirFn(schema.adSpendLogs.createdAt);
+            default: return dirFn(schema.adSpendLogs.spendDate);
+          }
+        })())
         .limit(input.limit)
         .offset(offset),
       this.db
@@ -3505,6 +3517,9 @@ export class MarketingService {
     }
     if (input.category) {
       conditions.push(eq(schema.adSpendLogs.category, input.category));
+    }
+    if (input.excludeCategory) {
+      conditions.push(ne(schema.adSpendLogs.category, input.excludeCategory));
     }
     if (input.startDate) {
       conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
@@ -3802,6 +3817,9 @@ export class MarketingService {
     }
     if (input.category) {
       conditions.push(eq(schema.adSpendLogs.category, input.category));
+    }
+    if (input.excludeCategory) {
+      conditions.push(ne(schema.adSpendLogs.category, input.excludeCategory));
     }
     if (input.startDate) {
       conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));

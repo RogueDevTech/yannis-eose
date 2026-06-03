@@ -44,6 +44,7 @@ import type {
   DistributingFundingEntry,
   DistributingFundingRequestEntry,
   DistributingFundingTransferEntry,
+  FundingBalanceRow,
   FundingRecord,
   FundingRequestRecord,
   FundingSection,
@@ -103,10 +104,12 @@ function parseSectionTab(
   const section: FundingSection =
     sectionParam === 'received'
       ? 'received'
-      : canDistribute
-        ? 'distributing'
-        : 'received';
-  if (section === 'distributing') {
+      : sectionParam === 'balances' && canDistribute
+        ? 'balances'
+        : canDistribute
+          ? 'distributing'
+          : 'received';
+  if (section === 'distributing' || section === 'balances') {
     return { section, tab: 'transfers' };
   }
   const tabParam = u.get('tab');
@@ -837,6 +840,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               tabs={[
                 { value: 'distributing', label: 'Funds Distributed' },
                 { value: 'received', label: receivedTitle },
+                ...(balancesList && balancesList.length > 0
+                  ? [{ value: 'balances' as const, label: `Recipient balances`, badge: balancesList.filter((b) => b.role === 'MEDIA_BUYER').length }]
+                  : []),
               ]}
             />
           </div>
@@ -852,7 +858,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </div>
         )}
 
-        {displaySection === 'distributing' && unifiedDistributingSlice ? (
+        {displaySection === 'balances' && balancesList ? (
+          <RecipientBalancesPanel balancesList={balancesList} filters={filters} canSendFunding={canSendFunding} onSendFunding={() => setShowSendForm(true)} />
+        ) : displaySection === 'distributing' && unifiedDistributingSlice ? (
           <>
             <UnifiedDistributingFilterBar
               slice={unifiedDistributingSlice}
@@ -1458,6 +1466,123 @@ function CountPill({ active, children }: { active: boolean; children: ReactNode 
   );
 }
 
+/** Recipient balances panel — shows each MB's received / spent / balance. */
+function RecipientBalancesPanel({
+  balancesList,
+  filters,
+  canSendFunding,
+  onSendFunding,
+}: {
+  balancesList: FundingBalanceRow[];
+  filters: MarketingFundingLoaderData['filters'];
+  canSendFunding: boolean;
+  onSendFunding: () => void;
+}) {
+  const mbRows = useMemo(
+    () => balancesList.filter((b) => b.role === 'MEDIA_BUYER'),
+    [balancesList],
+  );
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(
+    () => search ? mbRows.filter((b) => b.name.toLowerCase().includes(search.toLowerCase())) : mbRows,
+    [mbRows, search],
+  );
+  const columns = useMemo((): CompactTableColumn<FundingBalanceRow>[] => [
+    {
+      key: 'name',
+      header: 'Recipient',
+      render: (b) => <span className="font-medium text-sm text-app-fg">{b.name}</span>,
+    },
+    {
+      key: 'received',
+      header: 'Received',
+      align: 'right',
+      headerClassName: 'text-right',
+      render: (b) => <span className="text-sm tabular-nums"><NairaPrice amount={Number(b.totalReceived)} /></span>,
+    },
+    {
+      key: 'spent',
+      header: 'Spent',
+      align: 'right',
+      headerClassName: 'text-right',
+      render: (b) => {
+        const spent = Number(b.totalDistributed || '0') + Number(b.totalSpend || '0');
+        return <span className="text-sm tabular-nums"><NairaPrice amount={spent} /></span>;
+      },
+    },
+    {
+      key: 'balance',
+      header: 'Balance',
+      align: 'right',
+      headerClassName: 'text-right',
+      render: (b) => (
+        <span className={`text-sm font-semibold tabular-nums ${Number(b.balance) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg'}`}>
+          <NairaPrice amount={Number(b.balance)} />
+        </span>
+      ),
+    },
+    ...(canSendFunding
+      ? [{
+          key: 'actions' as const,
+          header: '',
+          align: 'right' as const,
+          render: () => (
+            <CompactTableActionButton variant="primary" onClick={onSendFunding}>
+              Send funds
+            </CompactTableActionButton>
+          ),
+        }]
+      : []),
+  ], [canSendFunding, onSendFunding]);
+
+  // Mobile cards
+  const mobileRow = useCallback(
+    (b: FundingBalanceRow) => {
+      const spent = Number(b.totalDistributed || '0') + Number(b.totalSpend || '0');
+      return (
+        <div className="px-4 py-3 border-b border-app-border">
+          <div className="flex items-center justify-between mb-1">
+            <span className="font-medium text-sm text-app-fg">{b.name}</span>
+            <span className={`text-sm font-semibold tabular-nums ${Number(b.balance) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg'}`}>
+              <NairaPrice amount={Number(b.balance)} />
+            </span>
+          </div>
+          <div className="flex gap-3 text-xs text-app-fg-muted">
+            <span>Received: <NairaPrice amount={Number(b.totalReceived)} /></span>
+            <span>Spent: <NairaPrice amount={spent} /></span>
+          </div>
+        </div>
+      );
+    },
+    [],
+  );
+
+  return (
+    <div>
+      <div className="p-3">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          onSubmit={() => {}}
+          placeholder="Search recipient name..."
+        />
+      </div>
+      {/* Desktop */}
+      <div className="hidden md:block">
+        <CompactTable data={filtered} columns={columns} emptyMessage="No recipient balances found." />
+      </div>
+      {/* Mobile */}
+      <div className="md:hidden">
+        {filtered.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-app-fg-muted">No recipient balances found.</p>
+        ) : (
+          filtered.map((b) => <div key={b.userId}>{mobileRow(b)}</div>)
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Top metric strip — funding-relevant numbers. Replaces the old marketing-perf strip
  * (CPA / ROAS / Delivery Rate / Confirmation Rate) which didn't speak to funding.
@@ -1491,21 +1616,12 @@ function FundingMetricsStrip({
     && (entryType ? activeEntryType === entryType : !activeEntryType)
     && (entryStatus ? activeEntryStatus === entryStatus : !activeEntryStatus);
   // Aggregate balances when the viewer can see the full list (Admin/Finance/HoM).
-  // Ad Spend Balance = money parked with MBs not yet spent.
-  // Manager Balance = money parked with HoMs not yet distributed/spent.
-  // Overall Balance = total marketing capital still in the system.
-  const adSpendBalance = balancesList
+  // Media Buyer Balance = money parked with MBs not yet spent.
+  const mbBalance = balancesList
     ? balancesList
         .filter((row) => row.role === 'MEDIA_BUYER')
         .reduce((acc, row) => acc + Number(row.balance), 0)
     : null;
-  const managerBalance = balancesList
-    ? balancesList
-        .filter((row) => row.role === 'HEAD_OF_MARKETING')
-        .reduce((acc, row) => acc + Number(row.balance), 0)
-    : null;
-  const overallBalance =
-    adSpendBalance != null && managerBalance != null ? adSpendBalance + managerBalance : null;
 
   const items = [
     ...(fundingBalance
@@ -1518,27 +1634,15 @@ function FundingMetricsStrip({
           },
         ]
       : []),
-    ...(adSpendBalance != null
+    ...(mbBalance != null
       ? [
           {
-            label: 'Ad Spend Balance',
-            value: <NairaPrice amount={adSpendBalance} />,
-            valueClassName: adSpendBalance > 0
+            label: 'Media Buyer Balance',
+            value: <NairaPrice amount={mbBalance} />,
+            valueClassName: mbBalance > 0
               ? 'text-blue-600 dark:text-blue-400'
               : 'text-app-fg',
-            title: 'Sum of unspent funding sitting with all Media Buyers (received − approved ad spend).',
-          },
-        ]
-      : []),
-    ...(overallBalance != null
-      ? [
-          {
-            label: 'Overall Balance',
-            value: <NairaPrice amount={overallBalance} />,
-            valueClassName: overallBalance > 0
-              ? 'text-purple-600 dark:text-purple-400 font-semibold'
-              : 'text-app-fg font-semibold',
-            title: 'Ad Spend Balance + Balance with Manager — total marketing capital still in the system.',
+            title: 'Sum of unspent funding sitting with all Media Buyers (received − expenses).',
           },
         ]
       : []),
@@ -1593,14 +1697,14 @@ function FundingMetricsStrip({
         ]
       : []),
     {
-      label: canDistribute ? 'My Pending Asks' : 'Pending Requests',
+      label: canDistribute ? 'My Requests Out' : 'Pending Requests',
       value: pendingRequestsByMe.toString(),
       valueClassName:
         pendingRequestsByMe > 0
           ? 'text-warning-600 dark:text-warning-400'
           : 'text-app-fg',
       title: canDistribute
-        ? 'Your outbound funding requests (e.g. to Finance) still awaiting approval'
+        ? 'Funding requests you sent to Finance / SuperAdmin — still awaiting approval'
         : 'Your funding requests still awaiting approval from Head of Marketing',
       onClick: () => onFilter({ section: 'received', entryType: 'request', entryStatus: 'PENDING' }),
       active: isActive('received', 'request', 'PENDING'),
@@ -2007,7 +2111,7 @@ function UnifiedDistributingTable({
                   key: 'expenses',
                   kind: 'link',
                   label: 'View Expenses',
-                  to: `/admin/marketing/expenses?mediaBuyerId=${userId}`,
+                  to: `/admin/marketing/expenses?mediaBuyerId=${userId}${filters.periodAllTime ? '&period=all_time' : filters.startDate && filters.endDate ? `&startDate=${filters.startDate}&endDate=${filters.endDate}` : ''}`,
                 },
                 {
                   key: 'receipt',
