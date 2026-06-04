@@ -1558,7 +1558,7 @@ function renderMarketingOrdersMobileCardShell() {
   );
 }
 
-const MARKETING_ORDERS_SHELL_STATUS_OPTIONS = STATUS_OPTIONS.map((status) => ({
+const MARKETING_ORDERS_SHELL_STATUS_OPTIONS = STATUS_OPTIONS.filter((s) => s !== 'FOLLOW_UP').map((status) => ({
   value: status,
   label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
 }));

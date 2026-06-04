@@ -6,7 +6,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { FollowUpBatchDetailPage } from '~/features/cs/FollowUpBatchDetailPage';
-import type { FollowUpBatchDetailData } from '~/features/cs/FollowUpBatchDetailPage';
+import type { FollowUpBatchDetailData, BatchDetailBundle } from '~/features/cs/FollowUpBatchDetailPage';
 
 export const meta: MetaFunction = () => [{ title: 'Follow Up Batch — Yannis EOSE' }];
 
@@ -15,13 +15,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const batchId = params.batchId!;
 
-  const pageData = (async (): Promise<FollowUpBatchDetailData | null> => {
-    const res = await apiRequest<unknown>(
-      `/trpc/orders.getFollowUpBatchDetail?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
-      { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
-    );
-    if (!res.ok) return null;
-    return (res.data as { result?: { data?: FollowUpBatchDetailData } })?.result?.data ?? null;
+  const pageData = (async (): Promise<BatchDetailBundle> => {
+    try {
+      const [detailRes, closersRes] = await Promise.all([
+        apiRequest<unknown>(
+          `/trpc/orders.getFollowUpBatchDetail?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
+          { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+        ),
+        apiRequest<unknown>('/trpc/orders.listCSClosers', {
+          method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS,
+        }),
+      ]);
+      const detail = detailRes.ok
+        ? ((detailRes.data as { result?: { data?: FollowUpBatchDetailData } })?.result?.data ?? null)
+        : null;
+      const closers = closersRes.ok
+        ? ((closersRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } })?.result?.data ?? [])
+        : [];
+      return { detail, closers };
+    } catch {
+      return { detail: null, closers: [] };
+    }
   })();
 
   return defer({ batchId, pageData });
@@ -72,13 +86,13 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function FollowUpBatchDetailRoute() {
   const { batchId, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait<FollowUpBatchDetailData | null>
-      resolve={pageData as Promise<FollowUpBatchDetailData | null>}
-      fallback={<FollowUpBatchDetailPage data={null} deferredLoading />}
+    <CachedAwait<BatchDetailBundle>
+      resolve={pageData as Promise<BatchDetailBundle>}
+      fallback={<FollowUpBatchDetailPage data={null} closers={[]} deferredLoading />}
       loaderShell={{ batchId }}
       deferredKey="pageData"
     >
-      {(data) => <FollowUpBatchDetailPage data={data} />}
+      {(bundle) => <FollowUpBatchDetailPage data={bundle.detail} closers={bundle.closers} />}
     </CachedAwait>
   );
 }
