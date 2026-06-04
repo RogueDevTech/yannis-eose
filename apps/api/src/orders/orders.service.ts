@@ -8171,6 +8171,7 @@ export class OrdersService {
           name: schema.followUpBatches.name,
           source: schema.followUpBatches.source,
           branchId: schema.followUpBatches.branchId,
+          groupId: schema.followUpBatches.groupId,
           createdById: schema.followUpBatches.createdById,
           orderCount: schema.followUpBatches.orderCount,
           createdAt: schema.followUpBatches.createdAt,
@@ -8188,21 +8189,26 @@ export class OrdersService {
 
     const total = countRows[0]?.count ?? 0;
 
-    // Enrich with creator names and branch names
+    // Enrich with creator names, branch names, and group names
     const creatorIds = [...new Set(batches.map((b) => b.createdById))];
     const branchIds = [...new Set(batches.map((b) => b.branchId).filter(Boolean))] as string[];
+    const groupIds = [...new Set(batches.map((b) => b.groupId).filter(Boolean))] as string[];
 
-    const [creators, branchRows] = await Promise.all([
+    const [creators, branchRows, groupRows] = await Promise.all([
       creatorIds.length > 0
         ? this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, creatorIds))
         : Promise.resolve([]),
       branchIds.length > 0
         ? this.db.select({ id: schema.branches.id, name: schema.branches.name }).from(schema.branches).where(inArray(schema.branches.id, branchIds))
         : Promise.resolve([]),
+      groupIds.length > 0
+        ? this.db.select({ id: schema.followUpGroups.id, name: schema.followUpGroups.name }).from(schema.followUpGroups).where(inArray(schema.followUpGroups.id, groupIds))
+        : Promise.resolve([]),
     ]);
 
     const creatorNames = new Map(creators.map((u) => [u.id, u.name]));
     const branchNames = new Map(branchRows.map((b) => [b.id, b.name]));
+    const groupNames = new Map(groupRows.map((g) => [g.id, g.name]));
 
     // Get per-batch order status breakdown in one query
     const batchIds = batches.map((b) => b.id);
@@ -8242,6 +8248,7 @@ export class OrdersService {
           name: b.name,
           source: b.source,
           branchName: b.branchId ? branchNames.get(b.branchId) ?? null : null,
+          groupName: b.groupId ? groupNames.get(b.groupId) ?? null : null,
           createdByName: creatorNames.get(b.createdById) ?? null,
           orderCount: b.orderCount,
           confirmed,

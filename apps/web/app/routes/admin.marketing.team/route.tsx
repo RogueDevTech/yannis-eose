@@ -68,7 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
   // URL-driven rows-per-page — the team list is sliced client-side from the
   // full member set, so `perPage` is both the slice size and totalPages divisor.
-  const { perPage } = parsePerPage(url.searchParams);
+  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
 
   const teamShell = { dateFilters: filters, leaderboardPeriod };
 

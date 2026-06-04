@@ -48,6 +48,7 @@ import type {
   CreateCampaignInput,
   UpdateCampaignInput,
   ListCampaignsInput,
+  FundingLedgerInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
@@ -5770,6 +5771,232 @@ export class MarketingService {
         mediaBuyerName: c.mediaBuyerId ? (mediaBuyerNames.get(c.mediaBuyerId) ?? null) : null,
       })),
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+    };
+  }
+
+  // ── Funding Ledger ─────────────────────────────────────────
+
+  async getFundingLedger(input: FundingLedgerInput, branchId?: string | null) {
+    const { userId, startDate, endDate, entryType, page, limit } = input;
+
+    // Date bounds
+    const dStart = startDate ? nigeriaDayStart(startDate) : undefined;
+    const dEnd = endDate ? nigeriaDayEnd(endDate) : undefined;
+
+    const sender = alias(schema.users, 'sender');
+    const receiver = alias(schema.users, 'receiver');
+
+    // ── 1) Transfers IN (user is receiver) ──
+    const transferInConds: SQL[] = [
+      eq(schema.marketingFunding.receiverId, userId),
+      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+    ];
+    if (dStart) transferInConds.push(gte(schema.marketingFunding.sentAt, dStart));
+    if (dEnd) transferInConds.push(lte(schema.marketingFunding.sentAt, dEnd));
+
+    // ── 2) Transfers OUT (user is sender) ──
+    const transferOutConds: SQL[] = [
+      eq(schema.marketingFunding.senderId, userId),
+      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+    ];
+    if (dStart) transferOutConds.push(gte(schema.marketingFunding.sentAt, dStart));
+    if (dEnd) transferOutConds.push(lte(schema.marketingFunding.sentAt, dEnd));
+
+    // ── 3) Expenses ──
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const expenseConds: SQL[] = [
+      eq(schema.adSpendLogs.mediaBuyerId, userId),
+      ne(schema.adSpendLogs.status, 'REJECTED'),
+    ];
+    if (branchCampaignIds) {
+      expenseConds.push(
+        or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))!,
+      );
+    }
+    if (dStart) expenseConds.push(gte(schema.adSpendLogs.spendDate, dStart));
+    if (dEnd) expenseConds.push(lte(schema.adSpendLogs.spendDate, dEnd));
+
+    // ── 4) Requests ──
+    const requestConds: SQL[] = [eq(schema.marketingFundingRequests.requesterId, userId)];
+    if (dStart) requestConds.push(gte(schema.marketingFundingRequests.createdAt, dStart));
+    if (dEnd) requestConds.push(lte(schema.marketingFundingRequests.createdAt, dEnd));
+
+    // Fetch all in parallel
+    const [transfersIn, transfersOut, expenses, requests] = await Promise.all([
+      entryType === 'all' || entryType === 'transfer_in'
+        ? this.db
+            .select({
+              id: schema.marketingFunding.id,
+              amount: schema.marketingFunding.amount,
+              status: schema.marketingFunding.status,
+              sentAt: schema.marketingFunding.sentAt,
+              senderName: sender.name,
+            })
+            .from(schema.marketingFunding)
+            .leftJoin(sender, eq(sender.id, schema.marketingFunding.senderId))
+            .where(and(...transferInConds))
+        : Promise.resolve([]),
+
+      entryType === 'all' || entryType === 'transfer_out'
+        ? this.db
+            .select({
+              id: schema.marketingFunding.id,
+              amount: schema.marketingFunding.amount,
+              status: schema.marketingFunding.status,
+              sentAt: schema.marketingFunding.sentAt,
+              receiverName: receiver.name,
+            })
+            .from(schema.marketingFunding)
+            .leftJoin(receiver, eq(receiver.id, schema.marketingFunding.receiverId))
+            .where(and(...transferOutConds))
+        : Promise.resolve([]),
+
+      entryType === 'all' || entryType === 'expense'
+        ? this.db
+            .select({
+              id: schema.adSpendLogs.id,
+              spendAmount: schema.adSpendLogs.spendAmount,
+              spendDate: schema.adSpendLogs.spendDate,
+              status: schema.adSpendLogs.status,
+              platform: schema.adSpendLogs.platform,
+              category: schema.adSpendLogs.category,
+              description: schema.adSpendLogs.description,
+            })
+            .from(schema.adSpendLogs)
+            .where(and(...expenseConds))
+        : Promise.resolve([]),
+
+      entryType === 'all' || entryType === 'request'
+        ? this.db
+            .select({
+              id: schema.marketingFundingRequests.id,
+              amount: schema.marketingFundingRequests.amount,
+              status: schema.marketingFundingRequests.status,
+              reason: schema.marketingFundingRequests.reason,
+              createdAt: schema.marketingFundingRequests.createdAt,
+            })
+            .from(schema.marketingFundingRequests)
+            .where(and(...requestConds))
+        : Promise.resolve([]),
+    ]);
+
+    // ── Normalize into unified entries ──
+    type LedgerEntry = {
+      id: string;
+      entryType: 'transfer_in' | 'transfer_out' | 'expense' | 'request';
+      eventDate: Date;
+      amount: number;
+      balanceEffect: number;
+      status: string;
+      description: string;
+      counterpartyName: string | null;
+    };
+
+    const entries: LedgerEntry[] = [];
+
+    for (const t of transfersIn) {
+      const amt = Number(t.amount);
+      entries.push({
+        id: t.id,
+        entryType: 'transfer_in',
+        eventDate: t.sentAt,
+        amount: amt,
+        balanceEffect: amt,
+        status: t.status,
+        description: `From ${t.senderName ?? 'Unknown'}`,
+        counterpartyName: t.senderName ?? null,
+      });
+    }
+
+    for (const t of transfersOut) {
+      const amt = Number(t.amount);
+      entries.push({
+        id: t.id,
+        entryType: 'transfer_out',
+        eventDate: t.sentAt,
+        amount: amt,
+        balanceEffect: -amt,
+        status: t.status,
+        description: `To ${t.receiverName ?? 'Unknown'}`,
+        counterpartyName: t.receiverName ?? null,
+      });
+    }
+
+    for (const e of expenses) {
+      const amt = Number(e.spendAmount);
+      const parts = [e.platform, e.category, e.description].filter(Boolean);
+      entries.push({
+        id: e.id,
+        entryType: 'expense',
+        eventDate: e.spendDate,
+        amount: amt,
+        balanceEffect: -amt,
+        status: e.status ?? 'APPROVED',
+        description: parts.length > 0 ? parts.join(' · ') : 'Ad spend',
+        counterpartyName: null,
+      });
+    }
+
+    for (const r of requests) {
+      entries.push({
+        id: r.id,
+        entryType: 'request',
+        eventDate: r.createdAt,
+        amount: Number(r.amount),
+        balanceEffect: 0, // requests don't affect balance directly
+        status: r.status,
+        description: r.reason ?? 'Funding request',
+        counterpartyName: null,
+      });
+    }
+
+    // Sort newest first
+    entries.sort((a, b) => b.eventDate.getTime() - a.eventDate.getTime());
+
+    const total = entries.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const offset = (page - 1) * limit;
+    const paged = entries.slice(offset, offset + limit);
+
+    // Compute running balance — sum of all balance effects from the start up to each entry
+    // We walk from oldest to newest to build the running balance, then slice.
+    // For efficiency with large datasets, compute the "tail balance" (sum of effects after this page)
+    // and walk backwards, or compute cumulative from the start.
+    const allBalanceEffects = entries.map((e) => e.balanceEffect);
+    // Running balance at position i = sum of effects from end (newest=index 0 is latest)
+    // Actually, running balance should show: after this transaction, what's the balance?
+    // Since entries are newest-first, running balance at i = sum of effects from i to end
+    const suffixSums: number[] = new Array(entries.length);
+    let cumulative = 0;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      cumulative += allBalanceEffects[i]!;
+      suffixSums[i] = cumulative;
+    }
+
+    // Summary
+    const totalCredits = entries.reduce((s, e) => s + (e.balanceEffect > 0 ? e.balanceEffect : 0), 0);
+    const totalDebits = entries.reduce((s, e) => s + (e.balanceEffect < 0 ? -e.balanceEffect : 0), 0);
+
+    return {
+      entries: paged.map((e, i) => ({
+        id: e.id,
+        entryType: e.entryType,
+        eventDate: e.eventDate.toISOString(),
+        amount: String(e.amount),
+        balanceEffect: e.balanceEffect,
+        runningBalance: suffixSums[offset + i] ?? 0,
+        status: e.status,
+        description: e.description,
+        counterpartyName: e.counterpartyName,
+      })),
+      total,
+      page,
+      totalPages,
+      summary: {
+        totalCredits: String(totalCredits),
+        totalDebits: String(totalDebits),
+        closingBalance: String(cumulative),
+      },
     };
   }
 }

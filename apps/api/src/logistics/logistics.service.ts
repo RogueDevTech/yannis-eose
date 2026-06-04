@@ -1627,6 +1627,12 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
+    if (input.startDate) {
+      awaitingConditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
+    }
+    if (input.endDate) {
+      awaitingConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+    }
 
     const awaitingSummaryQuery = this.db
       .select({
