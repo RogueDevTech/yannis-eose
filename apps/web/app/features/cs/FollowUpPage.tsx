@@ -21,7 +21,6 @@ import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { DateInput } from '~/components/ui/date-input';
-import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { FormSelect } from '~/components/ui/form-select';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { TextInput } from '~/components/ui/text-input';
@@ -304,7 +303,7 @@ export function FollowUpPage({
   const viewTotalPages = isCartView ? abandonedCartsTotalPages : totalPages;
   const viewItems = isCartView ? abandonedCarts : orders;
 
-  const smartPickCeiling = Math.min(viewTotal, isCartView ? abandonedCarts.length : ORDERS_DEEP_SELECT_MAX);
+  const smartPickCeiling = Math.min(viewTotal, ORDERS_DEEP_SELECT_MAX);
 
   async function selectAllMatchingFilter() {
     if (!bulkSelectAllMatchingInput || isCartView) return;
@@ -538,17 +537,7 @@ export function FollowUpPage({
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
             filtersBadgeCount={activeFilterCount}
-            desktop={
-              <>
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  chrome="pill"
-                />
-                <PageRefreshButton />
-              </>
-            }
+            desktop={<PageRefreshButton />}
             filters={
               <>
                 {!isCartView && (
@@ -731,8 +720,32 @@ export function FollowUpPage({
                   setSelectedIds(new Set(items.slice(0, count).map((o) => o.id)));
                   return;
                 }
-                // Cross-page path: fetch matching IDs from the server
-                if (!bulkSelectAllMatchingInput || isCartView) {
+                // Cross-page path for carts: fetch a large page from the server
+                if (isCartView) {
+                  setSelectAllMatchingLoading(true);
+                  setSelectAllMatchingError(null);
+                  try {
+                    const { getBrowserApiBaseUrl } = await import('~/lib/browser-api-base');
+                    const base = getBrowserApiBaseUrl();
+                    const input = encodeURIComponent(JSON.stringify({ page: 1, limit: Math.min(count, ORDERS_DEEP_SELECT_MAX) }));
+                    const res = await fetch(`${base}/trpc/cart.listAbandoned?input=${input}`, { credentials: 'include' });
+                    if (res.ok) {
+                      const json = await res.json() as { result?: { data?: { items: Array<{ id: string }> } } };
+                      const cartIds = (json?.result?.data?.items ?? []).map((c) => c.id);
+                      const picked = cartIds.slice(0, count);
+                      setSelectedIds(new Set(picked));
+                      setSelectAllMatchingActive(picked.length > items.length);
+                    } else {
+                      setSelectedIds(new Set(items.map((o) => o.id)));
+                    }
+                  } catch {
+                    setSelectedIds(new Set(items.map((o) => o.id)));
+                  } finally {
+                    setSelectAllMatchingLoading(false);
+                  }
+                  return;
+                }
+                if (!bulkSelectAllMatchingInput) {
                   setSelectedIds(new Set(items.map((o) => o.id)));
                   return;
                 }

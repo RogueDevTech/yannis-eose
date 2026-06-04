@@ -35,6 +35,7 @@ export interface FollowUpBatchesPageData {
     deliveredRevenue: string;
     confirmationRate: number;
     deliveryRate: number;
+    batchStatus?: string;
     createdAt: string;
   }>;
   pagination: { page: number; limit: number; total: number; totalPages: number };
@@ -114,9 +115,14 @@ export function FollowUpBatchesPage({
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[10rem]" />
           : (b) => (
-              <button type="button" onClick={() => openPeek(b.id)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
-                {b.name}
-              </button>
+              <span className="flex items-center gap-1.5">
+                <button type="button" onClick={() => openPeek(b.id)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
+                  {b.name}
+                </button>
+                {b.batchStatus === 'REVERTED' && (
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-400">Reverted</span>
+                )}
+              </span>
             ),
       },
       {
@@ -301,7 +307,7 @@ export function FollowUpBatchesPage({
       ) : (
         <CompactTable<BatchRow>
           columns={columns}
-          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ id: `sk-${i}`, name: '', source: '', branchName: null, groupName: null, createdByName: null, orderCount: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0, createdAt: '' })) : batches}
+          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ id: `sk-${i}`, name: '', source: '', branchName: null, groupName: null, createdByName: null, orderCount: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0, batchStatus: 'ACTIVE', createdAt: '' })) : batches}
           rowKey={(b) => b.id}
           renderMobileCard={(b) => (
             <button
@@ -310,7 +316,12 @@ export function FollowUpBatchesPage({
               className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-app-fg truncate">{b.name}</span>
+                <span className="text-sm font-medium text-app-fg truncate">
+                  {b.name}
+                  {b.batchStatus === 'REVERTED' && (
+                    <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-400">Reverted</span>
+                  )}
+                </span>
                 <span className="shrink-0 text-xs text-app-fg-muted capitalize">{b.source}</span>
               </div>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
