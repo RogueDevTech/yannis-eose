@@ -140,7 +140,7 @@ export function ProductViewModal({ product, canEditProduct, onClose, canInstantA
                 onArchive(product);
               }}
             >
-              {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
+              Archive
             </Button>
           )}
           <button

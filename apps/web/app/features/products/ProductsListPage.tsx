@@ -302,7 +302,7 @@ export function ProductsListPage({
                   setArchiveTarget(product);
                 }}
               >
-                {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
+                Archive
               </CompactTableActionButton>
             ) : null}
           </div>

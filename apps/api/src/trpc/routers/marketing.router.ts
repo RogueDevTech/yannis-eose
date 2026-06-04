@@ -33,6 +33,7 @@ import {
   listCampaignsSchema,
   logDailyAdSpendWithBranchSchema,
   updateDailyAdSpendSchema,
+  fundingLedgerSchema,
   type ListFundingInput,
   type ListFundingRequestsInput,
 } from '@yannis/shared';
@@ -243,6 +244,17 @@ export const marketingRouter = router({
     .input(getFundingBalanceSchema)
     .query(async ({ input, ctx }) => {
       return getMarketingService().getFundingBalanceWithAuth(input.userId, ctx.user, ctx.currentBranchId);
+    }),
+
+  /** Chronological ledger of all funding events for a user — transfers, expenses, requests. */
+  fundingLedger: permissionProcedure('marketing.fundingSummary', 'marketing.read', 'users.read')
+    .input(fundingLedgerSchema)
+    .query(async ({ input, ctx }) => {
+      // MBs can only view their own ledger
+      if (ctx.user.role === 'MEDIA_BUYER' && input.userId !== ctx.user.id) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own funding ledger.' });
+      }
+      return getMarketingService().getFundingLedger(input, ctx.currentBranchId);
     }),
 
   /** List funding balances for recipients. HoM sees self + Media Buyers; SA/FO see all HoM + MB.

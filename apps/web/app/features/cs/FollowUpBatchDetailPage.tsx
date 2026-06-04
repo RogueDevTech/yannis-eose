@@ -95,11 +95,11 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
   const [singleAssignCloserId, setSingleAssignCloserId] = useState('');
 
   const singleFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(singleFetcher, { successMessage: 'Assigned' });
+  useFetcherToast(singleFetcher.data, { successMessage: 'Assigned' });
   useCloseOnFetcherSuccess(singleFetcher, () => setSingleAssignItem(null));
 
   const bulkFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(bulkFetcher, { successMessage: 'Assigned' });
+  useFetcherToast(bulkFetcher.data, { successMessage: 'Assigned' });
   useCloseOnFetcherSuccess(bulkFetcher, () => {
     setAssignModalOpen(false);
     setSelectedItemIds(new Set());

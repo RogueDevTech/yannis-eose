@@ -1067,11 +1067,13 @@ export function FollowUpPage({
         <p className="text-sm text-app-fg-muted">
           {isCartView ? (
             <>
-              {selectedIds.size} abandoned cart{selectedIds.size !== 1 ? 's' : ''} will be converted into <strong>Unprocessed</strong> orders and assigned to the selected CS branch.
+              {selectedIds.size} abandoned cart{selectedIds.size !== 1 ? 's' : ''} will be converted into <strong>Unprocessed</strong> orders.
+              {' '}Pick a CS branch, a group, or both.
             </>
           ) : (
             <>
-              {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} will be reset to <strong>Unprocessed</strong> and assigned to the selected CS branch.
+              {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} will be reset to <strong>Unprocessed</strong>.
+              {' '}Pick a CS branch, a group, or both.
             </>
           )}
         </p>
@@ -1083,11 +1085,11 @@ export function FollowUpPage({
         />
         {branchesCatalog.length > 0 && (
           <FormSelect
-            label="CS branch"
+            label="CS branch (optional)"
             value={targetBranchId}
             onChange={(e) => setTargetBranchId(e.target.value)}
             options={[
-              { value: '', label: 'Select a branch…' },
+              { value: '', label: 'No branch — assign later' },
               ...branchesCatalog.map((b) => ({ value: b.id, label: `${b.name} (${b.code})` })),
             ]}
           />
@@ -1139,7 +1141,7 @@ export function FollowUpPage({
           </Button>
           <Button
             variant="primary"
-            disabled={reopenFetcher.state === 'submitting' || !targetBranchId || !batchName.trim()}
+            disabled={reopenFetcher.state === 'submitting' || !batchName.trim()}
             loading={reopenFetcher.state === 'submitting'}
             loadingText={isCartView ? 'Converting…' : 'Reopening…'}
             onClick={() => {
@@ -1150,9 +1152,9 @@ export function FollowUpPage({
                 }
               }
               const submitData: Record<string, string> = {
-                targetBranchId,
                 batchName: batchName.trim(),
               };
+              if (targetBranchId) submitData.targetBranchId = targetBranchId;
               if (selectedGroupId) {
                 submitData.groupId = selectedGroupId;
                 submitData.assignmentMode = assignmentMode;

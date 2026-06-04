@@ -103,11 +103,11 @@ function MarketingTeamMemberCard({
 }) {
   const balance = Number(member.balance);
   const balanceToneClass =
-    balance > 0
-      ? 'text-success-600 dark:text-success-400'
-      : balance < 0
+    balance < 0
+      ? 'text-danger-600 dark:text-danger-400'
+      : balance < 50000
         ? 'text-danger-600 dark:text-danger-400'
-        : 'text-brand-600 dark:text-brand-400';
+        : 'text-success-600 dark:text-success-400';
   const profitabilityToneClass =
     member.profitabilityScore != null && member.trueRoas != null
       ? member.trueRoas >= greenThreshold
@@ -168,19 +168,25 @@ function MarketingTeamMemberCard({
       </div>
 
       <div className="border-t border-app-border pt-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <CompactTableActionButton
             to={buildOrdersQuery(member.userId, dateFilters)}
             className="w-full justify-center"
             tone="brand"
           >
-            View orders
+            Orders
+          </CompactTableActionButton>
+          <CompactTableActionButton
+            to={`/admin/marketing/funding/ledger?userId=${member.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`}
+            className="w-full justify-center"
+          >
+            Ledger
           </CompactTableActionButton>
           <CompactTableActionButton
             to={`/hr/users/${member.userId}`}
             className="w-full justify-center"
           >
-            View profile
+            Profile
           </CompactTableActionButton>
         </div>
       </div>
@@ -371,9 +377,13 @@ export function MarketingTeamPage({
         header: 'Balance',
         align: 'right',
         nowrap: true,
-        render: (m) => (
-          <span className="font-medium text-brand-600 dark:text-brand-400">{formatNaira(Number(m.balance))}</span>
-        ),
+        render: (m) => {
+          const bal = Number(m.balance);
+          const cls = bal < 50000
+            ? 'font-medium text-danger-600 dark:text-danger-400'
+            : 'font-medium text-brand-600 dark:text-brand-400';
+          return <span className={cls}>{formatNaira(bal)}</span>;
+        },
       },
       {
         key: 'received',
@@ -477,13 +487,19 @@ export function MarketingTeamPage({
         render: (m) => (
           <div className="inline-flex flex-nowrap items-center justify-end gap-1.5 shrink-0">
             <CompactTableActionButton to={buildOrdersQuery(m.userId, dateFilters)} tone="brand">
-              View orders
+              Orders
+            </CompactTableActionButton>
+            <CompactTableActionButton
+              to={`/admin/marketing/funding/ledger?userId=${m.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`}
+              className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+            >
+              Ledger
             </CompactTableActionButton>
             <CompactTableActionButton
               to={`/hr/users/${m.userId}`}
               className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
             >
-              View profile
+              Profile
             </CompactTableActionButton>
           </div>
         ),
@@ -759,7 +775,7 @@ export function MarketingTeamPage({
                         <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400">{initials}</span>
                       </div>
                       <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">{m.name}</span>
-                      <span className="shrink-0 text-sm font-medium text-brand-600 dark:text-brand-400 tabular-nums">
+                      <span className={`shrink-0 text-sm font-medium tabular-nums ${Number(m.balance) < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'}`}>
                         {formatNaira(Number(m.balance))}
                       </span>
                     </div>

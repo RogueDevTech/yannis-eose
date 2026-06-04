@@ -1548,19 +1548,26 @@ function RecipientBalancesPanel({
         </span>
       ),
     },
-    ...(canSendFunding
-      ? [{
-          key: 'actions' as const,
-          header: '',
-          align: 'right' as const,
-          render: () => (
-            <CompactTableActionButton variant="primary" onClick={onSendFunding}>
+    {
+      key: 'actions' as const,
+      header: '',
+      align: 'right' as const,
+      render: (b) => (
+        <div className="inline-flex items-center gap-1.5">
+          <CompactTableActionButton
+            to={`/admin/marketing/funding/ledger?userId=${b.userId}${filters.periodAllTime ? '&period=all_time' : filters.startDate && filters.endDate ? `&startDate=${filters.startDate}&endDate=${filters.endDate}` : ''}`}
+          >
+            Ledger
+          </CompactTableActionButton>
+          {canSendFunding && (
+            <CompactTableActionButton tone="brand" onClick={onSendFunding}>
               Send funds
             </CompactTableActionButton>
-          ),
-        }]
-      : []),
-  ], [canSendFunding, onSendFunding]);
+          )}
+        </div>
+      ),
+    },
+  ], [canSendFunding, onSendFunding, filters]);
 
   // Mobile cards
   const mobileRow = useCallback(
@@ -2162,9 +2169,15 @@ function UnifiedDistributingTable({
                   onClick: () => onOpenDetails(entry),
                 },
                 {
+                  key: 'ledger',
+                  kind: 'link',
+                  label: 'Ledger',
+                  to: `/admin/marketing/funding/ledger?userId=${userId}${filters.periodAllTime ? '&period=all_time' : filters.startDate && filters.endDate ? `&startDate=${filters.startDate}&endDate=${filters.endDate}` : ''}`,
+                },
+                {
                   key: 'expenses',
                   kind: 'link',
-                  label: 'View Expenses',
+                  label: 'Expenses',
                   to: `/admin/marketing/expenses?mediaBuyerId=${userId}${filters.periodAllTime ? '&period=all_time' : filters.startDate && filters.endDate ? `&startDate=${filters.startDate}&endDate=${filters.endDate}` : ''}`,
                 },
                 {

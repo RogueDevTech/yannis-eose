@@ -720,3 +720,17 @@ export const listCampaignsSchema = z.object({
   limit: z.number().int().min(1).max(500).default(20),
 });
 export type ListCampaignsInput = z.infer<typeof listCampaignsSchema>;
+
+// ============================================
+// Funding Ledger
+// ============================================
+
+export const fundingLedgerSchema = z.object({
+  userId: z.string().uuid(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  entryType: z.enum(['all', 'transfer_in', 'transfer_out', 'expense', 'request']).default('all'),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(200).default(50),
+});
+export type FundingLedgerInput = z.infer<typeof fundingLedgerSchema>;

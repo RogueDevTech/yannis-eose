@@ -227,7 +227,12 @@ export const financeRouter = router({
       const [profit, remit, payroll, approvals, branches, buyers, fundingSummary, byProduct, byLocation] = await Promise.all([
         getFinanceService().getProfitReport(profitInput, ctx.effectiveBranchIds),
         getLogisticsService()
-          .listDeliveryRemittances({ page: 1, limit: 1 }, ctx.user)
+          .listDeliveryRemittances({
+            page: 1,
+            limit: 1,
+            ...(input.startDate && { startDate: input.startDate }),
+            ...(input.endDate && { endDate: input.endDate }),
+          }, ctx.user)
           .catch(() => null),
         getPayrollBatchService()
           .listMonthlyPayrolls({ status: 'PENDING_FINANCE' as const }, ctx.user)
