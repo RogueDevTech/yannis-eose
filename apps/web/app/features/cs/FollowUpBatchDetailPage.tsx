@@ -83,7 +83,8 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
     : closers.map((c) => ({ value: c.agentId, label: c.agentName }));
   const canAssign = closerOptions.length > 0;
   const isReverted = data?.batchStatus === 'REVERTED';
-  const hasWorkedOrders = (data?.items ?? []).some((i) => i.orderStatus !== 'UNPROCESSED' && i.orderStatus !== 'CS_ASSIGNED');
+  const SAFE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
+  const hasWorkedOrders = (data?.items ?? []).some((i) => !SAFE_STATUSES.has(i.orderStatus));
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -310,7 +311,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                   </button>
                 )}
                 <PageRefreshButton />
-                {!isReverted && !hasWorkedOrders && (
+                {!isReverted && (
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmOpen(true)}
@@ -332,7 +333,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                     Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
                   </button>
                 )}
-                {!isReverted && !hasWorkedOrders && (
+                {!isReverted && (
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmOpen(true)}
@@ -550,9 +551,22 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         contentClassName="p-6 space-y-4"
       >
         <h3 className="text-lg font-semibold text-app-fg">Delete batch</h3>
-        <p className="text-sm text-app-fg-muted">
-          This will revert all {allItems.length} orders in <strong>{data?.name}</strong> back to their original state and mark the batch as reverted.
-        </p>
+        {(() => {
+          const UNTOUCHED = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
+          const workedCount = allItems.filter((i) => !UNTOUCHED.has(i.orderStatus)).length;
+          const revertCount = allItems.length - workedCount;
+          return (
+            <div className="space-y-2 text-sm text-app-fg-muted">
+              <p>This will mark <strong>{data?.name}</strong> as reverted.</p>
+              {revertCount > 0 && (
+                <p>{revertCount} untouched order{revertCount !== 1 ? 's' : ''} will be reverted to their original state.</p>
+              )}
+              {workedCount > 0 && (
+                <p className="text-app-fg">{workedCount} order{workedCount !== 1 ? 's have' : ' has'} been worked on — they will remain with their assigned closer as normal orders.</p>
+              )}
+            </div>
+          );
+        })()}
         {deleteFetcher.data?.error && (
           <p className="text-sm text-danger-600 dark:text-danger-400">{deleteFetcher.data.error}</p>
         )}

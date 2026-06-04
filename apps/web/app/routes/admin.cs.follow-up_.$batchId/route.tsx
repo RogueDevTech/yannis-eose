@@ -11,7 +11,7 @@ import type { FollowUpBatchDetailData, BatchDetailBundle } from '~/features/cs/F
 export const meta: MetaFunction = () => [{ title: 'Follow Up Batch — Yannis EOSE' }];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'] });
+  await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'] });
   const cookie = getSessionCookie(request);
   const batchId = params.batchId!;
 
@@ -45,7 +45,7 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'] });
+  await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'] });
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();

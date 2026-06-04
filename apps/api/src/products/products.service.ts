@@ -496,7 +496,7 @@ export class ProductsService {
     input: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' },
     viewerId: string,
     viewerRole: string,
-  ): Promise<Array<{ id: string; name: string; status: string }>> {
+  ): Promise<Array<{ id: string; name: string; status: string; offers?: ProductOffer[] }>> {
     const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
     if (allowedProductIds !== null && allowedProductIds.length === 0) return [];
 
@@ -509,15 +509,27 @@ export class ProductsService {
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return this.db
+    const rows = await this.db
       .select({
         id: schema.products.id,
         name: schema.products.name,
         status: schema.products.status,
+        baseSalePrice: schema.products.baseSalePrice,
+        offers: schema.products.offers,
       })
       .from(schema.products)
       .where(whereClause)
       .orderBy(asc(schema.products.name));
+
+    const productIds = rows.map((r) => r.id);
+    const templateMap = await this.loadActiveOfferTemplatesByProductIds(productIds);
+
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      offers: resolveOffersForProduct(templateMap.get(r.id) ?? [], r.offers, String(r.baseSalePrice)),
+    }));
   }
 
   /**

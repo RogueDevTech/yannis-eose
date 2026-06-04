@@ -30,11 +30,14 @@ const ABANDONED_CART_STATUS = 'ABANDONED_CART';
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
     permission: 'orders.followUp',
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'],
   });
+  const user = await getCurrentUser(request);
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const view = url.searchParams.get('view') || 'batches';
+  const isCloser = user?.role === 'CS_CLOSER';
+  // Closers only see batches view (no create/groups)
+  const view = isCloser ? 'batches' : (url.searchParams.get('view') || 'batches');
 
   // ── Groups view ──────────────────────────────────────────────
   if (view === 'groups') {
@@ -105,7 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     })();
     return defer({
-      shell: { view: 'batches' as const, page: batchesPage, startDate, endDate, periodAllTime: batchesPeriodAllTime },
+      shell: { view: 'batches' as const, page: batchesPage, startDate, endDate, periodAllTime: batchesPeriodAllTime, isCloser, userId: user?.id },
       batchesData,
     });
   }
@@ -512,6 +515,7 @@ export default function FollowUpRoute() {
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
             periodAllTime={shell?.periodAllTime ?? false}
+            isCloser={shell?.isCloser ?? false}
             groups={[]}
             closers={[]}
             deferredLoading
@@ -527,6 +531,7 @@ export default function FollowUpRoute() {
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
             periodAllTime={shell?.periodAllTime ?? false}
+            isCloser={shell?.isCloser ?? false}
           />
         )}
       </CachedAwait>
