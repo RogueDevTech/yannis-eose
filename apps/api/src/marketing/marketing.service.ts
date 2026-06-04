@@ -3048,6 +3048,7 @@ export class MarketingService {
     const conditions: SQL[] = [
       eq(schema.orders.mediaBuyerId, mediaBuyerId),
       sql`${schema.orders.status} != 'DELETED'`,
+      eq(schema.orders.isFollowUp, false),
       gte(schema.orders.createdAt, dayStart),
       lte(schema.orders.createdAt, dayEnd),
     ];
