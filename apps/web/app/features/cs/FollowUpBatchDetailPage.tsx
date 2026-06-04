@@ -83,7 +83,8 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
     : closers.map((c) => ({ value: c.agentId, label: c.agentName }));
   const canAssign = closerOptions.length > 0;
   const isReverted = data?.batchStatus === 'REVERTED';
-  const hasWorkedOrders = (data?.items ?? []).some((i) => i.orderStatus !== 'UNPROCESSED' && i.orderStatus !== 'CS_ASSIGNED');
+  const SAFE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
+  const hasWorkedOrders = (data?.items ?? []).some((i) => !SAFE_STATUSES.has(i.orderStatus));
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());

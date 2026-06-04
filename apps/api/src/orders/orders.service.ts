@@ -2813,21 +2813,12 @@ export class OrdersService {
       : [isNull(schema.orders.deletedAt), sql`${schema.orders.status} != 'CANCELLED'`];
 
     // Follow-up isolation: default excludes follow-up orders from normal list views.
-    // `isFollowUp: true` = show ONLY follow-ups (Follow Up pseudo-status filter).
-    // `excludeFollowUp: false` = include follow-ups alongside normal orders (follow-up page).
-    // Exception: closers always see follow-up orders assigned to them in their queue.
+    // `isFollowUp: true` = show ONLY follow-ups (follow-up batch detail page).
+    // `excludeFollowUp: false` = include follow-ups alongside normal orders (follow-up create page).
     if (input.isFollowUp) {
       conditions.push(eq(schema.orders.isFollowUp, true));
     } else if (input.excludeFollowUp !== false) {
-      if (listOpts?.assignedCloserViewerId) {
-        const followUpCondition = or(
-          eq(schema.orders.isFollowUp, false),
-          and(eq(schema.orders.isFollowUp, true), eq(schema.orders.assignedCsId, listOpts.assignedCloserViewerId)),
-        );
-        if (followUpCondition) conditions.push(followUpCondition);
-      } else {
-        conditions.push(eq(schema.orders.isFollowUp, false));
-      }
+      conditions.push(eq(schema.orders.isFollowUp, false));
     }
 
     if (input.status) {
@@ -8429,9 +8420,10 @@ export class OrdersService {
       .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
       .where(eq(schema.followUpBatchItems.batchId, batchId));
 
-    // Block deletion if any order has been worked on (progressed beyond initial assignment)
-    const UNTOUCHED_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED']);
-    const worked = items.filter((i) => !UNTOUCHED_STATUSES.has(i.orderStatus));
+    // Block deletion if any order has been actively worked on.
+    // UNPROCESSED/CS_ASSIGNED = untouched, DELETED/CANCELLED = dead — none block deletion.
+    const SAFE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
+    const worked = items.filter((i) => !SAFE_STATUSES.has(i.orderStatus));
     if (worked.length > 0) {
       const workedStatuses = [...new Set(worked.map((i) => i.orderStatus))].join(', ');
       throw new TRPCError({

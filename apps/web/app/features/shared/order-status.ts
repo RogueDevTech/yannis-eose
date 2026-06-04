@@ -173,7 +173,6 @@ export const STATUS_OPTIONS = [
   'CONFIRMED',
   'DELIVERED',
   'REMITTED',
-  'FOLLOW_UP',
 ];
 
 export function formatStatus(status: string): string {
