@@ -164,7 +164,7 @@ export function defaultTodayRange(): { startDate: string; endDate: string } {
  * **Mutations** (POST/PUT/PATCH/DELETE) default to {@link DEFAULT_MUTATION_API_TIMEOUT_MS}.
  * Override `timeoutMs` for auth flows, CSV exports, MV refresh, etc.; the login action uses 20_000ms.
  */
-export const DEFAULT_READ_API_TIMEOUT_MS = 10_000;
+export const DEFAULT_READ_API_TIMEOUT_MS = 30_000;
 
 /**
  * `/auth/me` runs on every protected route loader. The bound is generous because:

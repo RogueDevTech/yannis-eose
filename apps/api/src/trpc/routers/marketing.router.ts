@@ -1077,6 +1077,10 @@ export const marketingRouter = router({
           // rows and an order CS-routed elsewhere still counts here.
           'marketing',
           ctx.effectiveBranchIds,
+          // Exclude follow-up orders — matches getPerformanceMetrics which
+          // filters isFollowUp=false. Without this, reopened follow-up orders
+          // inflate Unassigned/Assigned counts beyond Total Orders.
+          false,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
