@@ -69,7 +69,7 @@ const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
  * CEO directive 2026-05-23: CANCELLED replaced by DELETED.
  */
 const MARKETING_ORDERS_STATUSES = [
-  ...STATUS_OPTIONS.filter((status) => status !== 'REMITTED'),
+  ...STATUS_OPTIONS.filter((status) => status !== 'REMITTED' && status !== 'FOLLOW_UP'),
   'DELETED',
 ];
 

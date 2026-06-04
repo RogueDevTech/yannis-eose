@@ -12,6 +12,7 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { Checkbox } from '~/components/ui/checkbox';
+import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { Pagination } from '~/components/ui/pagination';
 import { SearchInput } from '~/components/ui/search-input';
@@ -56,8 +57,14 @@ export interface FollowUpBatchDetailData {
   };
 }
 
+export interface BatchDetailBundle {
+  detail: FollowUpBatchDetailData | null;
+  closers: Array<{ agentId: string; agentName: string }>;
+}
+
 interface Props {
   data: FollowUpBatchDetailData | null;
+  closers?: Array<{ agentId: string; agentName: string }>;
   deferredLoading?: boolean;
 }
 
@@ -66,16 +73,19 @@ const formatNaira = (n: number) =>
 
 const PAGE_SIZE = 50;
 
-export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props) {
+export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = false }: Props) {
   const showSkeleton = deferredLoading;
-  const isManualMode = data?.assignmentMode === 'MANUAL';
-  const hasGroup = !!data?.groupId;
+  // Build closer options: prefer group members if a group is set, fall back to all closers
   const groupMembers = data?.groupMembers ?? [];
+  const closerOptions = groupMembers.length > 0
+    ? groupMembers.map((m) => ({ value: m.userId, label: m.userName }))
+    : closers.map((c) => ({ value: c.agentId, label: c.agentName }));
+  const canAssign = closerOptions.length > 0;
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [assignModalOpen, setAssignModalOpen] = useState(false);
-  const [assignCloserId, setAssignCloserId] = useState('');
+  const [assignAgentIds, setAssignAgentIds] = useState<Set<string>>(new Set());
 
   // Search + status filter + pagination (client-side)
   const [search, setSearch] = useState('');
@@ -187,7 +197,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
           : (item) => (
               <span className="text-xs text-app-fg-muted">
                 {item.assignedCsName ?? (
-                  isManualMode && hasGroup ? (
+                  canAssign ? (
                     <button
                       type="button"
                       onClick={() => { setSingleAssignItem(item.itemId); setSingleAssignCloserId(''); }}
@@ -233,7 +243,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
                 sheetTitle={item.customerName}
                 actions={[
                   { key: 'view', kind: 'link', label: 'View order', to: `/admin/orders/${item.orderId}` },
-                  ...(isManualMode && hasGroup && !item.assignedCsId
+                  ...(canAssign && !item.assignedCsId
                     ? [{ key: 'assign', kind: 'button' as const, label: 'Assign closer', onClick: () => { setSingleAssignItem(item.itemId); setSingleAssignCloserId(''); } }]
                     : []),
                 ]}
@@ -241,7 +251,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             ),
       },
     ],
-    [showSkeleton, isManualMode, hasGroup],
+    [showSkeleton, canAssign],
   );
 
   if (!data && !deferredLoading) {
@@ -277,10 +287,10 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             triggerAriaLabel="Batch tools"
             desktop={
               <>
-                {selectedItemIds.size > 0 && isManualMode && hasGroup && (
+                {selectedItemIds.size > 0 && canAssign && (
                   <button
                     type="button"
-                    onClick={() => { setAssignModalOpen(true); setAssignCloserId(''); }}
+                    onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
                     className="btn-primary btn-sm inline-flex items-center gap-1.5"
                   >
                     Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
@@ -290,10 +300,10 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
               </>
             }
             sheet={
-              selectedItemIds.size > 0 && isManualMode && hasGroup ? (
+              selectedItemIds.size > 0 && canAssign ? (
                 <button
                   type="button"
-                  onClick={() => { setAssignModalOpen(true); setAssignCloserId(''); }}
+                  onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
                   className="btn-primary w-full inline-flex items-center justify-center"
                 >
                   Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
@@ -312,7 +322,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
           { label: 'In progress', value: data ? csEngaged.toLocaleString() : '—', valueClassName: 'text-info-600 dark:text-info-400 tabular-nums' },
           { label: 'Confirmed', value: data ? `${analytics?.confirmed ?? 0} (${analytics?.confirmationRate ?? 0}%)` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
           { label: 'Delivered', value: data ? `${analytics?.delivered ?? 0} (${analytics?.deliveryRate ?? 0}%)` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
-          ...(hasGroup
+          ...(canAssign
             ? [{ label: 'Assigned', value: data ? `${assignedCount}/${allItems.length}` : '—', valueClassName: assignedCount === allItems.length ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-warning-600 dark:text-warning-400 tabular-nums' }]
             : []),
         ]}
@@ -324,7 +334,8 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
           <SearchInput
             value={search}
             onChange={(v) => { setSearch(v); setPage(1); }}
-            placeholder="Search by customer name..."
+            placeholder="Search by name, order ID, or closer..."
+            withSubmitButton
             wrapperClassName="min-w-0 flex-1 max-w-sm"
           />
           <FormSelect
@@ -336,7 +347,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             ]}
             wrapperClassName="w-auto min-w-[10rem]"
           />
-          {hasGroup && (
+          {canAssign && (
             <FormSelect
               value={assignmentFilter}
               onChange={(e) => { setAssignmentFilter(e.target.value as 'ALL' | 'ASSIGNED' | 'UNASSIGNED'); setPage(1); }}
@@ -368,11 +379,11 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''} selected
           </span>
           <div className="flex items-center gap-2">
-            {isManualMode && hasGroup && (
+            {canAssign && (
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => { setAssignModalOpen(true); setAssignCloserId(''); }}
+                onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
               >
                 Assign selected
               </Button>
@@ -449,88 +460,54 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
       )}
 
       {/* ── Single Assign Modal ────────────────────── */}
-      <Modal
+      <AssignCloserModal
         open={!!singleAssignItem}
         onClose={() => setSingleAssignItem(null)}
-        maxWidth="max-w-sm"
-        contentClassName="p-6 space-y-4"
-      >
-        <h3 className="text-lg font-semibold text-app-fg">Assign closer</h3>
-        <FormSelect
-          label="Select closer"
-          value={singleAssignCloserId}
-          onChange={(e) => setSingleAssignCloserId(e.target.value)}
-          options={[
-            { value: '', label: 'Select a closer…' },
-            ...groupMembers.map((m) => ({ value: m.userId, label: m.userName })),
-          ]}
-        />
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={() => setSingleAssignItem(null)}>Cancel</Button>
-          <Button
-            variant="primary"
-            disabled={singleFetcher.state === 'submitting' || !singleAssignCloserId}
-            loading={singleFetcher.state === 'submitting'}
-            loadingText="Assigning…"
-            onClick={() => {
-              singleFetcher.submit(
-                { intent: 'assignBatchItem', batchItemId: singleAssignItem!, csCloserId: singleAssignCloserId },
-                { method: 'post' },
-              );
-            }}
-          >
-            Assign
-          </Button>
-        </div>
-      </Modal>
+        selectedCount={1}
+        options={closerOptions}
+        selectedIds={new Set(singleAssignCloserId ? [singleAssignCloserId] : [])}
+        onToggle={(id) => setSingleAssignCloserId((prev) => prev === id ? '' : id)}
+        onSubmit={() => {
+          if (!singleAssignCloserId || !singleAssignItem) return;
+          singleFetcher.submit(
+            { intent: 'assignBatchItem', batchItemId: singleAssignItem, csCloserId: singleAssignCloserId },
+            { method: 'post' },
+          );
+        }}
+        isSubmitting={singleFetcher.state === 'submitting'}
+        mode="assign"
+      />
 
       {/* ── Bulk Assign Modal ────────────────────── */}
-      <Modal
+      <AssignCloserModal
         open={assignModalOpen}
         onClose={() => setAssignModalOpen(false)}
-        maxWidth="max-w-sm"
-        contentClassName="p-6 space-y-4"
-      >
-        <h3 className="text-lg font-semibold text-app-fg">
-          Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
-        </h3>
-        <p className="text-sm text-app-fg-muted">
-          Orders will be distributed round-robin across the selected closer{groupMembers.length !== 1 ? 's' : ''}.
-        </p>
-        <FormSelect
-          label="Assign to"
-          value={assignCloserId}
-          onChange={(e) => setAssignCloserId(e.target.value)}
-          options={[
-            { value: '', label: 'All group members (round-robin)' },
-            ...groupMembers.map((m) => ({ value: m.userId, label: m.userName })),
-          ]}
-        />
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={() => setAssignModalOpen(false)}>Cancel</Button>
-          <Button
-            variant="primary"
-            disabled={bulkFetcher.state === 'submitting'}
-            loading={bulkFetcher.state === 'submitting'}
-            loadingText="Assigning…"
-            onClick={() => {
-              const closerIds = assignCloserId
-                ? [assignCloserId]
-                : groupMembers.map((m) => m.userId);
-              bulkFetcher.submit(
-                {
-                  intent: 'bulkAssignBatchItems',
-                  itemIds: JSON.stringify([...selectedItemIds]),
-                  csCloserIds: JSON.stringify(closerIds),
-                },
-                { method: 'post' },
-              );
-            }}
-          >
-            Assign
-          </Button>
-        </div>
-      </Modal>
+        selectedCount={selectedItemIds.size}
+        options={closerOptions}
+        selectedIds={assignAgentIds}
+        onToggle={(id) => {
+          setAssignAgentIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          });
+        }}
+        onSubmit={() => {
+          const closerIds = [...assignAgentIds];
+          if (closerIds.length === 0) return;
+          bulkFetcher.submit(
+            {
+              intent: 'bulkAssignBatchItems',
+              itemIds: JSON.stringify([...selectedItemIds]),
+              csCloserIds: JSON.stringify(closerIds),
+            },
+            { method: 'post' },
+          );
+        }}
+        isSubmitting={bulkFetcher.state === 'submitting'}
+        mode="assign"
+      />
     </div>
   );
 }

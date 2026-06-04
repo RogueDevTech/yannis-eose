@@ -104,6 +104,12 @@ const ORDER_STATUS_THEMES: Record<
     text: 'text-slate-500 dark:text-slate-400',
     hex: '#94a3b8',
   },
+  FOLLOW_UP: {
+    badge: 'badge bg-info-50 text-info-800 dark:bg-info-900/20 dark:text-info-300',
+    dot: 'bg-info-500',
+    text: 'text-info-600 dark:text-info-400',
+    hex: '#3b82f6',
+  },
 };
 
 /** Badge class string (bg + text, light + dark) for order status badges. */
@@ -143,6 +149,7 @@ export const STATUS_LABELS: Record<string, string> = {
   WRITTEN_OFF: 'Written Off',
   REMITTED: 'Cash Remitted',
   DELETED: 'Deleted',
+  FOLLOW_UP: 'Follow Up',
 };
 
 /**
@@ -166,6 +173,7 @@ export const STATUS_OPTIONS = [
   'CONFIRMED',
   'DELIVERED',
   'REMITTED',
+  'FOLLOW_UP',
 ];
 
 export function formatStatus(status: string): string {
