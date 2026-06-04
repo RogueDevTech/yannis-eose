@@ -8169,12 +8169,13 @@ export class OrdersService {
   }
 
   /** List all follow-up batches with summary stats. */
-  async listFollowUpBatches(input: { page: number; limit: number; startDate?: string; endDate?: string }) {
+  async listFollowUpBatches(input: { page: number; limit: number; startDate?: string; endDate?: string; includeReverted?: boolean }) {
     const offset = (input.page - 1) * input.limit;
-    const dateConditions: SQL[] = [];
-    if (input.startDate) dateConditions.push(gte(schema.followUpBatches.createdAt, new Date(`${input.startDate}T00:00:00+01:00`)));
-    if (input.endDate) dateConditions.push(lte(schema.followUpBatches.createdAt, new Date(`${input.endDate}T23:59:59+01:00`)));
-    const whereClause = dateConditions.length > 0 ? and(...dateConditions) : undefined;
+    const conditions: SQL[] = [];
+    if (!input.includeReverted) conditions.push(eq(schema.followUpBatches.status, 'ACTIVE'));
+    if (input.startDate) conditions.push(gte(schema.followUpBatches.createdAt, new Date(`${input.startDate}T00:00:00+01:00`)));
+    if (input.endDate) conditions.push(lte(schema.followUpBatches.createdAt, new Date(`${input.endDate}T23:59:59+01:00`)));
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [batches, countRows] = await Promise.all([
       this.db
@@ -8186,6 +8187,7 @@ export class OrdersService {
           groupId: schema.followUpBatches.groupId,
           createdById: schema.followUpBatches.createdById,
           orderCount: schema.followUpBatches.orderCount,
+          batchStatus: schema.followUpBatches.status,
           createdAt: schema.followUpBatches.createdAt,
         })
         .from(schema.followUpBatches)
@@ -8263,6 +8265,7 @@ export class OrdersService {
           groupName: b.groupId ? groupNames.get(b.groupId) ?? null : null,
           createdByName: creatorNames.get(b.createdById) ?? null,
           orderCount: b.orderCount,
+          batchStatus: b.batchStatus,
           confirmed,
           delivered,
           deliveredRevenue: String(deliveredRevenue),
@@ -8372,6 +8375,7 @@ export class OrdersService {
       createdByName: creator?.name ?? null,
       orderCount: batch.orderCount,
       assignmentMode: batch.assignmentMode,
+      batchStatus: batch.status,
       groupId: batch.groupId,
       groupName,
       groupMembers,
@@ -8398,6 +8402,66 @@ export class OrdersService {
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.followUpBatches);
     return `Follow Up #${(row?.count ?? 0) + 1}`;
+  }
+
+  /**
+   * Delete a follow-up batch. Reverts untouched orders (UNPROCESSED/CS_ASSIGNED)
+   * to their original state. Orders that have progressed beyond CS_ASSIGNED are
+   * left as-is — you can't un-confirm a real order.
+   */
+  async deleteFollowUpBatch(batchId: string) {
+    const [batch] = await this.db
+      .select()
+      .from(schema.followUpBatches)
+      .where(eq(schema.followUpBatches.id, batchId))
+      .limit(1);
+    if (!batch) throw new TRPCError({ code: 'NOT_FOUND', message: 'Batch not found' });
+
+    // Get all batch items with current order status
+    const items = await this.db
+      .select({
+        itemId: schema.followUpBatchItems.id,
+        orderId: schema.followUpBatchItems.orderId,
+        originalStatus: schema.followUpBatchItems.originalStatus,
+        orderStatus: schema.orders.status,
+      })
+      .from(schema.followUpBatchItems)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
+      .where(eq(schema.followUpBatchItems.batchId, batchId));
+
+    // Block deletion if any order has been worked on (progressed beyond initial assignment)
+    const UNTOUCHED_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED']);
+    const worked = items.filter((i) => !UNTOUCHED_STATUSES.has(i.orderStatus));
+    if (worked.length > 0) {
+      const workedStatuses = [...new Set(worked.map((i) => i.orderStatus))].join(', ');
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: `Cannot delete — ${worked.length} order${worked.length !== 1 ? 's have' : ' has'} already been worked on (${workedStatuses}). Only batches with no progressed orders can be deleted.`,
+      });
+    }
+
+    // Revert all orders back to their original state
+    for (const item of items) {
+      const restoreStatus = item.originalStatus !== 'UNKNOWN' ? item.originalStatus : 'UNPROCESSED';
+      await this.db
+        .update(schema.orders)
+        .set({
+          isFollowUp: false,
+          status: restoreStatus as typeof schema.orders.$inferSelect['status'],
+          assignedCsId: null,
+        })
+        .where(eq(schema.orders.id, item.orderId));
+    }
+
+    // Mark batch as REVERTED (soft delete — keep the record for audit)
+    await this.db
+      .update(schema.followUpBatches)
+      .set({ status: 'REVERTED' })
+      .where(eq(schema.followUpBatches.id, batchId));
+
+    return {
+      reverted: items.length,
+    };
   }
 
   // ── Follow-Up Groups ────────────────────────────────────────

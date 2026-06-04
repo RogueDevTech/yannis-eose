@@ -5756,20 +5756,53 @@ export class MarketingService {
     const mediaBuyerIds = [
       ...new Set(campaigns.map((c) => c.mediaBuyerId).filter(Boolean)),
     ] as string[];
-    const mediaBuyerNames: Map<string, string> = new Map();
-    if (mediaBuyerIds.length > 0) {
-      const users = await this.db
-        .select({ id: schema.users.id, name: schema.users.name })
-        .from(schema.users)
-        .where(inArray(schema.users.id, mediaBuyerIds));
-      users.forEach((u) => mediaBuyerNames.set(u.id, u.name));
+    const offerGroupIds = [
+      ...new Set(campaigns.map((c) => c.offerGroupId).filter(Boolean)),
+    ] as string[];
+
+    const [mediaBuyerRows, offerGroupItemRows] = await Promise.all([
+      mediaBuyerIds.length > 0
+        ? this.db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.users)
+            .where(inArray(schema.users.id, mediaBuyerIds))
+        : Promise.resolve([]),
+      offerGroupIds.length > 0
+        ? this.db
+            .select({
+              offerGroupId: schema.offerGroupItems.offerGroupId,
+              productId: schema.offerGroupItems.productId,
+            })
+            .from(schema.offerGroupItems)
+            .where(inArray(schema.offerGroupItems.offerGroupId, offerGroupIds))
+        : Promise.resolve([]),
+    ]);
+
+    const mediaBuyerNames = new Map(mediaBuyerRows.map((u) => [u.id, u.name]));
+
+    // Build offerGroupId → Set<productId> so campaigns using offer groups
+    // surface all their products in the product filter.
+    const offerGroupProductIds = new Map<string, string[]>();
+    for (const row of offerGroupItemRows) {
+      const list = offerGroupProductIds.get(row.offerGroupId) ?? [];
+      if (!list.includes(row.productId)) list.push(row.productId);
+      offerGroupProductIds.set(row.offerGroupId, list);
     }
 
     return {
-      campaigns: campaigns.map((c) => ({
-        ...c,
-        mediaBuyerName: c.mediaBuyerId ? (mediaBuyerNames.get(c.mediaBuyerId) ?? null) : null,
-      })),
+      campaigns: campaigns.map((c) => {
+        // Merge productIds from legacy field + offer group items so the
+        // product filter on the Forms page finds forms by any product
+        // referenced in the offer group (not just the legacy productIds).
+        const legacyIds = Array.isArray(c.productIds) ? (c.productIds as string[]) : [];
+        const groupIds = c.offerGroupId ? (offerGroupProductIds.get(c.offerGroupId) ?? []) : [];
+        const mergedProductIds = [...new Set([...legacyIds, ...groupIds])];
+        return {
+          ...c,
+          productIds: mergedProductIds.length > 0 ? mergedProductIds : c.productIds,
+          mediaBuyerName: c.mediaBuyerId ? (mediaBuyerNames.get(c.mediaBuyerId) ?? null) : null,
+        };
+      }),
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
   }

@@ -2097,6 +2097,14 @@ export const ordersRouter = router({
       return getOrdersService().nextFollowUpBatchName();
     }),
 
+  deleteFollowUpBatch: permissionProcedure('orders.followUp')
+    .input(z.object({ batchId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const result = await getOrdersService().deleteFollowUpBatch(input.batchId);
+      await invalidateOrdersAggregatesCache();
+      return result;
+    }),
+
   // ── Follow-Up Groups ──────────────────────────────────────
 
   createFollowUpGroup: permissionProcedure('orders.followUp')
