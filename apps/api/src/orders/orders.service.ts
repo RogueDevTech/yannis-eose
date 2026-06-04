@@ -8420,20 +8420,13 @@ export class OrdersService {
       .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
       .where(eq(schema.followUpBatchItems.batchId, batchId));
 
-    // Block deletion if any order has been actively worked on.
-    // UNPROCESSED/CS_ASSIGNED = untouched, DELETED/CANCELLED = dead — none block deletion.
-    const SAFE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
-    const worked = items.filter((i) => !SAFE_STATUSES.has(i.orderStatus));
-    if (worked.length > 0) {
-      const workedStatuses = [...new Set(worked.map((i) => i.orderStatus))].join(', ');
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: `Cannot delete — ${worked.length} order${worked.length !== 1 ? 's have' : ' has'} already been worked on (${workedStatuses}). Only batches with no progressed orders can be deleted.`,
-      });
-    }
+    // Untouched = can be fully reverted; worked = keep assignment, just unflag follow-up
+    const UNTOUCHED_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
+    const untouched = items.filter((i) => UNTOUCHED_STATUSES.has(i.orderStatus));
+    const worked = items.filter((i) => !UNTOUCHED_STATUSES.has(i.orderStatus));
 
-    // Revert all orders back to their original state
-    for (const item of items) {
+    // Fully revert untouched orders — restore original status, clear assignment
+    for (const item of untouched) {
       const restoreStatus = item.originalStatus !== 'UNKNOWN' ? item.originalStatus : 'UNPROCESSED';
       await this.db
         .update(schema.orders)
@@ -8445,6 +8438,15 @@ export class OrdersService {
         .where(eq(schema.orders.id, item.orderId));
     }
 
+    // Worked orders: keep current status + assigned closer, just remove follow-up flag
+    // so they become normal orders and the work stays with the closer
+    for (const item of worked) {
+      await this.db
+        .update(schema.orders)
+        .set({ isFollowUp: false })
+        .where(eq(schema.orders.id, item.orderId));
+    }
+
     // Mark batch as REVERTED (soft delete — keep the record for audit)
     await this.db
       .update(schema.followUpBatches)
@@ -8452,7 +8454,8 @@ export class OrdersService {
       .where(eq(schema.followUpBatches.id, batchId));
 
     return {
-      reverted: items.length,
+      reverted: untouched.length,
+      kept: worked.length,
     };
   }
 
