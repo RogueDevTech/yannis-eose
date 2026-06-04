@@ -2,7 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { FinancePage } from '~/features/finance/FinancePage';
 import { FinanceOverviewLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
 import type {
@@ -44,8 +44,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'finance.read');
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const startDateRaw = url.searchParams.get('startDate') || undefined;
-  const endDateRaw = url.searchParams.get('endDate') || undefined;
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  // Default to this month (Lagos timezone) when no date params and not explicitly all_time.
+  const defaults = defaultThisMonthRange();
+  const startDateRaw = url.searchParams.get('startDate') || (periodAllTime ? undefined : defaults.startDate);
+  const endDateRaw = url.searchParams.get('endDate') || (periodAllTime ? undefined : defaults.endDate);
   // Time-aware filter — when present, compose with the date so the API window
   // is the precise moment the user picked instead of being bumped to 23:59.
   const startTime = url.searchParams.get('startTime') || undefined;
@@ -57,7 +60,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const startDate = composeBound(startDateRaw, startTime);
   const endDate = composeBound(endDateRaw, endTime);
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
   // Optional dimensional slice — branch and/or media buyer.
   const branchId = url.searchParams.get('branchId') || undefined;
   const mediaBuyerId = url.searchParams.get('mediaBuyerId') || undefined;

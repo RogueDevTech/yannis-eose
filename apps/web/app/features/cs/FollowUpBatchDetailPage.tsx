@@ -12,10 +12,14 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { Checkbox } from '~/components/ui/checkbox';
+import { SmartPick } from '~/components/ui/smart-pick';
+import { Pagination } from '~/components/ui/pagination';
+import { SearchInput } from '~/components/ui/search-input';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useMemo, useState, useCallback } from 'react';
+import { formatStatus } from '~/features/shared/order-status';
 
 export interface FollowUpBatchDetailData {
   id: string;
@@ -60,16 +64,65 @@ interface Props {
 const formatNaira = (n: number) =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
 
+const PAGE_SIZE = 50;
+
 export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props) {
   const showSkeleton = deferredLoading;
   const isManualMode = data?.assignmentMode === 'MANUAL';
   const hasGroup = !!data?.groupId;
   const groupMembers = data?.groupMembers ?? [];
 
-  // Selection for manual bulk assignment
+  // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignCloserId, setAssignCloserId] = useState('');
+
+  // Search + status filter + pagination (client-side)
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [assignmentFilter, setAssignmentFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL');
+  const [page, setPage] = useState(1);
+
+  const allItems = data?.items ?? [];
+
+  // Unique statuses for the filter dropdown
+  const statusOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const i of allItems) {
+      counts.set(i.orderStatus, (counts.get(i.orderStatus) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([status, count]) => ({ value: status, label: `${formatStatus(status)} (${count})` }));
+  }, [allItems]);
+
+  // Filter by search + status + assignment
+  const filteredItems = useMemo(() => {
+    let result = allItems;
+    if (statusFilter !== 'ALL') {
+      result = result.filter((i) => i.orderStatus === statusFilter);
+    }
+    if (assignmentFilter === 'ASSIGNED') {
+      result = result.filter((i) => !!i.assignedCsId);
+    } else if (assignmentFilter === 'UNASSIGNED') {
+      result = result.filter((i) => !i.assignedCsId);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (i) =>
+          i.customerName.toLowerCase().includes(q) ||
+          (i.assignedCsName ?? '').toLowerCase().includes(q) ||
+          i.orderId.includes(q),
+      );
+    }
+    return result;
+  }, [allItems, search, statusFilter, assignmentFilter]);
+
+  // Paginate
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginatedItems = filteredItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const toggleItem = useCallback((id: string) => {
     setSelectedItemIds((prev) => {
@@ -80,15 +133,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
     });
   }, []);
 
-  const toggleAll = useCallback(() => {
-    if (!data) return;
-    const unassignedItems = data.items.filter((i) => !i.assignedCsId);
-    if (selectedItemIds.size === unassignedItems.length) {
-      setSelectedItemIds(new Set());
-    } else {
-      setSelectedItemIds(new Set(unassignedItems.map((i) => i.itemId)));
-    }
-  }, [data, selectedItemIds.size]);
+  const clearSelection = useCallback(() => setSelectedItemIds(new Set()), []);
 
   // Single-item assignment
   const [singleAssignItem, setSingleAssignItem] = useState<string | null>(null);
@@ -109,32 +154,6 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
 
   const columns: CompactTableColumn<ItemRow>[] = useMemo(
     () => [
-      // Checkbox column for manual assignment
-      ...(isManualMode && hasGroup
-        ? [
-            {
-              key: 'select' as const,
-              header: (
-                <Checkbox
-                  checked={data ? selectedItemIds.size === data.items.filter((i) => !i.assignedCsId).length && selectedItemIds.size > 0 : false}
-                  onChange={toggleAll}
-                />
-              ),
-              tight: true,
-              render: showSkeleton
-                ? () => null
-                : (item: ItemRow) =>
-                    item.assignedCsId ? (
-                      <span className="text-xs text-success-600 dark:text-success-400">&#10003;</span>
-                    ) : (
-                      <Checkbox
-                        checked={selectedItemIds.has(item.itemId)}
-                        onChange={() => toggleItem(item.itemId)}
-                      />
-                    ),
-            } satisfies CompactTableColumn<ItemRow>,
-          ]
-        : []),
       {
         key: 'customer',
         header: 'Customer',
@@ -222,7 +241,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             ),
       },
     ],
-    [showSkeleton, isManualMode, hasGroup, selectedItemIds, data],
+    [showSkeleton, isManualMode, hasGroup],
   );
 
   if (!data && !deferredLoading) {
@@ -235,11 +254,11 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
   }
 
   const analytics = data?.analytics;
-  const items = data?.items ?? [];
   const unprocessed = analytics?.statusCounts.UNPROCESSED ?? 0;
   const csEngaged = (analytics?.statusCounts.CS_ASSIGNED ?? 0) + (analytics?.statusCounts.CS_ENGAGED ?? 0);
-  const assignedCount = items.filter((i) => i.assignedCsId).length;
-  const unassignedCount = items.length - assignedCount;
+  const assignedCount = allItems.filter((i) => i.assignedCsId).length;
+
+  const selectableItems = filteredItems;
 
   return (
     <div className="space-y-4">
@@ -258,7 +277,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             triggerAriaLabel="Batch tools"
             desktop={
               <>
-                {isManualMode && hasGroup && selectedItemIds.size > 0 && (
+                {selectedItemIds.size > 0 && isManualMode && hasGroup && (
                   <button
                     type="button"
                     onClick={() => { setAssignModalOpen(true); setAssignCloserId(''); }}
@@ -271,7 +290,7 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
               </>
             }
             sheet={
-              isManualMode && hasGroup && selectedItemIds.size > 0 ? (
+              selectedItemIds.size > 0 && isManualMode && hasGroup ? (
                 <button
                   type="button"
                   onClick={() => { setAssignModalOpen(true); setAssignCloserId(''); }}
@@ -294,18 +313,106 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
           { label: 'Confirmed', value: data ? `${analytics?.confirmed ?? 0} (${analytics?.confirmationRate ?? 0}%)` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
           { label: 'Delivered', value: data ? `${analytics?.delivered ?? 0} (${analytics?.deliveryRate ?? 0}%)` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
           ...(hasGroup
-            ? [{ label: 'Assigned', value: data ? `${assignedCount}/${items.length}` : '—', valueClassName: assignedCount === items.length ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-warning-600 dark:text-warning-400 tabular-nums' }]
+            ? [{ label: 'Assigned', value: data ? `${assignedCount}/${allItems.length}` : '—', valueClassName: assignedCount === allItems.length ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-warning-600 dark:text-warning-400 tabular-nums' }]
             : []),
         ]}
       />
 
-      {items.length === 0 && !showSkeleton ? (
-        <EmptyState title="No orders" description="This batch has no orders." />
+      {/* Filters + Search + Smart Pick */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <SearchInput
+            value={search}
+            onChange={(v) => { setSearch(v); setPage(1); }}
+            placeholder="Search by customer name..."
+            wrapperClassName="min-w-0 flex-1 max-w-sm"
+          />
+          <FormSelect
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            options={[
+              { value: 'ALL', label: `All statuses (${allItems.length})` },
+              ...statusOptions,
+            ]}
+            wrapperClassName="w-auto min-w-[10rem]"
+          />
+          {hasGroup && (
+            <FormSelect
+              value={assignmentFilter}
+              onChange={(e) => { setAssignmentFilter(e.target.value as 'ALL' | 'ASSIGNED' | 'UNASSIGNED'); setPage(1); }}
+              options={[
+                { value: 'ALL', label: 'All assignments' },
+                { value: 'ASSIGNED', label: `Assigned (${assignedCount})` },
+                { value: 'UNASSIGNED', label: `Unassigned (${allItems.length - assignedCount})` },
+              ]}
+              wrapperClassName="w-auto min-w-[10rem]"
+            />
+          )}
+        </div>
+        <SmartPick
+          total={selectableItems.length}
+          selectedCount={selectedItemIds.size}
+          onPick={(count) => {
+            const ids = selectableItems.slice(0, count).map((i) => i.itemId);
+            setSelectedItemIds(new Set(ids));
+          }}
+          onClear={clearSelection}
+          itemNoun="orders"
+        />
+      </div>
+
+      {/* Selection bar */}
+      {selectedItemIds.size > 0 && (
+        <div className="rounded-lg border border-brand-500/30 bg-brand-50/10 px-3 py-2 flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-brand-600 dark:text-brand-400">
+            {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''} selected
+          </span>
+          <div className="flex items-center gap-2">
+            {isManualMode && hasGroup && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => { setAssignModalOpen(true); setAssignCloserId(''); }}
+              >
+                Assign selected
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={clearSelection}>Clear</Button>
+          </div>
+        </div>
+      )}
+
+      {filteredItems.length === 0 && !showSkeleton ? (
+        <EmptyState
+          title={search ? 'No matching orders' : 'No orders'}
+          description={search ? 'Try a different search term.' : 'This batch has no orders.'}
+        />
       ) : (
         <CompactTable<ItemRow>
           columns={columns}
-          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ itemId: `sk-${i}`, orderId: '', originalStatus: '', assignedCsId: null, assignedCsName: null, addedAt: '', orderStatus: '', customerName: '', totalAmount: null, orderCreatedAt: '' })) : items}
+          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ itemId: `sk-${i}`, orderId: '', originalStatus: '', assignedCsId: null, assignedCsName: null, addedAt: '', orderStatus: '', customerName: '', totalAmount: null, orderCreatedAt: '' })) : paginatedItems}
           rowKey={(r) => r.itemId}
+          selection={{
+            selectedIds: selectedItemIds,
+            getRowId: (item) => item.itemId,
+            onToggle: (id) => toggleItem(id),
+            onToggleAll: (selectAll) => {
+              if (selectAll) {
+                setSelectedItemIds((prev) => {
+                  const next = new Set(prev);
+                  for (const i of paginatedItems) next.add(i.itemId);
+                  return next;
+                });
+              } else {
+                setSelectedItemIds((prev) => {
+                  const next = new Set(prev);
+                  for (const i of paginatedItems) next.delete(i.itemId);
+                  return next;
+                });
+              }
+            },
+            isSelectable: () => true,
+          }}
           renderMobileCard={(item) => (
             <Link
               to={`/admin/orders/${item.orderId}`}
@@ -325,6 +432,20 @@ export function FollowUpBatchDetailPage({ data, deferredLoading = false }: Props
             </Link>
           )}
         />
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredItems.length)} of {filteredItems.length} orders
+          </p>
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+          />
+        </div>
       )}
 
       {/* ── Single Assign Modal ────────────────────── */}

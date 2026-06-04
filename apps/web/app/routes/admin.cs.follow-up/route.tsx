@@ -68,13 +68,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // ── Batches view (default) ──────────────────────────────────
   if (view === 'batches' || view !== 'create') {
     const batchesPage = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-    // Default to this month if no date params
+    const batchesPeriodAllTime = url.searchParams.get('period') === 'all_time';
+    // Default to this month if no date params and not all-time
     const now = new Date();
     const defaultStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const defaultEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-    const startDate = url.searchParams.get('startDate') || defaultStart;
-    const endDate = url.searchParams.get('endDate') || defaultEnd;
+    const startDate = batchesPeriodAllTime ? '' : (url.searchParams.get('startDate') || defaultStart);
+    const endDate = batchesPeriodAllTime ? '' : (url.searchParams.get('endDate') || defaultEnd);
 
     const emptyBatches = { batches: [] as Array<{ id: string; name: string; source: string; branchName: string | null; createdByName: string | null; orderCount: number; confirmed: number; delivered: number; deliveredRevenue: string; confirmationRate: number; deliveryRate: number; createdAt: string }>, pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } };
     type GroupItem = { id: string; name: string; createdByName: string | null; memberCount: number; members: Array<{ userId: string; userName: string }>; createdAt: string };
@@ -83,7 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       try {
         const [batchesRes, groupsRes, closersRes] = await Promise.all([
           apiRequest<unknown>(
-            `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20, startDate, endDate }))}`,
+            `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20, ...(startDate && { startDate }), ...(endDate && { endDate }) }))}`,
             { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
           ),
           apiRequest<unknown>('/trpc/orders.listFollowUpGroups', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
@@ -104,7 +105,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     })();
     return defer({
-      shell: { view: 'batches' as const, page: batchesPage, startDate, endDate },
+      shell: { view: 'batches' as const, page: batchesPage, startDate, endDate, periodAllTime: batchesPeriodAllTime },
       batchesData,
     });
   }
@@ -122,6 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const olderThanDays = url.searchParams.get('olderThanDays') || undefined;
   const customStartDate = url.searchParams.get('startDate') || undefined;
   const customEndDate = url.searchParams.get('endDate') || undefined;
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const limit = 50;
 
@@ -234,6 +236,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       olderThanDays: olderThanDays ?? '',
       startDate: customStartDate ?? '',
       endDate: customEndDate ?? '',
+      periodAllTime,
       page,
       bulkSelectAllMatchingInput,
     },
@@ -508,6 +511,7 @@ export default function FollowUpRoute() {
             page={batchesPage}
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
+            periodAllTime={shell?.periodAllTime ?? false}
             groups={[]}
             closers={[]}
             deferredLoading
@@ -522,6 +526,7 @@ export default function FollowUpRoute() {
             page={batchesPage}
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
+            periodAllTime={shell?.periodAllTime ?? false}
           />
         )}
       </CachedAwait>
@@ -536,6 +541,7 @@ export default function FollowUpRoute() {
     olderThanDays: shell?.olderThanDays ?? '',
     startDate: shell?.startDate ?? '',
     endDate: shell?.endDate ?? '',
+    periodAllTime: shell?.periodAllTime ?? false,
     page: shell?.page ?? 1,
   };
   const bulkSelectAllMatchingInput: string | undefined = shell?.bulkSelectAllMatchingInput;
