@@ -44,6 +44,7 @@ interface Props extends FollowUpBatchesPageData {
   page: number;
   startDate?: string;
   endDate?: string;
+  periodAllTime?: boolean;
   groups?: FollowUpGroupItem[];
   closers?: CloserWithBranches[];
   deferredLoading?: boolean;
@@ -55,6 +56,7 @@ export function FollowUpBatchesPage({
   page,
   startDate = '',
   endDate = '',
+  periodAllTime = false,
   groups = [],
   closers = [],
   deferredLoading = false,
@@ -228,7 +230,7 @@ export function FollowUpBatchesPage({
             triggerAriaLabel="Follow-up tools"
             desktop={
               <>
-                <DateFilterBar startDate={startDate} endDate={endDate} chrome="pill" />
+                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
                 <PageRefreshButton />
                 <button
                   type="button"

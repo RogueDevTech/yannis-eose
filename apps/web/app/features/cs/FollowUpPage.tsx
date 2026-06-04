@@ -79,6 +79,7 @@ interface FollowUpFilters {
   olderThanDays: string;
   startDate: string;
   endDate: string;
+  periodAllTime?: boolean;
   page: number;
 }
 
@@ -542,6 +543,7 @@ export function FollowUpPage({
                 <DateFilterBar
                   startDate={filters.startDate}
                   endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
                   chrome="pill"
                 />
                 <PageRefreshButton />
