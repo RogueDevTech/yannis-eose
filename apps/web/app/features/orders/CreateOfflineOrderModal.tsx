@@ -7,7 +7,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
-import { NumberInput } from '~/components/ui/number-input';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 
@@ -40,17 +40,11 @@ interface CreateOfflineOrderModalProps {
   onClose: () => void;
   onSuccess?: (orderId: string) => void;
   products: ProductOption[];
-  /** Prefill customer name when opening from Cart Abandonment */
   initialCustomerName?: string;
-  /** Full cart prefill when recovering from an abandoned cart (overrides initialCustomerName). */
   cartPrefill?: CartPrefill | null;
-  /** SuperAdmin / org-wide heads: session may have no branch — required for `orders.createOffline` middleware. */
   branchId?: string;
-  /** When true, the user can type custom prices for products that have offers. Admin-level only. */
   canEditPrices?: boolean;
 }
-
-const defaultItem = { productId: '', quantity: 1, unitPrice: '', offerLabel: '' };
 
 export function CreateOfflineOrderModal({
   open,
@@ -74,8 +68,15 @@ export function CreateOfflineOrderModal({
   const [preferredDeliveryDate, setPreferredDeliveryDate] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'PAY_ON_DELIVERY' | 'PAY_ONLINE'>('PAY_ON_DELIVERY');
   const [customerEmail, setCustomerEmail] = useState('');
-  const [items, setItems] = useState<Array<{ productId: string; quantity: number; unitPrice: string; offerLabel?: string }>>([{ ...defaultItem }]);
   const [dismissedError, setDismissedError] = useState(false);
+
+  // Product + offer selection (single product per order, like the customer flow)
+  const [productId, setProductId] = useState('');
+  const [selectedOfferLabel, setSelectedOfferLabel] = useState('');
+
+  const selectedProduct = products.find((p) => p.id === productId);
+  const offers = selectedProduct?.offers ?? [];
+  const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
 
   useFetcherToast(fetcher.data, { successMessage: 'Offline order created', skipErrorToast: open });
 
@@ -85,14 +86,7 @@ export function CreateOfflineOrderModal({
   }, [actionError]);
 
   useEffect(() => {
-    if (open && items.length === 0) {
-      setItems([{ ...defaultItem }]);
-    }
-  }, [open]);
-
-  useEffect(() => {
     if (open && cartPrefill) {
-      // Full prefill from abandoned cart — overrides initialCustomerName.
       if (cartPrefill.customerName) setCustomerName(cartPrefill.customerName);
       if (cartPrefill.customerPhone) setCustomerPhone(cartPrefill.customerPhone);
       if (cartPrefill.customerAddress) setCustomerAddress(cartPrefill.customerAddress);
@@ -104,16 +98,12 @@ export function CreateOfflineOrderModal({
       if (cartPrefill.customerEmail) setCustomerEmail(cartPrefill.customerEmail);
       if (cartPrefill.paymentMethod === 'PAY_ONLINE') setPaymentMethod('PAY_ONLINE');
       if (cartPrefill.productId) {
+        setProductId(cartPrefill.productId);
         const product = products.find((p) => p.id === cartPrefill.productId);
         const offer = cartPrefill.offerLabel
           ? product?.offers?.find((o) => o.label === cartPrefill.offerLabel)
           : product?.offers?.[0];
-        setItems([{
-          productId: cartPrefill.productId,
-          quantity: cartPrefill.quantity ?? offer?.qty ?? 1,
-          unitPrice: offer?.price ?? '',
-          offerLabel: offer?.label ?? cartPrefill.offerLabel ?? '',
-        }]);
+        if (offer) setSelectedOfferLabel(offer.label);
       }
     } else if (open && initialCustomerName?.trim()) {
       setCustomerName(initialCustomerName.trim());
@@ -143,80 +133,31 @@ export function CreateOfflineOrderModal({
     setPreferredDeliveryDate('');
     setPaymentMethod('PAY_ON_DELIVERY');
     setCustomerEmail('');
-    setItems([{ ...defaultItem }]);
+    setProductId('');
+    setSelectedOfferLabel('');
   }
 
-  function addItem() {
-    setItems((prev) => [...prev, { ...defaultItem }]);
-  }
-
-  function removeItem(index: number) {
-    setItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
-  }
-
-  function updateItem(index: number, field: string, value: string | number) {
-    setItems((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
-    );
-  }
-
-  function onProductSelect(index: number, productId: string) {
-    const product = products.find((p) => p.id === productId);
-    // Pre-select the first offer when a product is chosen so the price isn't blank.
-    // The user can switch to another tier via the Offer dropdown next to it.
+  function onProductChange(id: string) {
+    setProductId(id);
+    // Auto-select first offer
+    const product = products.find((p) => p.id === id);
     const firstOffer = product?.offers?.[0];
-    setItems((prev) =>
-      prev.map((row, i) =>
-        i === index
-          ? {
-              ...row,
-              productId,
-              unitPrice: firstOffer?.price ?? '',
-              offerLabel: firstOffer?.label ?? '',
-              quantity: firstOffer?.qty ?? row.quantity ?? 1,
-            }
-          : row,
-      ),
-    );
+    setSelectedOfferLabel(firstOffer?.label ?? '');
   }
 
-  /** Apply an offer (tier) to a row — fills label, price, and the offer's quantity. */
-  function onOfferSelect(index: number, offerLabel: string) {
-    const product = products.find((p) => p.id === items[index]?.productId);
-    const offer = product?.offers?.find((o) => o.label === offerLabel);
-    if (!offer) {
-      // "Custom" — clear the offer label, keep current price/qty so the user can free-type.
-      updateItem(index, 'offerLabel', '');
-      return;
-    }
-    setItems((prev) =>
-      prev.map((row, i) =>
-        i === index
-          ? { ...row, offerLabel: offer.label, unitPrice: offer.price, quantity: offer.qty }
-          : row,
-      ),
-    );
-  }
-
-  // unitPrice is the offer/line total — sum directly without multiplying by quantity
-  const totalAmount = items.reduce((sum, it) => {
-    const price = Number(it.unitPrice) || 0;
-    return sum + price;
-  }, 0);
+  const totalAmount = selectedOffer ? Number(selectedOffer.price) : 0;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const validItems = items
-      .filter((it) => it.productId && it.quantity >= 1 && it.unitPrice !== '')
-      .map((it) => ({
-        productId: it.productId,
-        quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPrice),
-        offerLabel: it.offerLabel || undefined,
-      }));
-    if (validItems.length === 0) {
-      return;
-    }
+    if (!productId || !selectedOffer) return;
+
+    const validItems = [{
+      productId,
+      quantity: selectedOffer.qty,
+      unitPrice: Number(selectedOffer.price),
+      offerLabel: selectedOffer.label,
+    }];
+
     const formData = new FormData();
     formData.set('intent', 'createOffline');
     formData.set('customerName', customerName.trim());
@@ -244,7 +185,7 @@ export function CreateOfflineOrderModal({
     <Modal
       open
       onClose={onClose}
-      maxWidth="max-w-2xl"
+      maxWidth="max-w-lg"
       role="dialog"
       aria-labelledby="create-offline-order-title"
       contentClassName="p-0 flex flex-col overflow-hidden min-h-0 border border-app-border"
@@ -275,7 +216,6 @@ export function CreateOfflineOrderModal({
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
               <TextInput
                 type="text"
                 label="Customer name *"
@@ -285,26 +225,19 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Full name"
               />
-            </div>
-            <div>
               <TextInput
                 type="tel"
                 inputMode="numeric"
                 label="Customer phone *"
                 required
                 value={customerPhone}
-                // Strip non-digit characters at the keystroke (allow `+` for
-                // international, dashes/spaces for formatting). Letters never
-                // make it into state — matches the form-builder phone field.
                 onChange={(e) => setCustomerPhone(e.target.value.replace(/[^\d+\-\s()]/g, ''))}
                 placeholder="e.g. 08012345678"
                 pattern="[0-9+\-\s()]*"
                 title="Numbers only"
               />
             </div>
-          </div>
 
-          <div>
             <TextInput
               type="text"
               label="Customer address"
@@ -312,8 +245,6 @@ export function CreateOfflineOrderModal({
               onChange={(e) => setCustomerAddress(e.target.value)}
               placeholder="Address"
             />
-          </div>
-          <div>
             <TextInput
               type="text"
               label="Delivery address"
@@ -321,9 +252,7 @@ export function CreateOfflineOrderModal({
               onChange={(e) => setDeliveryAddress(e.target.value)}
               placeholder="Delivery address"
             />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextInput
                 type="text"
                 label="Delivery state"
@@ -331,8 +260,6 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setDeliveryState(e.target.value)}
                 placeholder="State"
               />
-            </div>
-            <div>
               <TextInput
                 type="date"
                 label="Preferred delivery date"
@@ -341,9 +268,7 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setPreferredDeliveryDate(e.target.value)}
               />
             </div>
-          </div>
-          <div className="flex gap-3">
-            <div>
+            <div className="flex gap-3">
               <FormSelect
                 id="offline-order-gender"
                 label="Gender"
@@ -355,23 +280,21 @@ export function CreateOfflineOrderModal({
                   { value: 'female', label: 'Female' },
                 ]}
               />
+              <div className="flex-1 min-w-0">
+                <FormSelect
+                  id="offline-order-payment"
+                  label="Payment method"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value as 'PAY_ON_DELIVERY' | 'PAY_ONLINE')}
+                  options={[
+                    { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
+                    { value: 'PAY_ONLINE', label: 'Pay online' },
+                  ]}
+                  wrapperClassName="w-full"
+                />
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <FormSelect
-                id="offline-order-payment"
-                label="Payment method"
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value as 'PAY_ON_DELIVERY' | 'PAY_ONLINE')}
-                options={[
-                  { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
-                  { value: 'PAY_ONLINE', label: 'Pay online' },
-                ]}
-                wrapperClassName="w-full"
-              />
-            </div>
-          </div>
-          {paymentMethod === 'PAY_ONLINE' && (
-            <div>
+            {paymentMethod === 'PAY_ONLINE' && (
               <TextInput
                 type="email"
                 label="Customer email *"
@@ -380,110 +303,70 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setCustomerEmail(e.target.value)}
                 placeholder="email@example.com"
               />
-            </div>
-          )}
+            )}
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-app-fg-muted">
-                Items *
-              </label>
-              <Button type="button" variant="secondary" size="sm" onClick={addItem}>
-                Add item
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {items.map((item, index) => {
-                const selectedProduct = products.find((p) => p.id === item.productId);
-                const offers = selectedProduct?.offers ?? [];
-                const hasOffers = offers.length > 0;
-                // When an offer is active (or user can't edit prices), qty + price are locked.
-                const offerLocked = hasOffers && (!!item.offerLabel || !canEditPrices);
-                return (
-                  <div key={index} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-app-hover">
-                    <div className="flex-1 min-w-[140px]">
-                      <SearchableSelect
-                        id={`offline-item-product-${index}`}
-                        label="Product"
-                        required
-                        value={item.productId}
-                        onChange={(val) => onProductSelect(index, val)}
-                        placeholder="Select product"
-                        options={products.map((p) => ({ value: p.id, label: p.name }))}
-                        controlSize="sm"
-                        searchPlaceholder="Search products..."
-                        wrapperClassName="w-full"
-                      />
-                    </div>
-                    {/* Offer / tier — shows the configured price tiers (e.g. "1 piece @ ₦7,500"
-                        vs "2 pieces @ ₦10,000"). Selecting one snaps the row's qty + price.
-                        "Custom" lets the rep type a non-standard price (rare, but allowed). */}
-                    {hasOffers && (
-                      <div className="flex-1 min-w-[180px]">
-                        <SearchableSelect
-                          id={`offline-item-offer-${index}`}
-                          label="Offer / tier"
-                          value={item.offerLabel ?? ''}
-                          onChange={(value) => onOfferSelect(index, value)}
-                          options={[
-                            ...offers.map((o) => ({
-                              value: o.label,
-                              label: `${o.label} — ${o.qty} × ₦${Number(o.price).toLocaleString()}`,
-                            })),
-                            ...(canEditPrices ? [{ value: '', label: 'Custom' }] : []),
-                          ]}
-                          searchPlaceholder="Search offers..."
-                          controlSize="sm"
-                          wrapperClassName="w-full"
-                        />
-                      </div>
-                    )}
-                    <div className="w-20">
-                      <NumberInput
-                        label="Qty"
-                        min={1}
-                        fallbackValue={1}
-                        value={Number(item.quantity) || 1}
-                        onValueChange={(n) => updateItem(index, 'quantity', n)}
-                        disabled={offerLocked}
-                        controlSize="sm"
-                        wrapperClassName="w-full"
-                      />
-                    </div>
-                    <div className="w-28">
-                      <TextInput
-                        type="number"
-                        label="Total price"
-                        required
-                        min={0}
-                        step={0.01}
-                        value={item.unitPrice}
-                        onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
-                        readOnly={offerLocked}
-                        controlSize="sm"
-                        wrapperClassName="w-full"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeItem(index)}
-                      disabled={items.length === 1}
-                      className="shrink-0"
-                    >
-                      Remove
-                    </Button>
+            {/* ── Product + Offer Selection ───────────────── */}
+            <div className="space-y-3">
+              <SearchableSelect
+                id="offline-order-product"
+                label="Product *"
+                required
+                value={productId}
+                onChange={onProductChange}
+                placeholder="Select product"
+                options={products.map((p) => ({ value: p.id, label: p.name }))}
+                searchPlaceholder="Search products..."
+                wrapperClassName="w-full"
+              />
+
+              {/* Offer cards — shown after product is selected */}
+              {productId && offers.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-2">
+                    Select offer *
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {offers.map((offer) => {
+                      const isSelected = selectedOfferLabel === offer.label;
+                      return (
+                        <button
+                          key={offer.label}
+                          type="button"
+                          onClick={() => setSelectedOfferLabel(offer.label)}
+                          className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                            isSelected
+                              ? 'border-brand-500 bg-brand-50/10 dark:bg-brand-900/20'
+                              : 'border-app-border bg-app-elevated hover:border-app-fg-muted'
+                          }`}
+                        >
+                          <p className="text-sm font-semibold text-app-fg">{offer.label}</p>
+                          <div className="flex items-center justify-between gap-2 mt-1">
+                            <span className="text-xs text-app-fg-muted">Qty: {offer.qty}</span>
+                            <span className="text-sm font-bold text-app-fg tabular-nums">
+                              <NairaPrice amount={Number(offer.price)} />
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
-            <p className="text-sm text-app-fg-muted mt-1">
-              Total: ₦{totalAmount.toFixed(2)}
-            </p>
-          </div>
+                </div>
+              )}
 
-          <div>
+              {/* Selected offer summary */}
+              {selectedOffer && (
+                <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 flex items-center justify-between">
+                  <div className="text-sm text-app-fg">
+                    <span className="font-medium">{selectedProduct?.name}</span>
+                    <span className="text-app-fg-muted"> · {selectedOffer.label} · Qty {selectedOffer.qty}</span>
+                  </div>
+                  <span className="text-sm font-bold text-app-fg tabular-nums">
+                    <NairaPrice amount={totalAmount} />
+                  </span>
+                </div>
+              )}
+            </div>
+
             <TextInput
               type="text"
               label="Delivery notes"
@@ -492,13 +375,12 @@ export function CreateOfflineOrderModal({
               placeholder="Notes"
             />
           </div>
-          </div>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-app-border shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" loading={isSubmitting} disabled={isSubmitting}>
+            <Button type="submit" loading={isSubmitting} disabled={isSubmitting || !selectedOffer}>
               Create offline order
             </Button>
           </div>

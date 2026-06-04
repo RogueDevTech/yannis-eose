@@ -80,6 +80,18 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'deleteBatch') {
+    const batchId = formData.get('batchId')?.toString();
+    if (!batchId) return json({ error: 'Missing batch ID' }, { status: 400 });
+
+    const res = await apiRequest<unknown>('/trpc/orders.deleteFollowUpBatch', {
+      method: 'POST', cookie, body: { batchId },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to delete batch') }, { status: safeStatus(res.status) });
+    const data = (res.data as { result?: { data?: { reverted: number; skipped: number; skippedStatuses: string[] } } })?.result?.data;
+    return json({ success: true, deleted: true, reverted: data?.reverted ?? 0, skipped: data?.skipped ?? 0 });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

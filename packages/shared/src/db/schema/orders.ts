@@ -203,6 +203,8 @@ export const followUpBatches = pgTable('follow_up_batches', {
   groupId: uuid('group_id').references(() => followUpGroups.id),
   /** EQUAL = auto round-robin assign; MANUAL = user assigns individually. */
   assignmentMode: text('assignment_mode').notNull().default('MANUAL'),
+  /** ACTIVE = live batch; REVERTED = batch deleted, orders restored. */
+  status: text('status').notNull().default('ACTIVE'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

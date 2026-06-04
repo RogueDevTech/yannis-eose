@@ -1,4 +1,4 @@
-import { Link, useFetcher } from '@remix-run/react';
+import { Link, useFetcher, useNavigate } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -30,6 +30,7 @@ export interface FollowUpBatchDetailData {
   createdByName: string | null;
   orderCount: number;
   assignmentMode: string;
+  batchStatus?: string;
   groupId: string | null;
   groupName: string | null;
   groupMembers: Array<{ userId: string; userName: string }>;
@@ -81,11 +82,23 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
     ? groupMembers.map((m) => ({ value: m.userId, label: m.userName }))
     : closers.map((c) => ({ value: c.agentId, label: c.agentName }));
   const canAssign = closerOptions.length > 0;
+  const isReverted = data?.batchStatus === 'REVERTED';
+  const hasWorkedOrders = (data?.items ?? []).some((i) => i.orderStatus !== 'UNPROCESSED' && i.orderStatus !== 'CS_ASSIGNED');
 
   // Selection
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignAgentIds, setAssignAgentIds] = useState<Set<string>>(new Set());
+
+  // Delete batch
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string; deleted?: boolean; reverted?: number; skipped?: number }>();
+  const navigate = useNavigate();
+  useFetcherToast(deleteFetcher.data, { successMessage: 'Batch deleted and orders reverted' });
+  useCloseOnFetcherSuccess(deleteFetcher, () => {
+    setDeleteConfirmOpen(false);
+    navigate('/admin/cs/follow-up');
+  });
 
   // Search + status filter + pagination (client-side)
   const [search, setSearch] = useState('');
@@ -278,7 +291,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         mobileInlineActions
         description={
           data
-            ? `${data.orderCount} orders from ${data.source} · ${data.branchName ?? 'No branch'}${data.groupName ? ` · Group: ${data.groupName}` : ''} · ${data.assignmentMode === 'EQUAL' ? 'Auto-assigned' : 'Manual assignment'}`
+            ? `${data.orderCount} orders from ${data.source} · ${data.branchName ?? 'No branch'}${data.groupName ? ` · Group: ${data.groupName}` : ''} · ${data.assignmentMode === 'EQUAL' ? 'Auto-assigned' : 'Manual assignment'}${isReverted ? ' · REVERTED' : ''}`
             : undefined
         }
         actions={
@@ -297,18 +310,38 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                   </button>
                 )}
                 <PageRefreshButton />
+                {!isReverted && !hasWorkedOrders && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    className="btn-danger btn-sm inline-flex items-center gap-1.5"
+                  >
+                    Delete batch
+                  </button>
+                )}
               </>
             }
             sheet={
-              selectedItemIds.size > 0 && canAssign ? (
-                <button
-                  type="button"
-                  onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
-                  className="btn-primary w-full inline-flex items-center justify-center"
-                >
-                  Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
-                </button>
-              ) : undefined
+              <>
+                {selectedItemIds.size > 0 && canAssign && (
+                  <button
+                    type="button"
+                    onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
+                    className="btn-primary w-full inline-flex items-center justify-center"
+                  >
+                    Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
+                  </button>
+                )}
+                {!isReverted && !hasWorkedOrders && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    className="btn-danger w-full inline-flex items-center justify-center mt-2"
+                  >
+                    Delete batch
+                  </button>
+                )}
+              </>
             }
           />
         }
@@ -508,6 +541,39 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         isSubmitting={bulkFetcher.state === 'submitting'}
         mode="assign"
       />
+
+      {/* ── Delete Batch Confirmation Modal ────────────────────── */}
+      <Modal
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        maxWidth="max-w-sm"
+        contentClassName="p-6 space-y-4"
+      >
+        <h3 className="text-lg font-semibold text-app-fg">Delete batch</h3>
+        <p className="text-sm text-app-fg-muted">
+          This will revert all {allItems.length} orders in <strong>{data?.name}</strong> back to their original state and mark the batch as reverted.
+        </p>
+        {deleteFetcher.data?.error && (
+          <p className="text-sm text-danger-600 dark:text-danger-400">{deleteFetcher.data.error}</p>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+          <Button
+            variant="danger"
+            loading={deleteFetcher.state === 'submitting'}
+            loadingText="Deleting…"
+            onClick={() => {
+              if (!data) return;
+              deleteFetcher.submit(
+                { intent: 'deleteBatch', batchId: data.id },
+                { method: 'post' },
+              );
+            }}
+          >
+            Delete batch
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
