@@ -689,7 +689,7 @@ function OrdersListPageImpl({
   // Exclude DELETED (editorial) and CART (abandoned carts never entered the pipeline)
   // from rate denominators — they're not business outcomes.
   const periodTotalExclDeleted = Object.entries(statusCounts)
-    .filter(([k]) => k !== 'DELETED' && k !== 'CART' && k !== 'FOLLOW_UP')
+    .filter(([k]) => k !== 'DELETED' && k !== 'CART')
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
   const confirmationRate =
     periodTotalExclDeleted > 0 ? (confirmedPlus / periodTotalExclDeleted) * 100 : 0;
@@ -1732,7 +1732,7 @@ function OrdersListPageImpl({
               // Always derive from statusCounts (the source of truth) so
               // search/filter changes don't make the overview strip fluctuate.
               value: Object.entries(statusCounts)
-                .filter(([k]) => k !== 'DELETED' && k !== 'CART' && k !== 'FOLLOW_UP')
+                .filter(([k]) => k !== 'DELETED' && k !== 'CART')
                 .reduce((sum, [, n]) => sum + (n || 0), 0),
               valueClassName: 'text-app-fg',
               active: selectedStatus === 'ALL',

@@ -35,7 +35,6 @@ const CS_ORDERS_VISIBLE_STATUSES = new Set([
   ...STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'REMITTED'),
   'CANCELLED',
   'DELETED',
-  'FOLLOW_UP',
 ]);
 export const meta: MetaFunction = () => [
   { title: 'Sales Orders — Yannis EOSE' },
@@ -190,15 +189,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // For CS/Marketing, DELIVERED and REMITTED are the same outcome ("delivered").
   const expandDeliveredFilter = status === 'DELIVERED';
-  const isFollowUpFilter = status === 'FOLLOW_UP';
   const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
-    ...(isFollowUpFilter
-      ? { excludeFollowUp: false, isFollowUp: true }
-      : expandDeliveredFilter
-        ? { statuses: ['DELIVERED', 'REMITTED'] }
-        : { status: status || undefined }),
+    ...(expandDeliveredFilter
+      ? { statuses: ['DELIVERED', 'REMITTED'] }
+      : { status: status || undefined }),
     search: search || undefined,
     sortBy,
     sortOrder,

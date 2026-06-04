@@ -46,6 +46,7 @@ interface Props extends FollowUpBatchesPageData {
   startDate?: string;
   endDate?: string;
   periodAllTime?: boolean;
+  isCloser?: boolean;
   groups?: FollowUpGroupItem[];
   closers?: CloserWithBranches[];
   deferredLoading?: boolean;
@@ -58,6 +59,7 @@ export function FollowUpBatchesPage({
   startDate = '',
   endDate = '',
   periodAllTime = false,
+  isCloser = false,
   groups = [],
   closers = [],
   deferredLoading = false,
@@ -229,40 +231,46 @@ export function FollowUpBatchesPage({
       <PageHeader
         title="Follow Up"
         mobileInlineActions
-        description="Track batches, groups, and conversion performance."
+        description={isCloser ? 'Batches assigned to you.' : 'Track batches, groups, and conversion performance.'}
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
             desktop={
               <>
-                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
+                {!isCloser && <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />}
                 <PageRefreshButton />
-                <button
-                  type="button"
-                  onClick={() => setCreateGroupOpen(true)}
-                  className="btn-secondary btn-sm inline-flex items-center gap-1.5"
-                >
-                  + New group
-                </button>
-                <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
-                  + Create batch
-                </Link>
+                {!isCloser && (
+                  <button
+                    type="button"
+                    onClick={() => setCreateGroupOpen(true)}
+                    className="btn-secondary btn-sm inline-flex items-center gap-1.5"
+                  >
+                    + New group
+                  </button>
+                )}
+                {!isCloser && (
+                  <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
+                    + Create batch
+                  </Link>
+                )}
               </>
             }
             sheet={
-              <>
-                <button
-                  type="button"
-                  onClick={() => setCreateGroupOpen(true)}
-                  className="btn-secondary w-full inline-flex items-center justify-center"
-                >
-                  + New group
-                </button>
-                <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center mt-2">
-                  + Create batch
-                </Link>
-              </>
+              isCloser ? undefined : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setCreateGroupOpen(true)}
+                    className="btn-secondary w-full inline-flex items-center justify-center"
+                  >
+                    + New group
+                  </button>
+                  <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center mt-2">
+                    + Create batch
+                  </Link>
+                </>
+              )
             }
           />
         }
@@ -280,14 +288,16 @@ export function FollowUpBatchesPage({
         ]}
       />
 
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as 'batches' | 'groups')}
-        tabs={[
-          { value: 'batches', label: 'Batches' },
-          { value: 'groups', label: 'Groups', badge: groups.length || undefined },
-        ]}
-      />
+      {!isCloser && (
+        <Tabs
+          value={activeTab}
+          onChange={(v) => setActiveTab(v as 'batches' | 'groups')}
+          tabs={[
+            { value: 'batches', label: 'Batches' },
+            { value: 'groups', label: 'Groups', badge: groups.length || undefined },
+          ]}
+        />
+      )}
 
       {activeTab === 'groups' ? (
         <FollowUpGroupsPanel groups={groups} closers={closers} deferredLoading={deferredLoading} />

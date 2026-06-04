@@ -28,7 +28,7 @@ import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './
  * pipeline pill / pie chart on this dashboard — they're still visible in the
  * timeline and detail views. See order-status.ts for the source-of-truth list.
  */
-const CEO_VISIBLE_STATUSES = new Set(STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'FOLLOW_UP'));
+const CEO_VISIBLE_STATUSES = new Set(STATUS_OPTIONS.filter((s) => s !== 'ALL'));
 
 function buildChartDataUrl(filters: CEODashboardFilters): string {
   const params = new URLSearchParams();
