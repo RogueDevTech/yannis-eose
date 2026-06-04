@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Link } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -14,7 +14,9 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
-import { FollowUpGroupsPanel } from '~/features/cs/FollowUpGroupsPage';
+import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { FollowUpGroupsPanel, GroupFormModal } from '~/features/cs/FollowUpGroupsPage';
 import type { FollowUpGroupItem, CloserWithBranches } from '~/features/cs/FollowUpGroupsPage';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import type { FollowUpBatchDetailData } from './FollowUpBatchDetailPage';
@@ -25,6 +27,7 @@ export interface FollowUpBatchesPageData {
     name: string;
     source: string;
     branchName: string | null;
+    groupName: string | null;
     createdByName: string | null;
     orderCount: number;
     confirmed: number;
@@ -57,6 +60,13 @@ export function FollowUpBatchesPage({
   deferredLoading = false,
 }: Props) {
   const [activeTab, setActiveTab] = useState<'batches' | 'groups'>('batches');
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const createGroupFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(createGroupFetcher.data, { successMessage: 'Group created' });
+  useCloseOnFetcherSuccess(createGroupFetcher, () => {
+    setCreateGroupOpen(false);
+    setActiveTab('groups');
+  });
   const batches = batchesRaw ?? [];
   const pagination = paginationRaw ?? { page: 1, limit: 20, total: 0, totalPages: 1 };
   const showSkeleton = deferredLoading;
@@ -124,6 +134,13 @@ export function FollowUpBatchesPage({
           : (b) => <span className="text-xs text-app-fg-muted">{b.branchName ?? '—'}</span>,
       },
       {
+        key: 'group',
+        header: 'Group',
+        render: showSkeleton
+          ? () => <TableCellTextPulse className="w-[6rem]" />
+          : (b) => <span className="text-xs text-app-fg-muted">{b.groupName ?? '—'}</span>,
+      },
+      {
         key: 'orders',
         header: 'Orders',
         align: 'right',
@@ -187,7 +204,7 @@ export function FollowUpBatchesPage({
                 ariaLabel={`Actions for ${b.name}`}
                 sheetTitle={b.name}
                 actions={[
-                  { key: 'view', kind: 'button', label: 'View orders', onClick: () => openPeek(b.id) },
+                  { key: 'view', kind: 'link', label: 'View orders', to: `/admin/cs/follow-up/${b.id}` },
                 ]}
               />
             ),
@@ -204,7 +221,7 @@ export function FollowUpBatchesPage({
       <PageHeader
         title="Follow Up"
         mobileInlineActions
-        description="Track batches of reopened orders and their conversion performance."
+        description="Track batches, groups, and conversion performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
@@ -213,20 +230,46 @@ export function FollowUpBatchesPage({
               <>
                 <DateFilterBar startDate={startDate} endDate={endDate} chrome="pill" />
                 <PageRefreshButton />
+                <button
+                  type="button"
+                  onClick={() => setCreateGroupOpen(true)}
+                  className="btn-secondary btn-sm inline-flex items-center gap-1.5"
+                >
+                  + New group
+                </button>
                 <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
-                  + Create follow-up
+                  + Create batch
                 </Link>
               </>
             }
             sheet={
               <>
-                <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center">
-                  + Create follow-up
+                <button
+                  type="button"
+                  onClick={() => setCreateGroupOpen(true)}
+                  className="btn-secondary w-full inline-flex items-center justify-center"
+                >
+                  + New group
+                </button>
+                <Link to="/admin/cs/follow-up?view=create" className="btn-primary w-full inline-flex items-center justify-center mt-2">
+                  + Create batch
                 </Link>
               </>
             }
           />
         }
+      />
+
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          { label: 'Batches', value: pagination.total.toString(), onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
+          { label: 'Orders', value: totalOrders.toString(), onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
+          { label: 'Confirmed', value: totalOrders > 0 ? `${Math.round((totalConfirmed / totalOrders) * 100)}%` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums', onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
+          { label: 'Delivered', value: totalOrders > 0 ? `${Math.round((totalDelivered / totalOrders) * 100)}%` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums', onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
+          { label: 'Revenue', value: formatNaira(totalRevenue), valueClassName: 'text-app-fg tabular-nums', onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
+          { label: 'Groups', value: groups.length.toString(), onClick: () => setActiveTab('groups'), active: activeTab === 'groups' },
+        ]}
       />
 
       <Tabs
@@ -242,16 +285,6 @@ export function FollowUpBatchesPage({
         <FollowUpGroupsPanel groups={groups} closers={closers} deferredLoading={deferredLoading} />
       ) : (
       <>
-      <OverviewStatStrip
-        mobileGrid
-        items={[
-          { label: `Batches (${pagination.total})`, value: pagination.total.toString() },
-          { label: `Orders (${totalOrders})`, value: totalOrders.toString() },
-          { label: `Confirmed (${totalConfirmed})`, value: totalOrders > 0 ? `${Math.round((totalConfirmed / totalOrders) * 100)}%` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
-          { label: `Delivered (${totalDelivered})`, value: totalOrders > 0 ? `${Math.round((totalDelivered / totalOrders) * 100)}%` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
-          { label: 'Revenue recovered', value: formatNaira(totalRevenue), valueClassName: 'text-app-fg tabular-nums' },
-        ]}
-      />
 
       {batches.length === 0 && !showSkeleton ? (
         <EmptyState
@@ -259,26 +292,27 @@ export function FollowUpBatchesPage({
           description="Create your first follow-up batch to start tracking order recovery."
           action={
             <Link to="/admin/cs/follow-up?view=create" className="btn-primary btn-sm inline-flex items-center gap-1.5">
-              + Create follow-up
+              + Create batch
             </Link>
           }
         />
       ) : (
         <CompactTable<BatchRow>
           columns={columns}
-          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ id: `sk-${i}`, name: '', source: '', branchName: null, createdByName: null, orderCount: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0, createdAt: '' })) : batches}
+          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ id: `sk-${i}`, name: '', source: '', branchName: null, groupName: null, createdByName: null, orderCount: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0, createdAt: '' })) : batches}
           rowKey={(b) => b.id}
           renderMobileCard={(b) => (
-            <Link
-              to={`/admin/cs/follow-up/${b.id}`}
-              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
+            <button
+              type="button"
+              onClick={() => openPeek(b.id)}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-app-fg truncate">{b.name}</span>
                 <span className="shrink-0 text-xs text-app-fg-muted capitalize">{b.source}</span>
               </div>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                <span>{b.branchName ?? '—'}</span>
+                <span>{b.branchName ?? '—'}{b.groupName ? ` · ${b.groupName}` : ''}</span>
                 <span>{b.orderCount} orders</span>
               </div>
               <div className="flex items-center justify-between gap-2 text-xs">
@@ -288,7 +322,7 @@ export function FollowUpBatchesPage({
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                 <span>{new Date(b.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}</span>
               </div>
-            </Link>
+            </button>
           )}
         />
       )}
@@ -384,12 +418,29 @@ export function FollowUpBatchesPage({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-app-border p-3 shrink-0">
-          <button type="button" onClick={closePeek} className="btn-secondary btn-sm w-full justify-center">
+        <div className="border-t border-app-border p-3 shrink-0 flex gap-2">
+          <Link
+            to={`/admin/cs/follow-up/${peekBatchId}`}
+            onClick={closePeek}
+            className="btn-primary btn-sm flex-1 justify-center inline-flex items-center"
+          >
+            View full page
+          </Link>
+          <button type="button" onClick={closePeek} className="btn-secondary btn-sm flex-1 justify-center">
             Close
           </button>
         </div>
       </Modal>
+
+      {/* ── Create Group Modal (always mounted, works from any tab) ── */}
+      <GroupFormModal
+        open={createGroupOpen}
+        onClose={() => setCreateGroupOpen(false)}
+        closers={closers}
+        fetcher={createGroupFetcher}
+        intent="createFollowUpGroup"
+        title="New Follow-Up Group"
+      />
     </div>
   );
 }

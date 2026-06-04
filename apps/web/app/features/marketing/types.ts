@@ -462,3 +462,34 @@ export interface MarketingAdSpendLoaderData {
   /** True while deferred picklists stream on first paint (route Suspense fallback). */
   picklistsLoading?: boolean;
 }
+
+// ── Funding Ledger ──────────────────────────────────────────
+
+export interface FundingLedgerEntry {
+  id: string;
+  entryType: 'transfer_in' | 'transfer_out' | 'expense' | 'request';
+  eventDate: string;
+  amount: string;
+  balanceEffect: number;
+  runningBalance: number;
+  status: string;
+  description: string;
+  counterpartyName: string | null;
+}
+
+export interface FundingLedgerLoaderData {
+  entries: FundingLedgerEntry[];
+  total: number;
+  page: number;
+  totalPages: number;
+  summary: {
+    totalCredits: string;
+    totalDebits: string;
+    closingBalance: string;
+  };
+  selectedUserId: string;
+  selectedUserName: string;
+  mediaBuyers: Array<{ id: string; name: string }>;
+  filters: MarketingDateFilters;
+  entryTypeFilter: string;
+}

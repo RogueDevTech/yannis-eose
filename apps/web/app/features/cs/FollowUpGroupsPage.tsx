@@ -36,8 +36,8 @@ interface Props {
 }
 
 /**
- * Embeddable panel — groups table + create/edit/delete modals, no PageHeader.
- * Used as a tab inside FollowUpBatchesPage.
+ * Embeddable panel — groups table + edit/delete modals, no PageHeader.
+ * Used as a tab inside FollowUpBatchesPage. Create modal is owned by parent.
  */
 export function FollowUpGroupsPanel({ groups, closers, deferredLoading = false }: Props) {
   return <FollowUpGroupsBody groups={groups} closers={closers} deferredLoading={deferredLoading} />;
@@ -76,21 +76,16 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
 }
 
 function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props) {
-  const [createOpen, setCreateOpen] = useState(false);
   const [editGroup, setEditGroup] = useState<FollowUpGroupItem | null>(null);
   const [deleteGroup, setDeleteGroup] = useState<FollowUpGroupItem | null>(null);
   const [peekGroup, setPeekGroup] = useState<FollowUpGroupItem | null>(null);
 
-  const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(createFetcher, { successMessage: 'Group created' });
-  useCloseOnFetcherSuccess(createFetcher, () => setCreateOpen(false));
-
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(editFetcher, { successMessage: 'Group updated' });
+  useFetcherToast(editFetcher.data, { successMessage: 'Group updated' });
   useCloseOnFetcherSuccess(editFetcher, () => setEditGroup(null));
 
   const deleteFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(deleteFetcher, { successMessage: 'Group deleted' });
+  useFetcherToast(deleteFetcher.data, { successMessage: 'Group deleted' });
   useCloseOnFetcherSuccess(deleteFetcher, () => setDeleteGroup(null));
 
   const columns: CompactTableColumn<FollowUpGroupItem>[] = useMemo(
@@ -149,7 +144,6 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
             actions={[
               { key: 'view', kind: 'button', label: 'View members', onClick: () => setPeekGroup(g) },
               { key: 'edit', kind: 'button', label: 'Edit group', onClick: () => setEditGroup(g) },
-              { key: 'delete', kind: 'button', label: 'Delete group', tone: 'danger', onClick: () => setDeleteGroup(g) },
             ]}
           />
         ),
@@ -160,21 +154,10 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <button type="button" onClick={() => setCreateOpen(true)} className="btn-primary btn-sm inline-flex items-center gap-1.5">
-          + New group
-        </button>
-      </div>
-
       {groups.length === 0 && !deferredLoading ? (
         <EmptyState
           title="No follow-up groups"
-          description="Create a group of closers to assign follow-up batches."
-          action={
-            <button type="button" onClick={() => setCreateOpen(true)} className="btn-primary btn-sm inline-flex items-center gap-1.5">
-              + New group
-            </button>
-          }
+          description="Create a group of closers to assign follow-up batches. Use the '+ New group' button above."
         />
       ) : (
         <CompactTable<FollowUpGroupItem>
@@ -198,16 +181,6 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
           )}
         />
       )}
-
-      {/* ── Create Group Modal ────────────────────── */}
-      <GroupFormModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        closers={closers}
-        fetcher={createFetcher}
-        intent="createFollowUpGroup"
-        title="New Follow-Up Group"
-      />
 
       {/* ── Edit Group Modal ────────────────────── */}
       {editGroup && (
@@ -308,7 +281,7 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
 
 // ── Group Form Modal (shared create/edit) ──────────────────
 
-interface GroupFormModalProps {
+export interface GroupFormModalProps {
   open: boolean;
   onClose: () => void;
   closers: CloserWithBranches[];
@@ -318,7 +291,7 @@ interface GroupFormModalProps {
   group?: FollowUpGroupItem;
 }
 
-function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group }: GroupFormModalProps) {
+export function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group }: GroupFormModalProps) {
   const [name, setName] = useState(group?.name ?? '');
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(
     new Set(group?.members.map((m) => m.userId) ?? []),
@@ -398,7 +371,7 @@ function GroupFormModal({ open, onClose, closers, fetcher, intent, title, group 
 
         {/* Branch filter + search row */}
         <div className="flex gap-2 mb-2">
-          {branchOptions.length > 1 && (
+          {branchOptions.length > 0 && (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}

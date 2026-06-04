@@ -1295,6 +1295,7 @@ export function MarketingAdSpendPage({
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-app-fg truncate">
                   <NairaPrice amount={Number(s.spendAmount)} />
+                  <span className="ml-1.5 text-xs font-normal text-app-fg-muted">({(s.orderCount ?? 0).toLocaleString()} orders)</span>
                 </span>
                 <StatusBadge status={s.status ?? 'PENDING'} />
               </div>
