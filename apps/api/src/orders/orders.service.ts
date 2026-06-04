@@ -2813,11 +2813,13 @@ export class OrdersService {
       : [isNull(schema.orders.deletedAt), sql`${schema.orders.status} != 'CANCELLED'`];
 
     // Follow-up isolation: default excludes follow-up orders from normal list views.
-    // Explicitly pass `excludeFollowUp: false` to include follow-up orders (follow-up page).
+    // `isFollowUp: true` = show ONLY follow-ups (Follow Up pseudo-status filter).
+    // `excludeFollowUp: false` = include follow-ups alongside normal orders (follow-up page).
     // Exception: closers always see follow-up orders assigned to them in their queue.
-    if (input.excludeFollowUp !== false) {
+    if (input.isFollowUp) {
+      conditions.push(eq(schema.orders.isFollowUp, true));
+    } else if (input.excludeFollowUp !== false) {
       if (listOpts?.assignedCloserViewerId) {
-        // Show normal orders OR follow-up orders assigned to this closer
         const followUpCondition = or(
           eq(schema.orders.isFollowUp, false),
           and(eq(schema.orders.isFollowUp, true), eq(schema.orders.assignedCsId, listOpts.assignedCloserViewerId)),

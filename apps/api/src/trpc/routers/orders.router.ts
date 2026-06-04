@@ -1258,6 +1258,7 @@ export const ordersRouter = router({
       const fetchBundle = async () => {
         const [
         statusCounts,
+        followUpCounts,
         myWorkload,
         dailyCounts,
         scheduleHeat,
@@ -1278,6 +1279,20 @@ export const ordersRouter = router({
           bundleBranchScope,
           ctx.effectiveBranchIds,
           false, // exclude follow-up orders — matches orders.list default
+        ),
+        // Separate count for follow-up orders (pseudo-status pill)
+        getOrdersService().getStatusCounts(
+          scope.mediaBuyerId,
+          scope.startDate,
+          scope.endDate,
+          scope.assignedCsId,
+          undefined,
+          aggregateBranchId,
+          undefined,
+          scope.supervisorScope,
+          bundleBranchScope,
+          ctx.effectiveBranchIds,
+          true, // only follow-up orders
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
@@ -1311,8 +1326,12 @@ export const ordersRouter = router({
           : Promise.resolve(null),
       ]);
 
+      // Merge follow-up total into statusCounts as a pseudo-status
+      const followUpTotal = Object.values(followUpCounts as Record<string, number>).reduce((s, n) => s + n, 0);
+      const mergedStatusCounts = { ...statusCounts, FOLLOW_UP: followUpTotal };
+
       return {
-        statusCounts,
+        statusCounts: mergedStatusCounts,
         myWorkload,
         dailyCounts,
         scheduleHeat,
