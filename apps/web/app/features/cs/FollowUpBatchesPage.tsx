@@ -263,12 +263,12 @@ export function FollowUpBatchesPage({
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Batches', value: pagination.total.toString(), onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
-          { label: 'Orders', value: totalOrders.toString(), onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
-          { label: 'Confirmed', value: totalOrders > 0 ? `${Math.round((totalConfirmed / totalOrders) * 100)}%` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums', onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
-          { label: 'Delivered', value: totalOrders > 0 ? `${Math.round((totalDelivered / totalOrders) * 100)}%` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums', onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
-          { label: 'Revenue', value: formatNaira(totalRevenue), valueClassName: 'text-app-fg tabular-nums', onClick: () => setActiveTab('batches'), active: activeTab === 'batches' },
-          { label: 'Groups', value: groups.length.toString(), onClick: () => setActiveTab('groups'), active: activeTab === 'groups' },
+          { label: 'Batches', value: pagination.total.toString() },
+          { label: 'Orders', value: totalOrders.toString() },
+          { label: 'Confirmed', value: totalOrders > 0 ? `${Math.round((totalConfirmed / totalOrders) * 100)}%` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
+          { label: 'Delivered', value: totalOrders > 0 ? `${Math.round((totalDelivered / totalOrders) * 100)}%` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
+          { label: 'Revenue', value: formatNaira(totalRevenue), valueClassName: 'text-app-fg tabular-nums' },
+          { label: 'Groups', value: groups.length.toString() },
         ]}
       />
 
