@@ -7601,6 +7601,12 @@ export class OrdersService {
     const order = await this.getById(orderId);
     this.assertActorMayViewOrderForRead(actor, order);
 
+    // CS_CLOSER viewing a follow-up order sees it as a fresh order — no prior history.
+    // HoCS / Admin / SuperAdmin still see the full timeline.
+    if (actor.role === 'CS_CLOSER' && order.isFollowUp) {
+      return [];
+    }
+
     const rows = await this.db
       .select()
       .from(schema.orderTimelineEvents)
