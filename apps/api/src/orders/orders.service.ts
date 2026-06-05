@@ -8431,14 +8431,17 @@ export class OrdersService {
     const untouched = items.filter((i) => UNTOUCHED_STATUSES.has(i.orderStatus));
     const worked = items.filter((i) => !UNTOUCHED_STATUSES.has(i.orderStatus));
 
-    // Fully revert untouched orders — restore original status, clear assignment
-    for (const item of untouched) {
-      const restoreStatus = item.originalStatus !== 'UNKNOWN' ? item.originalStatus : 'UNPROCESSED';
+    // Fully revert untouched orders — restore original status, clear assignment.
+    // Skip orders with UNKNOWN original status — we can't safely restore them.
+    const revertable = untouched.filter((i) => i.originalStatus !== 'UNKNOWN');
+    const unknownOrigin = untouched.filter((i) => i.originalStatus === 'UNKNOWN');
+
+    for (const item of revertable) {
       await this.db
         .update(schema.orders)
         .set({
           isFollowUp: false,
-          status: restoreStatus as typeof schema.orders.$inferSelect['status'],
+          status: item.originalStatus as typeof schema.orders.$inferSelect['status'],
           assignedCsId: null,
         })
         .where(eq(schema.orders.id, item.orderId));
@@ -8453,6 +8456,15 @@ export class OrdersService {
         .where(eq(schema.orders.id, item.orderId));
     }
 
+    // Orders with unknown original status: keep isFollowUp = true, just clear assignment
+    // so they don't pollute normal views. They stay in limbo until manually handled.
+    for (const item of unknownOrigin) {
+      await this.db
+        .update(schema.orders)
+        .set({ assignedCsId: null })
+        .where(eq(schema.orders.id, item.orderId));
+    }
+
     // Mark batch as REVERTED (soft delete — keep the record for audit)
     await this.db
       .update(schema.followUpBatches)
@@ -8460,8 +8472,9 @@ export class OrdersService {
       .where(eq(schema.followUpBatches.id, batchId));
 
     return {
-      reverted: untouched.length,
+      reverted: revertable.length,
       kept: worked.length,
+      unknownOrigin: unknownOrigin.length,
     };
   }
 
