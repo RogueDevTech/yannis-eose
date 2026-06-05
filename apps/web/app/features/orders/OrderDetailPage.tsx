@@ -1330,7 +1330,7 @@ export function OrderDetailPage({
     userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
   const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
   const canEditOrderStatus =
-    userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' ||
+    userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT' ||
     userRole === 'HEAD_OF_LOGISTICS' || userRole === 'HEAD_OF_CS';
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
   // Campaign-scoped offer tiers keyed by product — feeds the Adjust order items
