@@ -8044,7 +8044,6 @@ export class OrdersService {
         status: 'UNPROCESSED',
         assignedCsId: null,
         updatedAt: now,
-        createdAt: now,
         deletedAt: null,
         isFollowUp: true,
       };
