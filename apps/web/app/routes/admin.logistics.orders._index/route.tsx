@@ -107,7 +107,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
   if (effectiveLogisticsLocationId) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
-  if (scopedStatuses) countsInput.statuses = scopedStatuses;
+  // Stat strip always shows unfiltered totals across all logistics statuses —
+  // the selected status filter only affects the table rows, not the overview.
+  countsInput.statuses = [...LOGISTICS_STATUS_SCOPE];
 
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
