@@ -293,10 +293,10 @@ function renderCSTeamMobileCardShell() {
       <div className="border-t border-app-border pt-3">
         <div className="grid grid-cols-2 gap-2">
           <CompactTableActionButton disabled className="w-full justify-center">
-            View orders
+            Orders
           </CompactTableActionButton>
           <CompactTableActionButton disabled className="w-full justify-center">
-            View profile
+            Profile
           </CompactTableActionButton>
         </div>
       </div>

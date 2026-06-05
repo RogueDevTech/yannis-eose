@@ -102,6 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       workloads: AgentWorkload[];
       leaderboard: CSLeaderboardEntry[];
       inactiveAgents: InactiveAgent[];
+      offlineCount: number;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -252,6 +253,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       backlogFilter,
       sort: sortKey,
       dateFilters: filters,
+      offlineCount: bundle?.offlineCount ?? 0,
     };
   })();
 
@@ -281,6 +283,7 @@ export default function CSTeamRoute() {
             backlogFilter={data.backlogFilter}
             sort={data.sort}
             dateFilters={data.dateFilters}
+            offlineCount={data.offlineCount}
           />
         )}
     </CachedAwait>

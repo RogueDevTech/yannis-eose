@@ -164,8 +164,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     hotSwapOrdersP,
+    apiRequest<unknown>(
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ orderSource: 'offline', limit: 1, page: 1 }))}`,
+      { method: 'GET', cookie },
+    ),
   ]).then(
-    ([dispatchSettingRes, workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes, hotSwapOrdersRes]) => {
+    ([dispatchSettingRes, workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes, hotSwapOrdersRes, offlineCountRes]) => {
   const workloads = workloadsRes.ok
     ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
     : [];
@@ -193,6 +197,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const abandonedPagination: AbandonedCartPagination = abandonedPayload
     ? { total: abandonedPayload.total, page: abandonedPayload.page, limit: abandonedPayload.limit }
     : { total: 0, page: 1, limit: ABANDONED_CARTS_PAGE_SIZE };
+
+  const offlineCount = offlineCountRes.ok
+    ? (offlineCountRes.data as { result?: { data?: { pagination: { total: number } } } })?.result?.data?.pagination?.total ?? 0
+    : 0;
 
   let hotSwapOrdersPayload: { forAgentId: string; orders: CSOrder[]; total: number } | null = null;
   if (hotSwapFromForLoader && hotSwapOrdersRes.ok) {
@@ -230,6 +238,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     activeTotal: activeData?.pagination?.total ?? 0,
     hotSwapOrdersPayload,
     statusCounts,
+    offlineCount,
     initialCartActivity: {
       activityItems,
       pendingCarts,
@@ -578,6 +587,7 @@ export async function action({ request }: ActionFunctionArgs) {
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((formData.get('totalAmount') as string) || '0') || undefined,
         ...(branchId ? { branchId } : {}),
+        ...(formData.get('customFields') ? { customFields: JSON.parse(formData.get('customFields') as string) } : {}),
       },
     });
     if (!res.ok) {

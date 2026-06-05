@@ -4000,6 +4000,9 @@ export class MarketingService {
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
       eq(schema.orders.isFollowUp, false),
+      // Exclude offline orders — marketing metrics only count edge-form orders.
+      // Offline orders affect Sales metrics only (CEO 2026-06-05).
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`,
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4016,6 +4019,7 @@ export class MarketingService {
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       eq(schema.orders.isFollowUp, false),
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`,
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -4042,6 +4046,7 @@ export class MarketingService {
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
       eq(schema.orders.isFollowUp, false),
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`,
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -5706,7 +5711,7 @@ export class MarketingService {
     };
   }
 
-  async listCampaigns(input: ListCampaignsInput, branchId?: string | null) {
+  async listCampaigns(input: ListCampaignsInput, branchId?: string | null, opts?: { enrichProductIds?: boolean }) {
     const conditions = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, input.mediaBuyerId));
@@ -5759,9 +5764,10 @@ export class MarketingService {
     const mediaBuyerIds = [
       ...new Set(campaigns.map((c) => c.mediaBuyerId).filter(Boolean)),
     ] as string[];
-    const offerGroupIds = [
-      ...new Set(campaigns.map((c) => c.offerGroupId).filter(Boolean)),
-    ] as string[];
+    const enrichProductIds = opts?.enrichProductIds !== false;
+    const offerGroupIds = enrichProductIds
+      ? ([...new Set(campaigns.map((c) => c.offerGroupId).filter(Boolean))] as string[])
+      : [];
 
     const [mediaBuyerRows, offerGroupItemRows] = await Promise.all([
       mediaBuyerIds.length > 0
@@ -5794,6 +5800,12 @@ export class MarketingService {
 
     return {
       campaigns: campaigns.map((c) => {
+        if (!enrichProductIds) {
+          return {
+            ...c,
+            mediaBuyerName: c.mediaBuyerId ? (mediaBuyerNames.get(c.mediaBuyerId) ?? null) : null,
+          };
+        }
         // Merge productIds from legacy field + offer group items so the
         // product filter on the Forms page finds forms by any product
         // referenced in the offer group (not just the legacy productIds).

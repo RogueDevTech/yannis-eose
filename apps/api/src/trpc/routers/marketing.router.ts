@@ -1062,6 +1062,7 @@ export const marketingRouter = router({
         productsResult,
         campaignsResult,
         abandonedCartCount,
+        supplementaryCounts,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
           ordersScope.mediaBuyerId,
@@ -1081,6 +1082,9 @@ export const marketingRouter = router({
           // filters isFollowUp=false. Without this, reopened follow-up orders
           // inflate Unassigned/Assigned counts beyond Total Orders.
           false,
+          // Exclude offline orders — marketing metrics only count edge-form orders.
+          // Offline orders affect Sales metrics only (CEO 2026-06-05).
+          true,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1149,10 +1153,22 @@ export const marketingRouter = router({
             ...(ctx.user.role === 'MEDIA_BUYER' ? { mediaBuyerId: ctx.user.id } : {}),
           },
           null, // Forms are global — never branch-scoped
+          { enrichProductIds: false }, // Orders page only needs id+name for the filter dropdown
         ),
         // Open abandoned-cart count for the overview strip — scoped to the same
         // media buyer / branch / date range the rest of the bundle uses.
         getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId, startDate, endDate }),
+        // Supplementary counts: offline + duplicate — same scope as statusCounts.
+        getOrdersService().getSupplementaryCounts(
+          ordersScope.mediaBuyerId,
+          ordersScope.startDate,
+          ordersScope.endDate,
+          ordersScope.assignedCsId,
+          branchId,
+          ordersScope.supervisorScope,
+          'marketing',
+          ctx.effectiveBranchIds,
+        ),
       ]);
 
       // Slim the picklist payloads down to what the page actually uses (id + name)
@@ -1198,6 +1214,8 @@ export const marketingRouter = router({
         productsForFilter,
         campaignsForFilter,
         abandonedCartCount,
+        offlineCount: supplementaryCounts.offlineCount,
+        duplicateCount: supplementaryCounts.duplicateCount,
       };
     }),
 
@@ -1370,8 +1388,8 @@ export const marketingRouter = router({
 
       const [adSpendStatusCounts, campaigns, buyersResult, teamsRaw] = await Promise.all([
         getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
-        // Forms are global — never branch-scoped.
-        getMarketingService().listCampaigns(campaignsScope, null),
+        // Forms are global — never branch-scoped. Skip offer group enrichment (only needs id+name).
+        getMarketingService().listCampaigns(campaignsScope, null, { enrichProductIds: false }),
         canSeeBuyerPicklist
           ? supervisorBuyerIds
             ? getUsersService()

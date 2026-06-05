@@ -380,6 +380,8 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'LINE_PRICE_CHANGE_REJECTED',
   'CS_ORDER_COMMENT',
   'ORDER_RESTORED',
+  'ORDER_RETRACKED',
+  'ORDER_CS_TRANSFERRED_POST_STATUS',
 ]);
 
 /** Staff onboarding workflow — non-blocking record-keeping flow. */
