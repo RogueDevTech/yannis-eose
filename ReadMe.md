@@ -12,7 +12,7 @@ docker restart yannis-eose-api-1
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
-docker exec yannis-eose-api-1 node -e 'require("postgres")(process.env.DATABASE_URL)`SELECT COUNT(*)::int c FROM follow_up_batch_items i JOIN follow_up_batches b ON b.id=i.batch_id JOIN orders o ON o.id=i.order_id WHERE b.status=${"REVERTED"} AND o.created_at>=${"2026-06-04T00:00:00+01:00"}`.then(r=>{console.log("batch orders still with jun4+ date:",r[0].c);process.exit()})'
+docker exec yannis-eose-api-1 node -e 'require("postgres")(process.env.DATABASE_URL)`SELECT COUNT(*)::int c FROM follow_up_batch_items i JOIN follow_up_batches b ON b.id=i.batch_id JOIN orders o ON o.id=i.order_id WHERE b.status=${"REVERTED"} AND (o.assigned_cs_id IS NULL OR o.created_at>=${"2026-06-04T00:00:00+01:00"})`.then(r=>{console.log("still broken:",r[0].c);process.exit()})'
 
 
 pnpm --filter @yannis/api dev
