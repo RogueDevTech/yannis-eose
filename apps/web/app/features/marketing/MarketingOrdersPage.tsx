@@ -81,6 +81,7 @@ const MARKETING_ORDERS_STATUS_OPTIONS_BASE = MARKETING_ORDERS_STATUSES.map((stat
 
 /** Sentinel — not a real order status. Selecting it activates the `?fromCart=1` view. */
 const FROM_CART_STATUS_VALUE = '__from_cart__';
+const OFFLINE_STATUS_VALUE = '__offline__';
 const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
 
 /** Marketing performance metrics — same shape as `marketing.metrics` / dashboard. */
@@ -113,6 +114,8 @@ export type MarketingOrdersSecondaryPayload = {
   campaignsForFilter: Array<{ id: string; name: string }>;
   /** Open (un-recovered) abandoned-cart count, scoped to the viewer's media buyer / branch. */
   abandonedCartCount: number;
+  offlineCount: number;
+  duplicateCount: number;
 };
 
 interface MarketingOrdersPageProps {
@@ -225,12 +228,15 @@ export function MarketingOrdersPage({
   // The "Cart abandonment" pseudo-status is selected whenever `?fromCart=1` is on.
   const fromCartUrlActive = searchParams.get('fromCart') === '1';
   const testOrdersUrlActive = searchParams.get('testOrders') === '1';
+  const offlineUrlActive = searchParams.get('orderSource') === 'offline';
   const [selectedStatus, setSelectedStatus] = useState(
-    enableTestOrdersOption && testOrdersUrlActive
-      ? TEST_ORDERS_STATUS_VALUE
-      : enableFromCartStatusOption && fromCartUrlActive
-        ? FROM_CART_STATUS_VALUE
-        : statusFilter || 'ALL',
+    offlineUrlActive
+      ? OFFLINE_STATUS_VALUE
+      : enableTestOrdersOption && testOrdersUrlActive
+        ? TEST_ORDERS_STATUS_VALUE
+        : enableFromCartStatusOption && fromCartUrlActive
+          ? FROM_CART_STATUS_VALUE
+          : statusFilter || 'ALL',
   );
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [myTeamTab, setMyTeamTab] = useState<'personal' | 'team'>(
@@ -250,15 +256,17 @@ export function MarketingOrdersPage({
 
   useEffect(() => {
     setSelectedStatus(
-      enableTestOrdersOption && testOrdersUrlActive
-        ? TEST_ORDERS_STATUS_VALUE
-        : enableFromCartStatusOption && fromCartUrlActive
-          ? FROM_CART_STATUS_VALUE
-          : statusFilter || 'ALL',
+      offlineUrlActive
+        ? OFFLINE_STATUS_VALUE
+        : enableTestOrdersOption && testOrdersUrlActive
+          ? TEST_ORDERS_STATUS_VALUE
+          : enableFromCartStatusOption && fromCartUrlActive
+            ? FROM_CART_STATUS_VALUE
+            : statusFilter || 'ALL',
     );
     setSearchQuery(searchFilter || '');
     setMyTeamTab(activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team');
-  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, activeMediaBuyerFilter, viewerUserId]);
+  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, offlineUrlActive, activeMediaBuyerFilter, viewerUserId]);
 
   // Quick-detail modal for an abandoned cart row — fetched on demand from the
   // marketing cart-detail resource route (scoped server-side to the viewer).
@@ -281,14 +289,22 @@ export function MarketingOrdersPage({
       if (status === FROM_CART_STATUS_VALUE) {
         next.delete('status');
         next.delete('testOrders');
+        next.delete('orderSource');
         next.set('fromCart', '1');
       } else if (status === TEST_ORDERS_STATUS_VALUE) {
         next.delete('status');
         next.delete('fromCart');
+        next.delete('orderSource');
         next.set('testOrders', '1');
+      } else if (status === OFFLINE_STATUS_VALUE) {
+        next.delete('status');
+        next.delete('fromCart');
+        next.delete('testOrders');
+        next.set('orderSource', 'offline');
       } else {
         next.delete('fromCart');
         next.delete('testOrders');
+        next.delete('orderSource');
         if (status === 'ALL' || !status) next.delete('status');
         else next.set('status', status);
       }

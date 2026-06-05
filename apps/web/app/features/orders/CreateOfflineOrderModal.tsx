@@ -46,6 +46,14 @@ interface CreateOfflineOrderModalProps {
   canEditPrices?: boolean;
 }
 
+const NIGERIAN_STATES = [
+  'Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun',
+  'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo',
+  'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue',
+  'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe',
+  'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi',
+];
+
 export function CreateOfflineOrderModal({
   open,
   onClose,
@@ -69,6 +77,9 @@ export function CreateOfflineOrderModal({
   const [paymentMethod, setPaymentMethod] = useState<'PAY_ON_DELIVERY' | 'PAY_ONLINE'>('PAY_ON_DELIVERY');
   const [customerEmail, setCustomerEmail] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
+
+  // Extra custom fields
+  const [extraFields, setExtraFields] = useState<Array<{ label: string; value: string }>>([]);
 
   // Product + offer selection (single product per order, like the customer flow)
   const [productId, setProductId] = useState('');
@@ -135,6 +146,7 @@ export function CreateOfflineOrderModal({
     setCustomerEmail('');
     setProductId('');
     setSelectedOfferLabel('');
+    setExtraFields([]);
   }
 
   function onProductChange(id: string) {
@@ -173,6 +185,16 @@ export function CreateOfflineOrderModal({
     if (customerGender) formData.set('customerGender', customerGender);
     if (preferredDeliveryDate.trim()) formData.set('preferredDeliveryDate', preferredDeliveryDate.trim());
     if (paymentMethod === 'PAY_ONLINE' && customerEmail.trim()) formData.set('customerEmail', customerEmail.trim());
+    // Extra custom fields → orders.custom_fields JSONB
+    const filledFields = extraFields.filter((f) => f.label.trim() && f.value.trim());
+    if (filledFields.length > 0) {
+      const customFields: Record<string, { label: string; value: string }> = {};
+      for (const f of filledFields) {
+        const id = f.label.trim().toLowerCase().replace(/\s+/g, '_');
+        customFields[id] = { label: f.label.trim(), value: f.value.trim() };
+      }
+      formData.set('customFields', JSON.stringify(customFields));
+    }
     if (branchId?.trim()) formData.set('branchId', branchId.trim());
     fetcher.submit(formData, { method: 'post' });
   }
@@ -230,11 +252,13 @@ export function CreateOfflineOrderModal({
                 inputMode="numeric"
                 label="Customer phone *"
                 required
+                minLength={10}
+                maxLength={15}
                 value={customerPhone}
                 onChange={(e) => setCustomerPhone(e.target.value.replace(/[^\d+\-\s()]/g, ''))}
                 placeholder="e.g. 08012345678"
-                pattern="[0-9+\-\s()]*"
-                title="Numbers only"
+                pattern="[0-9+\-\s()]{10,15}"
+                title="Phone number must be 10–15 digits"
               />
             </div>
 
@@ -253,12 +277,14 @@ export function CreateOfflineOrderModal({
               placeholder="Delivery address"
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <TextInput
-                type="text"
+              <FormSelect
                 label="Delivery state"
                 value={deliveryState}
                 onChange={(e) => setDeliveryState(e.target.value)}
-                placeholder="State"
+                options={[
+                  { value: '', label: 'Select state' },
+                  ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
+                ]}
               />
               <TextInput
                 type="date"
@@ -374,6 +400,67 @@ export function CreateOfflineOrderModal({
               onChange={(e) => setDeliveryNotes(e.target.value)}
               placeholder="Notes"
             />
+
+            {/* ── Extra Fields ─────────────────────────────── */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-app-fg-muted">
+                  Extra fields
+                </label>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setExtraFields((prev) => [...prev, { label: '', value: '' }])}
+                >
+                  + Add field
+                </Button>
+              </div>
+              {extraFields.length > 0 && (
+                <div className="space-y-2">
+                  {extraFields.map((field, idx) => (
+                    <div key={idx} className="flex items-end gap-2 rounded-lg bg-app-hover p-2.5">
+                      <div className="flex-1 min-w-0">
+                        <TextInput
+                          label={idx === 0 ? 'Label' : undefined}
+                          value={field.label}
+                          onChange={(e) =>
+                            setExtraFields((prev) =>
+                              prev.map((f, i) => (i === idx ? { ...f, label: e.target.value } : f)),
+                            )
+                          }
+                          placeholder="e.g. Health condition"
+                          controlSize="sm"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <TextInput
+                          label={idx === 0 ? 'Value' : undefined}
+                          value={field.value}
+                          onChange={(e) =>
+                            setExtraFields((prev) =>
+                              prev.map((f, i) => (i === idx ? { ...f, value: e.target.value } : f)),
+                            )
+                          }
+                          placeholder="e.g. Diabetes"
+                          controlSize="sm"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setExtraFields((prev) => prev.filter((_, i) => i !== idx))}
+                        className="shrink-0 text-app-fg-muted hover:text-danger-600 p-1"
+                        aria-label="Remove field"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-app-border shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">

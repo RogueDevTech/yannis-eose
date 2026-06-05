@@ -1723,6 +1723,7 @@ export class OrdersService {
           // Back-link to the cart when this offline order was created from a
           // recovered cart (Assign-from-Modal flow). NULL for direct offline orders.
           cartId: input.cartId ?? null,
+          customFields: input.customFields ?? null,
         })
         .returning();
 
@@ -3567,6 +3568,25 @@ export class OrdersService {
       updateFields[tsField] = new Date();
     }
 
+    // Retrack: when rolling back to an earlier status, clear timestamps of
+    // all later lifecycle stages so the order doesn't carry stale dates.
+    // The timeline / activity log is untouched — it records every event permanently.
+    const LIFECYCLE_ORDER: Array<{ status: string; tsField: string }> = [
+      { status: 'CONFIRMED', tsField: 'confirmedAt' },
+      { status: 'AGENT_ASSIGNED', tsField: 'allocatedAt' },
+      { status: 'DISPATCHED', tsField: 'dispatchedAt' },
+      { status: 'DELIVERED', tsField: 'deliveredAt' },
+    ];
+    const targetIdx = LIFECYCLE_ORDER.findIndex((s) => s.status === newStatus);
+    const currentIdx = LIFECYCLE_ORDER.findIndex((s) => s.status === currentStatus);
+    if (currentIdx > targetIdx) {
+      // Rolling backward — clear all timestamp fields after the target status
+      const startClear = targetIdx < 0 ? 0 : targetIdx + 1;
+      for (let i = startClear; i < LIFECYCLE_ORDER.length; i++) {
+        updateFields[LIFECYCLE_ORDER[i]!.tsField] = null;
+      }
+    }
+
     // 15-min order lock on CS_ENGAGED (agent clicks Call)
     if (newStatus === 'CS_ENGAGED') {
       const lockExpiry = new Date(Date.now() + 15 * 60 * 1000);
@@ -3752,7 +3772,16 @@ export class OrdersService {
       RESTOCKED: 'ORDER_RESTOCKED',
       WRITTEN_OFF: 'ORDER_WRITTEN_OFF',
     };
-    const timelineType = timelineEventMap[newStatus];
+    // Detect retrack (backward transition) by lifecycle position
+    const LIFECYCLE_POSITION: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const isRetrack =
+      (LIFECYCLE_POSITION[currentStatus] ?? -1) > (LIFECYCLE_POSITION[newStatus] ?? -1) &&
+      newStatus !== 'UNPROCESSED'; // DELETED→UNPROCESSED is a restore, not a retrack
+
+    const timelineType = isRetrack ? 'ORDER_RETRACKED' : timelineEventMap[newStatus];
     if (timelineType) {
       const reason = typeof input.metadata?.reason === 'string' ? input.metadata.reason : undefined;
       // Resolve the 3PL location name so the timeline reads
@@ -3802,7 +3831,9 @@ export class OrdersService {
         eventType: timelineType,
         actorId: actor.id,
         actorName: actor.name ?? null,
-        description: this.buildTransitionActivityDescription(newStatus, {
+        description: isRetrack
+          ? `Order retracked from ${currentStatus.replace(/_/g, ' ')} to ${newStatus.replace(/_/g, ' ')}${reason ? ` — ${reason}` : ''}`
+          : this.buildTransitionActivityDescription(newStatus, {
           reason,
           preferredDeliveryDate:
             typeof input.metadata?.preferredDeliveryDate === 'string'
@@ -4872,6 +4903,8 @@ export class OrdersService {
     effectiveBranchIds?: string[] | null,
     /** When true, count only follow-up orders. When false, exclude them. When undefined, count all. */
     isFollowUp?: boolean,
+    /** When true, exclude offline-created orders from counts. Marketing surfaces pass true. */
+    excludeOffline?: boolean,
   ) {
     // Status counts always include every status (including DELETED) so the
     // stat strip can show the Deleted count. CANCELLED is merged into DELETED
@@ -4881,6 +4914,9 @@ export class OrdersService {
     // Follow-up isolation: when explicitly set, filter by follow-up flag. When undefined, show all.
     if (isFollowUp !== undefined) {
       conditions.push(eq(schema.orders.isFollowUp, isFollowUp));
+    }
+    if (excludeOffline) {
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`);
     }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId,
@@ -4914,6 +4950,47 @@ export class OrdersService {
       delete counts['CANCELLED'];
     }
     return counts;
+  }
+
+  /**
+   * Supplementary counts for the stat strip: offline-created orders and flagged duplicates.
+   * Uses the same scope as `getStatusCounts` so numbers are consistent.
+   */
+  async getSupplementaryCounts(
+    mediaBuyerId?: string,
+    startDate?: string,
+    endDate?: string,
+    assignedCsId?: string,
+    branchId?: string | null,
+    supervisorScope?: OrdersAggregateSupervisorScope,
+    branchScope: 'servicing' | 'marketing' = 'servicing',
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{ offlineCount: number; duplicateCount: number }> {
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.isFollowUp, false),
+    ];
+    appendOrdersAggregateScopeConditions(conditions, { mediaBuyerId, assignedCsId, supervisorScope });
+    const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [offlineRows, duplicateRows] = await Promise.all([
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(and(whereClause, eq(schema.orders.orderSource, 'offline'))),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(and(whereClause, sql`${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != ''`)),
+    ]);
+
+    return {
+      offlineCount: offlineRows[0]?.count ?? 0,
+      duplicateCount: duplicateRows[0]?.count ?? 0,
+    };
   }
 
   /**
@@ -8001,9 +8078,12 @@ export class OrdersService {
   }
 
   /**
-   * Reopen closed/stuck orders for follow-up. Always resets to UNPROCESSED,
-   * clears CS assignment, and optionally moves to a new servicing branch.
-   * All order data, timeline, items, and marketing attribution are preserved.
+   * Create follow-up copies of existing orders. The originals are NEVER mutated.
+   * Each copy gets a new order number (YNS-XXXXX), isFollowUp = true, and a
+   * follow_up_source_order_id linking back to the original. Customer data,
+   * items, and amounts are copied. The copy starts as UNPROCESSED.
+   *
+   * Returns the newly created order IDs (not the originals).
    */
   async reopenForFollowUp(
     orderIds: string[],
@@ -8013,100 +8093,111 @@ export class OrdersService {
     const unique = [...new Set(orderIds)];
     if (unique.length === 0) return { results: [], succeeded: 0, failed: 0, total: 0 };
 
-    // 1. Batch-read all orders in one query
-    const existingOrders = await this.db
-      .select({
-        id: schema.orders.id,
-        status: schema.orders.status,
-        servicingBranchId: schema.orders.servicingBranchId,
-      })
+    // 1. Read full original orders
+    const originals = await this.db
+      .select()
       .from(schema.orders)
       .where(inArray(schema.orders.id, unique));
 
-    const orderMap = new Map(existingOrders.map((o) => [o.id, o]));
-    const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
-    const toUpdate: Array<{ id: string; previousStatus: string; previousBranchId: string | null }> = [];
+    const orderMap = new Map(originals.map((o) => [o.id, o]));
 
-    for (const id of unique) {
-      const order = orderMap.get(id);
-      if (!order) { results.push({ orderId: id, success: false, error: 'Order not found' }); continue; }
-      if (order.status === 'UNPROCESSED') { results.push({ orderId: id, success: false, error: 'Already unprocessed' }); continue; }
-      toUpdate.push({ id, previousStatus: order.status, previousBranchId: order.servicingBranchId });
+    // 2. Read all order items for originals
+    const originalItems = originals.length > 0
+      ? await this.db
+          .select()
+          .from(schema.orderItems)
+          .where(inArray(schema.orderItems.orderId, unique))
+      : [];
+    const itemsByOrder = new Map<string, typeof originalItems>();
+    for (const item of originalItems) {
+      const list = itemsByOrder.get(item.orderId) ?? [];
+      list.push(item);
+      itemsByOrder.set(item.orderId, list);
     }
 
-    if (toUpdate.length > 0) {
-      const targetBranch = opts?.targetBranchId;
-      const now = new Date();
-      const updateIds = toUpdate.map((o) => o.id);
+    const targetBranch = opts?.targetBranchId;
+    const results: Array<{ orderId: string; newOrderId: string; success: boolean; error?: string }> = [];
 
-      // 2. Batch-update all eligible orders in one query
-      const updateFields: Record<string, unknown> = {
-        status: 'UNPROCESSED',
-        assignedCsId: null,
-        updatedAt: now,
-        deletedAt: null,
-        isFollowUp: true,
-      };
-      if (targetBranch) updateFields.servicingBranchId = targetBranch;
+    // 3. Create copies one by one (each gets a new auto-incremented order_number)
+    for (const sourceId of unique) {
+      const orig = orderMap.get(sourceId);
+      if (!orig) { results.push({ orderId: sourceId, newOrderId: '', success: false, error: 'Order not found' }); continue; }
 
-      await withActorAndBranch(
-        this.db,
-        { id: actor.id, currentBranchId: targetBranch ?? actor.currentBranchId },
-        async (tx) => {
-          await tx
-            .update(schema.orders)
-            .set(updateFields)
-            .where(inArray(schema.orders.id, updateIds));
-        },
-      );
-
-      // 3. Resolve branch name for human-readable timeline
-      let targetBranchName: string | null = null;
-      if (targetBranch) {
-        const [br] = await this.db
-          .select({ name: schema.branches.name })
-          .from(schema.branches)
-          .where(eq(schema.branches.id, targetBranch))
-          .limit(1);
-        targetBranchName = br?.name ?? null;
-      }
-
-      // 4. Batch-insert timeline events
-      const timelineRows = toUpdate.map((o) => {
-        const branchChanged = targetBranch && targetBranch !== o.previousBranchId;
-        const branchNote = branchChanged ? ` Moved to ${targetBranchName ?? 'another branch'}.` : '';
-        return {
-          orderId: o.id,
-          eventType: 'ORDER_RESTORED' as const,
-          actorId: actor.id,
-          actorName: actor.name ?? null,
-          description: `Reopened for follow-up. Previous status: ${o.previousStatus}.${branchNote}`,
-          metadata: {
-            previousStatus: o.previousStatus,
-            ...(branchChanged ? { previousServicingBranchId: o.previousBranchId, targetServicingBranchId: targetBranch } : {}),
+      try {
+        const [newOrder] = await withActorAndBranch(
+          this.db,
+          { id: actor.id, currentBranchId: targetBranch ?? actor.currentBranchId },
+          async (tx) => {
+            return tx
+              .insert(schema.orders)
+              .values({
+                // Copy customer + product data from original
+                customerName: orig.customerName,
+                customerPhoneHash: orig.customerPhoneHash,
+                customerPhone: orig.customerPhone,
+                customerAddress: orig.customerAddress,
+                deliveryAddress: orig.deliveryAddress,
+                deliveryNotes: orig.deliveryNotes,
+                deliveryState: orig.deliveryState,
+                customerGender: orig.customerGender,
+                customerEmail: orig.customerEmail,
+                totalAmount: orig.totalAmount,
+                items: orig.items,
+                paymentMethod: orig.paymentMethod,
+                preferredDeliveryDate: orig.preferredDeliveryDate,
+                customFields: orig.customFields,
+                orderSource: 'follow-up',
+                // Follow-up specific
+                isFollowUp: true,
+                followUpSourceOrderId: sourceId,
+                status: 'UNPROCESSED',
+                // Branch: use target or original's servicing branch
+                servicingBranchId: targetBranch ?? orig.servicingBranchId,
+                branchId: orig.branchId,
+                // Keep marketing attribution for tracking
+                campaignId: orig.campaignId,
+                mediaBuyerId: orig.mediaBuyerId,
+              })
+              .returning({ id: schema.orders.id, orderNumber: schema.orders.orderNumber });
           },
-          branchId: targetBranch ?? o.previousBranchId,
-        };
-      });
-      if (timelineRows.length > 0) {
-        await this.db.insert(schema.orderTimelineEvents).values(timelineRows);
-      }
-
-      // 4. Update existing ORDER_RECEIVED events to reflect follow-up origin
-      await this.db
-        .update(schema.orderTimelineEvents)
-        .set({
-          description: 'Order recreated as follow-up',
-          actorName: actor.name ?? 'Follow Up',
-        })
-        .where(
-          and(
-            inArray(schema.orderTimelineEvents.orderId, updateIds),
-            eq(schema.orderTimelineEvents.eventType, 'ORDER_RECEIVED'),
-          ),
         );
 
-      for (const o of toUpdate) results.push({ orderId: o.id, success: true });
+        // 4. Copy order items
+        const sourceItems = itemsByOrder.get(sourceId) ?? [];
+        if (sourceItems.length > 0 && newOrder) {
+          await this.db.insert(schema.orderItems).values(
+            sourceItems.map((item) => ({
+              orderId: newOrder.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              offerLabel: item.offerLabel,
+            })),
+          );
+        }
+
+        // 5. Write timeline event on the NEW order
+        if (newOrder) {
+          await this.db.insert(schema.orderTimelineEvents).values({
+            orderId: newOrder.id,
+            eventType: 'ORDER_RECEIVED' as const,
+            actorId: actor.id,
+            actorName: actor.name ?? null,
+            description: `Follow-up order created from original YNS-${String(orig.orderNumber).padStart(5, '0')}. Original status: ${orig.status}.`,
+            metadata: {
+              sourceOrderId: sourceId,
+              sourceOrderNumber: orig.orderNumber,
+              sourceStatus: orig.status,
+            },
+            branchId: targetBranch ?? orig.servicingBranchId,
+          });
+        }
+
+        results.push({ orderId: sourceId, newOrderId: newOrder?.id ?? '', success: true });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        results.push({ orderId: sourceId, newOrderId: '', success: false, error: message });
+      }
     }
 
     return {
@@ -8293,9 +8384,11 @@ export class OrdersService {
         assignedCsId: schema.followUpBatchItems.assignedCsId,
         addedAt: schema.followUpBatchItems.createdAt,
         orderStatus: schema.orders.status,
+        orderNumber: schema.orders.orderNumber,
         customerName: schema.orders.customerName,
         totalAmount: schema.orders.totalAmount,
         orderCreatedAt: schema.orders.createdAt,
+        followUpSourceOrderId: schema.orders.followUpSourceOrderId,
       })
       .from(schema.followUpBatchItems)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
@@ -8405,6 +8498,11 @@ export class OrdersService {
    * to their original state. Orders that have progressed beyond CS_ASSIGNED are
    * left as-is — you can't un-confirm a real order.
    */
+  /**
+   * Delete a follow-up batch. Since batch items now point to COPY orders
+   * (not originals), we soft-delete untouched copies and keep worked ones.
+   * Original orders are NEVER touched.
+   */
   async deleteFollowUpBatch(batchId: string) {
     const [batch] = await this.db
       .select()
@@ -8413,68 +8511,37 @@ export class OrdersService {
       .limit(1);
     if (!batch) throw new TRPCError({ code: 'NOT_FOUND', message: 'Batch not found' });
 
-    // Get all batch items with current order status
     const items = await this.db
       .select({
-        itemId: schema.followUpBatchItems.id,
         orderId: schema.followUpBatchItems.orderId,
-        originalStatus: schema.followUpBatchItems.originalStatus,
         orderStatus: schema.orders.status,
       })
       .from(schema.followUpBatchItems)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))
       .where(eq(schema.followUpBatchItems.batchId, batchId));
 
-    // Untouched = can be fully reverted; worked = keep assignment, just unflag follow-up
-    const UNTOUCHED_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
-    const untouched = items.filter((i) => UNTOUCHED_STATUSES.has(i.orderStatus));
-    const worked = items.filter((i) => !UNTOUCHED_STATUSES.has(i.orderStatus));
+    const UNTOUCHED = new Set(['UNPROCESSED', 'CS_ASSIGNED']);
+    const untouched = items.filter((i) => UNTOUCHED.has(i.orderStatus));
+    const worked = items.filter((i) => !UNTOUCHED.has(i.orderStatus));
 
-    // Fully revert untouched orders — restore original status, clear assignment.
-    // Skip orders with UNKNOWN original status — we can't safely restore them.
-    const revertable = untouched.filter((i) => i.originalStatus !== 'UNKNOWN');
-    const unknownOrigin = untouched.filter((i) => i.originalStatus === 'UNKNOWN');
-
-    for (const item of revertable) {
+    // Soft-delete untouched copy orders
+    const now = new Date();
+    for (const item of untouched) {
       await this.db
         .update(schema.orders)
-        .set({
-          isFollowUp: false,
-          status: item.originalStatus as typeof schema.orders.$inferSelect['status'],
-          assignedCsId: null,
-        })
+        .set({ status: 'DELETED', deletedAt: now })
         .where(eq(schema.orders.id, item.orderId));
     }
 
-    // Worked orders: keep current status + assigned closer, just remove follow-up flag
-    // so they become normal orders and the work stays with the closer
-    for (const item of worked) {
-      await this.db
-        .update(schema.orders)
-        .set({ isFollowUp: false })
-        .where(eq(schema.orders.id, item.orderId));
-    }
+    // Worked copies stay as-is — work remains with the closer
 
-    // Orders with unknown original status: keep isFollowUp = true, just clear assignment
-    // so they don't pollute normal views. They stay in limbo until manually handled.
-    for (const item of unknownOrigin) {
-      await this.db
-        .update(schema.orders)
-        .set({ assignedCsId: null })
-        .where(eq(schema.orders.id, item.orderId));
-    }
-
-    // Mark batch as REVERTED (soft delete — keep the record for audit)
+    // Mark batch as REVERTED
     await this.db
       .update(schema.followUpBatches)
       .set({ status: 'REVERTED' })
       .where(eq(schema.followUpBatches.id, batchId));
 
-    return {
-      reverted: revertable.length,
-      kept: worked.length,
-      unknownOrigin: unknownOrigin.length,
-    };
+    return { deleted: untouched.length, kept: worked.length };
   }
 
   // ── Follow-Up Groups ────────────────────────────────────────

@@ -116,6 +116,10 @@ export const createOfflineOrderSchema = z.object({
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
   paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
   customerEmail: z.string().email().max(255).optional(),
+  /** Ad-hoc custom fields added by the CS rep during offline order creation. */
+  customFields: z
+    .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50), z.object({ label: z.string(), value: z.string() })]))
+    .optional(),
 });
 
 export type CreateOfflineOrderInput = z.infer<typeof createOfflineOrderSchema>;

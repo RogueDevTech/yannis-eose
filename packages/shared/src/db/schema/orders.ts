@@ -103,8 +103,10 @@ export const orders = pgTable('orders', {
    * Rows are never physically removed — temporal history + audit remain intact.
    */
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  /** Set to true when an order is reopened via the Follow Up page. */
+  /** Set to true when an order is a follow-up copy. Excludes from normal order views. */
   isFollowUp: boolean('is_follow_up').default(false).notNull(),
+  /** Links a follow-up copy back to the original order. NULL for normal orders. */
+  followUpSourceOrderId: uuid('follow_up_source_order_id'),
   ...temporalColumns,
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

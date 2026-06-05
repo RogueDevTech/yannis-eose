@@ -36,6 +36,8 @@ const EMPTY_SECONDARY: MarketingOrdersSecondaryPayload = {
   productsForFilter: [],
   campaignsForFilter: [],
   abandonedCartCount: 0,
+  offlineCount: 0,
+  duplicateCount: 0,
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -306,6 +308,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 productsForFilter: Array<{ id: string; name: string }>;
                 campaignsForFilter: Array<{ id: string; name: string }>;
                 abandonedCartCount: number;
+                offlineCount: number;
+                duplicateCount: number;
               };
             };
           })?.result?.data
@@ -340,6 +344,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         productsForFilter,
         campaignsForFilter,
         abandonedCartCount: data?.abandonedCartCount ?? 0,
+        offlineCount: data?.offlineCount ?? 0,
+        duplicateCount: data?.duplicateCount ?? 0,
       };
     } catch (err) {
       console.error('[marketing.ordersPageBundle] Secondary bundle failed:', err instanceof Error ? err.message : err);
@@ -354,6 +360,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         productsForFilter: [],
         campaignsForFilter: [],
         abandonedCartCount: 0,
+        offlineCount: 0,
+        duplicateCount: 0,
       };
     }
   })();
@@ -388,6 +396,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
                     productsForFilter: Array<{ id: string; name: string }>;
                     campaignsForFilter: Array<{ id: string; name: string }>;
                     abandonedCartCount: number;
+                    offlineCount: number;
+                    duplicateCount: number;
                   };
                 };
               })?.result?.data
@@ -404,6 +414,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
             productsForFilter: [],
             campaignsForFilter: [],
             abandonedCartCount: data?.abandonedCartCount ?? 0,
+            offlineCount: data?.offlineCount ?? 0,
+            duplicateCount: data?.duplicateCount ?? 0,
           };
         } catch {
           return null;

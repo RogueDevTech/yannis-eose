@@ -183,6 +183,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
   const testOrders = testOrdersParam && canFilterTestOrders;
 
+  const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | null;
+  const orderSource = orderSourceParam === 'offline' ? 'offline' : undefined;
+
   const productIdParam = url.searchParams.get('productId') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
@@ -202,6 +205,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(productIdParam && { productId: productIdParam }),
     ...(fromCart && { fromCart: true }),
     ...(testOrders && { testOrders: true }),
+    ...(orderSource && { orderSource }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -387,6 +391,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         offers?: Array<{ label: string; price: string; qty: number }>;
       }>;
       cartAbandonmentCount: number | null;
+      offlineCount: number;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -402,6 +407,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
       productsForFilter: (bundle?.productsForOfflineOrder ?? []).map((p) => ({ id: p.id, name: p.name })),
       cartAbandonmentCount: bundle?.cartAbandonmentCount ?? null,
+      offlineCount: bundle?.offlineCount ?? 0,
     };
   })();
 
@@ -529,6 +535,7 @@ export async function action({ request }: ActionFunctionArgs) {
         customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
+        ...(form.get('customFields') ? { customFields: JSON.parse(form.get('customFields') as string) } : {}),
       },
     });
     if (!res.ok) {

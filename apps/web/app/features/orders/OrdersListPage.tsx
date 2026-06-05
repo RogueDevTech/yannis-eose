@@ -78,6 +78,7 @@ export type CsOrdersDeferredSecondary = {
   productsForFilter?: Array<{ id: string; name: string }>;
   /** Open abandoned-cart count for the overview strip — null when the viewer is not HoCS+. */
   cartAbandonmentCount: number | null;
+  offlineCount: number;
 };
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
@@ -280,6 +281,7 @@ export interface OrdersListPageProps {
    * `deferredSecondary`) and only for HoCS / Admin / SuperAdmin.
    */
   cartAbandonmentCount?: number | null;
+  offlineCount?: number;
   /**
    * Cart-abandonment mode — true when the `?fromCart=1` filter is active and the
    * loader has populated `orders` with abandoned CARTS (status `'CART'`) instead
@@ -334,6 +336,7 @@ function OrdersListPageImpl({
   enableFromCartStatusOption = false,
   enableTestOrdersOption = false,
   cartAbandonmentCount = null,
+  offlineCount = 0,
   isCartAbandonmentView = false,
   bulkSelectAllMatchingInput,
   branchesForMove,
@@ -356,15 +359,30 @@ function OrdersListPageImpl({
   /** Sentinel — not an order status, indicates the `?fromCart=1` pseudo-filter is active. */
   const FROM_CART_STATUS_VALUE = '__from_cart__';
   const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
+  const OFFLINE_STATUS_VALUE = '__offline__';
   const fromCartUrlActive = searchParams.get('fromCart') === '1';
   const testOrdersUrlActive = searchParams.get('testOrders') === '1';
+  const offlineUrlActive = searchParams.get('orderSource') === 'offline';
   const initialSelectedStatus =
-    enableTestOrdersOption && testOrdersUrlActive
-      ? TEST_ORDERS_STATUS_VALUE
-      : enableFromCartStatusOption && fromCartUrlActive
-        ? FROM_CART_STATUS_VALUE
-        : statusFilter || 'ALL';
+    offlineUrlActive
+      ? OFFLINE_STATUS_VALUE
+      : enableTestOrdersOption && testOrdersUrlActive
+        ? TEST_ORDERS_STATUS_VALUE
+        : enableFromCartStatusOption && fromCartUrlActive
+          ? FROM_CART_STATUS_VALUE
+          : statusFilter || 'ALL';
   const [selectedStatus, setSelectedStatus] = useState(initialSelectedStatus);
+  // Sync selectedStatus when URL params change (e.g. remount after loader revalidation)
+  useEffect(() => {
+    const synced = offlineUrlActive
+      ? OFFLINE_STATUS_VALUE
+      : enableTestOrdersOption && testOrdersUrlActive
+        ? TEST_ORDERS_STATUS_VALUE
+        : enableFromCartStatusOption && fromCartUrlActive
+          ? FROM_CART_STATUS_VALUE
+          : statusFilter || 'ALL';
+    setSelectedStatus(synced);
+  }, [statusFilter, offlineUrlActive, fromCartUrlActive, testOrdersUrlActive, enableFromCartStatusOption, enableTestOrdersOption]);
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
@@ -470,14 +488,22 @@ function OrdersListPageImpl({
       if (v === FROM_CART_STATUS_VALUE) {
         next.delete('status');
         next.delete('testOrders');
+        next.delete('orderSource');
         next.set('fromCart', '1');
       } else if (v === TEST_ORDERS_STATUS_VALUE) {
         next.delete('status');
         next.delete('fromCart');
+        next.delete('orderSource');
         next.set('testOrders', '1');
+      } else if (v === OFFLINE_STATUS_VALUE) {
+        next.delete('status');
+        next.delete('fromCart');
+        next.delete('testOrders');
+        next.set('orderSource', 'offline');
       } else {
         next.delete('fromCart');
         next.delete('testOrders');
+        next.delete('orderSource');
         if (v === 'ALL') next.delete('status');
         else next.set('status', v);
       }
@@ -1305,6 +1331,7 @@ function OrdersListPageImpl({
     ...(enableFromCartStatusOption
       ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
       : []),
+    { value: OFFLINE_STATUS_VALUE, label: `Offline orders (${offlineCount ?? 0})` },
     ...(enableTestOrdersOption
       ? [{ value: TEST_ORDERS_STATUS_VALUE, label: 'Test orders' }]
       : []),
@@ -1737,6 +1764,14 @@ function OrdersListPageImpl({
               valueClassName: 'text-app-fg',
               active: selectedStatus === 'ALL',
               onClick: () => handleStatusSelect('ALL'),
+            },
+            {
+              label: 'Offline',
+              value: offlineCount ?? 0,
+              valueClassName: (offlineCount ?? 0) > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+              title: 'Orders created manually via offline order',
+              onClick: () => handleStatusSelect(OFFLINE_STATUS_VALUE),
+              active: selectedStatus === OFFLINE_STATUS_VALUE,
             },
             ...pipelineItems,
             {
@@ -2760,6 +2795,7 @@ export function OrdersListPage(props: OrdersListPageProps) {
             productsForOfflineOrder={cached?.productsForOfflineOrder ?? []}
             productsForFilter={cached?.productsForFilter}
             cartAbandonmentCount={cached?.cartAbandonmentCount ?? null}
+            offlineCount={cached?.offlineCount ?? 0}
           />
         }
       >
@@ -2778,6 +2814,7 @@ export function OrdersListPage(props: OrdersListPageProps) {
                 productsForOfflineOrder={sec.productsForOfflineOrder}
                 productsForFilter={sec.productsForFilter}
                 cartAbandonmentCount={sec.cartAbandonmentCount}
+                offlineCount={sec.offlineCount ?? 0}
               />
             );
           }}

@@ -288,11 +288,12 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: safeStatus(res.status) },
       );
     }
-    const data = (res.data as { result?: { data?: { succeeded: number; failed: number; results?: Array<{ orderId: string; success: boolean }> } } })?.result?.data;
-    const succeededIds = (data?.results ?? []).filter((r) => r.success).map((r) => r.orderId);
+    const data = (res.data as { result?: { data?: { succeeded: number; failed: number; results?: Array<{ orderId: string; newOrderId: string; success: boolean }> } } })?.result?.data;
+    const succeededResults = (data?.results ?? []).filter((r) => r.success);
+    const newOrderIds = succeededResults.map((r) => r.newOrderId).filter(Boolean);
 
-    // Create batch record for tracking
-    if (batchName && succeededIds.length > 0) {
+    // Create batch record using the NEW copy order IDs
+    if (batchName && newOrderIds.length > 0) {
       await apiRequest<unknown>('/trpc/orders.createFollowUpBatch', {
         method: 'POST',
         cookie,
@@ -302,7 +303,7 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(targetBranchId ? { branchId: targetBranchId } : {}),
           ...(groupId ? { groupId } : {}),
           assignmentMode,
-          items: succeededIds.map((id) => ({ orderId: id, originalStatus: originalStatuses[id] ?? 'UNKNOWN' })),
+          items: succeededResults.map((r) => ({ orderId: r.newOrderId, originalStatus: originalStatuses[r.orderId] ?? r.orderId })),
         },
       });
     }

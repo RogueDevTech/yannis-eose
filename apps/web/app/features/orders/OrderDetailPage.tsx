@@ -1028,6 +1028,9 @@ export function OrderDetailPage({
     CALLBACK_DELAY_MAX_MINUTES / callbackCustomUnitMultiplier(scheduleCustomUnit),
   );
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
+  const [editStatusModalOpen, setEditStatusModalOpen] = useState(false);
+  const [editStatusTarget, setEditStatusTarget] = useState('');
+  const [editStatusReason, setEditStatusReason] = useState('');
   const [editDetailsModalOpen, setEditDetailsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number; offerLabel: string | null }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
@@ -1326,6 +1329,9 @@ export function OrderDetailPage({
   const isElevated =
     userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
   const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
+  const canEditOrderStatus =
+    userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' ||
+    userRole === 'HEAD_OF_LOGISTICS' || userRole === 'HEAD_OF_CS';
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
   // Campaign-scoped offer tiers keyed by product — feeds the Adjust order items
   // offer picker so a discounted bundle can be applied in one selection.
@@ -2588,6 +2594,26 @@ export function OrderDetailPage({
               );
             })()}
 
+            {/* Retrack order status — HoCS, HoLogistics, SuperAdmin, Admin only.
+                Only shown when the order can be rolled back (not already at the first status). */}
+            {canEditOrderStatus && order.status !== 'UNPROCESSED' && (
+              <div className="card order-[-1] lg:order-none">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setEditStatusTarget('');
+                    setEditStatusReason('');
+                    setEditStatusModalOpen(true);
+                  }}
+                  disabled={fetcher.state === 'submitting'}
+                >
+                  Retrack order status
+                </Button>
+              </div>
+            )}
+
             {/* Communication Panel — unified Call/SMS/WhatsApp panel for Sales closers.
                 Hidden once the order leaves the CS lifecycle (DELIVERED / REMITTED /
                 CANCELLED / DELETED / RETURNED / WRITTEN_OFF / RESTOCKED / PARTIALLY_DELIVERED) —
@@ -3591,6 +3617,80 @@ export function OrderDetailPage({
             )}
         </Modal>
       )}
+
+      {/* Retrack order status modal */}
+      <Modal
+        open={editStatusModalOpen}
+        onClose={() => setEditStatusModalOpen(false)}
+        maxWidth="max-w-sm"
+        contentClassName="p-6 space-y-4"
+      >
+        <h3 className="text-lg font-semibold text-app-fg">Retrack order status</h3>
+        <p className="text-sm text-app-fg-muted">
+          Roll this order back to an earlier status. A reason is required for audit purposes.
+        </p>
+        <FormSelect
+          label="Roll back to"
+          value={editStatusTarget}
+          onChange={(e) => setEditStatusTarget(e.target.value)}
+          options={(() => {
+            const lifecycle = [
+              { value: 'UNPROCESSED', label: 'Unassigned' },
+              { value: 'CS_ASSIGNED', label: 'Assigned' },
+              { value: 'CS_ENGAGED', label: 'Unconfirmed' },
+              { value: 'CONFIRMED', label: 'Confirmed' },
+              { value: 'AGENT_ASSIGNED', label: 'Agent Assigned' },
+              { value: 'DISPATCHED', label: 'Dispatched' },
+              { value: 'IN_TRANSIT', label: 'In Transit' },
+              { value: 'DELIVERED', label: 'Delivered' },
+              { value: 'REMITTED', label: 'Cash Remitted' },
+            ];
+            const currentIdx = lifecycle.findIndex((s) => s.value === order.status);
+            return currentIdx > 0 ? lifecycle.slice(0, currentIdx) : [];
+          })()}
+        />
+        <Textarea
+          label="Reason"
+          value={editStatusReason}
+          onChange={(e) => setEditStatusReason(e.target.value)}
+          placeholder="Why is this status being changed?"
+          rows={2}
+        />
+        {fetcherSurface.errorMatchingIntent('transition') && (
+          <p className="text-sm text-danger-600 dark:text-danger-400">
+            {fetcherSurface.errorMatchingIntent('transition')}
+          </p>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={() => setEditStatusModalOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={
+              fetcher.state === 'submitting' ||
+              !editStatusTarget ||
+              editStatusTarget === order.status ||
+              !editStatusReason.trim()
+            }
+            loading={fetcher.state === 'submitting'}
+            loadingText="Retracking…"
+            onClick={() => {
+              fetcher.submit(
+                {
+                  intent: 'transition',
+                  newStatus: editStatusTarget,
+                  reason: editStatusReason.trim(),
+                },
+                { method: 'post' },
+              );
+              setEditStatusModalOpen(false);
+            }}
+          >
+            Retrack
+          </Button>
+        </div>
+      </Modal>
 
       {/* Edit order details modal */}
       {editDetailsModalOpen && (
