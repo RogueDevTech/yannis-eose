@@ -625,10 +625,12 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const body =
+    const explicitBranchId = form.get('branchId')?.toString() || undefined;
+    const body: Record<string, unknown> =
       csCloserIds.length === 1
         ? { orderIds, csCloserId: csCloserIds[0] }
         : { orderIds, csCloserIds };
+    if (explicitBranchId) body.branchId = explicitBranchId;
 
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
       '/trpc/orders.bulkAssignToCS',
