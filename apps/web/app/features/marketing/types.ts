@@ -212,6 +212,8 @@ export interface Campaign {
 export interface MarketingDateFilters {
   startDate: string;
   endDate: string;
+  startTime?: string;
+  endTime?: string;
   periodAllTime: boolean;
 }
 

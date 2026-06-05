@@ -710,6 +710,7 @@ export class MarketingService {
       eq(schema.orders.campaignId, params.campaignId),
       lte(schema.orders.createdAt, now),
       sql`${schema.orders.status} != 'DELETED'`,
+      eq(schema.orders.isFollowUp, false),
     ];
     if (windowStartExclusive) {
       orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
@@ -765,6 +766,7 @@ export class MarketingService {
       gte(schema.orders.createdAt, rangeStart),
       lte(schema.orders.createdAt, rangeEnd),
       sql`${schema.orders.status} != 'DELETED'`,
+      eq(schema.orders.isFollowUp, false),
     ];
     if (params.branchId) {
       conditions.push(eq(schema.orders.branchId, params.branchId));

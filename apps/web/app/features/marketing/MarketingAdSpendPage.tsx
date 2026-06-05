@@ -937,6 +937,8 @@ export function MarketingAdSpendPage({
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
+                    startTime={dateFilters.startTime}
+                    endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <BranchScopedLink
                   to="/admin/marketing/expenses/new"
@@ -964,6 +966,8 @@ export function MarketingAdSpendPage({
       <MobileDateFilterRow
         startDate={dateFilters.startDate}
         endDate={dateFilters.endDate}
+        startTime={dateFilters.startTime}
+        endTime={dateFilters.endTime}
         periodAllTime={dateFilters.periodAllTime}
       />
 
