@@ -4002,7 +4002,7 @@ export class MarketingService {
       eq(schema.orders.isFollowUp, false),
       // Exclude offline orders — marketing metrics only count edge-form orders.
       // Offline orders affect Sales metrics only (CEO 2026-06-05).
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4019,7 +4019,7 @@ export class MarketingService {
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       eq(schema.orders.isFollowUp, false),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -4046,7 +4046,7 @@ export class MarketingService {
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
       eq(schema.orders.isFollowUp, false),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
