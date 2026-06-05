@@ -1519,6 +1519,11 @@ export function OrderDetailPage({
       setDeliverNote('');
       setDeliverProofUrl('');
     }
+    if (editStatusModalOpen) {
+      setEditStatusModalOpen(false);
+      setEditStatusTarget('');
+      setEditStatusReason('');
+    }
     // Chain assign → share: when the assignment succeeds AND a WhatsApp group
     // exists for some logistics location AND a dispatch template exists, pop
     // the Share-to-3PL modal next so the operator's hand-off is one continuous
@@ -2183,7 +2188,158 @@ export function OrderDetailPage({
                       above for rationale. */}
                   {!(order.status === 'UNPROCESSED' && !order.assignedCsId) && orderAllowsLineItemEdits && (
                   <>
-                  {/* Adjust order items — always first */}
+                  {/* ── Schedule date — always at the top when present ── */}
+                  {order.preferredDeliveryDate?.trim() && (
+                    <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2">
+                      <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">Schedule date</p>
+                      <p className="mt-0.5 text-sm font-semibold text-app-fg tabular-nums">
+                        {formatScheduleDateDisplay(order.preferredDeliveryDate)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ── Primary action (blue/green filled) — contextual to status ── */}
+
+                  {/* UNPROCESSED / CS_ASSIGNED → Call customer is the next step */}
+                  {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && !voipEnabled && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => setCallCustomerModalOpen(true)}
+                      disabled={!canPerformCSActionsOnOrder}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Starting..."
+                    >
+                      Call customer
+                    </Button>
+                  )}
+
+                  {/* CS_ENGAGED → Confirm order is the next step */}
+                  {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && canConfirm && canTransitionTo('CONFIRMED') && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => setConfirmModalOpen(true)}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Confirm order
+                    </Button>
+                  )}
+
+                  {/* CS_ENGAGED → Call customer is secondary (already called once) */}
+                  {order.status === 'CS_ENGAGED' && !voipEnabled && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setCallCustomerModalOpen(true)}
+                      disabled={!canPerformCSActionsOnOrder}
+                    >
+                      Call customer
+                    </Button>
+                  )}
+
+                  {/* CONFIRMED → Assign for delivery is the next step */}
+                  {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => { setAllocateLocationId(''); setAllocateModalOpen(true); }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Assign for delivery
+                    </Button>
+                  )}
+
+                  {/* AGENT_ASSIGNED → Mark delivered is the next step */}
+                  {(order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && canTransitionTo('DELIVERED') && (
+                    <Button
+                      type="button"
+                      variant="success"
+                      className="w-full"
+                      onClick={() => {
+                        setDeliverNote('');
+                        setDeliverProofUrl('');
+                        setDeliverLocationId(order.logisticsLocationId ?? '');
+                        setDeliverCost('');
+                        setDeliverModalOpen(true);
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Mark delivered
+                    </Button>
+                  )}
+
+                  {/* Reassign to another location — secondary after mark delivered */}
+                  {order.status === 'AGENT_ASSIGNED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => { setAllocateLocationId(''); setAllocateModalOpen(true); }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Reassign to another location
+                    </Button>
+                  )}
+
+                  {/* Share to logistics WhatsApp */}
+                  {order.status === 'AGENT_ASSIGNED' && (() => {
+                    const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
+                    return locationsWithGroup.length > 0 && logisticsDispatchTemplates.length > 0 ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => {
+                          setShareError(null);
+                          const alreadyAllocated = order.logisticsLocationId
+                            ? locationsWithGroup.find((l) => l.id === order.logisticsLocationId)
+                            : undefined;
+                          setShareLocationId(alreadyAllocated?.id ?? locationsWithGroup[0]?.id ?? '');
+                          setShareTemplateId(logisticsDispatchTemplates[0]?.id ?? '');
+                          setShareModalOpen(true);
+                        }}
+                        disabled={sharePending}
+                      >
+                        Share to logistics (WhatsApp)
+                      </Button>
+                    ) : null;
+                  })()}
+
+                  {/* Post-confirm/logistics: Call customer as secondary (follow-up calls) */}
+                  {(order.status === 'CONFIRMED' || order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && !voipEnabled && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setCallCustomerModalOpen(true)}
+                      disabled={!canPerformCSActionsOnOrder}
+                    >
+                      Call customer
+                    </Button>
+                  )}
+
+                  {/* ── Supporting actions (secondary) ── */}
+
+                  {/* Schedule / reschedule callback */}
+                  {canPerformCSActionsOnOrder &&
+                    order.status !== 'DELIVERED' && order.status !== 'REMITTED' && order.status !== 'DELETED' && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setScheduleCallbackModalOpen(true)}
+                      disabled={scheduleFetcher.state === 'submitting'}
+                    >
+                      {(order.callbackScheduledAt || (order.callbackAttempts ?? 0) > 0) ? 'Reschedule callback' : 'Schedule callback'}
+                    </Button>
+                  )}
+
+                  {/* Adjust order items */}
                   <Button
                     type="button"
                     variant="secondary"
@@ -2217,34 +2373,7 @@ export function OrderDetailPage({
                     Edit order details
                   </Button>
 
-                  {/* Confirm order — CS_ENGAGED only */}
-                  {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && canConfirm && canTransitionTo('CONFIRMED') && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => setConfirmModalOpen(true)}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Confirm order
-                    </Button>
-                  )}
-
-                  {/* Schedule / reschedule callback — always visible for pre-terminal statuses */}
-                  {canPerformCSActionsOnOrder &&
-                    order.status !== 'DELIVERED' && order.status !== 'REMITTED' && order.status !== 'DELETED' && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="w-full"
-                      onClick={() => setScheduleCallbackModalOpen(true)}
-                      disabled={scheduleFetcher.state === 'submitting'}
-                    >
-                      {(order.callbackScheduledAt || (order.callbackAttempts ?? 0) > 0) ? 'Reschedule callback' : 'Schedule callback'}
-                    </Button>
-                  )}
-
-                  {/* Reschedule delivery date — visible when order already has a schedule date */}
+                  {/* Reschedule delivery date */}
                   {order.preferredDeliveryDate?.trim() &&
                     order.status !== 'DELIVERED' && order.status !== 'REMITTED' && order.status !== 'DELETED' && (
                     <Button
@@ -2258,49 +2387,6 @@ export function OrderDetailPage({
                       disabled={fetcher.state === 'submitting'}
                     >
                       Reschedule delivery
-                    </Button>
-                  )}
-
-                  {/* Call customer — available pre-delivery. For pre-CS_ENGAGED statuses, opening
-                      the modal also triggers CS_ENGAGED on the server (one click to dial).
-                      Post-CS_ENGAGED statuses (CONFIRMED/ALLOCATED/…) use the same modal for
-                      delivery-coordination / follow-up calls without changing order state. */}
-                  {!voipEnabled ? (
-                    <div className="space-y-2">
-                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && order.status !== 'CS_ENGAGED' && !(order.status === 'CONFIRMED' || order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
-                        <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
-                          Call the customer manually, then confirm the order.
-                        </p>
-                      )}
-                      <Button
-                        type="button"
-                        variant={order.status === 'CS_ENGAGED' && canConfirm ? 'secondary' : 'primary'}
-                        className="w-full"
-                        onClick={() => setCallCustomerModalOpen(true)}
-                        disabled={!canPerformCSActionsOnOrder || (order.status === 'CS_ENGAGED' && fetcher.state === 'submitting')}
-                        loading={(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && fetcher.state === 'submitting'}
-                        loadingText="Starting..."
-                      >
-                        Call customer
-                      </Button>
-                    </div>
-                  ) : null}
-
-                  {/* Delete order — lifecycle transition to DELETED. Restricted to
-                      HoCS / Branch Admin / Admin (permission-gated via orders.delete).
-                      CEO directive 2026-05-23: replaces the old CANCELLED flow. */}
-                  {canTransitionTo('DELETED') && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
-                      onClick={() => {
-                        setCancelModalOpen(true);
-                        setCancelReason('Customer not picking');
-                      }}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Delete order
                     </Button>
                   )}
 
@@ -2330,10 +2416,40 @@ export function OrderDetailPage({
                     </Button>
                   )}
 
-                  {/* Assign / Reassign closer. Same UI everywhere — picker + button on
-                      one row. Past CS_ENGAGED (credit-attribution fixes for HoCS /
-                      SuperAdmin) the order's status is preserved and an audit reason
-                      is required, shown as a textarea below the picker. */}
+                  {/* Retrack order status — HoCS, HoLogistics, SuperAdmin, Admin only */}
+                  {canEditOrderStatus && order.status !== 'UNPROCESSED' && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setEditStatusTarget('');
+                        setEditStatusReason('');
+                        setEditStatusModalOpen(true);
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Retrack order status
+                    </Button>
+                  )}
+
+                  {/* Delete order — before reassign */}
+                  {canTransitionTo('DELETED') && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                      onClick={() => {
+                        setCancelModalOpen(true);
+                        setCancelReason('Customer not picking');
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Delete order
+                    </Button>
+                  )}
+
+                  {/* Assign / Reassign closer */}
                   {showCsAssignForm && csClosersForAssign && csClosersForAssign.length > 0 && (
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-app-fg-muted">
@@ -2454,162 +2570,23 @@ export function OrderDetailPage({
                 </div>
               )}
 
-            {/* Logistics Actions — share/allocate when CONFIRMED or ALLOCATED, confirm delivery when IN_TRANSIT.
-                Same read-only rule as Order Actions: viewers without the detail-action capability do not see this card. */}
-            {(() => {
-              if (!canEditOrder) return null;
-              const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
-              const canShareToWhatsApp =
-                order.status === 'AGENT_ASSIGNED' &&
-                locationsWithGroup.length > 0 &&
-                logisticsDispatchTemplates.length > 0;
-              const canMarkDelivered =
-                (order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') &&
-                canTransitionTo('DELIVERED');
-              const canReallocate =
-                order.status === 'AGENT_ASSIGNED' &&
-                canTransitionTo('AGENT_ASSIGNED') &&
-                logisticsLocations.length > 0;
-              const showCard =
-                (order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0) ||
-                canReallocate ||
-                canMarkDelivered ||
-                canShareToWhatsApp ||
-                showPostAllocationWhatsAppActions;
-              if (!showCard) return null;
-              return (
-                <div className="card order-[-2] lg:order-none">
-                  <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
-                  {order.preferredDeliveryDate?.trim() ? (
-                    <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 mb-3">
-                      <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
-                        Schedule date
-                      </p>
-                      <p className="mt-0.5 text-sm font-semibold text-app-fg tabular-nums">
-                        {formatScheduleDateDisplay(order.preferredDeliveryDate)}
-                      </p>
-                    </div>
-                  ) : null}
-                  <div className="space-y-2">
-                    {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
-                      <Button
-                        type="button"
-                        variant="primary"
-                        className="w-full"
-                        onClick={() => {
-                          setAllocateLocationId('');
-                          setAllocateModalOpen(true);
-                        }}
-                        disabled={fetcher.state === 'submitting'}
-                      >
-                        Assign for delivery (Logistics)
-                      </Button>
-                    )}
-                    {canReallocate && (
-                      <Button
-                        type="button"
-                        variant="primary"
-                        className="w-full"
-                        onClick={() => {
-                          setAllocateLocationId('');
-                          setAllocateModalOpen(true);
-                        }}
-                        disabled={fetcher.state === 'submitting'}
-                      >
-                        Reassign to another location
-                      </Button>
-                    )}
-                    {canShareToWhatsApp && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="w-full"
-                        onClick={() => {
-                          setShareError(null);
-                          // Default to the already-allocated location if set; else the first with a group link.
-                          const alreadyAllocated = order.logisticsLocationId
-                            ? locationsWithGroup.find((l) => l.id === order.logisticsLocationId)
-                            : undefined;
-                          const preselected = alreadyAllocated?.id ?? locationsWithGroup[0]?.id ?? '';
-                          setShareLocationId(preselected);
-                          setShareTemplateId(logisticsDispatchTemplates[0]?.id ?? '');
-                          setShareModalOpen(true);
-                        }}
-                        disabled={sharePending}
-                      >
-                        Share to logistics company (WhatsApp)
-                      </Button>
-                    )}
-                    {showPostAllocationWhatsAppActions && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="w-full"
-                        onClick={() =>
-                          window.open(
-                            logisticsLocationWithGroupLink!.whatsappGroupLink as string,
-                            '_blank',
-                            'noopener,noreferrer',
-                          )
-                        }
-                      >
-                        Open Logistics Group Chat
-                      </Button>
-                    )}
-                    {showCopyOrderSummary &&
-                      (order.status === 'AGENT_ASSIGNED' ||
-                        order.status === 'DISPATCHED' ||
-                        order.status === 'IN_TRANSIT') &&
-                      !logisticsLocationWithGroupLink && (
-                        // Don't tell CS to add the group link — that's the
-                        // Logistics admin's job (set on the location at create
-                        // time). CS just needs to know the link isn't there
-                        // yet so the "Open group" button is missing for a
-                        // reason.
-                        <p className="text-xs text-app-fg-muted">
-                          WhatsApp group not configured for this logistics location yet — ask Logistics to add it.
-                        </p>
-                      )}
-                    {canMarkDelivered && (
-                      <Button
-                        type="button"
-                        variant="success"
-                        className="w-full"
-                        onClick={() => {
-                          setDeliverNote('');
-                          setDeliverProofUrl('');
-                          // Pre-fill with the original allocation so the common path
-                          // (same provider delivered) is a single click.
-                          setDeliverLocationId(order.logisticsLocationId ?? '');
-                          setDeliverCost('');
-                          setDeliverModalOpen(true);
-                        }}
-                        disabled={fetcher.state === 'submitting'}
-                      >
-                        Mark delivered
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Retrack order status — HoCS, HoLogistics, SuperAdmin, Admin only.
-                Only shown when the order can be rolled back (not already at the first status). */}
-            {canEditOrderStatus && order.status !== 'UNPROCESSED' && (
-              <div className="card order-[-1] lg:order-none">
+            {/* Open Logistics Group Chat + missing-group hint — kept outside Order Actions
+                because they depend on the allocated location and only make sense post-allocation. */}
+            {canEditOrder && showPostAllocationWhatsAppActions && (
+              <div className="card order-[-2] lg:order-none">
                 <Button
                   type="button"
                   variant="secondary"
                   className="w-full"
-                  onClick={() => {
-                    setEditStatusTarget('');
-                    setEditStatusReason('');
-                    setEditStatusModalOpen(true);
-                  }}
-                  disabled={fetcher.state === 'submitting'}
+                  onClick={() =>
+                    window.open(
+                      logisticsLocationWithGroupLink!.whatsappGroupLink as string,
+                      '_blank',
+                      'noopener,noreferrer',
+                    )
+                  }
                 >
-                  Retrack order status
+                  Open Logistics Group Chat
                 </Button>
               </div>
             )}
@@ -3639,9 +3616,6 @@ export function OrderDetailPage({
               { value: 'CS_ASSIGNED', label: 'Assigned' },
               { value: 'CS_ENGAGED', label: 'Unconfirmed' },
               { value: 'CONFIRMED', label: 'Confirmed' },
-              { value: 'AGENT_ASSIGNED', label: 'Agent Assigned' },
-              { value: 'DISPATCHED', label: 'Dispatched' },
-              { value: 'IN_TRANSIT', label: 'In Transit' },
               { value: 'DELIVERED', label: 'Delivered' },
               { value: 'REMITTED', label: 'Cash Remitted' },
             ];
@@ -3684,7 +3658,6 @@ export function OrderDetailPage({
                 },
                 { method: 'post' },
               );
-              setEditStatusModalOpen(false);
             }}
           >
             Retrack

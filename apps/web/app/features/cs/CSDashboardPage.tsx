@@ -673,9 +673,10 @@ function CSDashboardPageLoaded({
     activeTotal,
     hotSwapOrdersPayload,
     statusCounts,
+    offlineCount,
     initialCartActivity,
     criticalFetchErrors,
-  } = critical;
+  } = critical as typeof critical & { offlineCount?: number };
   const { isClaimMode, claimCap } = shell;
   const liveState = useLiveIndicator(liveEvents ?? []);
   const adminRouteData = useRouteLoaderData('routes/admin') as
@@ -1439,6 +1440,12 @@ function CSDashboardPageLoaded({
       label: 'Unassigned',
       value: optimisticUnassigned,
       valueClassName: 'text-danger-600 dark:text-danger-400',
+    },
+    {
+      label: 'Offline',
+      value: offlineCount ?? 0,
+      valueClassName: (offlineCount ?? 0) > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+      title: 'Orders created manually via offline order',
     },
     {
       label: 'Assigned',

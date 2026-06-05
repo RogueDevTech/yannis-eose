@@ -114,7 +114,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(testOrders && { testOrders: true }),
-    ...(orderSource && { orderSource }),
+    // Marketing only shows edge-form orders — offline orders affect Sales only.
+    // When an explicit orderSource filter is active (rare), honour it; otherwise
+    // default to edge-form so offline orders never appear on this page.
+    orderSource: orderSource ?? 'edge-form',
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
