@@ -69,7 +69,7 @@ export const productsRouter = router({
       }
 
       const key =
-        'cache:products:options:' +
+        'cache:products:options:v2:' +
         CacheService.hashInput({
           status: effective.status,
           viewerRole: ctx.user.role,
