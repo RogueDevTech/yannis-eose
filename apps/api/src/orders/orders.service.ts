@@ -1791,6 +1791,16 @@ export class OrdersService {
       branchId: order.branchId ?? null,
     });
 
+    // Auto-assigned to creator — log the assignment event.
+    void this.writeTimelineEvent({
+      orderId: order.id,
+      eventType: 'ORDER_MANUALLY_ASSIGNED',
+      actorId: actorId,
+      actorName,
+      description: `Assigned to ${actorName ?? 'creator'} (auto-assigned on offline creation)`,
+      branchId: order.branchId ?? null,
+    });
+
     return { id: order.id };
   }
 
@@ -2905,7 +2915,12 @@ export class OrdersService {
       conditions.push(sql`btrim(${schema.orders.customerName}) ~* '^test([^[:alpha:]]|$)'`);
     }
     if (input.orderSource) {
-      conditions.push(eq(schema.orders.orderSource, input.orderSource));
+      if (input.orderSource === 'edge-form') {
+        // edge-form includes legacy orders with NULL orderSource (pre-migration)
+        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`);
+      } else {
+        conditions.push(eq(schema.orders.orderSource, input.orderSource));
+      }
     }
     if (input.search) {
       const trimmed = input.search.trim();
