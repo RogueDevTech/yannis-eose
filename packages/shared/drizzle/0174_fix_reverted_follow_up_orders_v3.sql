@@ -12,7 +12,7 @@
 
 UPDATE orders o
 SET
-  status = sub.previous_status::text,
+  status = sub.previous_status::order_status,
   is_follow_up = false,
   assigned_cs_id = NULL
 FROM (
