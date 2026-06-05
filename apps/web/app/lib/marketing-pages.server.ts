@@ -291,8 +291,10 @@ export function parseBalancesList(res: { ok: boolean; data: unknown }): FundingB
 export interface MarketingDateFilterResult {
   startDate: string | undefined;
   endDate: string | undefined;
+  startTime: string | undefined;
+  endTime: string | undefined;
   periodAllTime: boolean;
-  filters: { startDate: string; endDate: string; periodAllTime: boolean };
+  filters: { startDate: string; endDate: string; startTime: string; endTime: string; periodAllTime: boolean };
   leaderboardPeriod: 'this_month' | 'all_time';
 }
 
@@ -331,6 +333,8 @@ export function resolveMarketingDateFilters(
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
+  let startTime = url.searchParams.get('startTime') ?? undefined;
+  let endTime = url.searchParams.get('endTime') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
     const range =
       defaultPreset === 'today'
@@ -344,12 +348,18 @@ export function resolveMarketingDateFilters(
   if (periodAllTime) {
     startDate = undefined;
     endDate = undefined;
+    startTime = undefined;
+    endTime = undefined;
   }
+  if (!startDate) startTime = undefined;
+  if (!endDate) endTime = undefined;
   return {
     startDate,
     endDate,
+    startTime,
+    endTime,
     periodAllTime,
-    filters: { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime },
+    filters: { startDate: startDate ?? '', endDate: endDate ?? '', startTime: startTime ?? '', endTime: endTime ?? '', periodAllTime },
     leaderboardPeriod,
   };
 }
