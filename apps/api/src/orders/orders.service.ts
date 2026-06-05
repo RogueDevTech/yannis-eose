@@ -4931,7 +4931,9 @@ export class OrdersService {
       conditions.push(eq(schema.orders.isFollowUp, isFollowUp));
     }
     if (excludeOffline) {
-      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'offline')`);
+      // Match the edge-form filter in orders.list — only count orders from the
+      // sales form (NULL = legacy pre-migration, 'edge-form' = explicit).
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`);
     }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId,

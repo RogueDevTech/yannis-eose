@@ -850,7 +850,7 @@ export function MarketingOrdersPage({
                   items={[
                     {
                       label: 'Total Orders',
-                      value: m.totalOrders,
+                      value: statusTotal,
                       valueClassName: 'text-app-fg',
                       active: selectedStatus === 'ALL',
                       onClick: () => handleStatusChange('ALL'),
@@ -878,25 +878,38 @@ export function MarketingOrdersPage({
                     },
                     {
                       label: 'Confirmed',
-                      value: m.confirmedOrders,
+                      value: confirmedCount,
                       valueClassName: 'text-brand-600 dark:text-brand-400',
                       active: selectedStatus === 'CONFIRMED',
                       onClick: () => handleStatusChange('CONFIRMED'),
                     },
                     {
                       label: 'Delivered',
-                      value: m.deliveredOrders,
-                      valueClassName: m.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+                      value: (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0),
+                      valueClassName: ((statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
                       active: selectedStatus === 'DELIVERED',
                       onClick: () => handleStatusChange('DELIVERED'),
                     },
-                    {
-                      label: 'CR',
-                      value: `${m.confirmationRate.toFixed(1)}%`,
-                      valueClassName: confirmationRateColorClass(m.confirmationRate),
-                      title: 'Confirmation Rate — confirmed / total in period (DELETED excluded)',
-                    },
-                    { label: 'DR', value: <>{m.deliveryRate.toFixed(1)}%</>, valueClassName: deliveryRateColorClass(m.deliveryRate), title: 'Delivery Rate — delivered / confirmed' },
+                    ...(() => {
+                      const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+                      const confirmedOrBeyond = confirmedCount + deliveredCount;
+                      const cr = statusTotal > 0 ? (confirmedOrBeyond / statusTotal) * 100 : 0;
+                      const dr = confirmedOrBeyond > 0 ? (deliveredCount / confirmedOrBeyond) * 100 : 0;
+                      return [
+                        {
+                          label: 'CR',
+                          value: `${cr.toFixed(1)}%`,
+                          valueClassName: confirmationRateColorClass(cr),
+                          title: 'Confirmation Rate — confirmed-or-beyond / total (DELETED excluded)',
+                        },
+                        {
+                          label: 'DR',
+                          value: <>{dr.toFixed(1)}%</>,
+                          valueClassName: deliveryRateColorClass(dr),
+                          title: 'Delivery Rate — delivered / confirmed-or-beyond',
+                        },
+                      ];
+                    })(),
                     {
                       label: 'Open carts',
                       value: activeSecondary.abandonedCartCount,
