@@ -128,32 +128,78 @@ export class ProductsService {
     const map = new Map<string, ProductOffer[]>();
     if (productIds.length === 0) return map;
 
-    const rows = await this.db
-      .select({
-        productId: schema.offerTemplates.productId,
-        name: schema.offerTemplates.name,
-        price: schema.offerTemplates.price,
-        quantity: schema.offerTemplates.quantity,
-        imageUrls: schema.offerTemplates.imageUrls,
-        createdAt: schema.offerTemplates.createdAt,
-      })
-      .from(schema.offerTemplates)
-      .where(
-        and(
-          inArray(schema.offerTemplates.productId, productIds),
-          eq(schema.offerTemplates.status, 'ACTIVE'),
-        ),
-      )
-      .orderBy(desc(schema.offerTemplates.createdAt));
+    // Load from both offer_templates AND offer_group_items (newer system).
+    // offer_group_items take precedence when present for a product.
+    const [templateRows, groupItemRows] = await Promise.all([
+      this.db
+        .select({
+          productId: schema.offerTemplates.productId,
+          name: schema.offerTemplates.name,
+          price: schema.offerTemplates.price,
+          quantity: schema.offerTemplates.quantity,
+          imageUrls: schema.offerTemplates.imageUrls,
+          createdAt: schema.offerTemplates.createdAt,
+        })
+        .from(schema.offerTemplates)
+        .where(
+          and(
+            inArray(schema.offerTemplates.productId, productIds),
+            eq(schema.offerTemplates.status, 'ACTIVE'),
+          ),
+        )
+        .orderBy(desc(schema.offerTemplates.createdAt)),
+      this.db
+        .select({
+          productId: schema.offerGroupItems.productId,
+          label: schema.offerGroupItems.label,
+          price: schema.offerGroupItems.price,
+          quantity: schema.offerGroupItems.quantity,
+          imageUrl: schema.offerGroupItems.imageUrl,
+          sortOrder: schema.offerGroupItems.sortOrder,
+        })
+        .from(schema.offerGroupItems)
+        .innerJoin(schema.offerGroups, eq(schema.offerGroups.id, schema.offerGroupItems.offerGroupId))
+        .where(
+          and(
+            inArray(schema.offerGroupItems.productId, productIds),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+            eq(schema.offerGroups.status, 'ACTIVE'),
+          ),
+        )
+        .orderBy(asc(schema.offerGroupItems.sortOrder)),
+    ]);
 
-    const byProduct = new Map<string, typeof rows>();
-    for (const r of rows) {
-      const arr = byProduct.get(r.productId) ?? [];
-      arr.push(r);
-      byProduct.set(r.productId, arr);
+    // Build from offer_group_items first (newer, takes precedence)
+    const groupByProduct = new Map<string, ProductOffer[]>();
+    for (const r of groupItemRows) {
+      const arr = groupByProduct.get(r.productId) ?? [];
+      arr.push({
+        label: r.label,
+        qty: r.quantity,
+        price: Number(r.price),
+        imageUrls: r.imageUrl ? [r.imageUrl] : [],
+      });
+      groupByProduct.set(r.productId, arr);
     }
-    for (const [pid, list] of byProduct) {
-      map.set(pid, templateRowsToOffers(list));
+
+    // Build from offer_templates (legacy)
+    const templateByProduct = new Map<string, typeof templateRows>();
+    for (const r of templateRows) {
+      const arr = templateByProduct.get(r.productId) ?? [];
+      arr.push(r);
+      templateByProduct.set(r.productId, arr);
+    }
+
+    // Merge: offer_group_items win when present, else fall back to offer_templates
+    const allProductIds = new Set([...groupByProduct.keys(), ...templateByProduct.keys()]);
+    for (const pid of allProductIds) {
+      const groupOffers = groupByProduct.get(pid);
+      if (groupOffers && groupOffers.length > 0) {
+        map.set(pid, groupOffers);
+      } else {
+        const templates = templateByProduct.get(pid);
+        if (templates) map.set(pid, templateRowsToOffers(templates));
+      }
     }
     return map;
   }
