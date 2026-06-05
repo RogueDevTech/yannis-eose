@@ -55,6 +55,7 @@ export interface CSTeamPageProps {
   sort?: string;
   /** Date filter from URL — controls the leaderboard window for order counts. */
   dateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  offlineCount?: number;
 }
 
 const CS_ACTIVITY_OPTIONS = [
@@ -238,10 +239,10 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
             to={`/admin/sales/orders?csCloserId=${member.id}&period=all_time`}
             className="w-full justify-center"
           >
-            View orders
+            Orders
           </CompactTableActionButton>
           <CompactTableActionButton to={`/hr/users/${member.id}`} className="w-full justify-center">
-            View profile
+            Profile
           </CompactTableActionButton>
         </div>
       </div>
@@ -261,6 +262,7 @@ export function CSTeamPage({
   backlogFilter = 'ALL',
   sort = 'total-desc',
   dateFilters,
+  offlineCount = 0,
 }: CSTeamPageProps) {
   // Parse flat sort string (e.g. "total-desc") into SortMenu value
   const sortMenuValue = useMemo((): SortMenuValue => {
@@ -506,9 +508,9 @@ export function CSTeamPage({
         render: (member) => (
           <div className="inline-flex items-center gap-1.5">
             <CompactTableActionButton to={`/admin/sales/orders?csCloserId=${member.id}&period=all_time`}>
-              View orders
+              Orders
             </CompactTableActionButton>
-            <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
+            <CompactTableActionButton to={`/hr/users/${member.id}`}>Profile</CompactTableActionButton>
           </div>
         ),
       },
@@ -640,6 +642,12 @@ export function CSTeamPage({
               value: summary.engagedTotal.toString(),
               valueClassName: 'text-brand-600 dark:text-brand-400',
               title: 'Total orders assigned to the team in this period',
+            },
+            {
+              label: 'Offline',
+              value: offlineCount.toString(),
+              valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+              title: 'Orders created manually via offline order',
             },
             {
               label: 'Backlog (unworked)',

@@ -214,7 +214,7 @@ export function FollowUpBatchesPage({
                 ariaLabel={`Actions for ${b.name}`}
                 sheetTitle={b.name}
                 actions={[
-                  { key: 'view', kind: 'link', label: 'View orders', to: `/admin/cs/follow-up/${b.id}` },
+                  { key: 'view', kind: 'link', label: 'View', to: `/admin/cs/follow-up/${b.id}` },
                 ]}
               />
             ),

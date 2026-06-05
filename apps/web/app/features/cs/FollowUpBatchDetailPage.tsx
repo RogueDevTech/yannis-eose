@@ -43,9 +43,11 @@ export interface FollowUpBatchDetailData {
     assignedCsName: string | null;
     addedAt: string;
     orderStatus: string;
+    orderNumber: number;
     customerName: string;
     totalAmount: string | null;
     orderCreatedAt: string;
+    followUpSourceOrderId: string | null;
   }>;
   analytics: {
     statusCounts: Record<string, number>;
@@ -256,9 +258,9 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                 ariaLabel={`Actions for ${item.customerName}`}
                 sheetTitle={item.customerName}
                 actions={[
-                  { key: 'view', kind: 'link', label: 'View order', to: `/admin/orders/${item.orderId}` },
+                  { key: 'view', kind: 'link', label: 'View', to: `/admin/orders/${item.orderId}` },
                   ...(canAssign && !item.assignedCsId
-                    ? [{ key: 'assign', kind: 'button' as const, label: 'Assign closer', onClick: () => { setSingleAssignItem(item.itemId); setSingleAssignCloserId(''); } }]
+                    ? [{ key: 'assign', kind: 'button' as const, label: 'Assign', onClick: () => { setSingleAssignItem(item.itemId); setSingleAssignCloserId(''); } }]
                     : []),
                 ]}
               />

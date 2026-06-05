@@ -845,10 +845,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
         return json({ error: 'You do not have permission to delete orders' }, { status: 403 });
       }
     }
-    // Restore a deleted/cancelled order back to the queue — Admin / Super Admin only.
-    if (newStatus === 'UNPROCESSED' && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
+    // Restore a deleted/cancelled order back to the queue — Admin / Super Admin / HoCS / HoLogistics.
+    if (newStatus === 'UNPROCESSED' && !['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS'].includes(user.role)) {
       return json(
-        { error: 'Only an Admin or Super Admin can restore this order' },
+        { error: 'Only an Admin, Head of CS, or Head of Logistics can restore this order' },
         { status: 403 },
       );
     }

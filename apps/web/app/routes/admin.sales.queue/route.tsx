@@ -578,6 +578,7 @@ export async function action({ request }: ActionFunctionArgs) {
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((formData.get('totalAmount') as string) || '0') || undefined,
         ...(branchId ? { branchId } : {}),
+        ...(formData.get('customFields') ? { customFields: JSON.parse(formData.get('customFields') as string) } : {}),
       },
     });
     if (!res.ok) {

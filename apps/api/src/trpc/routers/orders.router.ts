@@ -1265,6 +1265,7 @@ export const ordersRouter = router({
         logisticsLocationsForBulk,
         productsForOfflineOrder,
         cartStats,
+        supplementaryCounts,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
           scope.mediaBuyerId,
@@ -1309,6 +1310,16 @@ export const ordersRouter = router({
         input.includeCartAbandonment
           ? getCartService().getStats(branchId, input.countsStartDate, input.countsEndDate)
           : Promise.resolve(null),
+        getOrdersService().getSupplementaryCounts(
+          scope.mediaBuyerId,
+          scope.startDate,
+          scope.endDate,
+          scope.assignedCsId,
+          aggregateBranchId,
+          scope.supervisorScope,
+          bundleBranchScope,
+          ctx.effectiveBranchIds,
+        ),
       ]);
 
       return {
@@ -1332,6 +1343,7 @@ export const ordersRouter = router({
         cartAbandonmentCount: cartStats
           ? (cartStats as { abandonedOpen: number }).abandonedOpen
           : null,
+        offlineCount: supplementaryCounts.offlineCount,
       };
       }; // end fetchBundle
 
@@ -1376,7 +1388,7 @@ export const ordersRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
-      const [team, workloads, leaderboard, inactiveAgents] = await Promise.all([
+      const [team, workloads, leaderboard, inactiveAgents, supplementary] = await Promise.all([
         getUsersService().listCSTeam(branchId),
         getOrdersService().getCSCloserWorkloads(branchId),
         getOrdersService().getCSCloserLeaderboard(
@@ -1386,8 +1398,18 @@ export const ordersRouter = router({
           branchId,
         ),
         getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId),
+        getOrdersService().getSupplementaryCounts(
+          undefined,
+          input.startDate,
+          input.endDate,
+          undefined,
+          branchId,
+          undefined,
+          'servicing',
+          ctx.effectiveBranchIds,
+        ),
       ]);
-      return { team, workloads, leaderboard, inactiveAgents };
+      return { team, workloads, leaderboard, inactiveAgents, offlineCount: supplementary.offlineCount };
     }),
 
   /**

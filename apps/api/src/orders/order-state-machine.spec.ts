@@ -65,16 +65,12 @@ describe('isTransitionAllowed — forbidden skips', () => {
     ['CONFIRMED', 'DELIVERED'],
     ['AGENT_ASSIGNED', 'IN_TRANSIT'],
     ['DISPATCHED', 'DELIVERED'],
-    // Backward transitions
+    // Backward skip transitions (retrack only allows stepping back, not skipping)
     ['DELIVERED', 'UNPROCESSED'],
     ['REMITTED', 'UNPROCESSED'],
-    ['CONFIRMED', 'CS_ENGAGED'],
-    ['AGENT_ASSIGNED', 'CONFIRMED'],
-    ['DISPATCHED', 'AGENT_ASSIGNED'],
-    ['IN_TRANSIT', 'DISPATCHED'],
-    // Terminal → anything
-    ['REMITTED', 'AGENT_ASSIGNED'],
-    ['REMITTED', 'DISPATCHED'],
+    // Terminal → anything (WRITTEN_OFF and RESTOCKED have no retrack)
+    ['WRITTEN_OFF', 'RETURNED'],
+    ['RESTOCKED', 'DISPATCHED'],
     ['WRITTEN_OFF', 'RETURNED'],
     ['RESTOCKED', 'DISPATCHED'],
     // Cross-branch invalid
@@ -101,11 +97,16 @@ describe('TERMINAL_STATUSES', () => {
     expect(TERMINAL_STATUSES).toContain('DELETED');
   });
 
-  it('returns empty array of next statuses for REMITTED, WRITTEN_OFF, RESTOCKED', () => {
-    // DELETED has a restore path (→ UNPROCESSED) so it's not fully terminal.
-    for (const status of ['REMITTED', 'WRITTEN_OFF', 'RESTOCKED'] as OrderStatus[]) {
+  it('returns empty array of next statuses for WRITTEN_OFF, RESTOCKED', () => {
+    // DELETED has a restore path (→ UNPROCESSED), REMITTED has a retrack path (→ DELIVERED).
+    for (const status of ['WRITTEN_OFF', 'RESTOCKED'] as OrderStatus[]) {
       expect(getAllowedNextStatuses(status)).toHaveLength(0);
     }
+  });
+
+  it('REMITTED can retrack to DELIVERED', () => {
+    const result = getAllowedNextStatuses('REMITTED');
+    expect(result).toContain('DELIVERED');
   });
 });
 
@@ -137,7 +138,10 @@ describe('getAllowedNextStatuses', () => {
     expect(result).toContain('DELIVERED');
     expect(result).toContain('PARTIALLY_DELIVERED');
     expect(result).toContain('RETURNED');
-    expect(result).not.toContain('CONFIRMED');
+    // Retrack paths
+    expect(result).toContain('DISPATCHED');
+    expect(result).toContain('AGENT_ASSIGNED');
+    expect(result).toContain('CONFIRMED');
   });
 
   it('returns correct options from RETURNED', () => {

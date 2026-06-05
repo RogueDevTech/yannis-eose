@@ -63,6 +63,24 @@ const ALLOWED_TRANSITIONS: TransitionRule[] = [
 
   // Partial delivery flows
   { from: 'PARTIALLY_DELIVERED', to: 'REMITTED' },
+
+  // Retrack — roll back an order to an earlier status (HoCS / HoLogistics / Admin only).
+  // Use case: order marked delivered prematurely, rider returned, wrong status click.
+  // Mandatory reason note for audit trail.
+  { from: 'REMITTED', to: 'DELIVERED', gate: 'Retrack: mandatory reason' },
+  { from: 'DELIVERED', to: 'IN_TRANSIT', gate: 'Retrack: mandatory reason' },
+  { from: 'DELIVERED', to: 'DISPATCHED', gate: 'Retrack: mandatory reason' },
+  { from: 'DELIVERED', to: 'AGENT_ASSIGNED', gate: 'Retrack: mandatory reason' },
+  { from: 'DELIVERED', to: 'CONFIRMED', gate: 'Retrack: mandatory reason' },
+  { from: 'IN_TRANSIT', to: 'DISPATCHED', gate: 'Retrack: mandatory reason' },
+  { from: 'IN_TRANSIT', to: 'AGENT_ASSIGNED', gate: 'Retrack: mandatory reason' },
+  { from: 'IN_TRANSIT', to: 'CONFIRMED', gate: 'Retrack: mandatory reason' },
+  { from: 'DISPATCHED', to: 'AGENT_ASSIGNED', gate: 'Retrack: mandatory reason' },
+  { from: 'DISPATCHED', to: 'CONFIRMED', gate: 'Retrack: mandatory reason' },
+  { from: 'AGENT_ASSIGNED', to: 'CONFIRMED', gate: 'Retrack: mandatory reason' },
+  { from: 'CONFIRMED', to: 'CS_ENGAGED', gate: 'Retrack: mandatory reason' },
+  { from: 'CS_ENGAGED', to: 'CS_ASSIGNED', gate: 'Retrack: mandatory reason' },
+  { from: 'CS_ASSIGNED', to: 'UNPROCESSED', gate: 'Retrack: mandatory reason' },
 ];
 
 /**
