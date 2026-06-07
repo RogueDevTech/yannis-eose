@@ -2,12 +2,23 @@ import { Link } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
+import {
+  STATUS_OPTIONS,
+  STATUS_LABELS,
+  STATUS_TEXT_CLASS,
+  formatStatus,
+} from '~/features/shared/order-status';
 
 /**
  * Data shape for the lightweight admin landing. Populated by
  * `dashboard.quickOverview` (single tRPC call, ~50-150ms total).
  */
 export interface QuickOverviewData {
+  /** Raw status → count map (same shape as the Sales Orders stat strip). */
+  statusCounts: Record<string, number>;
+  /** Offline-created orders count for today. */
+  offlineCount: number;
   marketing: {
     today: {
       /** All orders created today, any status. */
@@ -38,6 +49,7 @@ export interface AdminQuickDashboardProps {
   data: QuickOverviewData;
   userName: string;
   role: string;
+  filters?: { startDate: string; endDate: string; periodAllTime?: boolean };
 }
 
 function getGreeting() {
@@ -52,9 +64,67 @@ function getGreeting() {
  * The full Executive Overview (profit aggregation, charts, leaderboards, branch breakdown)
  * lives at /admin/ceo — linked prominently from this page. See CLAUDE.md for context on why.
  */
-export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboardProps) {
+export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuickDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const m = data.marketing.today;
+  const statusCounts = data.statusCounts ?? {};
+  const offlineCount = data.offlineCount ?? 0;
+
+  /** Build a Sales Orders URL carrying the current date filter context. */
+  function salesLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    const qs = params.toString();
+    return qs ? `/admin/sales/orders?${qs}` : '/admin/sales/orders';
+  }
+
+  // Mirror the Sales Orders page stat strip (CEO six-bucket pipeline).
+  const CONFIRMED_SUBSTAGES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'] as const;
+  const PIPELINE_KEYS = STATUS_OPTIONS.filter((s) => s !== 'ALL');
+  const confirmedAbsorbsSubstages = !PIPELINE_KEYS.some((s) =>
+    (CONFIRMED_SUBSTAGES as readonly string[]).includes(s),
+  );
+
+  const total = Object.entries(statusCounts)
+    .filter(([k]) => k !== 'DELETED' && k !== 'CART')
+    .reduce((sum, [, n]) => sum + (n || 0), 0);
+
+  // CR = confirmed-or-beyond / (total - DELETED)
+  const confirmedAndBeyond =
+    (statusCounts['CONFIRMED'] ?? 0) +
+    (statusCounts['AGENT_ASSIGNED'] ?? 0) +
+    (statusCounts['DISPATCHED'] ?? 0) +
+    (statusCounts['IN_TRANSIT'] ?? 0) +
+    (statusCounts['DELIVERED'] ?? 0) +
+    (statusCounts['REMITTED'] ?? 0);
+  const confirmationRate = total > 0 ? (confirmedAndBeyond / total) * 100 : 0;
+
+  // DR = delivered / total
+  const delivered = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+  const deliveryRate = total > 0 ? (delivered / total) * 100 : 0;
+
+  const pipelineItems = PIPELINE_KEYS.map((status) => {
+    let value = statusCounts[status] ?? 0;
+    if (status === 'DELIVERED') {
+      value += statusCounts['REMITTED'] ?? 0;
+    }
+    if (status === 'CONFIRMED' && confirmedAbsorbsSubstages) {
+      for (const sub of CONFIRMED_SUBSTAGES) value += statusCounts[sub] ?? 0;
+    }
+    return {
+      label: STATUS_LABELS[status] ?? formatStatus(status),
+      value,
+      valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+      to: salesLink({ status }),
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -63,10 +133,6 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
         mobileInlineActions
         description="Quick snapshot of today's performance."
         actions={
-          // Match the Inventory-page mobile pattern (CEO directive 2026-05-10):
-          // below `md` the action collapses to an icon so the greeting +
-          // description get full width and don't truncate. No extra kebab
-          // sheet here — there's only the single refresh action.
           <>
             <span className="hidden md:inline-flex"><PageRefreshButton /></span>
             <span className="md:hidden"><PageRefreshButton iconOnly /></span>
@@ -74,16 +140,16 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
         }
       />
 
-      {/* Marketing — today's order pulse. Click header to jump into the marketing module. */}
+      {/* Orders stat strip — mirrors /admin/sales/orders. Each pill links to that page. */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Marketing today</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Orders today</h2>
           <Link
-            to="/admin/marketing/overview"
+            to={salesLink()}
             prefetch="intent"
             className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
           >
-            Live activities →
+            View all →
           </Link>
         </div>
         <OverviewStatStrip
@@ -92,77 +158,30 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
           showScrollControls={false}
           items={[
             {
-              label: 'New orders',
-              value: m.newOrders.toString(),
+              label: 'Total',
+              value: total,
               valueClassName: 'text-app-fg',
-              title: 'All orders created today, any status',
+              to: salesLink(),
             },
             {
-              label: 'Confirmed',
-              value: m.confirmed.toString(),
-              valueClassName: 'text-success-600 dark:text-success-400',
-              title: 'Orders that reached CONFIRMED today',
+              label: 'Offline',
+              value: offlineCount,
+              valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+              title: 'Orders created manually via offline order',
+              to: salesLink({ orderSource: 'offline' }),
+            },
+            ...pipelineItems,
+            {
+              label: 'CR',
+              value: `${confirmationRate.toFixed(1)}%`,
+              valueClassName: confirmationRateColorClass(confirmationRate),
+              title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
             },
             {
-              label: 'Delivered',
-              value: m.delivered.toString(),
-              valueClassName: 'text-success-600 dark:text-success-400',
-              title: 'Orders that reached DELIVERED today',
-            },
-            {
-              label: 'Cancelled',
-              value: m.cancelled.toString(),
-              valueClassName:
-                m.cancelled > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-              title: 'Orders that were cancelled today',
-            },
-          ]}
-        />
-      </div>
-
-      {/* Sales — today's company-wide activity snapshot. */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Sales activity today</h2>
-          <Link
-            to="/admin/sales/queue"
-            prefetch="intent"
-            className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-          >
-            Sales queue →
-          </Link>
-        </div>
-        <OverviewStatStrip
-          mobileGrid
-          embedded
-          showScrollControls={false}
-          items={[
-            {
-              label: 'Unassigned',
-              value: data.cs.unassigned.toString(),
-              valueClassName:
-                data.cs.unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-              title: 'Orders created today that are still in UNPROCESSED',
-            },
-            {
-              label: 'Engaged',
-              value: data.cs.engaged.toString(),
-              valueClassName: 'text-info-600 dark:text-info-400',
-              title: 'Orders created today that are currently in CS_ENGAGED',
-            },
-            {
-              label: 'Confirmed',
-              value: data.cs.confirmed.toString(),
-              valueClassName:
-                data.cs.confirmed > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              title: 'Orders created today that are currently CONFIRMED',
-            },
-            {
-              label: 'Delivered',
-              value: data.cs.delivered.toString(),
-              valueClassName:
-                data.cs.delivered > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              title: 'Orders created today that are currently DELIVERED',
+              label: 'DR',
+              value: `${deliveryRate.toFixed(1)}%`,
+              valueClassName: deliveryRateColorClass(deliveryRate),
+              title: 'Delivery Rate — delivered / total orders',
             },
           ]}
         />
@@ -209,7 +228,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
 
       {/* Quick jumps */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <QuickJump to="/admin/sales/queue" label="Sales Queue" />
+        <QuickJump to={salesLink()} label="Sales Orders" />
         <QuickJump to="/admin/logistics/orders" label="Logistics" />
         <QuickJump to="/admin/marketing" label="Marketing" />
         <QuickJump to="/admin/finance/overview" label="Finance" />

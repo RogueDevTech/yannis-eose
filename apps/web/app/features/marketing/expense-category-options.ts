@@ -6,9 +6,10 @@ export const EXPENSE_CATEGORY_OPTIONS: Array<{ value: ExpenseCategory; label: st
   { value: 'RECRUITMENT_AD', label: 'Recruitment Ad' },
   { value: 'WHATSAPP_CAMPAIGN', label: 'WhatsApp Campaign' },
   { value: 'UGC_PRODUCTION', label: 'UGC Production' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
 export const EXPENSE_CATEGORY_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
-  ...EXPENSE_CATEGORY_OPTIONS,
-  { value: 'NOT_AD_SPEND', label: 'All Others (excl. Ad Spend)' },
+  { value: 'AD_SPEND', label: 'Ad Spend' },
+  { value: 'NOT_AD_SPEND', label: 'Others' },
 ];

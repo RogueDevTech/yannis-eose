@@ -946,11 +946,11 @@ function OrdersListPageImpl({
     }
   };
 
-  // Eligibility: initial queue assign — only unprocessed orders.
+  // Eligibility: initial queue assign — unprocessed orders or abandoned carts.
   const canBulkAssignToCS =
     selectedOrders.length > 0 &&
     (csClosersForFilter?.length ?? 0) > 0 &&
-    selectedOrders.every((o) => o.status === 'UNPROCESSED');
+    selectedOrders.every((o) => o.status === 'UNPROCESSED' || o.status === 'CART');
 
   // Eligibility: Hot-swap style reassignment — orders already with a closer (same bulk API + random split).
   const canBulkReassignToCS =
@@ -985,10 +985,11 @@ function OrdersListPageImpl({
   const submitBulkAssign = () => {
     setBulkResult(null);
 
+    const isCartAssign = selectedOrders.every((o) => o.status === 'CART');
     const doSubmit = (branchId: string) =>
       assignFetcher.submit(
         {
-          intent: 'bulkAssign',
+          intent: isCartAssign ? 'bulkAssignCarts' : 'bulkAssign',
           orderIds: JSON.stringify([...selectedIds]),
           csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
           branchId,
@@ -1058,10 +1059,9 @@ function OrdersListPageImpl({
     }
   };
 
-  // Bulk transition / assign / cancel act on orders — disabled entirely in the
-  // cart-abandonment view, where the rows are carts, not orders.
+  // Bulk transition / assign / cancel act on orders. Cart abandonment view
+  // only allows assign (recover + assign in one step).
   const canBulkAction =
-    !isCartAbandonmentView &&
     (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER');
 
   const ordersListColumns = useMemo((): CompactTableColumn<Order>[] => {
@@ -1784,7 +1784,7 @@ function OrdersListPageImpl({
               label: 'DR',
               value: `${deliveryRate.toFixed(1)}%`,
               valueClassName: deliveryRateColorClass(deliveryRate),
-              title: 'Delivery Rate — delivered / confirmed',
+              title: 'Delivery Rate — delivered / total orders',
             },
             ...(enableFromCartStatusOption && !searchParams.get('csCloserId') && cartAbandonmentCount != null
               ? [
@@ -1886,7 +1886,7 @@ function OrdersListPageImpl({
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
-                {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} selected
+                {selectedIds.size} {isCartAbandonmentView ? 'cart' : 'order'}{selectedIds.size !== 1 ? 's' : ''} selected
               </span>
               <button onClick={clearSelection} className="text-xs text-brand-500 hover:text-brand-600 underline">
                 Clear
@@ -2623,7 +2623,7 @@ function OrdersListPageImpl({
           }
           onSubmit={submitBulkAssign}
           isSubmitting={isAssigning}
-          errorMessage={assignSurface.errorMatchingIntent('bulkAssign')}
+          errorMessage={assignSurface.errorMatchingIntent('bulkAssign') || assignSurface.errorMatchingIntent('bulkAssignCarts')}
           mode={assignModalKind}
           emptyMessage="No closers available in your scope."
         />

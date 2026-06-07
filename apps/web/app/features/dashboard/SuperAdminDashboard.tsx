@@ -33,6 +33,22 @@ export interface SuperAdminDashboardProps {
 export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
 
+  /** Build a Sales Orders URL carrying the current date filter context. */
+  function salesLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    const qs = params.toString();
+    return qs ? `/admin/sales/orders?${qs}` : '/admin/sales/orders';
+  }
+
   const revenue = data?.revenue ?? 0;
   const marketingSafe = {
     totalSpend: data?.marketing?.totalSpend ?? 0,
@@ -46,6 +62,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
   const orderPipeline = {
     total: data?.orderPipeline?.total ?? 0,
     statusCounts: data?.orderPipeline?.statusCounts ?? {},
+    offlineCount: data?.orderPipeline?.offlineCount ?? 0,
   };
   // Deliveries per Brand + Stock Available per Product removed 2026-05-19 per
   // CEO directive; backend still returns them but this view no longer renders.
@@ -113,6 +130,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       {/* ── Order Funnel: full pipeline at a glance ── */}
       {(() => {
         const sc = orderPipeline.statusCounts;
+        const offlineCount = orderPipeline.offlineCount ?? 0;
         const ordersTotal = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
         const unassigned = sc['UNPROCESSED'] ?? 0;
         const assigned = sc['CS_ASSIGNED'] ?? 0;
@@ -137,37 +155,44 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   label: 'Total',
                   value: ordersTotal,
                   valueClassName: 'text-app-fg',
-                  to: '/admin/marketing/orders',
+                  to: salesLink(),
+                },
+                {
+                  label: 'Offline',
+                  value: offlineCount,
+                  valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+                  title: 'Orders created manually via offline order',
+                  to: salesLink({ orderSource: 'offline' }),
                 },
                 {
                   label: 'Unassigned',
                   value: unassigned,
                   valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-                  to: '/admin/marketing/orders?status=UNPROCESSED',
+                  to: salesLink({ status: 'UNPROCESSED' }),
                 },
                 {
                   label: 'Assigned',
                   value: assigned,
                   valueClassName: 'text-info-600 dark:text-info-400',
-                  to: '/admin/marketing/orders?status=CS_ASSIGNED',
+                  to: salesLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
                   label: 'Unconfirmed',
                   value: unconfirmed,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                  to: '/admin/marketing/orders?status=CS_ENGAGED',
+                  to: salesLink({ status: 'CS_ENGAGED' }),
                 },
                 {
                   label: 'Confirmed',
                   value: confirmed,
                   valueClassName: 'text-brand-600 dark:text-brand-400',
-                  to: '/admin/marketing/orders?status=CONFIRMED',
+                  to: salesLink({ status: 'CONFIRMED' }),
                 },
                 {
                   label: 'Delivered',
                   value: delivered,
                   valueClassName: 'text-success-600 dark:text-success-400',
-                  to: '/admin/marketing/orders?status=DELIVERED',
+                  to: salesLink({ status: 'DELIVERED' }),
                 },
                 {
                   label: 'CR',
@@ -183,7 +208,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   label: 'Deleted',
                   value: deleted,
                   valueClassName: deleted > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
-                  to: '/admin/marketing/orders?status=DELETED',
+                  to: salesLink({ status: 'DELETED' }),
                 },
               ]}
             />
@@ -212,7 +237,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               value: orderPipeline.total.toLocaleString(),
               valueClassName: 'text-app-fg',
               title: 'All orders created in the selected period',
-              to: '/admin/marketing/orders',
+              to: salesLink(),
             },
             {
               label: 'Cost Per Acquisition',
@@ -246,7 +271,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 
       {/* ── Quick Navigation ─────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <QuickJump to="/admin/sales/queue" label="Sales Queue" />
+        <QuickJump to={salesLink()} label="Sales Orders" />
         <QuickJump to="/admin/logistics/orders" label="Logistics" />
         <QuickJump to="/admin/marketing" label="Marketing" />
         <QuickJump to="/admin/finance/overview" label="Finance" />

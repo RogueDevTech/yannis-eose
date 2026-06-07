@@ -173,13 +173,13 @@ export function AdminQuickDashboardLoadingShell({
 
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Marketing today</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Orders today</h2>
           <Link
-            to="/admin/marketing/overview"
+            to="/admin/sales/orders"
             prefetch="intent"
             className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
           >
-            Live activities →
+            View all →
           </Link>
         </div>
         <OverviewStatStrip
@@ -187,34 +187,15 @@ export function AdminQuickDashboardLoadingShell({
           embedded
           showScrollControls={false}
           items={[
-            { label: 'New orders', value: <StatValuePulse className="min-w-[2.25rem]" /> },
+            { label: 'Total', value: <StatValuePulse className="min-w-[2.25rem]" /> },
+            { label: 'Offline', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Unconfirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Cancelled', value: <StatValuePulse className="min-w-[2rem]" /> },
-          ]}
-        />
-      </div>
-
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Sales activity today</h2>
-          <Link
-            to="/admin/sales/queue"
-            prefetch="intent"
-            className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-          >
-            Sales queue →
-          </Link>
-        </div>
-        <OverviewStatStrip
-          mobileGrid
-          embedded
-          showScrollControls={false}
-          items={[
-            { label: 'Unassigned', value: <StatValuePulse className="min-w-[2.25rem]" /> },
-            { label: 'Engaged', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'CR', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'DR', value: <StatValuePulse className="min-w-[2rem]" /> },
           ]}
         />
       </div>

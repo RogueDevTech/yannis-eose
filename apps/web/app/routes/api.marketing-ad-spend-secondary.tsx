@@ -117,7 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : Promise.resolve({ ok: false as const, data: null });
 
     // Fetch status counts + total spend for non-AD_SPEND categories (always, for the "Other Expenses" overview)
-    const otherCategories = ['AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION'] as const;
+    const otherCategories = ['AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION', 'OTHER'] as const;
     const otherBaseScope = {
       ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
       ...(startDate && !periodAllTime ? { startDate } : {}),

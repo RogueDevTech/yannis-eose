@@ -668,6 +668,56 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'bulkAssignCarts') {
+    const cartIds = JSON.parse(form.get('orderIds') as string) as string[];
+    const csCloserIdsRaw = form.get('csCloserIds')?.toString();
+    const csCloserIdSingle = (form.get('csCloserId') as string | null) ?? '';
+    let csCloserIds: string[] = [];
+    if (csCloserIdsRaw) {
+      try { csCloserIds = JSON.parse(csCloserIdsRaw) as string[]; } catch { /* ignore */ }
+    }
+    if (csCloserIds.length === 0 && csCloserIdSingle) csCloserIds = [csCloserIdSingle];
+    if (csCloserIds.length === 0) {
+      return json({ success: false, error: 'Pick at least one closer', succeeded: 0, failed: cartIds.length, results: [] }, { status: 400 });
+    }
+
+    // Step 1: Recover all carts to orders in parallel
+    const recoverResults = await Promise.all(
+      cartIds.map(async (cartId) => {
+        const res = await apiRequest<unknown>('/trpc/orders.recoverFromCart', {
+          method: 'POST', cookie, body: { cartId }, timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+        });
+        if (res.ok) {
+          const orderId = (res.data as { result?: { data?: { id: string } } })?.result?.data?.id;
+          return { ok: true as const, orderId };
+        }
+        return { ok: false as const, error: extractApiErrorMessage(res.data, 'Recovery failed') };
+      }),
+    );
+    const createdOrderIds = recoverResults.filter((r) => r.ok && r.orderId).map((r) => (r as { ok: true; orderId: string }).orderId);
+    const recoverFailed = recoverResults.filter((r) => !r.ok).length;
+    const errors = [...new Set(recoverResults.filter((r) => !r.ok).map((r) => (r as { ok: false; error: string }).error))];
+
+    // Step 2: Assign the recovered orders to closers
+    if (createdOrderIds.length > 0) {
+      const body: Record<string, unknown> =
+        csCloserIds.length === 1
+          ? { orderIds: createdOrderIds, csCloserId: csCloserIds[0] }
+          : { orderIds: createdOrderIds, csCloserIds };
+      await apiRequest('/trpc/orders.bulkAssignToCS', {
+        method: 'POST', cookie, body, timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+      });
+    }
+
+    return json({
+      success: createdOrderIds.length > 0,
+      succeeded: createdOrderIds.length,
+      failed: recoverFailed,
+      results: [],
+      error: recoverFailed > 0 ? `${recoverFailed} cart${recoverFailed !== 1 ? 's' : ''} failed to convert: ${errors.join('; ')}` : undefined,
+    });
+  }
+
   if (intent === 'moveOrdersToBranch') {
     const orderIds = JSON.parse(form.get('orderIds')?.toString() ?? '[]');
     const targetBranchId = form.get('targetBranchId')?.toString() ?? '';

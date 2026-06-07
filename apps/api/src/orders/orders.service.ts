@@ -1887,14 +1887,38 @@ export class OrdersService {
       totalAmount: overrides.totalAmount,
     };
 
-    // 3. Create via the standard edge-form path — UNPROCESSED, MB-attributed.
-    const result = await this.create(orderInput, actorId, 'edge-form');
+    // 3. Try edge-form first (preserves MB attribution + campaign link).
+    // If campaign tier validation fails (offers changed after cart was
+    // abandoned), retry without the campaign so the tier check is skipped,
+    // but keep mediaBuyerId + orderSource for proper attribution.
+    let result: { id?: string };
+    try {
+      result = await this.create(orderInput, actorId, 'edge-form');
+    } catch {
+      const { campaignId: _dropped, ...inputWithoutCampaign } = orderInput;
+      result = await this.create(inputWithoutCampaign, actorId, 'edge-form');
+    }
     if (!result.id) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Order creation returned no ID' });
     }
 
-    // 4. Convert the cart (fire-and-forget — order is already created).
-    this.cartService.convert(cartId, result.id, actorId).catch(() => {});
+    // 4. Convert the cart — mark as CONVERTED so it disappears from the abandonment list.
+    try {
+      await this.cartService.convert(cartId, result.id, actorId);
+    } catch (err) {
+      this.logger.warn(`Failed to mark cart ${cartId} as CONVERTED: ${err instanceof Error ? err.message : err}`);
+    }
+
+    // 5. Timeline event — record that this order was recovered from an abandoned cart.
+    await this.db.insert(schema.orderTimelineEvents).values({
+      orderId: result.id,
+      eventType: 'ORDER_RESTORED' as const,
+      actorId,
+      actorName: null,
+      description: `Order recovered from abandoned cart.`,
+      metadata: { cartId, customerName: cart.customerName },
+      branchId: null,
+    });
 
     return { id: result.id };
   }
