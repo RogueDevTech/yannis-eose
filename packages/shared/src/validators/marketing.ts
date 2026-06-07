@@ -137,7 +137,7 @@ export const adPlatformValues = ['FACEBOOK', 'TIKTOK', 'GOOGLE', 'OTHER'] as con
 export type AdPlatform = (typeof adPlatformValues)[number];
 export const adPlatformSchema = z.enum(adPlatformValues);
 
-export const expenseCategoryValues = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION'] as const;
+export const expenseCategoryValues = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION', 'OTHER'] as const;
 export type ExpenseCategory = (typeof expenseCategoryValues)[number];
 export const expenseCategorySchema = z.enum(expenseCategoryValues);
 

@@ -894,7 +894,7 @@ export function MarketingOrdersPage({
                       const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
                       const confirmedOrBeyond = confirmedCount + deliveredCount;
                       const cr = statusTotal > 0 ? (confirmedOrBeyond / statusTotal) * 100 : 0;
-                      const dr = confirmedOrBeyond > 0 ? (deliveredCount / confirmedOrBeyond) * 100 : 0;
+                      const dr = statusTotal > 0 ? (deliveredCount / statusTotal) * 100 : 0;
                       return [
                         {
                           label: 'CR',
@@ -906,7 +906,7 @@ export function MarketingOrdersPage({
                           label: 'DR',
                           value: <>{dr.toFixed(1)}%</>,
                           valueClassName: deliveryRateColorClass(dr),
-                          title: 'Delivery Rate — delivered / confirmed-or-beyond',
+                          title: 'Delivery Rate — delivered / total orders',
                         },
                       ];
                     })(),

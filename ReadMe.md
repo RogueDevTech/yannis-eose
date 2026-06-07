@@ -16,10 +16,6 @@ docker restart yannis-eose-api-1
 
 
 
-
-
-
-
 pnpm --filter @yannis/api dev
 START NEW DB
 

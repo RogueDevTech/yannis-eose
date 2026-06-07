@@ -272,6 +272,7 @@ export const expenseCategoryEnum = pgEnum('expense_category', [
   'RECRUITMENT_AD',
   'WHATSAPP_CAMPAIGN',
   'UGC_PRODUCTION',
+  'OTHER',
 ]);
 
 /** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */

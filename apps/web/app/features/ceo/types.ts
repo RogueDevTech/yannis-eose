@@ -33,6 +33,7 @@ export interface CEODashboardData {
     cancelled: number;
     returned: number;
     statusCounts: Record<string, number>;
+    offlineCount?: number;
   };
 
   // Marketing
