@@ -142,6 +142,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           (sc['IN_TRANSIT'] ?? 0);
         const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
         const deleted = sc['DELETED'] ?? 0;
+        // CR = confirmed-or-beyond / total (excludes DELETED from denominator)
+        const confirmedAndBeyond = confirmed + delivered;
+        const confirmationRate = ordersTotal > 0 ? (confirmedAndBeyond / ordersTotal) * 100 : 0;
+        // DR = delivered / total
+        const deliveryRate = ordersTotal > 0 ? (delivered / ordersTotal) * 100 : 0;
         return (
           <div>
             <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
@@ -196,13 +201,15 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 },
                 {
                   label: 'CR',
-                  value: pct(marketingSafe.confirmationRate),
-                  valueClassName: confirmationRateColorClass(marketingSafe.confirmationRate),
+                  value: pct(confirmationRate),
+                  valueClassName: confirmationRateColorClass(confirmationRate),
+                  title: 'Confirmation Rate — confirmed-or-beyond / total',
                 },
                 {
                   label: 'DR',
-                  value: pct(marketingSafe.deliveryRate),
-                  valueClassName: deliveryRateColorClass(marketingSafe.deliveryRate),
+                  value: pct(deliveryRate),
+                  valueClassName: deliveryRateColorClass(deliveryRate),
+                  title: 'Delivery Rate — delivered / total',
                 },
                 {
                   label: 'Deleted',
