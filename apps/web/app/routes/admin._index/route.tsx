@@ -19,6 +19,8 @@ import type { CEODashboardData } from '~/features/ceo/types';
 import type { DashboardData, OrdersAndCounts } from '~/features/dashboard/types';
 
 const defaultQuickOverview: QuickOverviewData = {
+  statusCounts: {},
+  offlineCount: 0,
   marketing: { today: { newOrders: 0, confirmed: 0, delivered: 0, cancelled: 0 } },
   cs: { unassigned: 0, engaged: 0, confirmed: 0, delivered: 0 },
   pendingApprovals: 0,
@@ -182,6 +184,7 @@ export default function AdminDashboard() {
             data={data as QuickOverviewData}
             userName={userName}
             role={adminRole}
+            filters={loaderData.filters}
           />
         ) : (
           <DashboardPage

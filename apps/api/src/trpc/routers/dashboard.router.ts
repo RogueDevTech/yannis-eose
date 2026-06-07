@@ -56,6 +56,7 @@ async function _ceoOverviewFetch(params: {
   const [
     fastProfitResult,
     statusCountsWhenDated,
+    supplementaryCounts,
     invoiceSummary,
     marketingMetrics,
     payoutSummary,
@@ -67,6 +68,7 @@ async function _ceoOverviewFetch(params: {
   ] = await Promise.all([
     financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
     hasDateRange ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false).catch(logErr('statusCounts')) : Promise.resolve(undefined),
+    ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
     financeService!.getInvoiceSummary().catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary().catch(logErr('payoutSummary')),
@@ -185,6 +187,7 @@ async function _ceoOverviewFetch(params: {
       deleted: deletedOrders,
       returned: returnedOrders,
       statusCounts,
+      offlineCount: supplementaryCounts.offlineCount,
     },
     marketing: {
       totalSpend: safeMarketingMetrics.totalSpend ?? 0,
@@ -428,14 +431,17 @@ export const dashboardRouter = router({
     const startIso = nigeriaDayStart(todayWat).toISOString();
     const endIso = nigeriaDayEnd(todayWat).toISOString();
 
-    const [todayCounts, pendingApprovals] = await Promise.all([
+    const [todayCounts, supplementary, pendingApprovals] = await Promise.all([
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({})),
+      ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
     ]);
 
     const today = (todayCounts ?? {}) as Record<string, number>;
 
     return {
+      statusCounts: today,
+      offlineCount: supplementary.offlineCount,
       marketing: {
         today: {
           // Exclude DELETED + legacy CANCELLED from "new orders" — both are

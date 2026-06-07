@@ -344,7 +344,9 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
     const t = simpleAmount.replace(/,/g, '').trim();
     if (t === '') return false;
     const n = Number(t);
-    return !Number.isNaN(n) && n > 0;
+    if (Number.isNaN(n) || n <= 0) return false;
+    if (category === 'OTHER' && !simpleDescription.trim()) return false;
+    return true;
   })();
 
   return (
@@ -385,12 +387,13 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
                 placeholder="0.00"
               />
             </FormField>
-            <FormField label="Description" htmlFor="simple-expense-desc">
+            <FormField label="Description" htmlFor="simple-expense-desc" required={category === 'OTHER'}>
               <TextInput
                 id="simple-expense-desc"
                 value={simpleDescription}
                 onChange={(e) => setSimpleDescription(e.target.value)}
-                placeholder="What was this expense for?"
+                placeholder={category === 'OTHER' ? 'What exactly was purchased?' : 'What was this expense for?'}
+                required={category === 'OTHER'}
               />
             </FormField>
           </div>

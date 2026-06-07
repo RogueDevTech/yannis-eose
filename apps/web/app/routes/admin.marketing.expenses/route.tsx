@@ -46,7 +46,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusParam && (AD_SPEND_STATUSES as readonly string[]).includes(statusParam)
       ? (statusParam as AdSpendStatusFilter)
       : undefined;
-  const EXPENSE_CATEGORIES = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION'] as const;
+  const EXPENSE_CATEGORIES = ['AD_SPEND', 'AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION', 'OTHER'] as const;
   const categoryParam = url.searchParams.get('category') ?? undefined;
   // NOT_AD_SPEND is a virtual category: shows all expenses except AD_SPEND.
   const isNotAdSpend = categoryParam === 'NOT_AD_SPEND';

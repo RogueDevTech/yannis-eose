@@ -1021,10 +1021,23 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
-    // Ledger rows have no branch_id. Do not filter by active-branch membership here — it
-    // drifted from `fundingByDirectionSummary` (actor + period only) and hid rows when the
-    // viewer's session branch did not match their `user_branches` row or cross-branch data.
-    void branchId;
+    // Branch-scope: restrict to transfers where at least one party (sender or receiver)
+    // is a member of the active branch. This prevents HoM from seeing cross-branch funding.
+    const branchUserIdsForFunding = await this.getBranchUserIds(branchId);
+    if (branchUserIdsForFunding && branchUserIdsForFunding.length === 0) {
+      return {
+        records: [],
+        pagination: { total: 0, page: input.page, limit: input.limit, totalPages: 0 },
+        filteredTotalAmount: '0',
+      };
+    }
+    if (branchUserIdsForFunding) {
+      const partyInBranch = or(
+        inArray(schema.marketingFunding.senderId, branchUserIdsForFunding),
+        inArray(schema.marketingFunding.receiverId, branchUserIdsForFunding),
+      );
+      if (partyInBranch) conditions.push(partyInBranch);
+    }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
       if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
@@ -1096,7 +1109,18 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
-    void branchId;
+    // Branch-scope: restrict to transfers where at least one party is a branch member.
+    const branchUserIdsForCounts = await this.getBranchUserIds(branchId);
+    if (branchUserIdsForCounts && branchUserIdsForCounts.length === 0) {
+      return { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
+    }
+    if (branchUserIdsForCounts) {
+      const partyInBranch = or(
+        inArray(schema.marketingFunding.senderId, branchUserIdsForCounts),
+        inArray(schema.marketingFunding.receiverId, branchUserIdsForCounts),
+      );
+      if (partyInBranch) conditions.push(partyInBranch);
+    }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
       if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
@@ -1202,7 +1226,14 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.marketingFundingRequests.createdAt, nigeriaDayEnd(input.endDate)));
     }
-    void branchId;
+    // Branch-scope: restrict to requests from branch members.
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+    }
+    if (branchUserIds) {
+      conditions.push(inArray(schema.marketingFundingRequests.requesterId, branchUserIds));
+    }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const rows = await this.db
@@ -2021,7 +2052,15 @@ export class MarketingService {
         ) as SQL,
       );
     }
-    void branchId;
+    // Branch-scope: restrict to requests from branch members so HoM only sees
+    // their own branch's MBs, not the whole org.
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return { records: [], pagination: { page: input.page, limit: input.limit, total: 0, totalPages: 0 } };
+    }
+    if (branchUserIds) {
+      conditions.push(inArray(schema.marketingFundingRequests.requesterId, branchUserIds));
+    }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -3392,7 +3431,8 @@ export class MarketingService {
       conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    if (branchCampaignIds && branchCampaignIds.length === 0) {
+    const branchUserIdsForSpend = await this.getBranchUserIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIdsForSpend && branchUserIdsForSpend.length === 0) {
       return {
         records: [],
         totalSpend: '0',
@@ -3400,11 +3440,18 @@ export class MarketingService {
       };
     }
     if (branchCampaignIds) {
-      // Daily-flow rows have campaignId=NULL — include them alongside branch-scoped legacy rows.
-      const branchOrDaily = or(
-        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
-        isNull(schema.adSpendLogs.campaignId),
-      );
+      // Campaign-linked rows: must belong to a branch campaign.
+      // NULL-campaign rows (non-AD_SPEND simple expenses): must be from a branch member
+      // so they don't leak across branches.
+      const nullCampaignCondition = branchUserIdsForSpend && branchUserIdsForSpend.length > 0
+        ? and(isNull(schema.adSpendLogs.campaignId), inArray(schema.adSpendLogs.mediaBuyerId, branchUserIdsForSpend))
+        : isNull(schema.adSpendLogs.campaignId);
+      const branchOrDaily = branchCampaignIds.length > 0
+        ? or(
+            inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+            nullCampaignCondition,
+          )
+        : nullCampaignCondition;
       if (branchOrDaily) conditions.push(branchOrDaily);
     }
     const searchTrimmed = input.search?.trim();
@@ -3553,17 +3600,23 @@ export class MarketingService {
       conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    if (branchCampaignIds && branchCampaignIds.length === 0) {
+    const branchUserIdsForGrouped = await this.getBranchUserIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIdsForGrouped && branchUserIdsForGrouped.length === 0) {
       return {
         groups: [],
         pagination: { page, limit, total: 0 },
       };
     }
     if (branchCampaignIds) {
-      const branchOrDaily = or(
-        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
-        isNull(schema.adSpendLogs.campaignId),
-      );
+      const nullCampaignCondition = branchUserIdsForGrouped && branchUserIdsForGrouped.length > 0
+        ? and(isNull(schema.adSpendLogs.campaignId), inArray(schema.adSpendLogs.mediaBuyerId, branchUserIdsForGrouped))
+        : isNull(schema.adSpendLogs.campaignId);
+      const branchOrDaily = branchCampaignIds.length > 0
+        ? or(
+            inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+            nullCampaignCondition,
+          )
+        : nullCampaignCondition;
       if (branchOrDaily) conditions.push(branchOrDaily);
     }
     const searchTrimmed = input.search?.trim();
@@ -3853,14 +3906,20 @@ export class MarketingService {
       conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    if (branchCampaignIds && branchCampaignIds.length === 0) {
+    const branchUserIdsForCounts = await this.getBranchUserIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIdsForCounts && branchUserIdsForCounts.length === 0) {
       return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     }
     if (branchCampaignIds) {
-      const branchOrDaily = or(
-        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
-        isNull(schema.adSpendLogs.campaignId),
-      );
+      const nullCampaignCondition = branchUserIdsForCounts && branchUserIdsForCounts.length > 0
+        ? and(isNull(schema.adSpendLogs.campaignId), inArray(schema.adSpendLogs.mediaBuyerId, branchUserIdsForCounts))
+        : isNull(schema.adSpendLogs.campaignId);
+      const branchOrDaily = branchCampaignIds.length > 0
+        ? or(
+            inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+            nullCampaignCondition,
+          )
+        : nullCampaignCondition;
       if (branchOrDaily) conditions.push(branchOrDaily);
     }
     const searchTrimmed = input.search?.trim();
