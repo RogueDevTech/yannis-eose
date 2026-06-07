@@ -14,6 +14,9 @@ docker restart yannis-eose-api-1
 
 
 
+docker exec yannis-eose-api-1 node -e 'require("postgres")(process.env.DATABASE_URL)`SELECT o.status,COUNT(*)::int c FROM orders o WHERE o.created_at>=${"2026-05-01T00:00:00+01:00"} AND o.created_at<${"2026-06-01T00:00:00+01:00"} AND o.is_follow_up=false GROUP BY o.status ORDER BY c DESC`.then(r=>{console.log(JSON.stringify(r));process.exit()})'
+
+
 
 
 pnpm --filter @yannis/api dev
