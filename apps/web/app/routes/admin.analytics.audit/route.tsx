@@ -30,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const endDate = url.searchParams.get('endDate') || '';
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   const page = parseInt(url.searchParams.get('page') || '1', 10);
-  const { perPage: limit } = parsePerPage(url.searchParams);
+  const { perPage: limit, pageSizeOptions } = parsePerPage(url.searchParams, { allowed: [20, 50, 100] });
 
   const filters = { tableName, actorId, startDate, endDate, periodAllTime, page, limit };
 

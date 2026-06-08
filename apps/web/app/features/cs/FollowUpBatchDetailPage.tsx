@@ -69,6 +69,8 @@ interface Props {
   data: FollowUpBatchDetailData | null;
   closers?: Array<{ agentId: string; agentName: string }>;
   deferredLoading?: boolean;
+  isCloser?: boolean;
+  userId?: string;
 }
 
 const formatNaira = (n: number) =>
@@ -76,14 +78,16 @@ const formatNaira = (n: number) =>
 
 const PAGE_SIZE = 50;
 
-export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = false }: Props) {
+export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = false, isCloser = false, userId }: Props) {
   const showSkeleton = deferredLoading;
   // Build closer options: prefer group members if a group is set, fall back to all closers
   const groupMembers = data?.groupMembers ?? [];
   const closerOptions = groupMembers.length > 0
     ? groupMembers.map((m) => ({ value: m.userId, label: m.userName }))
     : closers.map((c) => ({ value: c.agentId, label: c.agentName }));
-  const canAssign = closerOptions.length > 0;
+  // Closers are read-only — no assign/delete/select
+  const canAssign = !isCloser && closerOptions.length > 0;
+  const canDelete = !isCloser;
   const isReverted = data?.batchStatus === 'REVERTED';
   const SAFE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'DELETED', 'CANCELLED']);
   const hasWorkedOrders = (data?.items ?? []).some((i) => !SAFE_STATUSES.has(i.orderStatus));
@@ -109,7 +113,12 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
   const [assignmentFilter, setAssignmentFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL');
   const [page, setPage] = useState(1);
 
-  const allItems = data?.items ?? [];
+  // Closers only see their own assigned orders
+  const allItems = useMemo(() => {
+    const items = data?.items ?? [];
+    if (isCloser && userId) return items.filter((i) => i.assignedCsId === userId);
+    return items;
+  }, [data?.items, isCloser, userId]);
 
   // Unique statuses for the filter dropdown
   const statusOptions = useMemo(() => {
@@ -279,9 +288,24 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
     );
   }
 
+  // For closers, compute stats from their filtered items; managers use server analytics
   const analytics = data?.analytics;
-  const unprocessed = analytics?.statusCounts.UNPROCESSED ?? 0;
-  const csEngaged = (analytics?.statusCounts.CS_ASSIGNED ?? 0) + (analytics?.statusCounts.CS_ENGAGED ?? 0);
+  const closerStatusCounts = useMemo(() => {
+    if (!isCloser) return null;
+    const counts: Record<string, number> = {};
+    for (const i of allItems) counts[i.orderStatus] = (counts[i.orderStatus] ?? 0) + 1;
+    return counts;
+  }, [isCloser, allItems]);
+  const effectiveCounts = isCloser ? closerStatusCounts! : (analytics?.statusCounts ?? {});
+  const unprocessed = effectiveCounts.UNPROCESSED ?? 0;
+  const csEngaged = (effectiveCounts.CS_ASSIGNED ?? 0) + (effectiveCounts.CS_ENGAGED ?? 0);
+  const closerConfirmedSet = new Set(['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED']);
+  const closerDeliveredSet = new Set(['DELIVERED', 'REMITTED']);
+  const confirmedCount = isCloser ? allItems.filter((i) => closerConfirmedSet.has(i.orderStatus)).length : (analytics?.confirmed ?? 0);
+  const deliveredCount = isCloser ? allItems.filter((i) => closerDeliveredSet.has(i.orderStatus)).length : (analytics?.delivered ?? 0);
+  const totalForRate = allItems.length || 1;
+  const confirmationRate = isCloser ? Math.round((confirmedCount / totalForRate) * 100) : (analytics?.confirmationRate ?? 0);
+  const deliveryRate = isCloser ? Math.round((deliveredCount / totalForRate) * 100) : (analytics?.deliveryRate ?? 0);
   const assignedCount = allItems.filter((i) => i.assignedCsId).length;
 
   const selectableItems = filteredItems;
@@ -294,7 +318,9 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         mobileInlineActions
         description={
           data
-            ? `${data.orderCount} orders from ${data.source} · ${data.branchName ?? 'No branch'}${data.groupName ? ` · Group: ${data.groupName}` : ''} · ${data.assignmentMode === 'EQUAL' ? 'Auto-assigned' : 'Manual assignment'}${isReverted ? ' · REVERTED' : ''}`
+            ? isCloser
+              ? `${allItems.length} order${allItems.length !== 1 ? 's' : ''} assigned to you.`
+              : `${data.orderCount} orders from ${data.source} · ${data.branchName ?? 'No branch'}${data.groupName ? ` · Group: ${data.groupName}` : ''} · ${data.assignmentMode === 'EQUAL' ? 'Auto-assigned' : 'Manual assignment'}${isReverted ? ' · REVERTED' : ''}`
             : undefined
         }
         actions={
@@ -313,7 +339,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                   </button>
                 )}
                 <PageRefreshButton />
-                {!isReverted && (
+                {canDelete && !isReverted && (
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmOpen(true)}
@@ -335,7 +361,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                     Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
                   </button>
                 )}
-                {!isReverted && (
+                {canDelete && !isReverted && (
                   <button
                     type="button"
                     onClick={() => setDeleteConfirmOpen(true)}
@@ -353,11 +379,11 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Total', value: (data?.orderCount ?? 0).toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
+          { label: 'Total', value: (isCloser ? allItems.length : (data?.orderCount ?? 0)).toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
           { label: 'Unprocessed', value: data ? unprocessed.toLocaleString() : '—', valueClassName: unprocessed > 0 ? 'text-warning-600 dark:text-warning-400 tabular-nums' : 'text-app-fg tabular-nums' },
           { label: 'In progress', value: data ? csEngaged.toLocaleString() : '—', valueClassName: 'text-info-600 dark:text-info-400 tabular-nums' },
-          { label: 'Confirmed', value: data ? `${analytics?.confirmed ?? 0} (${analytics?.confirmationRate ?? 0}%)` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
-          { label: 'Delivered', value: data ? `${analytics?.delivered ?? 0} (${analytics?.deliveryRate ?? 0}%)` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
+          { label: 'Confirmed', value: data ? `${confirmedCount} (${confirmationRate}%)` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
+          { label: 'Delivered', value: data ? `${deliveredCount} (${deliveryRate}%)` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
           ...(canAssign
             ? [{ label: 'Assigned', value: data ? `${assignedCount}/${allItems.length}` : '—', valueClassName: assignedCount === allItems.length ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-warning-600 dark:text-warning-400 tabular-nums' }]
             : []),
@@ -396,16 +422,18 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
             />
           )}
         </div>
-        <SmartPick
-          total={selectableItems.length}
-          selectedCount={selectedItemIds.size}
-          onPick={(count) => {
-            const ids = selectableItems.slice(0, count).map((i) => i.itemId);
-            setSelectedItemIds(new Set(ids));
-          }}
-          onClear={clearSelection}
-          itemNoun="orders"
-        />
+        {!isCloser && (
+          <SmartPick
+            total={selectableItems.length}
+            selectedCount={selectedItemIds.size}
+            onPick={(count) => {
+              const ids = selectableItems.slice(0, count).map((i) => i.itemId);
+              setSelectedItemIds(new Set(ids));
+            }}
+            onClear={clearSelection}
+            itemNoun="orders"
+          />
+        )}
       </div>
 
       {/* Selection bar */}
@@ -437,9 +465,9 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
       ) : (
         <CompactTable<ItemRow>
           columns={columns}
-          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ itemId: `sk-${i}`, orderId: '', originalStatus: '', assignedCsId: null, assignedCsName: null, addedAt: '', orderStatus: '', customerName: '', totalAmount: null, orderCreatedAt: '' })) : paginatedItems}
+          rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ itemId: `sk-${i}`, orderId: '', originalStatus: '', assignedCsId: null, assignedCsName: null, addedAt: '', orderStatus: '', orderNumber: 0, customerName: '', totalAmount: null, orderCreatedAt: '', followUpSourceOrderId: null })) : paginatedItems}
           rowKey={(r) => r.itemId}
-          selection={{
+          selection={isCloser ? undefined : {
             selectedIds: selectedItemIds,
             getRowId: (item) => item.itemId,
             onToggle: (id) => toggleItem(id),

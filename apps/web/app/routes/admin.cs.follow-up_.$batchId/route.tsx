@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus, DEFERRED_LOADER_TIMEOUT_MS } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, requirePermissionOrRoles, safeStatus, DEFERRED_LOADER_TIMEOUT_MS } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -12,20 +12,26 @@ export const meta: MetaFunction = () => [{ title: 'Follow Up Batch — Yannis EO
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'] });
+  const user = await getCurrentUser(request);
   const cookie = getSessionCookie(request);
   const batchId = params.batchId!;
+  const isCloser = user?.role === 'CS_CLOSER';
 
   const pageData = (async (): Promise<BatchDetailBundle> => {
     try {
-      const [detailRes, closersRes] = await Promise.all([
+      const fetches: [Promise<unknown>, Promise<unknown>] = [
         apiRequest<unknown>(
           `/trpc/orders.getFollowUpBatchDetail?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
           { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
         ),
-        apiRequest<unknown>('/trpc/orders.listCSClosers', {
-          method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS,
-        }),
-      ]);
+        // Closers don't need the closer list — they can't assign
+        isCloser
+          ? Promise.resolve({ ok: true, data: { result: { data: [] } } })
+          : apiRequest<unknown>('/trpc/orders.listCSClosers', {
+              method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS,
+            }),
+      ];
+      const [detailRes, closersRes] = await Promise.all(fetches) as [{ ok: boolean; data: unknown }, { ok: boolean; data: unknown }];
       const detail = detailRes.ok
         ? ((detailRes.data as { result?: { data?: FollowUpBatchDetailData } })?.result?.data ?? null)
         : null;
@@ -38,14 +44,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   })();
 
-  return defer({ batchId, pageData });
+  return defer({ batchId, isCloser, userId: user?.id, pageData });
 }
 
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'] });
+  // Closers are read-only on batch detail — only managers can assign/delete
+  await requirePermissionOrRoles(request, { permission: 'orders.followUp', roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'] });
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
@@ -96,15 +103,17 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function FollowUpBatchDetailRoute() {
-  const { batchId, pageData } = useLoaderData<typeof loader>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const loaderData = useLoaderData<typeof loader>() as any;
+  const { batchId, isCloser, userId } = loaderData;
   return (
     <CachedAwait<BatchDetailBundle>
-      resolve={pageData as Promise<BatchDetailBundle>}
-      fallback={<FollowUpBatchDetailPage data={null} closers={[]} deferredLoading />}
+      resolve={loaderData.pageData as Promise<BatchDetailBundle>}
+      fallback={<FollowUpBatchDetailPage data={null} closers={[]} deferredLoading isCloser={isCloser} />}
       loaderShell={{ batchId }}
       deferredKey="pageData"
     >
-      {(bundle) => <FollowUpBatchDetailPage data={bundle.detail} closers={bundle.closers} />}
+      {(bundle) => <FollowUpBatchDetailPage data={bundle.detail} closers={bundle.closers} isCloser={isCloser} userId={userId} />}
     </CachedAwait>
   );
 }

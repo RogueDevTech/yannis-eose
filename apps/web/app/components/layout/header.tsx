@@ -281,6 +281,17 @@ export function Header({
               />
             </div>
           )}
+        {/* Static branch label — single-branch non-admin users still see which branch they're in */}
+        {branchesHydrationReady &&
+          branches &&
+          branches.length === 1 &&
+          !shouldShowHeaderBranchSwitcher(branches.length, user?.role ?? '') && (
+            <div className="hidden lg:flex items-center shrink-0">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-app-border bg-app-bg-secondary px-3 py-1 text-xs font-medium text-app-fg-muted">
+                {branches[0].name}
+              </span>
+            </div>
+          )}
         {/* Mirror Mode pill — only shown when the session is mirroring another user.
             POSTs to the same /admin action that exits mirror; returns to /admin when done. */}
         {mirroredBy && (

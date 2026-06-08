@@ -2083,10 +2083,10 @@ function OrdersListPageImpl({
           hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
           searchRow={
-            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
+            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3 md:flex-1">
               <form
                 method="get"
-                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1"
+                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1 md:min-w-[280px]"
                 onSubmit={(e) => {
                   e.preventDefault();
                   setSearchParams((p) => {
@@ -2102,7 +2102,18 @@ function OrdersListPageImpl({
                   name="search"
                   placeholder="Search by customer name or phone number…"
                   value={searchQuery}
-                  onChange={(val) => setSearchQuery(val)}
+                  onChange={(val) => {
+                    setSearchQuery(val);
+                    // Clear × should reload immediately, not wait for submit
+                    if (!val.trim() && searchParams.get('search')) {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.delete('search');
+                        next.set('page', '1');
+                        return next;
+                      });
+                    }
+                  }}
                   withSubmitButton
                   wrapperClassName="min-w-0 w-full flex-1"
                 />
