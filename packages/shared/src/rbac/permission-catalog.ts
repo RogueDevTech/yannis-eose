@@ -331,6 +331,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'cs.teamOverview',
     'cs.leaderboard',
     'cart.read',
+    'cart.delete',
     'users.read',
     'audit.read',
     'products.read',
