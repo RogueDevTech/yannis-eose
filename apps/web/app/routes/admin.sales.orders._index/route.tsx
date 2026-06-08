@@ -190,13 +190,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
-  // For CS/Marketing, DELIVERED and REMITTED are the same outcome ("delivered").
+  // Six-bucket collapse: "Confirmed" pill rolls up the post-confirmation in-flight
+  // pipeline (AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT) so the list must match.
+  // Similarly, "Delivered" rolls up REMITTED for CS/Marketing surfaces.
+  const expandConfirmedFilter = status === 'CONFIRMED';
   const expandDeliveredFilter = status === 'DELIVERED';
+  const expandedStatuses = expandConfirmedFilter
+    ? ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT']
+    : expandDeliveredFilter
+      ? ['DELIVERED', 'REMITTED']
+      : null;
   const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
-    ...(expandDeliveredFilter
-      ? { statuses: ['DELIVERED', 'REMITTED'] }
+    ...(expandedStatuses
+      ? { statuses: expandedStatuses }
       : { status: status || undefined }),
     search: search || undefined,
     sortBy,
