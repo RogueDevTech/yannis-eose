@@ -91,8 +91,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const productIdParam = url.searchParams.get('productId') || undefined;
   const campaignIdParam = url.searchParams.get('campaignId') || undefined;
-  // For marketing, DELIVERED and REMITTED are the same outcome — merge them.
+  // Six-bucket collapse: "Confirmed" rolls up AGENT_ASSIGNED / DISPATCHED /
+  // IN_TRANSIT; "Delivered" rolls up REMITTED for marketing surfaces.
+  const expandConfirmedFilter = status === 'CONFIRMED';
   const expandDeliveredFilter = status === 'DELIVERED';
+  const expandedStatuses = expandConfirmedFilter
+    ? ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT']
+    : expandDeliveredFilter
+      ? ['DELIVERED', 'REMITTED']
+      : null;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
   const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
@@ -101,8 +108,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
-    ...(expandDeliveredFilter
-      ? { statuses: ['DELIVERED', 'REMITTED'] }
+    ...(expandedStatuses
+      ? { statuses: expandedStatuses }
       : { status: status || undefined }),
     search: search || undefined,
     sortBy,

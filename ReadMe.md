@@ -12,19 +12,12 @@ docker restart yannis-eose-api-1
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
-
-docker exec yannis-eose-api-1 node -e 'require("postgres")(process.env.DATABASE_URL)`SELECT e.metadata->>${"previousStatus"} AS status,COUNT(*)::int c FROM follow_up_batch_items i JOIN follow_up_batches b ON b.id=i.batch_id JOIN order_timeline_events e ON e.order_id=i.order_id AND e.event_type=${"ORDER_RESTORED"} WHERE b.status=${"REVERTED"} GROUP BY status ORDER BY c DESC`.then(r=>{console.log(JSON.stringify(r));process.exit()})'
-
-
-
-
 pnpm --filter @yannis/api dev
 START NEW DB
 
 pnpm db:migrate:app
 pnpm db:seed-permissions
 pnpm --filter @yannis/shared db:seed
-
 
 LOCAL REDIS
 brew services list           # see status
@@ -34,8 +27,6 @@ brew services restart redis  # restart
 brew services stop redis
 brew services start redis
 brew services list | grep redis   # should now show "started"
-
-
 
 GCP TERRAFORM
 terraform plan project-26c432ec-b4f1-4e21-a6a
