@@ -1550,6 +1550,7 @@ export class UsersService {
       const permSet = new Set((actor.permissions ?? []).map((c) => canonicalPermissionCode(c)));
       const canReactivate =
         actor.role === 'SUPER_ADMIN' ||
+        actor.role === 'HR_MANAGER' ||
         permSet.has(canonicalPermissionCode('users.deactivate')) ||
         permSet.has(canonicalPermissionCode('users.staff.deactivate'));
       if (!canReactivate) {
@@ -1788,8 +1789,11 @@ export class UsersService {
 
     let emailChangePending = false;
 
-    // Email changes require SuperAdmin approval — create request instead of applying
-    if (input.email) {
+    // Email changes: admin-level roles and HR_MANAGER apply directly; everyone else
+    // goes through a pending-approval flow that SuperAdmin signs off on.
+    const canDirectlyChangeEmail =
+      isAdminLevelRole(actor.role) || actor.role === 'HR_MANAGER';
+    if (input.email && !canDirectlyChangeEmail) {
       const newEmail = input.email.toLowerCase();
       const emailRows = await this.db
         .select({ id: schema.users.id })
@@ -2363,8 +2367,12 @@ export class UsersService {
    * - Others: forbidden.
    */
   async deactivate(userId: string, actor: SessionUser) {
+    const permSet = new Set((actor.permissions ?? []).map((c) => canonicalPermissionCode(c)));
     const can =
-      actor.role === 'SUPER_ADMIN' || (actor.permissions ?? []).includes('users.deactivate');
+      actor.role === 'SUPER_ADMIN' ||
+      actor.role === 'HR_MANAGER' ||
+      permSet.has(canonicalPermissionCode('users.deactivate')) ||
+      permSet.has(canonicalPermissionCode('users.staff.deactivate'));
     if (!can) {
       throw new TRPCError({
         code: 'FORBIDDEN',

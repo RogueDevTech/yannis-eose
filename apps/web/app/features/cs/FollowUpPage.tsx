@@ -93,7 +93,6 @@ const STATUS_CHOICES = [
   { value: 'CS_ASSIGNED', label: STATUS_LABELS.CS_ASSIGNED },
   { value: 'CS_ENGAGED', label: STATUS_LABELS.CS_ENGAGED },
   { value: 'CONFIRMED', label: STATUS_LABELS.CONFIRMED },
-  { value: 'AGENT_ASSIGNED', label: STATUS_LABELS.AGENT_ASSIGNED },
   { value: 'DELIVERED', label: STATUS_LABELS.DELIVERED },
   { value: 'REMITTED', label: STATUS_LABELS.REMITTED },
   { value: ABANDONED_CART_STATUS, label: 'Abandoned Carts' },
@@ -102,9 +101,6 @@ const STATUS_CHOICES = [
 const CUSTOM_RANGE_VALUE = '__custom__';
 
 const AGE_OPTIONS = [
-  { value: '', label: 'Any age' },
-  { value: '3', label: 'Older than 3 days' },
-  { value: '7', label: 'Older than 7 days' },
   { value: '14', label: 'Older than 14 days' },
   { value: '30', label: 'Older than 30 days' },
   { value: '60', label: 'Older than 60 days' },
@@ -560,6 +556,7 @@ export function FollowUpPage({
                     value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
                     onChange={(e) => handleAgeChange(e.target.value)}
                     options={AGE_OPTIONS}
+                    placeholder="Any age"
                     className="!bg-transparent !border-transparent !text-center" inlineChevron
                     controlSize="sm"
                     openAs="modal"
@@ -682,6 +679,7 @@ export function FollowUpPage({
             value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
             onChange={(e) => handleAgeChange(e.target.value)}
             options={AGE_OPTIONS}
+            placeholder="Any age"
           />
         </div>
         <div className="flex-1">

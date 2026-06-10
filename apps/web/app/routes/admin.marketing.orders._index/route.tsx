@@ -1,4 +1,4 @@
-import { json, defer } from '@remix-run/node';
+import { json, defer, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -186,23 +186,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortOrder,
     viewerUserId: user.id,
     activeMediaBuyerFilter: mediaBuyerId ?? null,
-    // Everyone who can open this page (gated on `marketing.orders`) may switch
-    // to the cart-abandonment view; scope is enforced server-side per role.
-    enableFromCartStatusOption: true,
     enableTestOrdersOption:
       isAdminLevel(user) ||
       user.role === 'HEAD_OF_MARKETING' ||
       user.isMarketingTeamSupervisorOnActiveBranch === true,
+    enableFromCartStatusOption: true,
     isCartAbandonmentView: fromCart,
   };
 
   // Defer the orders list — page chrome renders immediately, table swaps from
   // skeleton rows to real ones when this promise resolves.
-  //
-  // Cart-abandonment view: when `?fromCart=1` is active the table is fed the
-  // un-recovered abandoned-cart backlog instead of orders. Each cart is mapped
-  // into an `Order`-shaped row with the synthetic status `'CART'` so the shared
-  // table renders it; `cartId` back-links the "View cart" quick-detail modal.
+  // Cart-abandonment view: swap for the abandoned-cart backlog instead.
   const listPromise = (async () => {
     if (fromCart) {
       const cartsInput = encodeURIComponent(
@@ -260,9 +254,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         campaignName: c.campaignName ?? null,
         mediaBuyerId: c.mediaBuyerId ?? null,
         mediaBuyerName: c.mediaBuyerName ?? null,
-        // Back-link drives the "View cart" quick-detail modal.
         cartId: c.id,
-      }));
+      })) as Order[];
       return { orders, total, totalPages };
     }
 
@@ -512,8 +505,8 @@ export default function MarketingOrdersRoute() {
     canExport: ordersShell.canExport,
     viewerUserId: ordersShell.viewerUserId,
     activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
-    enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
     enableTestOrdersOption: ordersShell.enableTestOrdersOption,
+    enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
     isCartAbandonmentView: ordersShell.isCartAbandonmentView,
   };
 

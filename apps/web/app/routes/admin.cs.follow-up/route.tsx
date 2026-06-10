@@ -123,9 +123,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const isCartView = statuses.length === 1 && statuses[0] === ABANDONED_CART_STATUS;
   const search = url.searchParams.get('search') || undefined;
   const assignedCsId = url.searchParams.get('assignedCsId') || undefined;
-  const olderThanDays = url.searchParams.get('olderThanDays') || undefined;
   const customStartDate = url.searchParams.get('startDate') || undefined;
   const customEndDate = url.searchParams.get('endDate') || undefined;
+  // Default to 14 days minimum — follow-up targets stale orders, not fresh ones.
+  const olderThanDays = url.searchParams.get('olderThanDays') || (!customStartDate && !customEndDate ? '14' : undefined);
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const limit = 50;
@@ -387,28 +388,24 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const targetBranchId = formData.get('targetBranchId')?.toString() || undefined;
 
-    let succeeded = 0;
-    let failed = 0;
-    const createdOrderIds: string[] = [];
-    for (const cartId of cartIds) {
-      const res = await apiRequest<unknown>('/trpc/orders.recoverFromCart', {
-        method: 'POST',
-        cookie,
-        body: { cartId },
-        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
-      });
-      if (res.ok) {
-        succeeded++;
-        const orderId = (res.data as { result?: { data?: { id: string } } })?.result?.data?.id;
-        if (orderId) createdOrderIds.push(orderId);
-      } else {
-        failed++;
-      }
+    // Single bulk call — recovers all carts in chunked parallel on the server.
+    const bulkRes = await apiRequest<unknown>('/trpc/orders.bulkRecoverCarts', {
+      method: 'POST',
+      cookie,
+      body: { cartIds },
+      timeoutMs: 60_000,
+    });
+    if (!bulkRes.ok) {
+      return json({ error: extractApiErrorMessage(bulkRes.data, 'Failed to recover carts') }, { status: safeStatus(bulkRes.status) });
     }
+    const bulkData = (bulkRes.data as { result?: { data?: { succeeded: number; failed: number; orderIds: string[] } } })?.result?.data;
+    const succeeded = bulkData?.succeeded ?? 0;
+    const failed = bulkData?.failed ?? 0;
+    const createdOrderIds = bulkData?.orderIds ?? [];
 
-    // Move created orders to the target CS branch if specified
+    // Move created orders to the target CS branch if specified.
     if (targetBranchId && createdOrderIds.length > 0) {
-      await apiRequest<unknown>('/trpc/orders.reopenForFollowUp', {
+      await apiRequest<unknown>('/trpc/orders.moveOrdersToBranch', {
         method: 'POST',
         cookie,
         body: { orderIds: createdOrderIds, targetBranchId },

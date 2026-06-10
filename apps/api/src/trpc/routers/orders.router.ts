@@ -504,6 +504,22 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Bulk-recover abandoned carts (single HTTP round-trip).
+   * Uses a lean path: skips auto-dispatch + notifications (batch handles assignment).
+   */
+  bulkRecoverCarts: permissionProcedure('cart.delete')
+    .input(
+      z.object({
+        cartIds: z.array(z.string().uuid()).min(1).max(200),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const result = await getOrdersService().bulkRecoverCarts(input.cartIds, ctx.user.id);
+      if (result.orderIds.length > 0) await invalidateOrdersAggregatesCache();
+      return result;
+    }),
+
+  /**
    * Prepare Paystack payment (payment-first): do NOT create order.
    * Stores payload in Redis, returns Paystack authorization URL. Order is created only after payment in completePaymentByReference.
    * Public procedure — Edge Worker calls without auth when user selects Pay online.
@@ -1209,9 +1225,8 @@ export const ordersRouter = router({
         isCSCloser: z.boolean().optional().default(false),
         showCSCloserColumn: z.boolean().optional().default(false),
         canCreateOffline: z.boolean().optional().default(false),
-        // HoCS / Admin / SuperAdmin only — adds the open abandoned-cart count to
-        // the orders-page overview strip. The loader sets this from the same
-        // role gate as the "Cart abandonment" status filter.
+        // Cart abandonment moved to Follow-Up page only (CEO 2026-06-09).
+        // Kept for backward compat with cached clients — always ignored now.
         includeCartAbandonment: z.boolean().optional().default(false),
       }),
     )
@@ -1264,7 +1279,7 @@ export const ordersRouter = router({
         csClosersForFilter,
         logisticsLocationsForBulk,
         productsForOfflineOrder,
-        cartStats,
+        cartAbandonmentCount,
         supplementaryCounts,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
@@ -1307,9 +1322,12 @@ export const ordersRouter = router({
               ctx.user.role,
             )
           : Promise.resolve(null),
-        input.includeCartAbandonment
-          ? getCartService().getStats(branchId, input.countsStartDate, input.countsEndDate)
-          : Promise.resolve(null),
+        getCartService().countAbandoned({
+          mediaBuyerId: scope.mediaBuyerId,
+          branchId: aggregateBranchId,
+          startDate: scope.startDate,
+          endDate: scope.endDate,
+        }),
         getOrdersService().getSupplementaryCounts(
           scope.mediaBuyerId,
           scope.startDate,
@@ -1338,11 +1356,7 @@ export const ordersRouter = router({
           providerName: loc.providerName ?? null,
         })),
         productsForOfflineOrder: productsForOfflineOrder?.products ?? [],
-        // Open (un-recovered) abandoned-cart count for the overview strip — null
-        // when the viewer is not HoCS+ so the pill simply doesn't render.
-        cartAbandonmentCount: cartStats
-          ? (cartStats as { abandonedOpen: number }).abandonedOpen
-          : null,
+        cartAbandonmentCount: cartAbandonmentCount ?? 0,
         offlineCount: supplementaryCounts.offlineCount,
       };
       }; // end fetchBundle

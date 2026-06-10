@@ -288,3 +288,5 @@ NEW_URL="postgres://yannis_app:${PASS}@<PUBLIC_IP>:5432/yannis?sslmode=require"
 echo "$NEW_URL"
 
 
+
+
