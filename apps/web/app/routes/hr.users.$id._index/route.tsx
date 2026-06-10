@@ -134,6 +134,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
     const canReactivateDeactivatedStaff =
       isSuperAdmin ||
+      currentUser?.role === 'HR_MANAGER' ||
       permsSetForReactivate.has(canonicalPermissionCode('users.deactivate')) ||
       permsSetForReactivate.has(canonicalPermissionCode('users.staff.deactivate'));
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
@@ -446,7 +447,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({
       success: true,
       message: emailChangePending
-        ? 'User updated. Email change is pending SuperAdmin approval.'
+        ? 'User updated. Email change is pending approval.'
         : 'User updated successfully',
       emailChangePending,
     });
@@ -454,8 +455,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'deactivate') {
     const currentUser = await getCurrentUser(request);
-    if (currentUser?.role !== 'SUPER_ADMIN' && currentUser?.role !== 'ADMIN') {
-      return json({ error: 'Only Super Admins and Admins can deactivate users.' }, { status: 403 });
+    if (
+      currentUser?.role !== 'SUPER_ADMIN' &&
+      currentUser?.role !== 'ADMIN' &&
+      currentUser?.role !== 'HR_MANAGER'
+    ) {
+      return json({ error: 'Only Super Admins, Admins, and HR Managers can deactivate users.' }, { status: 403 });
     }
 
     const targetRes = await apiRequest<unknown>(

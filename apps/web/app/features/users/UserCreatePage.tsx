@@ -713,7 +713,7 @@ export function UserCreatePage({
                 defaultValue={editingUser?.email ?? ''}
                 hint={
                   isEditMode
-                    ? 'Email changes require SuperAdmin approval before taking effect.'
+                    ? 'Email changes may require approval before taking effect.'
                     : 'A password will be auto-generated and sent to this email.'
                 }
               />

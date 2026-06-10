@@ -1221,7 +1221,7 @@ export class OrdersService {
   async create(
     input: CreateOrderInput & { cartId?: string },
     actorId: string | null,
-    orderSource?: 'edge-form' | null,
+    orderSource?: 'edge-form' | 'offline' | null,
   ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
@@ -1434,7 +1434,7 @@ export class OrdersService {
           items: orderInput.items,
           totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
           status: 'UNPROCESSED',
-          orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
+          orderSource: orderSource === 'edge-form' ? 'edge-form' : orderSource === 'offline' ? 'offline' : null,
           customFields: orderInput.customFields ?? null,
           // Back-link to the originating cart so HoCS can filter "Recovered from
           // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
@@ -1805,9 +1805,10 @@ export class OrdersService {
   }
 
   /**
-   * Recover an abandoned cart as a real edge-form order.
-   * Unlike `createOffline`, this creates the order with `orderSource: 'edge-form'`
-   * so the MB gets full attribution and the order counts toward their metrics.
+   * Recover an abandoned cart as an offline order (CEO 2026-06-09).
+   * Cart-recovered orders use `orderSource: 'offline'` so they are excluded from
+   * marketing CR/DR/CPA metrics. MB attribution (mediaBuyerId) is preserved for
+   * reference but the order only surfaces in CS/offline metrics.
    * CS can supplement missing fields (address, items, etc.) from the modal.
    */
   async recoverFromCart(
@@ -1887,29 +1888,38 @@ export class OrdersService {
       totalAmount: overrides.totalAmount,
     };
 
-    // 3. Try edge-form first (preserves MB attribution + campaign link).
-    // If campaign tier validation fails (offers changed after cart was
-    // abandoned), retry without the campaign so the tier check is skipped,
-    // but keep mediaBuyerId + orderSource for proper attribution.
+    // 3. Create as offline order (CEO 2026-06-09: cart recovery is CS-only,
+    // should not pollute marketing metrics). MB attribution is preserved via
+    // mediaBuyerId on the order; orderSource='offline' excludes it from
+    // marketing CR/DR/CPA. If campaign tier validation fails (offers changed
+    // after cart was abandoned), retry without the campaign.
     let result: { id?: string };
     try {
-      result = await this.create(orderInput, actorId, 'edge-form');
+      result = await this.create(orderInput, actorId, 'offline');
     } catch {
       const { campaignId: _dropped, ...inputWithoutCampaign } = orderInput;
-      result = await this.create(inputWithoutCampaign, actorId, 'edge-form');
+      result = await this.create(inputWithoutCampaign, actorId, 'offline');
     }
     if (!result.id) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Order creation returned no ID' });
     }
 
-    // 4. Convert the cart — mark as CONVERTED so it disappears from the abandonment list.
+    // 4. Mark as follow-up so the order is excluded from normal CS metrics
+    // until delivered (CEO 2026-06-09). Delivered follow-up offline orders
+    // still count toward the closer's delivery metrics.
+    await this.db
+      .update(schema.orders)
+      .set({ isFollowUp: true })
+      .where(eq(schema.orders.id, result.id));
+
+    // 5. Convert the cart — mark as CONVERTED so it disappears from the abandonment list.
     try {
       await this.cartService.convert(cartId, result.id, actorId);
     } catch (err) {
       this.logger.warn(`Failed to mark cart ${cartId} as CONVERTED: ${err instanceof Error ? err.message : err}`);
     }
 
-    // 5. Timeline event — record that this order was recovered from an abandoned cart.
+    // 6. Timeline event — record that this order was recovered from an abandoned cart.
     await this.db.insert(schema.orderTimelineEvents).values({
       orderId: result.id,
       eventType: 'ORDER_RESTORED' as const,
@@ -1921,6 +1931,157 @@ export class OrdersService {
     });
 
     return { id: result.id };
+  }
+
+  /**
+   * Bulk-recover abandoned carts — optimised for speed.
+   *  1. Fetches all carts + product prices in batch (2 queries)
+   *  2. Resolves branches in batch
+   *  3. Inserts all orders + items + timeline in ONE withActor transaction
+   *  4. Converts carts fire-and-forget
+   *  5. Skips auto-dispatch, notifications, dedup (batch handles assignment)
+   */
+  async bulkRecoverCarts(
+    cartIds: string[],
+    actorId: string,
+  ): Promise<{ succeeded: number; failed: number; orderIds: string[] }> {
+    if (cartIds.length === 0) return { succeeded: 0, failed: 0, orderIds: [] };
+
+    // ── 1. Batch-fetch carts + products ──────────────────────────
+    const carts = await this.db
+      .select()
+      .from(schema.cartAbandonments)
+      .where(inArray(schema.cartAbandonments.id, cartIds));
+
+    const productIds = [...new Set(carts.map((c) => c.productId).filter(Boolean))] as string[];
+    const products = productIds.length > 0
+      ? await this.db
+          .select({ id: schema.products.id, baseSalePrice: schema.products.baseSalePrice })
+          .from(schema.products)
+          .where(inArray(schema.products.id, productIds))
+      : [];
+    const priceMap = new Map(products.map((p) => [p.id, Number(p.baseSalePrice ?? 0)]));
+
+    // ── 2. Batch-resolve branches (campaign → branch) ────────────
+    const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
+    const campaignBranches = campaignIds.length > 0
+      ? await this.db
+          .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId })
+          .from(schema.campaigns)
+          .where(inArray(schema.campaigns.id, campaignIds))
+      : [];
+    const campaignBranchMap = new Map(campaignBranches.map((c) => [c.id, c.branchId]));
+
+    // ── 3. Build valid cart rows ─────────────────────────────────
+    type PreparedCart = {
+      cart: (typeof carts)[0];
+      phoneHash: string;
+      items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+      branchId: string | null;
+    };
+    const prepared: PreparedCart[] = [];
+    let failed = 0;
+    const cartMap = new Map(carts.map((c) => [c.id, c]));
+
+    for (const cartId of cartIds) {
+      const cart = cartMap.get(cartId);
+      if (!cart || cart.status === 'CONVERTED' || !cart.customerPhone || !cart.productId) {
+        failed++;
+        continue;
+      }
+      const quantity = cart.quantity ?? 1;
+      const unitPrice = priceMap.get(cart.productId) ?? 0;
+      prepared.push({
+        cart,
+        phoneHash: this.hashPhone(cart.customerPhone),
+        items: [{ productId: cart.productId, quantity, unitPrice, offerLabel: cart.offerLabel ?? undefined }],
+        branchId: cart.campaignId ? (campaignBranchMap.get(cart.campaignId) ?? null) : null,
+      });
+    }
+
+    if (prepared.length === 0) return { succeeded: 0, failed, orderIds: [] };
+
+    // ── 4. Single transaction: insert all orders + items + timeline ──
+    const orderIds = await withActor(this.db, { id: actorId }, async (tx) => {
+      const ids: string[] = [];
+      // Bulk insert orders
+      const orderRows = await tx
+        .insert(schema.orders)
+        .values(
+          prepared.map((p) => ({
+            campaignId: p.cart.campaignId ?? null,
+            mediaBuyerId: p.cart.mediaBuyerId ?? null,
+            branchId: p.branchId,
+            servicingBranchId: p.branchId,
+            customerName: p.cart.customerName,
+            customerPhoneHash: p.phoneHash,
+            customerPhone: p.cart.customerPhone ?? null,
+            customerAddress: p.cart.customerAddress ?? null,
+            deliveryAddress: p.cart.deliveryAddress ?? null,
+            deliveryNotes: p.cart.deliveryNotes ?? null,
+            deliveryState: p.cart.deliveryState ?? null,
+            customerGender: p.cart.customerGender ?? null,
+            preferredDeliveryDate: p.cart.preferredDeliveryDate ?? null,
+            customerEmail: p.cart.customerEmail ?? null,
+            paymentMethod: (p.cart.paymentMethod as 'PAY_ON_DELIVERY' | 'PAY_ONLINE') ?? 'PAY_ON_DELIVERY',
+            items: p.items,
+            totalAmount: p.items[0] ? String(p.items[0].unitPrice) : null,
+            status: 'UNPROCESSED' as const,
+            orderSource: 'offline' as const,
+            isFollowUp: true,
+            cartId: p.cart.id,
+            customFields: null,
+          })),
+        )
+        .returning({ id: schema.orders.id });
+
+      for (const row of orderRows) ids.push(row.id);
+
+      // Bulk insert order_items
+      const allItems: Array<{ orderId: string; productId: string; quantity: number; unitPrice: string; offerLabel: string | null }> = [];
+      for (let i = 0; i < prepared.length; i++) {
+        const orderId = ids[i];
+        if (!orderId) continue;
+        for (const item of prepared[i]!.items) {
+          allItems.push({
+            orderId,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: String(item.unitPrice),
+            offerLabel: item.offerLabel ?? null,
+          });
+        }
+      }
+      if (allItems.length > 0) {
+        await tx.insert(schema.orderItems).values(allItems);
+      }
+
+      // Bulk insert timeline events
+      const timelineRows = prepared.map((p, i) => ({
+        orderId: ids[i]!,
+        eventType: 'ORDER_RESTORED' as const,
+        actorId,
+        actorName: null as string | null,
+        description: 'Order recovered from abandoned cart.',
+        metadata: { cartId: p.cart.id, customerName: p.cart.customerName },
+        branchId: null as string | null,
+      })).filter((r) => r.orderId);
+      if (timelineRows.length > 0) {
+        await tx.insert(schema.orderTimelineEvents).values(timelineRows);
+      }
+
+      return ids;
+    });
+
+    // ── 5. Fire-and-forget: convert carts ────────────────────────
+    for (let i = 0; i < prepared.length; i++) {
+      const orderId = orderIds[i];
+      if (orderId) {
+        void this.cartService.convert(prepared[i]!.cart.id, orderId, actorId).catch(() => {});
+      }
+    }
+
+    return { succeeded: orderIds.length, failed, orderIds };
   }
 
   /** SHA-256 hash of phone for offline order creation (server-side only). */
@@ -2850,10 +3011,14 @@ export class OrdersService {
     // Follow-up isolation: default excludes follow-up orders from normal list views.
     // `isFollowUp: true` = show ONLY follow-ups (follow-up batch detail page).
     // `excludeFollowUp: false` = include follow-ups alongside normal orders (follow-up create page).
+    // Exception: delivered/remitted follow-up orders "graduate" into normal views
+    // so they count toward CS metrics and are visible on orders pages (CEO 2026-06-09).
     if (input.isFollowUp) {
       conditions.push(eq(schema.orders.isFollowUp, true));
     } else if (input.excludeFollowUp !== false) {
-      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(
+        sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
+      );
     }
 
     if (input.status) {
@@ -4951,8 +5116,14 @@ export class OrdersService {
     // from the "Total" by using `total` from listOrders (which filters them).
     const conditions: Parameters<typeof and>[0][] = [];
     // Follow-up isolation: when explicitly set, filter by follow-up flag. When undefined, show all.
-    if (isFollowUp !== undefined) {
-      conditions.push(eq(schema.orders.isFollowUp, isFollowUp));
+    // Delivered/remitted follow-up orders "graduate" into normal counts so CS
+    // metrics stay accurate (CEO 2026-06-09).
+    if (isFollowUp === true) {
+      conditions.push(eq(schema.orders.isFollowUp, true));
+    } else if (isFollowUp === false) {
+      conditions.push(
+        sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
+      );
     }
     if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
@@ -5017,7 +5188,22 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const [offlineRows, duplicateRows] = await Promise.all([
+    // Offline count includes:
+    //  1. Normal offline orders (isFollowUp=false, orderSource='offline')
+    //  2. Delivered follow-up offline orders (cart-recovered, CEO 2026-06-09)
+    //     — these are invisible to normal metrics but count once delivered.
+    const deliveredFollowUpOfflineConditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.isFollowUp, true),
+      eq(schema.orders.orderSource, 'offline'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+    ];
+    appendOrdersAggregateScopeConditions(deliveredFollowUpOfflineConditions, { mediaBuyerId, assignedCsId, supervisorScope });
+    if (bCond) deliveredFollowUpOfflineConditions.push(bCond);
+    if (startDate) deliveredFollowUpOfflineConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) deliveredFollowUpOfflineConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+    const deliveredFollowUpOfflineWhere = and(...deliveredFollowUpOfflineConditions);
+
+    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows] = await Promise.all([
       this.db
         .select({ count: count() })
         .from(schema.orders)
@@ -5025,11 +5211,17 @@ export class OrdersService {
       this.db
         .select({ count: count() })
         .from(schema.orders)
+        .where(deliveredFollowUpOfflineWhere),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
         .where(and(whereClause, sql`${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != ''`)),
     ]);
 
     return {
-      offlineCount: offlineRows[0]?.count ?? 0,
+      // Merge delivered follow-up offline orders into the offline count so they
+      // surface in the "Offline orders" stat strip tile (CEO 2026-06-09).
+      offlineCount: (offlineRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
       duplicateCount: duplicateRows[0]?.count ?? 0,
     };
   }
@@ -5084,12 +5276,13 @@ export class OrdersService {
     onlyAgentId?: string,
     effectiveBranchIds?: string[] | null,
   ): Promise<Record<string, number>> {
+    // Include follow-up orders — CS confirms/cancels on follow-up orders
+    // count toward daily performance (CEO 2026-06-09).
     const conditions: Parameters<typeof and>[0][] = [
       inArray(schema.orderTimelineEvents.eventType, ['ORDER_CONFIRMED', 'ORDER_CANCELLED']),
       sql`(timezone('Africa/Lagos', ${schema.orderTimelineEvents.createdAt}))::date = (timezone('Africa/Lagos', now()))::date`,
       sql`${schema.orders.assignedCsId} IS NOT NULL`,
       isNull(schema.orders.deletedAt),
-      eq(schema.orders.isFollowUp, false),
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
@@ -5162,7 +5355,6 @@ export class OrdersService {
         .where(
           and(
             isNull(schema.orders.deletedAt),
-            eq(schema.orders.isFollowUp, false),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
             ...(branchId && !pendingCountsAcrossAllBranches ? [eq(schema.orders.servicingBranchId, branchId)] : []),
           ),
@@ -5819,15 +6011,16 @@ export class OrdersService {
         : gte(schema.callLogs.startedAt, periodStart)
       : undefined;
 
+    // Include all orders (normal + follow-up) in agent metrics so that
+    // delivered follow-up orders count toward CS delivery performance and
+    // the engaged denominator stays consistent (CEO 2026-06-09).
     const orderWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
-      eq(schema.orders.isFollowUp, false),
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
-      eq(schema.orders.isFollowUp, false),
       deliveredOrRemitted,
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),

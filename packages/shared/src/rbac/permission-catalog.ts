@@ -512,5 +512,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'permission_requests.role_change.approve',
     'permission_requests.permission_grant.approve',
     'hr.export',
+    // HR can deactivate and reactivate staff accounts (CEO directive 2026-06-09).
+    'users.staff.deactivate',
   ],
 };
