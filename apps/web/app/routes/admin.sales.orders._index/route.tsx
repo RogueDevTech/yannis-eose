@@ -170,14 +170,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (scheduleKind === 'delivery_on_day' && !!scheduleDate) ||
     (scheduleKind === 'callback_on_day' && !!scheduleDate);
 
-  // HoCS-only "Recovered from cart" pill — toggles `fromCart` on the API list.
-  // CS_CLOSER never sees the option in the UI, but enforce here so a hand-crafted
-  // URL doesn't widen scope. Note: filtering down to `cart_id IS NOT NULL`
-  // happens server-side via the partial index added in migration 0142.
-  const fromCartParam = url.searchParams.get('fromCart') === '1';
-  const canFilterFromCart =
-    user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
-  const fromCart = fromCartParam && canFilterFromCart;
+  // Cart-abandonment pseudo-filter — `?fromCart=1` swaps the orders table for
+  // the abandoned-cart backlog. The "View cart" quick-detail modal shows full
+  // cart details with Call / WhatsApp / Copy all actions.
+  const fromCart = url.searchParams.get('fromCart') === '1';
 
   const testOrdersParam = url.searchParams.get('testOrders') === '1';
   const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
@@ -211,7 +207,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortOrder,
     ...(assignedCsId && { assignedCsId }),
     ...(productIdParam && { productId: productIdParam }),
-    ...(fromCart && { fromCart: true }),
     ...(testOrders && { testOrders: true }),
     ...(orderSource && { orderSource }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
@@ -277,29 +272,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'canCreateOffline'
       | 'canExport'
       | 'canBulkPick'
-      | 'isCartAbandonmentView'
       | 'bulkSelectAllMatchingInput'
       | 'deferredSecondary'
       | 'branchesForMove'
-    >
+      | 'enableFromCartStatusOption'
+      | 'isCartAbandonmentView'
+    > & { sortBy?: string; sortOrder?: string; productFilter?: string }
   > => {
-  // Cart-abandonment view: the "Cart abandonment" status pseudo-filter swaps the
-  // table from real orders to the un-recovered abandoned-cart backlog. Each cart
-  // is mapped into an `Order`-shaped row with the synthetic status `'CART'` so the
-  // shared table renders it (the page switches to a read-only cart view).
-  let orders: Order[] = [];
-  let total = 0;
-  let totalPages = 0;
+  // Cart-abandonment view: swap the orders table for the abandoned-cart backlog.
+  // Each cart is mapped into an Order-shaped row with synthetic status 'CART'
+  // so the shared table renders it; cartId back-links the "View cart" modal.
+  let orders: Order[];
+  let total: number;
+  let totalPages: number;
+
   if (fromCart) {
-    // Cart abandonment list respects the same date window as the stat strip
-    // count so the KPI and the list always agree.
-    const cartsInput = encodeURIComponent(JSON.stringify({
-      page,
-      limit: ORDERS_PER_PAGE,
-      ...(search && { search }),
-      ...(apiStartDate && { startDate: apiStartDate }),
-      ...(apiEndDate && { endDate: apiEndDate }),
-    }));
+    const cartsInput = encodeURIComponent(
+      JSON.stringify({
+        page,
+        limit: ORDERS_PER_PAGE,
+        ...(search ? { search } : {}),
+        ...(apiStartDate ? { startDate: apiStartDate } : {}),
+        ...(apiEndDate ? { endDate: apiEndDate } : {}),
+      }),
+    );
     const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
       method: 'GET',
       cookie,
@@ -317,6 +313,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
                   productName: string | null;
                   campaignId: string | null;
                   campaignName: string | null;
+                  mediaBuyerId: string | null;
+                  mediaBuyerName: string | null;
                   updatedAt: string;
                   quantity: number | null;
                 }>;
@@ -331,7 +329,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     orders = (cartsData?.items ?? []).map((c) => ({
       id: c.id,
       customerName: c.customerName,
-      customerPhoneDisplay: c.customerPhoneDisplay ?? '',
+      customerPhoneDisplay: '',
       status: 'CART',
       totalAmount: null,
       createdAt: c.updatedAt,
@@ -341,9 +339,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       itemCount: c.quantity ?? 0,
       campaignId: c.campaignId ?? null,
       campaignName: c.campaignName ?? null,
-      // Back-link drives the "View cart" quick-detail modal — for a cart row it's the cart's own id.
+      mediaBuyerId: c.mediaBuyerId ?? null,
+      mediaBuyerName: c.mediaBuyerName ?? null,
       cartId: c.id,
-    }));
+    })) as Order[];
   } else {
     const listRes = await apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie });
     const trpcData = listRes.ok
@@ -371,7 +370,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isCSCloser,
         showCSCloserColumn,
         canCreateOffline,
-        includeCartAbandonment: canFilterFromCart,
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -398,8 +396,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         name: string;
         offers?: Array<{ label: string; price: string; qty: number }>;
       }>;
-      cartAbandonmentCount: number | null;
       offlineCount: number;
+      cartAbandonmentCount: number;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -414,8 +412,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       logisticsLocationsForBulk: bundle?.logisticsLocationsForBulk ?? [],
       productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
       productsForFilter: (bundle?.productsForOfflineOrder ?? []).map((p) => ({ id: p.id, name: p.name })),
-      cartAbandonmentCount: bundle?.cartAbandonmentCount ?? null,
       offlineCount: bundle?.offlineCount ?? 0,
+      cartAbandonmentCount: bundle?.cartAbandonmentCount ?? 0,
     };
   })();
 
@@ -441,7 +439,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchFilter: search,
     sortBy,
     sortOrder,
-    isCartAbandonmentView: fromCart,
     isCSCloser,
     showCSCloserColumn,
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
@@ -466,6 +463,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // server-side authz/scope as the visible list applies.
     bulkSelectAllMatchingInput: JSON.stringify(listInput),
     deferredSecondary,
+    enableFromCartStatusOption: true,
+    isCartAbandonmentView: fromCart,
   };
   })();
 
@@ -796,20 +795,16 @@ export default function CSOrdersRoute() {
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
-        | 'isCartAbandonmentView'
         | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'
         | 'branchesForMove'
+        | 'enableFromCartStatusOption'
+        | 'isCartAbandonmentView'
       >
     >;
   };
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
-  // HoCS / Admin / SuperAdmin can filter the list to recovered-from-cart
-  // orders via the "Cart abandonment" pseudo-option in the status dropdown.
-  // CS_CLOSER never sees the option (filter is also enforced server-side).
-  const isHoCSPlus =
-    userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT';
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
     <CachedAwait
@@ -840,13 +835,10 @@ export default function CSOrdersRoute() {
           // and just steals space from the closer's real funnel (Assigned →
           // Delivered).
           excludeStatuses={
-            isHoCSPlus
-              ? ['REMITTED', 'DELETED']
-              : userRole === 'CS_CLOSER'
-                ? ['REMITTED', 'DELETED', 'UNPROCESSED']
-                : ['REMITTED', 'DELETED']
+            userRole === 'CS_CLOSER'
+              ? ['REMITTED', 'DELETED', 'UNPROCESSED']
+              : ['REMITTED', 'DELETED']
           }
-          enableFromCartStatusOption={isHoCSPlus}
           enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT'}
         />
       )}

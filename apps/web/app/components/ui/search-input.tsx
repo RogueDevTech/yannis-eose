@@ -110,7 +110,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
     const rightPaddingClass = withSubmitButton ? 'pr-12' : '';
 
     return (
-      <div className={['relative md:min-w-[400px]', wrapperClassName].filter(Boolean).join(' ')}>
+      <div className={['relative md:min-w-[220px]', wrapperClassName].filter(Boolean).join(' ')}>
         {showClear ? (
           <button
             type="button"
@@ -146,6 +146,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
         <input
           ref={ref}
           type="search"
+          autoComplete="off"
           value={displayValue as string}
           onChange={handleChange}
           className={[

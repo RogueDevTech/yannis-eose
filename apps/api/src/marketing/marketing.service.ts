@@ -5770,7 +5770,7 @@ export class MarketingService {
     };
   }
 
-  async listCampaigns(input: ListCampaignsInput, branchId?: string | null, opts?: { enrichProductIds?: boolean }) {
+  async listCampaigns(input: ListCampaignsInput, branchId?: string | null, opts?: { enrichProductIds?: boolean; callerId?: string; effectiveBranchIds?: string[] | null }) {
     const conditions = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, input.mediaBuyerId));
@@ -5788,22 +5788,27 @@ export class MarketingService {
       // branch_id. They resurface here — under the owner's new primary branch —
       // so the MB can reactivate them (which re-stamps branch_id; see
       // updateCampaign). The branch_id only moves on reactivation.
-      conditions.push(
-        or(
-          eq(schema.campaigns.branchId, branchId),
-          and(
-            eq(schema.campaigns.status, 'DEACTIVATED'),
-            ne(schema.campaigns.branchId, branchId),
-            inArray(
-              schema.campaigns.mediaBuyerId,
-              this.db
-                .select({ id: schema.users.id })
-                .from(schema.users)
-                .where(eq(schema.users.primaryBranchId, branchId)),
-            ),
+      //
+      // Also include the caller's own forms regardless of branch — an HoM who
+      // created a form in Branch A must still see it when viewing Branch B.
+      const branchOr: SQL[] = [
+        eq(schema.campaigns.branchId, branchId),
+        and(
+          eq(schema.campaigns.status, 'DEACTIVATED'),
+          ne(schema.campaigns.branchId, branchId),
+          inArray(
+            schema.campaigns.mediaBuyerId,
+            this.db
+              .select({ id: schema.users.id })
+              .from(schema.users)
+              .where(eq(schema.users.primaryBranchId, branchId)),
           ),
         )!,
-      );
+      ];
+      if (opts?.callerId) {
+        branchOr.push(eq(schema.campaigns.mediaBuyerId, opts.callerId));
+      }
+      conditions.push(or(...branchOr)!);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

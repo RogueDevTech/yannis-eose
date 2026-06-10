@@ -439,7 +439,7 @@ export function UserCreateEditLoadingShell({ mode }: { mode: 'create' | 'edit' }
             {inputPulse}
             <p className="text-xs text-app-fg-muted">
               {mode === 'edit'
-                ? 'Email changes require SuperAdmin approval before taking effect.'
+                ? 'Email changes may require approval before taking effect.'
                 : 'A password will be auto-generated and sent to this email.'}
             </p>
           </div>

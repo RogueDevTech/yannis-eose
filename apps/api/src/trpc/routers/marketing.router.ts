@@ -966,7 +966,7 @@ export const marketingRouter = router({
       // the selected branch filters the forms list. `null` currentBranchId
       // ("All branches") = no filter. `listCampaigns` also surfaces a moved
       // MB's parked (DEACTIVATED) forms under their new primary branch.
-      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId);
+      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId, { callerId: ctx.user.id });
     }),
 
   /**

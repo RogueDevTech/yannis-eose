@@ -1162,8 +1162,8 @@ export function UserDetailPage({
                                 )}
                                 {user.status === 'DEACTIVATED' && !canReactivateDeactivatedStaff && (
                                   <p className="text-xs text-app-fg-muted italic">
-                                    Reactivating deactivated staff requires Super Admin / Admin access or the
-                                    users deactivate permission.
+                                    Reactivating deactivated staff requires Super Admin, Admin, or HR Manager
+                                    access.
                                   </p>
                                 )}
                               </>
@@ -1268,8 +1268,8 @@ export function UserDetailPage({
                                 )}
                                 {user.status === 'DEACTIVATED' && !canReactivateDeactivatedStaff && (
                                   <p className="text-xs text-app-fg-muted italic w-full">
-                                    Reactivating deactivated staff requires Super Admin / Admin access or the
-                                    users deactivate permission.
+                                    Reactivating deactivated staff requires Super Admin, Admin, or HR Manager
+                                    access.
                                   </p>
                                 )}
                               </>
