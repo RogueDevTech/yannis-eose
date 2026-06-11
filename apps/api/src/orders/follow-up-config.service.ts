@@ -479,24 +479,28 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const validUserIds = new Set(validUserRows.map((u) => u.id));
     const validCampaignIds = new Set(validCampaignRows.map((c) => c.id));
 
-    // Single transaction: freeze source orders + create follow-up copies
-    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      // Freeze source orders
-      await tx
-        .update(schema.orders)
-        .set({ frozenForFollowUp: true, updatedAt: new Date() })
-        .where(inArray(schema.orders.id, orderIds));
+    // Process each order individually — one bad order (trigger error, FK issue)
+    // shouldn't block the rest of the batch.
+    let succeeded = 0;
+    for (let idx = 0; idx < fullOrders.length; idx++) {
+      const orig = fullOrders[idx]!;
+      try {
+        const assignedBranch = activeBranches.length > 0
+          ? activeBranches[idx % activeBranches.length]!
+          : orig.servicingBranchId;
+        const items = itemsByOrder.get(orig.id) ?? [];
 
-      // Insert follow-up order copies — round-robin across active branches
-      const followUpRows = await tx
-        .insert(schema.followUpOrders)
-        .values(
-          fullOrders.map((orig, idx) => {
-            // Round-robin: distribute evenly across active branches
-            const assignedBranch = activeBranches.length > 0
-              ? activeBranches[idx % activeBranches.length]!
-              : orig.servicingBranchId;
-            return {
+        await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+          // Freeze source order
+          await tx
+            .update(schema.orders)
+            .set({ frozenForFollowUp: true, updatedAt: new Date() })
+            .where(eq(schema.orders.id, orig.id));
+
+          // Create follow-up copy
+          const [fuRow] = await tx
+            .insert(schema.followUpOrders)
+            .values({
               sourceOrderId: orig.id,
               followUpRuleId: rule.id,
               campaignId: orig.campaignId && validCampaignIds.has(orig.campaignId) ? orig.campaignId : null,
@@ -526,90 +530,52 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               branchId: orig.branchId,
               servicingBranchId: assignedBranch,
               cartId: orig.cartId,
-            };
-          }),
-        )
-        .returning({ id: schema.followUpOrders.id });
+            })
+            .returning({ id: schema.followUpOrders.id });
 
-      // Build order ID mapping (source → follow-up)
-      const idMap = new Map<string, string>();
-      fullOrders.forEach((orig, i) => {
-        const fuRow = followUpRows[i];
-        if (fuRow) idMap.set(orig.id, fuRow.id);
-      });
+          if (fuRow) {
+            // Items
+            if (items.length > 0) {
+              await tx.insert(schema.followUpOrderItems).values(
+                items.map((item) => ({
+                  followUpOrderId: fuRow.id,
+                  productId: item.productId,
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                  offerLabel: item.offerLabel,
+                  batchId: item.batchId,
+                })),
+              );
+            }
 
-      // Bulk insert follow-up order items
-      const fuItems: Array<{
-        followUpOrderId: string;
-        productId: string;
-        quantity: number;
-        unitPrice: string;
-        offerLabel: string | null;
-        batchId: string | null;
-      }> = [];
-      for (const orig of fullOrders) {
-        const fuId = idMap.get(orig.id);
-        if (!fuId) continue;
-        const items = itemsByOrder.get(orig.id) ?? [];
-        for (const item of items) {
-          fuItems.push({
-            followUpOrderId: fuId,
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            offerLabel: item.offerLabel,
-            batchId: item.batchId,
-          });
-        }
+            // Timeline on source order
+            await tx.insert(schema.orderTimelineEvents).values({
+              orderId: orig.id,
+              eventType: 'ORDER_ARCHIVED' as const,
+              actorId: null,
+              actorName: 'System',
+              description: `Order frozen for follow-up (rule: ${rule.name}).`,
+              metadata: { ruleId: rule.id, ruleName: rule.name },
+              branchId: null,
+            });
+
+            // Timeline on follow-up order
+            await tx.insert(schema.followUpOrderTimelineEvents).values({
+              followUpOrderId: fuRow.id,
+              eventType: 'ORDER_RECEIVED',
+              actorId: null,
+              actorName: 'System',
+              description: `Follow-up order created from ${orig.orderNumber ? `YNS-${String(orig.orderNumber).padStart(5, '0')}` : 'original order'}.`,
+              metadata: { sourceOrderId: orig.id, sourceOrderNumber: orig.orderNumber, ruleId: rule.id },
+              branchId: assignedBranch,
+            });
+          }
+        });
+        succeeded++;
+      } catch (err) {
+        this.logger.warn(`Follow-up pull skipped order ${orig.id}: ${err instanceof Error ? err.message : err}`);
       }
-      if (fuItems.length > 0) {
-        await tx.insert(schema.followUpOrderItems).values(fuItems);
-      }
-
-      // Timeline events on source orders (frozen notification)
-      await tx.insert(schema.orderTimelineEvents).values(
-        orderIds.map((orderId) => ({
-          orderId,
-          eventType: 'ORDER_ARCHIVED' as const,
-          actorId: null as string | null,
-          actorName: 'System',
-          description: `Order frozen for follow-up (rule: ${rule.name}).`,
-          metadata: { ruleId: rule.id, ruleName: rule.name },
-          branchId: null as string | null,
-        })),
-      );
-
-      // Timeline events on new follow-up orders
-      const fuTimelineRows = fullOrders
-        .map((orig, idx) => {
-          const fuId = idMap.get(orig.id);
-          if (!fuId) return null;
-          const assignedBranch = activeBranches.length > 0
-            ? activeBranches[idx % activeBranches.length]!
-            : orig.servicingBranchId;
-          return {
-            followUpOrderId: fuId,
-            eventType: 'ORDER_RECEIVED',
-            actorId: null as string | null,
-            actorName: 'System',
-            description: `Follow-up order created from ${orig.orderNumber ? `YNS-${String(orig.orderNumber).padStart(5, '0')}` : 'original order'}.`,
-            metadata: { sourceOrderId: orig.id, sourceOrderNumber: orig.orderNumber, ruleId: rule.id },
-            branchId: assignedBranch,
-          };
-        })
-        .filter(Boolean) as Array<{
-          followUpOrderId: string;
-          eventType: string;
-          actorId: string | null;
-          actorName: string;
-          description: string;
-          metadata: Record<string, unknown>;
-          branchId: string | null;
-        }>;
-      if (fuTimelineRows.length > 0) {
-        await tx.insert(schema.followUpOrderTimelineEvents).values(fuTimelineRows);
-      }
-    });
+    }
 
     // Follow-up orders live in the `follow_up_orders` table and are listed
     // via the Follow-Up Orders view (view=orders).  Batches are a CS-facing
@@ -617,8 +583,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // NOT create an empty batch here — the orders aren't in the `orders`
     // table until they graduate on DELIVERED.
 
-    this.logger.log(`Rule "${rule.name}": pulled ${orderIds.length} orders`);
-    return orderIds.length;
+    if (succeeded < fullOrders.length) {
+      this.logger.warn(`Rule "${rule.name}": pulled ${succeeded}/${fullOrders.length} orders (${fullOrders.length - succeeded} skipped)`);
+    } else {
+      this.logger.log(`Rule "${rule.name}": pulled ${succeeded} orders`);
+    }
+    return succeeded;
   }
 
   // ── Cart Abandonment Pull ──────────────────────────────────────────
@@ -896,7 +866,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   // ── Follow-Up Order Lifecycle ──────────────────────────────────────
 
   async listFollowUpOrders(input: ListFollowUpOrdersInput, branchId?: string | null) {
-    const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
+    const conditions: Parameters<typeof and>[0][] = input.showDeleted
+      ? [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`]
+      : [isNull(schema.followUpOrders.deletedAt)];
 
     if (input.status) conditions.push(eq(schema.followUpOrders.status, input.status));
     if (input.statuses && input.statuses.length > 0) {
@@ -1045,6 +1017,23 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     const counts: Record<string, number> = {};
     for (const row of rows) counts[row.status] = row.count;
+
+    // Separate deleted count (soft-deleted orders are excluded from the main query)
+    const deletedConditions: Parameters<typeof and>[0][] = [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`];
+    if (branchId) deletedConditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
+    if (assignedCsId) deletedConditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
+    if (startDate) deletedConditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
+    if (endDate) {
+      const endDel = new Date(endDate);
+      endDel.setHours(23, 59, 59, 999);
+      deletedConditions.push(lte(schema.followUpOrders.createdAt, endDel));
+    }
+    const [deletedRow] = await this.db
+      .select({ count: count() })
+      .from(schema.followUpOrders)
+      .where(and(...deletedConditions));
+    counts['DELETED'] = Number(deletedRow?.count ?? 0);
+
     return counts;
   }
 
@@ -1608,7 +1597,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         .set({ frozenForFollowUp: false, updatedAt: new Date() })
         .where(eq(schema.orders.id, orderId));
 
-      // Soft-delete follow-up copies that haven't progressed beyond UNPROCESSED/CS_ASSIGNED
+      // Soft-delete ALL follow-up copies — the original is now the single source of truth.
+      // Admin provided a reason via the confirmation modal; any work on the follow-up
+      // is superseded by resuming the original order.
       await tx
         .update(schema.followUpOrders)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -1616,7 +1607,6 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           and(
             eq(schema.followUpOrders.sourceOrderId, orderId),
             isNull(schema.followUpOrders.deletedAt),
-            inArray(schema.followUpOrders.status, ['UNPROCESSED', 'CS_ASSIGNED']),
           ),
         );
 
