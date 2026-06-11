@@ -262,7 +262,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: 'Select at least one order', succeeded: 0, failed: orderIds.length, results: [] }, { status: 400 });
     }
     const isDeliveryConfirmation = true;
-    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
     const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
     let succeeded = 0;
     let failed = 0;
@@ -322,7 +322,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Delivery confirmation (DELIVERED / PARTIALLY_DELIVERED): TPL_MANAGER goes through approval
     const isDeliveryConfirmation = newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED';
-    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
 
     if (isDeliveryConfirmation && !canTransitionDirect) {
       const res = await apiRequest<unknown>('/trpc/logistics.submitDeliveryConfirmation', {

@@ -48,7 +48,7 @@ interface MyNotificationPrefs {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   const cookie = getSessionCookie(request);
-  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT';
 
   // Wave A — independent fetches for everyone with a session cookie path.
   const settingsP = apiRequest<unknown>('/trpc/settings.getSystemSettings', { method: 'GET', cookie });

@@ -14,7 +14,7 @@ import { withActor } from '../common/db/with-actor';
 import { CacheService } from '../common/cache/cache.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
-const MAX_PER_RULE = 200;
+const MAX_PER_RULE = 10_000;
 
 @Injectable()
 export class FollowUpConfigService implements OnApplicationBootstrap {
@@ -248,16 +248,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
   }
 
-  /** Hourly sync — catches new stale orders + abandoned carts between midnight runs. */
-  @Cron('0 0 * * * *', { timeZone: 'Africa/Lagos' })
-  async handleHourlySync() {
-    try {
-      const result = await this.runSync('cron');
-      if (result.totalPulled > 0) this.logger.log(`Hourly sync: ${result.totalPulled} orders pulled`);
-    } catch (err) {
-      this.logger.error(`Hourly sync failed: ${err instanceof Error ? err.message : err}`);
-    }
-  }
+  // Hourly cron removed — midnight + boot + manual sync is sufficient.
 
   // ── Rule CRUD ──────────────────────────────────────────────────────
 
@@ -433,7 +424,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .where(
         and(
           ...conditions,
-          sql`${schema.orders.id} NOT IN (SELECT source_order_id FROM follow_up_orders)`,
+          sql`${schema.orders.id} NOT IN (SELECT source_order_id FROM follow_up_orders WHERE source_order_id IS NOT NULL)`,
         ),
       )
       .limit(MAX_PER_RULE);

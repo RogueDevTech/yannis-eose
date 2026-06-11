@@ -128,7 +128,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
     // Treat ADMIN the same as SUPER_ADMIN for admin-level capabilities on this page.
-    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN';
+    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPPORT';
     const permsSetForReactivate = new Set(
       (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
     );

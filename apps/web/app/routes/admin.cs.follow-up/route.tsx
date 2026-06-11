@@ -33,13 +33,13 @@ const ABANDONED_CART_STATUS = 'ABANDONED_CART';
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
     permission: 'orders.followUp',
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HEAD_OF_CS', 'CS_CLOSER'],
   });
   const user = await getCurrentUser(request);
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const isCloser = user?.role === 'CS_CLOSER';
-  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT';
   const isHoCS = user?.role === 'HEAD_OF_CS';
   // Admins + HoCS see branch summary so they can drill into a specific branch. Closers go straight to orders.
   const view = url.searchParams.get('view') || (isAdmin || isHoCS ? 'batches' : 'orders');

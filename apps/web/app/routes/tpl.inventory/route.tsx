@@ -127,7 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       locations,
       canIntake: false,
       canReadShipments:
-        user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || actorPerms.has(canonicalPermissionCode('inventory.shipments.read')),
+        user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT' || actorPerms.has(canonicalPermissionCode('inventory.shipments.read')),
       transfers: bundle?.transfers ?? [],
       returnedOrders: bundle?.returnedOrders ?? [],
       reconciliations: bundle?.reconciliations ?? [],
