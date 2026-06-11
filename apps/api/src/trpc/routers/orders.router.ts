@@ -2257,6 +2257,12 @@ export const ordersRouter = router({
       return getFollowUpConfigService().listSyncLogs(input.page, input.limit);
     }),
 
+  /** Get current sync progress (Redis-backed, survives page refresh). Returns null if no sync running. */
+  followUpConfigSyncStatus: permissionProcedure('orders.followUpConfig')
+    .query(async () => {
+      return getFollowUpConfigService().getSyncProgress();
+    }),
+
   transferFollowUpOrder: permissionProcedure('orders.followUp')
     .input(z.object({ orderId: z.string().uuid(), targetBranchId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
@@ -2302,12 +2308,15 @@ export const ordersRouter = router({
 
   /** Lightweight follow-up counts for dashboard stat strips (assigned + delivered). */
   followUpDashboardCounts: authedProcedure
-    .query(async ({ ctx }) => {
+    .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
+    .query(async ({ input, ctx }) => {
       const role = ctx.user.role;
       const isCloser = role === 'CS_CLOSER';
       return getFollowUpConfigService().getFollowUpDashboardCounts({
         assignedCsId: isCloser ? ctx.user.id : undefined,
         branchId: ctx.currentBranchId ?? undefined,
+        startDate: input?.startDate,
+        endDate: input?.endDate,
       });
     }),
 

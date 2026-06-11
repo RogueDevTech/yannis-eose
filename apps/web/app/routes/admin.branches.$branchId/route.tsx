@@ -3061,6 +3061,7 @@ function BranchOverviewPage({
   const toggleStatusFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [deactivateDept, setDeactivateDept] = useState<BranchOrgDepartmentBlock | null>(null);
   const [isPrimary, setIsPrimary] = useState(false);
   const [addMemberUserId, setAddMemberUserId] = useState('');
 
@@ -3173,48 +3174,16 @@ function BranchOverviewPage({
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusBadge status={branch.status} />
-                {canManageBranchPage && (
-                  <Button
-                    variant={isActive ? 'danger' : 'primary'}
-                    size="sm"
-                    onClick={handleToggleStatus}
-                    disabled={isToggling}
-                    loading={isToggling}
-                    loadingText={isActive ? 'Deactivating...' : 'Activating...'}
-                  >
-                    {isActive ? 'Deactivate' : 'Activate'}
-                  </Button>
-                )}
-                {canManageBranchPage ? (
-                  <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}>
-                    Edit
-                  </Button>
-                ) : null}
               </div>
             }
             sheet={({ closeSheet }) => (
               <>
                 {canManageBranchPage && (
-                  <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setEditOpen(true); }}>
-                    Edit branch
-                  </Button>
-                )}
-                {canManageBranchPage && (
                   <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setAddMemberOpen(true); }}>
                     Add member
                   </Button>
                 )}
-                {canManageBranchPage && (
-                  <Button
-                    variant={isActive ? 'danger' : 'primary'}
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => { closeSheet(); handleToggleStatus(); }}
-                    disabled={isToggling}
-                  >
-                    {isActive ? 'Deactivate branch' : 'Activate branch'}
-                  </Button>
-                )}
+                {/* Branch deactivation removed — deactivation is for departments, not branches */}
               </>
             )}
           />

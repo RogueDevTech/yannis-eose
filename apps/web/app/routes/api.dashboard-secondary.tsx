@@ -124,8 +124,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const cartAbandonedP = needsCartAbandoned
       ? apiRequest<unknown>(`/trpc/cart.countAbandoned?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
+    const followUpInput = JSON.stringify({ startDate, endDate });
     const followUpP = needsFollowUp
-      ? apiRequest<unknown>('/trpc/orders.followUpDashboardCounts', deferredOpt)
+      ? apiRequest<unknown>(`/trpc/orders.followUpDashboardCounts?input=${encodeURIComponent(followUpInput)}`, deferredOpt)
       : Promise.resolve(null);
 
     const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount, followUpCounts] = await Promise.all([
