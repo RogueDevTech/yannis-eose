@@ -1,15 +1,10 @@
 -- Commission plans + settlement configs: add group_id for multi-company.
 -- CEO directive 2026-06-10.
 
--- commission_plans
+-- commission_plans: add column
 ALTER TABLE "commission_plans" ADD COLUMN IF NOT EXISTS "group_id" uuid REFERENCES "branch_groups"("id");
 
-UPDATE "commission_plans"
-SET "group_id" = (SELECT "id" FROM "branch_groups" ORDER BY "created_at" LIMIT 1)
-WHERE "group_id" IS NULL;
-
-CREATE INDEX IF NOT EXISTS "commission_plans_group_id_idx" ON "commission_plans" ("group_id");
-
+-- History sync BEFORE update (audit trigger needs the column)
 DO $$
 BEGIN
   IF EXISTS (
@@ -21,15 +16,17 @@ BEGIN
   END IF;
 END $$;
 
--- settlement_configs
-ALTER TABLE "settlement_configs" ADD COLUMN IF NOT EXISTS "group_id" uuid REFERENCES "branch_groups"("id");
-
-UPDATE "settlement_configs"
+-- Backfill
+UPDATE "commission_plans"
 SET "group_id" = (SELECT "id" FROM "branch_groups" ORDER BY "created_at" LIMIT 1)
 WHERE "group_id" IS NULL;
 
-CREATE INDEX IF NOT EXISTS "settlement_configs_group_id_idx" ON "settlement_configs" ("group_id");
+CREATE INDEX IF NOT EXISTS "commission_plans_group_id_idx" ON "commission_plans" ("group_id");
 
+-- settlement_configs: add column
+ALTER TABLE "settlement_configs" ADD COLUMN IF NOT EXISTS "group_id" uuid REFERENCES "branch_groups"("id");
+
+-- History sync BEFORE update (audit trigger needs the column)
 DO $$
 BEGIN
   IF EXISTS (
@@ -40,3 +37,10 @@ BEGIN
     ALTER TABLE "settlement_configs_history" ADD COLUMN "group_id" uuid;
   END IF;
 END $$;
+
+-- Backfill
+UPDATE "settlement_configs"
+SET "group_id" = (SELECT "id" FROM "branch_groups" ORDER BY "created_at" LIMIT 1)
+WHERE "group_id" IS NULL;
+
+CREATE INDEX IF NOT EXISTS "settlement_configs_group_id_idx" ON "settlement_configs" ("group_id");
