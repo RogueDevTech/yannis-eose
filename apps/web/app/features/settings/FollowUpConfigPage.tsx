@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
+import { useSocketEvent } from '~/hooks/useSocket';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { CompactTable } from '~/components/ui/compact-table';
@@ -92,9 +93,65 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const [viewRule, setViewRule] = useState<Rule | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [breakdownLog, setBreakdownLog] = useState<SyncLog | null>(null);
+  const [syncErrorModal, setSyncErrorModal] = useState<string | null>(null);
   const [syncPreview, setSyncPreview] = useState<Array<{ ruleId: string; ruleName: string; eligible: number }> | null>(null);
   const [syncPreviewLoading, setSyncPreviewLoading] = useState(false);
   const rev = useRevalidator();
+
+  // ── Real-time sync progress ─────────────────────────────────────
+  type SyncProgressData = {
+    syncId: string;
+    triggeredBy: 'cron' | 'manual';
+    startedAt: string;
+    totalRules: number;
+    currentRuleIndex: number;
+    currentRuleName: string;
+    currentRulePulled: number;
+    totalPulledSoFar: number;
+    ruleResults: Array<{ ruleName: string; pulled: number }>;
+    status: 'running' | 'complete' | 'error';
+    errorMessage?: string;
+  };
+  const [syncProgress, setSyncProgress] = useState<SyncProgressData | null>(null);
+  const syncCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // On mount: check if a sync is already running (Redis-backed persistence)
+  useEffect(() => {
+    fetch('/trpc/orders.followUpConfigSyncStatus', { credentials: 'include' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        const data = json?.result?.data;
+        if (data && data.status === 'running') setSyncProgress(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Socket.io: real-time progress updates
+  useSocketEvent('followup:sync_progress', useCallback((data: SyncProgressData) => {
+    if (data.status === 'complete') {
+      setSyncProgress(data);
+      // Show "Complete" for 3 seconds, then clear and refresh history
+      if (syncCompleteTimerRef.current) clearTimeout(syncCompleteTimerRef.current);
+      syncCompleteTimerRef.current = setTimeout(() => {
+        setSyncProgress(null);
+        rev.revalidate();
+      }, 3000);
+    } else if (data.status === 'error') {
+      setSyncProgress(data);
+      if (syncCompleteTimerRef.current) clearTimeout(syncCompleteTimerRef.current);
+      syncCompleteTimerRef.current = setTimeout(() => {
+        setSyncProgress(null);
+        rev.revalidate();
+      }, 5000);
+    } else {
+      setSyncProgress(data);
+    }
+  }, [rev]));
+
+  // Cleanup timer
+  useEffect(() => () => { if (syncCompleteTimerRef.current) clearTimeout(syncCompleteTimerRef.current); }, []);
+
+  const isSyncRunning = syncProgress?.status === 'running';
 
   const [name, setName] = useState('');
   const [sourceStatus, setSourceStatus] = useState('CONFIRMED');
@@ -205,14 +262,14 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             triggerAriaLabel="Config tools"
             desktop={
               <>
-                <Button size="sm" variant="secondary" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
+                <Button size="sm" variant="secondary" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading || isSyncRunning} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
                 <Button size="sm" variant="secondary" onClick={openCreate}>Add Rule</Button>
                 <Button size="sm" onClick={() => setCreateGroupOpen(true)}>Add Group</Button>
               </>
             }
             sheet={
               <>
-                <Button size="sm" variant="secondary" className="w-full" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
+                <Button size="sm" variant="secondary" className="w-full" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading || isSyncRunning} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
                 <Button size="sm" variant="secondary" className="w-full mt-2" onClick={openCreate}>Add Rule</Button>
                 <Button size="sm" className="w-full mt-2" onClick={() => setCreateGroupOpen(true)}>Add Group</Button>
               </>
@@ -318,6 +375,66 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
       {/* ── Sync History Tab ────────────────────────────────────── */}
       {tab === 'history' && (
         <>
+          {/* Live sync progress bar */}
+          {syncProgress && (
+            <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-app-fg">
+                    {syncProgress.status === 'complete'
+                      ? `Sync complete — ${syncProgress.totalPulledSoFar} orders pulled`
+                      : syncProgress.status === 'error'
+                        ? `Sync error — ${syncProgress.totalPulledSoFar} orders pulled before failure`
+                        : `Syncing... Rule ${syncProgress.currentRuleIndex} of ${syncProgress.totalRules}`}
+                  </p>
+                  <p className="text-xs text-app-fg-muted mt-0.5 truncate">
+                    {syncProgress.status === 'running'
+                      ? `${syncProgress.currentRuleName} — ${syncProgress.totalPulledSoFar} orders pulled so far`
+                      : syncProgress.status === 'error'
+                        ? syncProgress.errorMessage ?? 'Unknown error'
+                        : `${syncProgress.ruleResults.length} rules processed`}
+                  </p>
+                </div>
+                <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  syncProgress.status === 'complete'
+                    ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
+                    : syncProgress.status === 'error'
+                      ? 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'
+                      : 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400'
+                }`}>
+                  {syncProgress.status === 'complete' ? 'Done' : syncProgress.status === 'error' ? 'Error' : 'Running'}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div className="h-2 w-full rounded-full bg-app-hover overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ease-out ${
+                    syncProgress.status === 'complete'
+                      ? 'bg-success-500'
+                      : syncProgress.status === 'error'
+                        ? 'bg-danger-500'
+                        : 'bg-brand-500'
+                  }`}
+                  style={{
+                    width: syncProgress.totalRules > 0
+                      ? `${Math.round((syncProgress.currentRuleIndex / syncProgress.totalRules) * 100)}%`
+                      : '5%',
+                  }}
+                />
+              </div>
+              {/* Per-rule breakdown (live) */}
+              {syncProgress.ruleResults.length > 0 && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-app-fg-muted">
+                  {syncProgress.ruleResults.map((r) => (
+                    <span key={r.ruleName}>
+                      {r.ruleName}: <span className="font-semibold text-app-fg">{r.pulled}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Filter pills */}
           <div className="flex flex-wrap gap-1.5">
             {([
@@ -355,7 +472,18 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       <span className="text-xs text-app-fg-muted">{l.triggeredBy === 'cron' ? 'Auto' : 'Manual'}</span>
                     </div>
                     <p className="text-sm font-semibold text-app-fg">{l.totalPulled} orders pulled</p>
-                    {l.errorMessage && <p className="text-xs text-danger-600 dark:text-danger-400">{l.errorMessage}</p>}
+                    {l.errorMessage && (
+                      <button
+                        type="button"
+                        onClick={() => setSyncErrorModal(l.errorMessage!)}
+                        className="inline-flex items-center gap-1 text-danger-600 dark:text-danger-400 text-xs"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                        View error
+                      </button>
+                    )}
                     <div className="flex items-center gap-3 pt-1">
                       {l.ruleResults?.length ? (
                         <button type="button" onClick={() => setBreakdownLog(l)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
@@ -392,7 +520,19 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       key: 'details', header: 'Breakdown',
                       render: (l: SyncLog) => (
                         <div className="space-y-0.5">
-                          {l.errorMessage && <span className="text-danger-600 dark:text-danger-400 text-xs block">{l.errorMessage}</span>}
+                          {l.errorMessage && (
+                            <button
+                              type="button"
+                              onClick={() => setSyncErrorModal(l.errorMessage!)}
+                              className="inline-flex items-center gap-1 text-danger-600 dark:text-danger-400 text-xs hover:underline"
+                              title="View error details"
+                            >
+                              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                              </svg>
+                              Error
+                            </button>
+                          )}
                           {l.ruleResults?.length ? (
                             <button type="button" onClick={() => setBreakdownLog(l)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
                               View breakdown
@@ -637,6 +777,29 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
       )}
 
       {/* Sync breakdown modal */}
+      {/* Sync error detail modal */}
+      {syncErrorModal && (
+        <Modal open onClose={() => setSyncErrorModal(null)} maxWidth="max-w-md" contentClassName="p-5 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center">
+              <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-semibold text-app-fg">Sync Error</h3>
+              <p className="mt-1 text-sm text-app-fg-muted">The sync encountered an error during processing. Orders pulled before the error are still saved.</p>
+            </div>
+          </div>
+          <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800/50 px-3 py-2.5">
+            <p className="text-sm text-danger-800 dark:text-danger-200 font-mono break-all whitespace-pre-wrap">{syncErrorModal}</p>
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" variant="secondary" onClick={() => setSyncErrorModal(null)}>Close</Button>
+          </div>
+        </Modal>
+      )}
+
       {breakdownLog && (
         <Modal open onClose={() => setBreakdownLog(null)} maxWidth="max-w-md" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[80dvh]">
           <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-app-border shrink-0">

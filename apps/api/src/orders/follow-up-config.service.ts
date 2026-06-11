@@ -12,9 +12,13 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { CacheService } from '../common/cache/cache.service';
+import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { randomUUID } from 'node:crypto';
 
 const MAX_PER_RULE = 10_000;
+const SYNC_PROGRESS_KEY = 'cache:followup:sync_progress';
+const SYNC_PROGRESS_TTL = 300; // 5 minutes
 
 @Injectable()
 export class FollowUpConfigService implements OnApplicationBootstrap {
@@ -23,6 +27,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly cache: CacheService,
+    private readonly events: EventsService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -346,9 +351,38 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   // ── Sync Engine ────────────────────────────────────────────────────
 
+  /** Read current sync progress from Redis (survives page refresh). */
+  async getSyncProgress(): Promise<unknown> {
+    return this.cache.get(SYNC_PROGRESS_KEY);
+  }
+
   async runSync(triggeredBy: 'cron' | 'manual', actorId?: string): Promise<{ totalPulled: number }> {
     let totalPulled = 0;
     const ruleResults: Array<{ ruleId: string; ruleName: string; pulled: number }> = [];
+    const syncId = randomUUID();
+    const startedAt = new Date().toISOString();
+
+    const emitProgress = (patch: {
+      currentRuleIndex: number;
+      currentRuleName: string;
+      currentRulePulled: number;
+      status: 'running' | 'complete' | 'error';
+      errorMessage?: string;
+    }) => {
+      const progress = {
+        syncId,
+        triggeredBy,
+        startedAt,
+        totalRules: 0, // updated below
+        ...patch,
+        totalPulledSoFar: totalPulled,
+        ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+      };
+      // Store in Redis for page-refresh persistence
+      void this.cache.set(SYNC_PROGRESS_KEY, progress, SYNC_PROGRESS_TTL).catch(() => {});
+      // Emit via Socket.io for real-time updates
+      this.events.emitFollowUpSyncProgress(progress);
+    };
 
     try {
       const rules = await this.db
@@ -357,27 +391,70 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         .where(eq(schema.followUpRules.enabled, true))
         .orderBy(desc(schema.followUpRules.priority), asc(schema.followUpRules.createdAt));
 
-      for (const rule of rules) {
+      // Emit start
+      emitProgress({ currentRuleIndex: 0, currentRuleName: 'Starting...', currentRulePulled: 0, status: 'running' });
+      // Patch totalRules now that we know it
+      const totalRules = rules.length;
+
+      for (let i = 0; i < rules.length; i++) {
+        const rule = rules[i]!;
+        // Emit "processing rule X"
+        const progressBase = { currentRuleIndex: i + 1, currentRuleName: rule.name, currentRulePulled: 0, status: 'running' as const };
+        emitProgress({ ...progressBase, totalPulledSoFar: totalPulled } as never);
+        // Override totalRules in the stored progress
+        void this.cache.set(SYNC_PROGRESS_KEY, {
+          syncId, triggeredBy, startedAt, totalRules,
+          ...progressBase, totalPulledSoFar: totalPulled,
+          ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+        }, SYNC_PROGRESS_TTL).catch(() => {});
+        this.events.emitFollowUpSyncProgress({
+          syncId, triggeredBy, startedAt, totalRules,
+          ...progressBase, totalPulledSoFar: totalPulled,
+          ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+        });
+
         const pulled = rule.sourceStatus === 'CART_ABANDONMENT'
           ? await this.pullAbandonedCarts(rule.ageThresholdDays)
           : await this.pullOrdersForRule(rule, actorId);
         ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled });
         totalPulled += pulled;
+
+        // Emit rule-complete progress
+        void this.cache.set(SYNC_PROGRESS_KEY, {
+          syncId, triggeredBy, startedAt, totalRules,
+          currentRuleIndex: i + 1, currentRuleName: rule.name, currentRulePulled: pulled,
+          totalPulledSoFar: totalPulled, status: 'running',
+          ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+        }, SYNC_PROGRESS_TTL).catch(() => {});
+        this.events.emitFollowUpSyncProgress({
+          syncId, triggeredBy, startedAt, totalRules,
+          currentRuleIndex: i + 1, currentRuleName: rule.name, currentRulePulled: pulled,
+          totalPulledSoFar: totalPulled, status: 'running',
+          ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+        });
       }
 
-      // Record every sync run (including empty ones) for audit visibility
-      {
-        await this.db.insert(schema.followUpSyncLogs).values({
-          triggeredBy,
-          triggeredByUserId: actorId ?? null,
-          finishedAt: new Date(),
-          totalPulled,
-          ruleResults,
-        });
-        if (totalPulled > 0) void this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
-      }
+      // Record sync log
+      await this.db.insert(schema.followUpSyncLogs).values({
+        triggeredBy,
+        triggeredByUserId: actorId ?? null,
+        finishedAt: new Date(),
+        totalPulled,
+        ruleResults,
+      });
+      if (totalPulled > 0) void this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+      // Emit complete + clear Redis
+      const completePayload = {
+        syncId, triggeredBy, startedAt, totalRules: rules.length,
+        currentRuleIndex: rules.length, currentRuleName: 'Complete',
+        currentRulePulled: 0, totalPulledSoFar: totalPulled, status: 'complete' as const,
+        ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+      };
+      this.events.emitFollowUpSyncProgress(completePayload);
+      void this.cache.del(SYNC_PROGRESS_KEY).catch(() => {});
     } catch (err) {
-      // Always log errors regardless of pull count
+      // Log error
       await this.db.insert(schema.followUpSyncLogs).values({
         triggeredBy,
         triggeredByUserId: actorId ?? null,
@@ -386,6 +463,15 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         ruleResults,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
+      // Emit error + clear Redis
+      this.events.emitFollowUpSyncProgress({
+        syncId, triggeredBy, startedAt, totalRules: 0,
+        currentRuleIndex: 0, currentRuleName: '', currentRulePulled: 0,
+        totalPulledSoFar: totalPulled, status: 'error',
+        ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      void this.cache.del(SYNC_PROGRESS_KEY).catch(() => {});
       throw err;
     }
 
@@ -1038,10 +1124,16 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   /** Lightweight per-status counts for dashboard stat strips. */
-  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null }) {
+  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; startDate?: string; endDate?: string }) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
     if (opts?.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, opts.assignedCsId));
     if (opts?.branchId) conditions.push(eq(schema.followUpOrders.servicingBranchId, opts.branchId));
+    if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(opts.startDate)));
+    if (opts?.endDate) {
+      const end = new Date(opts.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.followUpOrders.createdAt, end));
+    }
 
     const rows = await this.db
       .select({

@@ -55,6 +55,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     totalSpend: data?.marketing?.totalSpend ?? 0,
     approvedSpend: (data?.marketing as Record<string, number> | undefined)?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
     deliveredRevenue: (data?.marketing as Record<string, number> | undefined)?.deliveredRevenue ?? 0,
+    totalOrders: (data?.marketing as Record<string, number> | undefined)?.totalOrders ?? 0,
     cpa: data?.marketing?.cpa ?? 0,
     roas: data?.marketing?.roas ?? 0,
     confirmationRate: (data?.marketing as Record<string, number> | undefined)?.confirmationRate ?? 0,
@@ -316,11 +317,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               to: '/admin/marketing/expenses',
             },
             {
-              label: 'Total Orders',
-              value: orderPipeline.total.toLocaleString(),
+              label: 'Marketing Orders',
+              value: marketingSafe.totalOrders.toLocaleString(),
               valueClassName: 'text-app-fg',
-              title: 'All orders created in the selected period',
-              to: salesLink(),
+              title: 'Online form orders in the selected period (excludes offline/follow-up)',
+              to: '/admin/marketing/orders',
             },
             {
               label: 'Cost Per Acquisition',

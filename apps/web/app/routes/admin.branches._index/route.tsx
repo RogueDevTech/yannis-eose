@@ -205,17 +205,21 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
               <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-mini font-semibold text-app-fg-muted">
                 {branch.code}
               </span>
-              <span className="mx-1.5">·</span>
-              <time dateTime={branch.createdAt}>
-                {new Date(branch.createdAt).toLocaleDateString('en-NG', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </time>
+              {branch.createdAt && !isNaN(new Date(branch.createdAt).getTime()) && (
+                <>
+                  <span className="mx-1.5">·</span>
+                  <time dateTime={branch.createdAt}>
+                    {new Date(branch.createdAt).toLocaleDateString('en-NG', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </time>
+                </>
+              )}
             </div>
 
-            <div className="relative z-10 flex items-center gap-2 pt-3 border-t border-app-border">
+            <div className="relative z-10 flex items-center gap-2 pt-3 border-t border-app-border pointer-events-none">
               <Button
                 type="button"
                 variant="primary"
@@ -224,11 +228,11 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
                   e.stopPropagation();
                   setEditBranch(branch);
                 }}
-                className="gap-1.5 shrink-0"
+                className="gap-1.5 shrink-0 pointer-events-auto"
               >
                 Edit
               </Button>
-              <span className="ml-auto text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors pointer-events-none">
+              <span className="ml-auto text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors">
                 View details
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
