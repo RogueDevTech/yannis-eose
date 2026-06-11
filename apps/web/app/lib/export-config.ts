@@ -22,9 +22,12 @@ export const EXPORT_CONFIGS: Record<ExportReportKey, ExportConfig> = {
       { key: 'phone', label: 'Phone' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
+      { key: 'product', label: 'Product' },
+      { key: 'quantity', label: 'Quantity' },
+      { key: 'address', label: 'Delivery Address' },
       { key: 'created', label: 'Created' },
     ],
-    defaultColumns: ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'],
+    defaultColumns: ['id', 'customer', 'assignedCs', 'status', 'amount', 'product', 'quantity', 'address', 'created'],
   },
   cs_team: {
     reportKey: 'cs_team',

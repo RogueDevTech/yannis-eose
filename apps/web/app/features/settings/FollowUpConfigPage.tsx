@@ -1,0 +1,956 @@
+import { useState } from 'react';
+import { Link, useFetcher, useRevalidator } from '@remix-run/react';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompactTable } from '~/components/ui/compact-table';
+import { Tabs } from '~/components/ui/tabs';
+import { Modal } from '~/components/ui/modal';
+import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { TextInput } from '~/components/ui/text-input';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { TableActionButton } from '~/components/ui/table-action-button';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
+import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { GroupFormModal } from '~/features/cs/FollowUpGroupsPage';
+import type { FollowUpGroupItem, CloserWithBranches } from '~/features/cs/FollowUpGroupsPage';
+
+// ── Types ────────────────────────────────────────────────────────────
+
+interface Rule {
+  id: string;
+  name: string;
+  sourceStatus: string;
+  ageThresholdDays: number;
+  maxAgeDays: number | null;
+  sourceBranchId: string | null;
+  sourceBranchName: string | null;
+  targetBranchId: string | null;
+  targetBranchName: string | null;
+  targetGroupId: string | null;
+  targetGroupName: string | null;
+  priority: number;
+  enabled: boolean;
+}
+
+interface Branch { id: string; name: string }
+interface Group { id: string; name: string }
+
+interface SyncLog {
+  id: string;
+  triggeredBy: string;
+  startedAt: string;
+  finishedAt: string | null;
+  totalPulled: number;
+  ruleResults: Array<{ ruleId: string; ruleName: string; pulled: number }> | null;
+  errorMessage: string | null;
+}
+
+interface Props {
+  rules: Rule[];
+  branches: Branch[];
+  groups: Group[];
+  syncLogs: SyncLog[];
+  followUpGroups?: FollowUpGroupItem[];
+  closers?: CloserWithBranches[];
+}
+
+const STATUS_OPTIONS = [
+  { value: 'CART_ABANDONMENT', label: 'Cart Abandonment' },
+  { value: 'UNPROCESSED', label: 'Unassigned' },
+  { value: 'CS_ASSIGNED', label: 'Assigned' },
+  { value: 'CS_ENGAGED', label: 'Unconfirmed' },
+  { value: 'CONFIRMED', label: 'Confirmed' },
+  { value: 'DISPATCHED', label: 'Dispatched' },
+  { value: 'DELIVERED', label: 'Delivered' },
+  { value: 'REMITTED', label: 'Cash Remitted' },
+];
+
+const STATUS_LABEL: Record<string, string> = Object.fromEntries(STATUS_OPTIONS.map((o) => [o.value, o.label]));
+
+const AGE_OPTIONS = [
+  { value: '1', label: '1 day' }, { value: '2', label: '2 days' }, { value: '3', label: '3 days' }, { value: '5', label: '5 days' }, { value: '7', label: '7 days' },
+  { value: '14', label: '14 days' }, { value: '21', label: '21 days' }, { value: '30', label: '30 days' },
+  { value: '45', label: '45 days' }, { value: '60', label: '60 days' }, { value: '90', label: '90 days' },
+  { value: '120', label: '120 days' }, { value: '180', label: '180 days' }, { value: '365', label: '365 days' },
+];
+
+function formatAge(r: Rule) {
+  return r.maxAgeDays ? `${r.ageThresholdDays}–${r.maxAgeDays}d` : `>${r.ageThresholdDays}d`;
+}
+
+export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUpGroups = [], closers = [] }: Props) {
+  const [tab, setTab] = useState('rules');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editRule, setEditRule] = useState<Rule | null>(null);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [deleteRuleTarget, setDeleteRuleTarget] = useState<Rule | null>(null);
+  const [viewRule, setViewRule] = useState<Rule | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [breakdownLog, setBreakdownLog] = useState<SyncLog | null>(null);
+  const [syncPreview, setSyncPreview] = useState<Array<{ ruleId: string; ruleName: string; eligible: number }> | null>(null);
+  const [syncPreviewLoading, setSyncPreviewLoading] = useState(false);
+  const rev = useRevalidator();
+
+  const [name, setName] = useState('');
+  const [sourceStatus, setSourceStatus] = useState('CONFIRMED');
+  const [ageThresholdDays, setAgeThresholdDays] = useState(7);
+  const [maxAgeDays, setMaxAgeDays] = useState<number | null>(null);
+  const [sourceBranchId, setSourceBranchId] = useState<string | null>(null);
+  const [targetType, setTargetType] = useState<'all' | 'branch' | 'group'>('all');
+  const [targetBranchId, setTargetBranchId] = useState<string | null>(null);
+  const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(true);
+
+  const saveFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(saveFetcher.data, { successMessage: editRule ? 'Rule updated' : 'Rule created' });
+  useCloseOnFetcherSuccess(saveFetcher, () => { setModalOpen(false); setEditRule(null); rev.revalidate(); });
+
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(deleteFetcher.data, { successMessage: 'Rule deleted' });
+  useCloseOnFetcherSuccess(deleteFetcher, () => { setDeleteRuleTarget(null); rev.revalidate(); });
+
+  const syncFetcher = useFetcher<{ success?: boolean; error?: string; totalPulled?: number }>();
+  useFetcherToast(syncFetcher.data, {
+    successMessage: syncFetcher.data?.totalPulled != null ? `Sync complete: ${syncFetcher.data.totalPulled} orders pulled` : 'Sync complete',
+  });
+
+  const createGroupFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(createGroupFetcher.data, { successMessage: 'Group created' });
+  useCloseOnFetcherSuccess(createGroupFetcher, () => { setCreateGroupOpen(false); rev.revalidate(); });
+
+  const openCreate = () => {
+    setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeThresholdDays(7); setMaxAgeDays(null);
+    setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
+    setEnabled(true); setModalOpen(true);
+  };
+  const openEdit = (rule: Rule) => {
+    setEditRule(rule); setName(rule.name); setSourceStatus(rule.sourceStatus);
+    setAgeThresholdDays(rule.ageThresholdDays); setMaxAgeDays(rule.maxAgeDays ?? null); setSourceBranchId(rule.sourceBranchId);
+    setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
+    setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
+    setEnabled(rule.enabled); setModalOpen(true);
+  };
+  const handleSave = () => {
+    const payload: Record<string, unknown> = {
+      name, sourceStatus, ageThresholdDays, maxAgeDays: maxAgeDays || null, sourceBranchId: sourceBranchId || null,
+      targetBranchId: targetType === 'branch' ? targetBranchId : null,
+      targetGroupId: targetType === 'group' ? targetGroupId : null,
+      targetAll: targetType === 'all',
+      priority: 0, enabled,
+    };
+    if (editRule) payload.ruleId = editRule.id;
+    const fd = new FormData();
+    fd.set('intent', editRule ? 'updateRule' : 'createRule');
+    fd.set('json', JSON.stringify(payload));
+    saveFetcher.submit(fd, { method: 'post' });
+  };
+  const confirmDelete = () => {
+    if (!deleteRuleTarget) return;
+    const fd = new FormData(); fd.set('intent', 'deleteRule'); fd.set('ruleId', deleteRuleTarget.id);
+    deleteFetcher.submit(fd, { method: 'post' });
+  };
+  const handleSyncPreview = async () => {
+    setSyncPreviewLoading(true);
+    try {
+      const res = await fetch('/trpc/orders.followUpConfigDryRun', { credentials: 'include' });
+      if (res.ok) {
+        const json = await res.json();
+        const data = json?.result?.data ?? [];
+        setSyncPreview(Array.isArray(data) ? data : []);
+      } else {
+        setSyncPreview([]);
+      }
+    } catch {
+      setSyncPreview([]);
+    } finally {
+      setSyncPreviewLoading(false);
+    }
+  };
+  const handleSyncConfirm = () => {
+    setSyncPreview(null);
+    const fd = new FormData(); fd.set('intent', 'syncNow');
+    syncFetcher.submit(fd, { method: 'post' });
+  };
+
+  const branchOptions = (branches ?? []).map((b: Branch) => ({ value: b.id, label: b.name }));
+  const groupOptions = (groups ?? []).map((g: Group) => ({ value: g.id, label: g.name }));
+  const isSyncing = syncFetcher.state !== 'idle';
+  const safeRules = rules ?? [];
+  const ruleTargetMap = new Map(safeRules.map((r) => [r.id, r.targetBranchName ?? r.targetGroupName ?? 'All branches']));
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'with_data' | 'empty'>('all');
+  const allLogs = syncLogs ?? [];
+  const visibleLogs = historyFilter === 'all'
+    ? allLogs
+    : historyFilter === 'with_data'
+      ? allLogs.filter((l) => l.totalPulled > 0 || l.errorMessage)
+      : allLogs.filter((l) => l.totalPulled === 0 && !l.errorMessage);
+  const HISTORY_PER_PAGE = 50;
+  const historyTotalPages = Math.max(1, Math.ceil(visibleLogs.length / HISTORY_PER_PAGE));
+  const paginatedLogs = visibleLogs.slice((historyPage - 1) * HISTORY_PER_PAGE, historyPage * HISTORY_PER_PAGE);
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Follow Up Order Config"
+        description="Auto-pull stale orders for CS follow-up."
+        backTo="/admin/settings"
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Config tools"
+            desktop={
+              <>
+                <Button size="sm" variant="secondary" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
+                <Button size="sm" variant="secondary" onClick={openCreate}>Add Rule</Button>
+                <Button size="sm" onClick={() => setCreateGroupOpen(true)}>Add Group</Button>
+              </>
+            }
+            sheet={
+              <>
+                <Button size="sm" variant="secondary" className="w-full" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
+                <Button size="sm" variant="secondary" className="w-full mt-2" onClick={openCreate}>Add Rule</Button>
+                <Button size="sm" className="w-full mt-2" onClick={() => setCreateGroupOpen(true)}>Add Group</Button>
+              </>
+            }
+          />
+        }
+        mobileInlineActions
+      />
+
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: 'rules', label: 'Rules' },
+          { value: 'groups', label: 'Groups & Branches' },
+          { value: 'history', label: 'Sync History' },
+        ]}
+      />
+
+      {/* ── Rules Tab ───────────────────────────────────────────── */}
+      {tab === 'rules' && (
+        <>
+          {safeRules.length === 0 ? (
+            <EmptyState
+              title="No rules configured"
+              description="Add a rule to start auto-pulling stale orders."
+              action={<Button size="sm" onClick={openCreate}>Add Rule</Button>}
+            />
+          ) : (
+            <>
+              {/* Mobile cards */}
+              <div className="sm:hidden space-y-2">
+                {safeRules.map((r) => (
+                  <div key={r.id} className="rounded-lg border border-app-border bg-app-card p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-app-fg truncate">{r.name}</span>
+                      <StatusBadge status={r.enabled ? 'ACTIVE' : 'INACTIVE'} />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-app-fg-muted">
+                      {r.sourceStatus === 'CART_ABANDONMENT' ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">Cart</span>
+                      ) : (
+                        <OrderStatusBadge status={r.sourceStatus} />
+                      )}
+                      <span>{formatAge(r)}</span>
+                      <span>from {r.sourceBranchName ?? 'All'}</span>
+                      <span>→ {r.targetBranchName ?? r.targetGroupName ?? 'All branches'}</span>
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <TableActionButton onClick={() => setViewRule(r)}>View</TableActionButton>
+                      <TableActionButton onClick={() => openEdit(r)}>Edit</TableActionButton>
+                      <TableActionButton variant="danger" onClick={() => setDeleteRuleTarget(r)}>Delete</TableActionButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block">
+                <CompactTable
+                  rowKey={(r: Rule) => r.id}
+                  columns={[
+                    { key: 'name', header: 'Name', render: (r: Rule) => r.name },
+                    { key: 'sourceStatus', header: 'Status', render: (r: Rule) => r.sourceStatus === 'CART_ABANDONMENT' ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">Cart</span>
+                      ) : (
+                        <OrderStatusBadge status={r.sourceStatus} />
+                      ) },
+                    { key: 'age', header: 'Age', render: (r: Rule) => formatAge(r) },
+                    { key: 'sourceBranch', header: 'From', render: (r: Rule) => r.sourceBranchName ?? 'All' },
+                    { key: 'target', header: 'Target', render: (r: Rule) => r.targetBranchName ?? r.targetGroupName ?? 'All branches' },
+                    { key: 'enabled', header: '', render: (r: Rule) => <StatusBadge status={r.enabled ? 'ACTIVE' : 'INACTIVE'} /> },
+                    {
+                      key: 'actions', header: '',
+                      render: (r: Rule) => (
+                        <div className="flex gap-1">
+                          <TableActionButton onClick={() => setViewRule(r)}>View</TableActionButton>
+                          <TableActionButton onClick={() => openEdit(r)}>Edit</TableActionButton>
+                          <TableActionButton variant="danger" onClick={() => setDeleteRuleTarget(r)}>Delete</TableActionButton>
+                        </div>
+                      ),
+                    },
+                  ]}
+                  rows={safeRules}
+                />
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* ── Groups & Branches Tab ─────────────────────────────── */}
+      {tab === 'groups' && (
+        <GroupsAndBranchesTab
+          branches={branches}
+          followUpGroups={followUpGroups}
+          closers={closers}
+          createGroupFetcher={createGroupFetcher}
+          onCreateGroup={() => setCreateGroupOpen(true)}
+        />
+      )}
+
+      {/* ── Sync History Tab ────────────────────────────────────── */}
+      {tab === 'history' && (
+        <>
+          {/* Filter pills */}
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              { value: 'all' as const, label: `All (${allLogs.length})` },
+              { value: 'with_data' as const, label: `With data (${allLogs.filter((l) => l.totalPulled > 0 || l.errorMessage).length})` },
+              { value: 'empty' as const, label: `Empty (${allLogs.filter((l) => l.totalPulled === 0 && !l.errorMessage).length})` },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { setHistoryFilter(opt.value); setHistoryPage(1); }}
+                className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                  historyFilter === opt.value
+                    ? 'bg-brand-600 text-white border-brand-600'
+                    : 'border-app-border text-app-fg-muted hover:bg-app-hover'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {visibleLogs.length === 0 ? (
+            <EmptyState title="No sync runs" description={historyFilter === 'with_data' ? 'No syncs pulled any orders yet.' : historyFilter === 'empty' ? 'No empty sync runs.' : 'No sync runs yet.'} />
+          ) : (
+            <>
+              {/* Mobile cards */}
+              <div className="sm:hidden space-y-2">
+                {paginatedLogs.map((l) => (
+                  <div key={l.id} className="rounded-lg border border-app-border bg-app-card p-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-app-fg">
+                        {l.startedAt ? new Date(l.startedAt).toLocaleString('en-NG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </span>
+                      <span className="text-xs text-app-fg-muted">{l.triggeredBy === 'cron' ? 'Auto' : 'Manual'}</span>
+                    </div>
+                    <p className="text-sm font-semibold text-app-fg">{l.totalPulled} orders pulled</p>
+                    {l.errorMessage && <p className="text-xs text-danger-600 dark:text-danger-400">{l.errorMessage}</p>}
+                    <div className="flex items-center gap-3 pt-1">
+                      {l.ruleResults?.length ? (
+                        <button type="button" onClick={() => setBreakdownLog(l)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                          View breakdown
+                        </button>
+                      ) : null}
+                      {l.totalPulled > 0 && !l.errorMessage && l.startedAt && (
+                        <Link
+                          to={`/admin/cs/follow-up?view=orders&startDate=${new Date(l.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(l.startedAt).toISOString().slice(0, 10)}`}
+                          className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        >
+                          View orders
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block">
+                <CompactTable
+                  rowKey={(l: SyncLog) => l.id}
+                  columns={[
+                    {
+                      key: 'time', header: 'Time',
+                      render: (l: SyncLog) => l.startedAt
+                        ? new Date(l.startedAt).toLocaleString('en-NG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                        : '—',
+                    },
+                    { key: 'type', header: 'Type', render: (l: SyncLog) => l.triggeredBy === 'cron' ? 'Auto' : 'Manual' },
+                    { key: 'pulled', header: 'Pulled', align: 'right', render: (l: SyncLog) => <span className="tabular-nums">{l.totalPulled}</span> },
+                    {
+                      key: 'details', header: 'Breakdown',
+                      render: (l: SyncLog) => {
+                        if (l.errorMessage) return <span className="text-danger-600 dark:text-danger-400 text-xs">{l.errorMessage}</span>;
+                        if (!l.ruleResults?.length) return <span className="text-xs text-app-fg-muted">—</span>;
+                        return (
+                          <button type="button" onClick={() => setBreakdownLog(l)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                            View breakdown
+                          </button>
+                        );
+                      },
+                    },
+                    {
+                      key: 'actions', header: '', align: 'right',
+                      render: (l: SyncLog) => {
+                        if (!l.totalPulled || l.errorMessage) return null;
+                        const d = l.startedAt ? new Date(l.startedAt).toISOString().slice(0, 10) : '';
+                        if (!d) return null;
+                        return (
+                          <TableActionButton to={`/admin/cs/follow-up?view=orders&startDate=${d}&endDate=${d}&backTo=/admin/settings/follow-up-config`} variant="primary">
+                            View orders
+                          </TableActionButton>
+                        );
+                      },
+                    },
+                  ]}
+                  rows={paginatedLogs}
+                />
+              </div>
+
+              {/* Pagination */}
+              {historyTotalPages > 1 && (
+                <Pagination
+                  page={historyPage}
+                  totalPages={historyTotalPages}
+                  onPageChange={setHistoryPage}
+                />
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {/* ── Add/Edit Rule Modal ─────────────────────────────────── */}
+      <Modal
+        open={modalOpen}
+        onClose={() => { setModalOpen(false); setEditRule(null); }}
+        maxWidth="max-w-lg"
+        contentClassName="p-0 flex flex-col overflow-hidden min-h-0 border border-app-border"
+      >
+        <div className="flex items-center justify-between border-b border-app-border px-4 pt-4 pb-3 sm:px-5 sm:pt-5 shrink-0">
+          <div>
+            <h2 className="text-lg font-semibold text-app-fg">{editRule ? 'Edit rule' : 'Add rule'}</h2>
+            <p className="text-xs text-app-fg-muted mt-0.5">Pull matching orders into follow-up.</p>
+          </div>
+          <button type="button" onClick={() => { setModalOpen(false); setEditRule(null); }} className="rounded-md p-1 text-app-fg-muted hover:text-app-fg hover:bg-app-hover">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="space-y-4 px-4 py-4 sm:px-5 overflow-y-auto">
+          <TextInput label="Rule name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Confirmed > 7 days" />
+
+          <div>
+            <label className="block text-xs font-medium text-app-fg-muted mb-1.5">Source status</label>
+            <div className="flex flex-wrap gap-1.5">
+              {STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setSourceStatus(opt.value)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                    sourceStatus === opt.value
+                      ? 'bg-brand-600 text-white border-brand-600'
+                      : 'border-app-border text-app-fg-muted hover:bg-app-hover hover:text-app-fg'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Older than</label>
+              <FormSelect id="fu-age" value={String(ageThresholdDays)} onChange={(e) => setAgeThresholdDays(parseInt(e.target.value, 10))} options={AGE_OPTIONS} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Max age (optional)</label>
+              <FormSelect id="fu-max-age" value={maxAgeDays ? String(maxAgeDays) : ''} onChange={(e) => setMaxAgeDays(e.target.value ? parseInt(e.target.value, 10) : null)} options={AGE_OPTIONS} placeholder="No limit" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
+            <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={branchOptions} placeholder="All branches" searchPlaceholder="Search..." />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-app-fg-muted mb-1">Push to</label>
+            <FormSelect id="fu-target-type" value={targetType} onChange={(e) => setTargetType(e.target.value as 'all' | 'branch' | 'group')} options={[
+              { value: 'all', label: 'All branches (round-robin)' },
+              { value: 'branch', label: 'Specific branch' },
+              { value: 'group', label: 'Follow-up group' },
+            ]} />
+          </div>
+
+          {targetType === 'branch' && (
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Target branch</label>
+              <SearchableSelect value={targetBranchId ?? ''} onChange={(v) => setTargetBranchId(v || null)} options={branchOptions} placeholder="Select branch" searchPlaceholder="Search..." />
+            </div>
+          )}
+          {targetType === 'group' && (
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Target group</label>
+              <SearchableSelect value={targetGroupId ?? ''} onChange={(v) => setTargetGroupId(v || null)} options={groupOptions} placeholder="Select group" searchPlaceholder="Search..." />
+            </div>
+          )}
+
+          <label className="flex items-center gap-2 text-sm text-app-fg">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
+            Enabled
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-app-border px-4 py-3 sm:px-5 shrink-0">
+          <Button size="sm" variant="secondary" onClick={() => { setModalOpen(false); setEditRule(null); }}>Cancel</Button>
+          <Button
+            size="sm" onClick={handleSave}
+            disabled={!name.trim() || (targetType === 'branch' && !targetBranchId) || (targetType === 'group' && !targetGroupId) || saveFetcher.state === 'submitting'}
+            loading={saveFetcher.state !== 'idle'} loadingText="Saving..."
+          >
+            {editRule ? 'Update' : 'Create'}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* ── Create Group Modal ─────────────────────────────────── */}
+      <GroupFormModal
+        open={createGroupOpen}
+        onClose={() => setCreateGroupOpen(false)}
+        closers={closers}
+        fetcher={createGroupFetcher}
+        intent="createFollowUpGroup"
+        title="Create follow-up group"
+      />
+
+      {/* ── Delete Rule Confirmation Modal ─────────────────────── */}
+      {deleteRuleTarget && (
+        <Modal open onClose={() => setDeleteRuleTarget(null)}>
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">Delete rule</h3>
+              <p className="text-sm text-app-fg-muted mt-1">
+                Are you sure you want to delete <strong className="text-app-fg">{deleteRuleTarget.name}</strong>?
+              </p>
+              <p className="text-xs text-app-fg-muted mt-2">
+                Previously pulled orders will not be affected — they stay in their current state.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setDeleteRuleTarget(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={confirmDelete}
+                disabled={deleteFetcher.state !== 'idle'}
+                loading={deleteFetcher.state !== 'idle'}
+                loadingText="Deleting..."
+              >
+                Delete rule
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── View Rule Detail Modal ──────────────────────────── */}
+      {viewRule && (
+        <Modal open onClose={() => setViewRule(null)} maxWidth="max-w-md">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-app-fg">{viewRule.name}</h3>
+              <StatusBadge status={viewRule.enabled ? 'ACTIVE' : 'INACTIVE'} />
+            </div>
+            <div className="divide-y divide-app-border">
+              <ViewRow label="Source Status" value={viewRule.sourceStatus === 'CART_ABANDONMENT' ? 'Cart Abandonment' : (STATUS_LABEL[viewRule.sourceStatus] ?? viewRule.sourceStatus)} />
+              <ViewRow label="Age Threshold" value={`${viewRule.ageThresholdDays} day${viewRule.ageThresholdDays !== 1 ? 's' : ''}`} />
+              {viewRule.maxAgeDays != null && (
+                <ViewRow label="Max Age" value={`${viewRule.maxAgeDays} day${viewRule.maxAgeDays !== 1 ? 's' : ''}`} />
+              )}
+              <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
+              <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
+              <ViewRow label="Priority" value={String(viewRule.priority)} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setViewRule(null)}>Close</Button>
+              <Button size="sm" variant="primary" onClick={() => { setViewRule(null); openEdit(viewRule); }}>Edit</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Sync preview confirmation modal */}
+      {syncPreview && (
+        <Modal open onClose={() => setSyncPreview(null)} maxWidth="max-w-md" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[80dvh]">
+          <div className="px-4 pt-4 pb-3 border-b border-app-border shrink-0">
+            <h3 className="text-base font-semibold text-app-fg">Sync Preview</h3>
+            <p className="text-xs text-app-fg-muted mt-0.5">
+              {syncPreview.reduce((s, r) => s + r.eligible, 0)} eligible order{syncPreview.reduce((s, r) => s + r.eligible, 0) !== 1 ? 's' : ''} found across {syncPreview.length} rule{syncPreview.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-app-border">
+            {syncPreview.length === 0 ? (
+              <p className="px-4 py-6 text-center text-sm text-app-fg-muted">No enabled rules configured.</p>
+            ) : (
+              syncPreview.map((r) => (
+                <div key={r.ruleId} className="px-4 py-3 flex items-center justify-between gap-3">
+                  <span className="text-sm text-app-fg truncate min-w-0">{r.ruleName}</span>
+                  <span className={`text-sm font-bold tabular-nums shrink-0 ${r.eligible > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>
+                    {r.eligible}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="border-t border-app-border p-3 shrink-0 flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setSyncPreview(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={isSyncing}
+              loading={isSyncing}
+              loadingText="Syncing..."
+              onClick={handleSyncConfirm}
+            >
+              Sync Now ({syncPreview.reduce((s, r) => s + r.eligible, 0)})
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Sync breakdown modal */}
+      {breakdownLog && (
+        <Modal open onClose={() => setBreakdownLog(null)} maxWidth="max-w-md" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[80dvh]">
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-app-border shrink-0">
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">Sync Breakdown</h3>
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                {breakdownLog.startedAt
+                  ? new Date(breakdownLog.startedAt).toLocaleString('en-NG', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                  : '—'}
+                {' · '}{breakdownLog.triggeredBy === 'cron' ? 'Auto sync' : 'Manual sync'}
+                {' · '}<span className="font-semibold">{breakdownLog.totalPulled} orders pulled</span>
+              </p>
+            </div>
+            <button type="button" onClick={() => setBreakdownLog(null)} className="text-app-fg-muted hover:text-app-fg p-1 shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-app-border">
+            {(breakdownLog.ruleResults ?? []).map((r) => (
+              <div key={r.ruleId} className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-app-fg truncate">{r.ruleName}</p>
+                  <p className="text-xs text-app-fg-muted mt-0.5">
+                    Target: {ruleTargetMap.get(r.ruleId) ?? 'All branches'}
+                  </p>
+                </div>
+                <span className={`text-sm font-bold tabular-nums shrink-0 ${r.pulled > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>
+                  {r.pulled}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-app-border p-3 shrink-0">
+            {breakdownLog.totalPulled > 0 && breakdownLog.startedAt && (
+              <Link
+                to={`/admin/cs/follow-up?view=orders&startDate=${new Date(breakdownLog.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(breakdownLog.startedAt).toISOString().slice(0, 10)}&backTo=/admin/settings/follow-up-config`}
+                className="btn-primary btn-sm w-full inline-flex items-center justify-center gap-1.5"
+                onClick={() => setBreakdownLog(null)}
+              >
+                View pulled orders
+              </Link>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Unified Groups & Branches Tab ─────────────────────────────────
+
+type UnifiedRow =
+  | { kind: 'branch'; id: string; name: string; closerCount: number }
+  | { kind: 'group'; id: string; name: string; memberCount: number; members: Array<{ userId: string; userName: string }>; createdByName: string | null; createdAt: string };
+
+function GroupsAndBranchesTab({
+  branches,
+  followUpGroups,
+  closers,
+  createGroupFetcher,
+  onCreateGroup,
+}: {
+  branches: Branch[];
+  followUpGroups: FollowUpGroupItem[];
+  closers: CloserWithBranches[];
+  createGroupFetcher: ReturnType<typeof useFetcher>;
+  onCreateGroup: () => void;
+}) {
+  const [peekGroup, setPeekGroup] = useState<FollowUpGroupItem | null>(null);
+  const [editGroup, setEditGroup] = useState<FollowUpGroupItem | null>(null);
+  const [deleteGroup, setDeleteGroup] = useState<FollowUpGroupItem | null>(null);
+
+  const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(editFetcher.data, { successMessage: 'Group updated' });
+  useCloseOnFetcherSuccess(editFetcher, () => setEditGroup(null));
+
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(deleteFetcher.data, { successMessage: 'Group deleted' });
+  useCloseOnFetcherSuccess(deleteFetcher, () => setDeleteGroup(null));
+
+  // Compute closer count per branch from the closers array
+  const branchCloserCounts = new Map<string, number>();
+  for (const c of closers) {
+    for (const b of c.branches) {
+      branchCloserCounts.set(b.branchId, (branchCloserCounts.get(b.branchId) ?? 0) + 1);
+    }
+  }
+
+  const rows: UnifiedRow[] = [
+    ...branches.map((b): UnifiedRow => ({ kind: 'branch', id: b.id, name: b.name, closerCount: branchCloserCounts.get(b.id) ?? 0 })),
+    ...followUpGroups.map((g): UnifiedRow => ({ kind: 'group', ...g })),
+  ];
+
+  return (
+    <>
+      <p className="text-sm text-app-fg-muted mb-3">
+        {branches.length} branch{branches.length !== 1 ? 'es' : ''} · {followUpGroups.length} group{followUpGroups.length !== 1 ? 's' : ''}
+      </p>
+
+      {rows.length === 0 ? (
+        <EmptyState title="No branches or groups" description="Add branches or create a follow-up group to get started." />
+      ) : (
+        <CompactTable<UnifiedRow>
+          rowKey={(r) => `${r.kind}-${r.id}`}
+          columns={[
+            {
+              key: 'name',
+              header: 'Name',
+              render: (r) => {
+                if (r.kind === 'group') {
+                  return (
+                    <button type="button" onClick={() => setPeekGroup(r as FollowUpGroupItem)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
+                      {r.name}
+                    </button>
+                  );
+                }
+                return <span className="text-sm font-medium text-app-fg">{r.name}</span>;
+              },
+            },
+            {
+              key: 'type',
+              header: 'Type',
+              render: (r) => (
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium ${
+                  r.kind === 'branch'
+                    ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                    : 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                }`}>
+                  {r.kind === 'branch' ? 'Branch' : 'Group'}
+                </span>
+              ),
+            },
+            {
+              key: 'members',
+              header: 'Members',
+              align: 'right',
+              render: (r) => {
+                const count = r.kind === 'group' ? (r as UnifiedRow & { kind: 'group' }).memberCount : (r as UnifiedRow & { kind: 'branch' }).closerCount;
+                return <span className="text-sm tabular-nums text-app-fg">{count}</span>;
+              },
+            },
+            {
+              key: 'createdBy',
+              header: 'Created by',
+              render: (r) => {
+                if (r.kind === 'group') {
+                  return <span className="text-xs text-app-fg-muted">{(r as UnifiedRow & { kind: 'group' }).createdByName ?? '—'}</span>;
+                }
+                return <span className="text-xs text-app-fg-muted">—</span>;
+              },
+            },
+            {
+              key: 'created',
+              header: 'Created',
+              render: (r) => {
+                if (r.kind === 'group') {
+                  return (
+                    <span className="text-xs text-app-fg-muted">
+                      {new Date((r as UnifiedRow & { kind: 'group' }).createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </span>
+                  );
+                }
+                return <span className="text-xs text-app-fg-muted">—</span>;
+              },
+            },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              render: (r) => {
+                if (r.kind === 'branch') {
+                  return (
+                    <TableActionButton to={`/admin/cs/follow-up?view=orders&branchId=${r.id}`} variant="primary">
+                      View
+                    </TableActionButton>
+                  );
+                }
+                const g = r as FollowUpGroupItem;
+                return (
+                  <div className="flex gap-1 justify-end">
+                    <TableActionButton onClick={() => setPeekGroup(g)}>View</TableActionButton>
+                    <TableActionButton onClick={() => setEditGroup(g)}>Edit</TableActionButton>
+                  </div>
+                );
+              },
+            },
+          ]}
+          rows={rows}
+          renderMobileCard={(r) => {
+            if (r.kind === 'branch') {
+              return (
+                <Link
+                  to={`/admin/cs/follow-up?view=orders&branchId=${r.id}`}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-app-fg truncate">{r.name}</span>
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">Branch</span>
+                  </div>
+                </Link>
+              );
+            }
+            const g = r as FollowUpGroupItem;
+            return (
+              <button
+                type="button"
+                onClick={() => setPeekGroup(g)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg truncate">{g.name}</span>
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">Group</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-app-fg-muted">
+                  <span>{g.memberCount} members</span>
+                  {g.createdByName && <span>by {g.createdByName}</span>}
+                </div>
+              </button>
+            );
+          }}
+        />
+      )}
+
+      {/* Edit group modal */}
+      {editGroup && (
+        <GroupFormModal
+          open={!!editGroup}
+          onClose={() => setEditGroup(null)}
+          closers={closers}
+          fetcher={editFetcher}
+          intent="updateFollowUpGroup"
+          title={`Edit ${editGroup.name}`}
+          group={editGroup}
+        />
+      )}
+
+      {/* Delete group confirm */}
+      {deleteGroup && (
+        <Modal open onClose={() => setDeleteGroup(null)} maxWidth="max-w-sm" contentClassName="p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-app-fg">Delete group</h3>
+          <p className="text-sm text-app-fg-muted">
+            Are you sure you want to delete <strong>{deleteGroup.name}</strong>? This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setDeleteGroup(null)}>Cancel</Button>
+            <Button
+              variant="danger"
+              loading={deleteFetcher.state === 'submitting'}
+              loadingText="Deleting…"
+              onClick={() => {
+                deleteFetcher.submit(
+                  { intent: 'deleteFollowUpGroup', groupId: deleteGroup.id },
+                  { method: 'post' },
+                );
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Peek members modal */}
+      {peekGroup && (
+        <Modal open onClose={() => setPeekGroup(null)} maxWidth="max-w-sm" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[80dvh]">
+          <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-app-border shrink-0">
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">{peekGroup.name}</h3>
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                {peekGroup.memberCount} {peekGroup.memberCount === 1 ? 'member' : 'members'}
+                {peekGroup.createdByName ? ` · Created by ${peekGroup.createdByName}` : ''}
+              </p>
+            </div>
+            <button type="button" onClick={() => setPeekGroup(null)} className="text-app-fg-muted hover:text-app-fg p-1">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-app-border">
+            {peekGroup.members.length === 0 ? (
+              <p className="px-4 py-6 text-center text-sm text-app-fg-muted">No members in this group.</p>
+            ) : (
+              peekGroup.members.map((m) => (
+                <div key={m.userId} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-semibold shrink-0">
+                    {m.userName.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-sm text-app-fg">{m.userName}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="border-t border-app-border p-3 shrink-0 flex gap-2">
+            <button
+              type="button"
+              onClick={() => { setPeekGroup(null); setEditGroup(peekGroup); }}
+              className="btn-secondary btn-sm flex-1 justify-center"
+            >
+              Edit group
+            </button>
+            <button type="button" onClick={() => setPeekGroup(null)} className="btn-secondary btn-sm flex-1 justify-center">
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function ViewRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 gap-4">
+      <span className="text-sm text-app-fg-muted">{label}</span>
+      <span className="text-sm font-medium text-app-fg text-right">{value}</span>
+    </div>
+  );
+}

@@ -51,13 +51,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {
-  const res = await apiRequest<{ result?: { data?: Branch[] } }>(
-    '/trpc/branches.list',
-    { method: 'GET', cookie },
-  );
+  const [res, groupsRes] = await Promise.all([
+    apiRequest<{ result?: { data?: Branch[] } }>('/trpc/branches.list', { method: 'GET', cookie }),
+    apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>('/trpc/branches.listGroups', { method: 'GET', cookie }),
+  ]);
 
   const branches: Branch[] = res.ok ? (res.data?.result?.data ?? []) : [];
-  return { branches };
+  const branchGroups = groupsRes.ok ? (groupsRes.data?.result?.data ?? []) : [];
+  return { branches, branchGroups };
   })();
 
   return defer({ pageData });
@@ -77,10 +78,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const code = form.get('code')?.toString()?.trim().toUpperCase() ?? '';
     if (!name || !code) return json({ error: 'Name and code are required' }, { status: 400 });
 
+    const groupId = form.get('groupId')?.toString()?.trim() ?? '';
+    if (!groupId) return json({ error: 'Company group is required' }, { status: 400 });
     const res = await apiRequest('/trpc/branches.create', {
       method: 'POST',
       cookie,
-      body: { name, code },
+      body: { name, code, groupId },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to create branch') }, { status: safeStatus(res.status) });
@@ -116,7 +119,7 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-function BranchManagementContent({ branches }: { branches: Branch[] }) {
+function BranchManagementContent({ branches, branchGroups }: { branches: Branch[]; branchGroups?: Array<{ id: string; name: string }> }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const branchSurface = useFetcherActionSurface(fetcher);
   const [createOpen, setCreateOpen] = useState(false);
@@ -299,6 +302,24 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
               className="uppercase"
               placeholder="e.g. LGS"
             />
+            {branchGroups && branchGroups.length > 0 && (
+              <div>
+                <label htmlFor="branch-create-group" className="block text-sm font-medium text-app-fg mb-1">
+                  Company group
+                </label>
+                <select
+                  id="branch-create-group"
+                  name="groupId"
+                  required
+                  className="input w-full"
+                  defaultValue={branchGroups[0]?.id}
+                >
+                  {branchGroups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <ModalFetcherInlineError message={branchSurface.errorMatchingIntent('create')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setCreateOpen(false)} disabled={isSubmitting}>
@@ -403,7 +424,7 @@ export default function BranchManagementRoute() {
       loaderShell={{}}
       deferredKey="pageData"
     >
-        {(data) => <BranchManagementContent branches={data.branches} />}
+        {(data) => <BranchManagementContent branches={data.branches} branchGroups={data.branchGroups} />}
       </CachedAwait>
   );
 }

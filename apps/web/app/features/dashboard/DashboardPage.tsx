@@ -15,6 +15,7 @@ import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel } from '~/lib/rbac';
 import {
+  DashboardFollowUpSection,
   DashboardHRSection,
   DashboardMetricsSection,
   DashboardProfitSection,
@@ -319,39 +320,34 @@ function CSDashboard({
       <>
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
           {(metrics) => (
+            <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders</h2>
             <OverviewStatStrip
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
                 { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
+                { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
+                { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+                { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
+                { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
                 {
-                  label: 'Pending Queue',
-                  value: pendingQueue.toString(),
-                  valueClassName:
-                    pendingQueue > 20 ? 'text-danger-600 dark:text-danger-400' : pendingQueue > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-success-600 dark:text-success-400',
-                },
-                { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
-                { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
-                {
-                  label: 'Delivered',
-                  value: metrics.deliveredOrders.toString(),
-                  valueClassName:
-                    metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-                },
-                {
-                  label: 'Confirmation Rate',
+                  label: 'CR',
                   value: `${metrics.confirmationRate.toFixed(1)}%`,
                   valueClassName: confirmationRateColorClass(metrics.confirmationRate),
                 },
                 {
-                  label: 'Delivery Rate',
+                  label: 'DR',
                   value: `${metrics.deliveryRate.toFixed(1)}%`,
                   valueClassName: deliveryRateColorClass(metrics.deliveryRate),
                 },
               ]}
             />
+            </div>
           )}
         </DashboardMetricsSection>
+
+        <FollowUpDashboardStrip showUnassigned={false} />
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
           {(metrics) => (
@@ -380,35 +376,28 @@ function CSDashboard({
     <>
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={6} />}>
         {(metrics) => (
+          <div>
+          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders</h2>
           <OverviewStatStrip
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
-              {
-                label: 'Pending Queue',
-                value: pendingQueue.toString(),
-                valueClassName:
-                  pendingQueue > 20 ? 'text-danger-600 dark:text-danger-400' : pendingQueue > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-success-600 dark:text-success-400',
-              },
-              { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
+              { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
+              { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400' },
               // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live
               // `counts['CONFIRMED']` only counts orders sitting in CONFIRMED right
               // now — almost always 0 once they advance to AGENT_ASSIGNED → DELIVERED.
-              { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+              { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
+              { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
               {
-                label: 'Delivered',
-                value: metrics.deliveredOrders.toString(),
-                valueClassName:
-                  metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              },
-              {
-                label: 'Delivery Rate',
+                label: 'DR',
                 value: `${metrics.deliveryRate.toFixed(1)}%`,
                 valueClassName: deliveryRateColorClass(metrics.deliveryRate),
               },
             ]}
           />
+          </div>
         )}
       </DashboardMetricsSection>
 
@@ -417,6 +406,8 @@ function CSDashboard({
           Live-bucket `Confirmed` is current CONFIRMED count; `Delivered` / rate use
           the selected date range from `marketing.metrics`. Per-status counts remain
           on `/admin/sales/orders` via the status filter pills. */}
+
+      <FollowUpDashboardStrip />
 
       {showsTeamManagementCard && (
         <div className="card">
@@ -504,7 +495,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           to: '/admin/marketing/orders?status=CONFIRMED',
         },
         {
-          label: 'Open carts',
+          label: 'Cart Abandonment',
           value: abandonedCartCount.toString(),
           valueClassName: abandonedCartCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
           title: 'Captured carts not yet recovered (browsing + dropped off)',
@@ -1058,4 +1049,83 @@ function StatIcon({ type }: { type: string }) {
 
 function ActionIcon({ type }: { type: string }) {
   return <StatIcon type={type} />;
+}
+
+// ── Follow-Up stat strip ────────────────────────────────────
+function FollowUpDashboardStrip({ showUnassigned = true }: { showUnassigned?: boolean }) {
+  return (
+    <DashboardFollowUpSection fallback={<OverviewStatStripSkeleton count={showUnassigned ? 6 : 5} />}>
+      {(sc) => {
+        const unassigned = sc['UNPROCESSED'] ?? 0;
+        const assigned = sc['CS_ASSIGNED'] ?? 0;
+        const engaged = sc['CS_ENGAGED'] ?? 0;
+        const confirmed =
+          (sc['CONFIRMED'] ?? 0) +
+          (sc['AGENT_ASSIGNED'] ?? 0) +
+          (sc['DISPATCHED'] ?? 0) +
+          (sc['IN_TRANSIT'] ?? 0);
+        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Follow-Up Orders
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="!py-2.5"
+              items={[
+                {
+                  label: 'Total',
+                  value: total,
+                  valueClassName: 'text-app-fg',
+                  to: '/admin/cs/follow-up',
+                },
+                ...(showUnassigned ? [{
+                  label: 'Unassigned',
+                  value: unassigned,
+                  valueClassName: 'text-warning-600 dark:text-warning-400',
+                  to: '/admin/cs/follow-up',
+                }] : []),
+                {
+                  label: 'Assigned',
+                  value: assigned,
+                  valueClassName: 'text-info-600 dark:text-info-400',
+                  to: '/admin/cs/follow-up',
+                },
+                {
+                  label: 'Engaged',
+                  value: engaged,
+                  valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                  to: '/admin/cs/follow-up',
+                },
+                {
+                  label: 'Confirmed',
+                  value: confirmed,
+                  valueClassName: 'text-brand-600 dark:text-brand-400',
+                  to: '/admin/cs/follow-up',
+                },
+                {
+                  label: 'Delivered',
+                  value: delivered,
+                  valueClassName: 'text-success-600 dark:text-success-400',
+                  to: '/admin/cs/follow-up',
+                },
+                {
+                  label: 'CR',
+                  value: `${total > 0 ? ((confirmed + delivered) / total * 100).toFixed(1) : '0.0'}%`,
+                  valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                },
+                {
+                  label: 'DR',
+                  value: `${total > 0 ? (delivered / total * 100).toFixed(1) : '0.0'}%`,
+                  valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
+                },
+              ]}
+            />
+          </div>
+        );
+      }}
+    </DashboardFollowUpSection>
+  );
 }

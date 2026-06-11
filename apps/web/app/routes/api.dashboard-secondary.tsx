@@ -46,6 +46,8 @@ export type DashboardSecondaryApiPayload = {
   totalProducts: number;
   payoutSummary: DashboardData['payoutSummary'];
   abandonedCartCount: number;
+  /** Follow-up order per-status counts for dashboard stat strip. */
+  followUpCounts?: Record<string, number>;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -92,6 +94,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const needsPayout = isAdminLevel({ role }) || role === 'HR_MANAGER';
   const needsCartAbandoned =
     isAdminLevel({ role }) || role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER' || isSupervisor;
+  const needsFollowUp =
+    isAdminLevel({ role }) || role === 'HEAD_OF_CS' || role === 'CS_CLOSER';
 
   try {
     const metricsP = needsMetrics
@@ -120,8 +124,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const cartAbandonedP = needsCartAbandoned
       ? apiRequest<unknown>(`/trpc/cart.countAbandoned?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
+    const followUpP = needsFollowUp
+      ? apiRequest<unknown>('/trpc/orders.followUpDashboardCounts', deferredOpt)
+      : Promise.resolve(null);
 
-    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount] = await Promise.all([
+    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount, followUpCounts] = await Promise.all([
       metricsP.then((r) => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics),
       personalMetricsP,
       profitP.then((r) => extractTrpc(r, defaultProfit)).catch(() => defaultProfit),
@@ -148,6 +155,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return d?.count ?? 0;
         })
         .catch(() => 0),
+      followUpP
+        ?.then((r) => {
+          if (!r) return undefined;
+          const d = r.ok ? (r.data as { result?: { data?: Record<string, number> } })?.result?.data : null;
+          return d ?? undefined;
+        })
+        .catch(() => undefined) ?? Promise.resolve(undefined),
     ]);
 
     return secondaryCacheJson({
@@ -159,6 +173,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalProducts,
       payoutSummary,
       abandonedCartCount,
+      followUpCounts,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Dashboard secondary load failed';

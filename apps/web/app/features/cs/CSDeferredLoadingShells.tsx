@@ -32,13 +32,19 @@ import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 
 const CS_ORDER_STAT_KEYS = STATUS_OPTIONS.filter((s) => s !== 'ALL');
 
-export function csOrdersStatPulseStripItems(): { label: string; value: ReactNode }[] {
+export function csOrdersStatPulseStripItems(opts?: { hideOfflineAndCartStats?: boolean }): { label: string; value: ReactNode }[] {
+  const hide = opts?.hideOfflineAndCartStats ?? false;
   return [
     { label: 'Total', value: <StatValuePulse className="min-w-[2.25rem]" /> },
+    ...(hide ? [] : [{ label: 'Offline', value: <StatValuePulse className="min-w-[2rem]" /> }]),
     ...CS_ORDER_STAT_KEYS.map((status) => ({
       label: formatStatus(status),
       value: <StatValuePulse className="min-w-[2rem]" />,
     })),
+    { label: 'CR', value: <StatValuePulse className="min-w-[2rem]" /> },
+    { label: 'DR', value: <StatValuePulse className="min-w-[2rem]" /> },
+    { label: 'Deleted', value: <StatValuePulse className="min-w-[2rem]" /> },
+    ...(hide ? [] : [{ label: 'Cart Abandonment', value: <StatValuePulse className="min-w-[2rem]" /> }]),
   ];
 }
 
@@ -1009,6 +1015,137 @@ const MSG_TEMPLATE_SHELL_COLS: CompactTableColumn<{ id: string }>[] = [
     ),
   },
 ];
+
+// ── Follow-Up Loading Shells ──────────────────────────────────────
+
+/** Follow-up branches summary — stat strip + branch table pulse. */
+export function FollowUpBatchesLoadingShell({
+  startDate = '',
+  endDate = '',
+  periodAllTime = false,
+}: {
+  startDate?: string;
+  endDate?: string;
+  periodAllTime?: boolean;
+}) {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Follow Up"
+        mobileInlineActions
+        description="Follow-up orders by branch."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Follow-up tools"
+            desktop={
+              <>
+                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
+                <PageRefreshButton />
+              </>
+            }
+          />
+        }
+      />
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          { label: 'Branches', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Revenue', value: <StatValuePulse className="min-w-[3rem]" /> },
+        ]}
+      />
+      <CompactTable<{ id: string }>
+        rows={shellPulsePlaceholderRows('fu_branch', 4)}
+        rowKey={(r) => r.id}
+        columns={[
+          { key: 'branch', header: 'Branch', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+          { key: 'total', header: 'Total', align: 'right', render: () => <TableCellTextPulse className="w-[3rem]" /> },
+          { key: 'unprocessed', header: 'Unprocessed', align: 'right', render: () => <TableCellTextPulse className="w-[3rem]" /> },
+          { key: 'confirmed', header: 'Confirmed', align: 'right', render: () => <TableCellTextPulse className="w-[4rem]" /> },
+          { key: 'delivered', header: 'Delivered', align: 'right', render: () => <TableCellTextPulse className="w-[4rem]" /> },
+          { key: 'revenue', header: 'Revenue', align: 'right', render: () => <TableCellTextPulse className="w-[5rem]" /> },
+          { key: 'actions', header: '', align: 'right', render: () => <CompactTableActionButton disabled>View</CompactTableActionButton> },
+        ]}
+        renderMobileCard={() => (
+          <div className="space-y-1.5" aria-hidden>
+            <div className="flex items-center justify-between gap-2">
+              <TableCellTextPulse className="w-[8rem]" />
+              <TableCellTextPulse className="w-[4rem]" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <TableCellTextPulse className="w-[6rem]" />
+              <TableCellTextPulse className="w-[5rem]" />
+            </div>
+          </div>
+        )}
+      />
+    </div>
+  );
+}
+
+/** Follow-up orders list — stat strip + order table pulse. */
+export function FollowUpOrdersLoadingShell({
+  pageTitle = 'Follow-Up Orders',
+  pageDescription = 'Orders pulled by follow-up rules for re-engagement.',
+  backTo,
+}: {
+  pageTitle?: string;
+  pageDescription?: string;
+  backTo?: string;
+}) {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title={pageTitle}
+        description={pageDescription}
+        backTo={backTo}
+        mobileInlineActions
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Follow-up tools"
+            desktop={<PageRefreshButton />}
+          />
+        }
+      />
+      {/* Status pills skeleton */}
+      <div className="flex flex-wrap gap-1.5">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="h-7 rounded-full bg-app-hover animate-pulse" style={{ width: `${60 + i * 10}px` }} />
+        ))}
+      </div>
+      <CompactTable<{ id: string }>
+        rows={shellPulsePlaceholderRows('fu_orders', 8)}
+        rowKey={(r) => r.id}
+        columns={[
+          { key: 'orderId', header: 'Order', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+          { key: 'customer', header: 'Customer', render: () => <TableCellTextPulse className="w-[9rem]" /> },
+          { key: 'closer', header: 'Closer', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+          { key: 'product', header: 'Product', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+          { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5rem]" /> },
+          { key: 'amount', header: 'Amount', align: 'right', render: () => <span className="inline-flex w-full justify-end"><TableCellTextPulse className="w-[4rem]" /></span> },
+          { key: 'created', header: 'Created', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+          { key: 'actions', header: '', align: 'right', tight: true, mobileShowLabel: false, render: () => <CompactTableActionButton disabled>View</CompactTableActionButton> },
+        ]}
+        renderMobileCard={() => (
+          <div className="space-y-1.5" aria-hidden>
+            <div className="flex items-center justify-between gap-2">
+              <TableCellTextPulse className="w-[9rem]" />
+              <TableCellTextPulse className="w-[5rem]" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <TableCellTextPulse className="w-[5.5rem]" />
+              <TableCellTextPulse className="w-[6rem]" />
+            </div>
+          </div>
+        )}
+      />
+    </div>
+  );
+}
 
 /** Message templates — header + channel tabs + table pulse. */
 export function CSMessageTemplatesLoadingShell() {

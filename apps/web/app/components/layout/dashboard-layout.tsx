@@ -69,7 +69,9 @@ interface DashboardLayoutProps {
   /** Route action URL for notification mark-read (e.g. /admin or /hr). */
   notificationsActionUrl?: string;
   /** Available branches for the branch switcher. Only shown when length > 1. */
-  branches?: Array<{ id: string; name: string; code: string }>;
+  branches?: Array<{ id: string; name: string; code: string; groupId?: string | null }>;
+  /** Branch groups for SuperAdmin header group switcher. */
+  branchGroups?: Array<{ id: string; name: string }>;
   /**
    * False while `/admin` layout is still streaming `branches.list` — branch switcher shows a
    * skeleton and org-wide branch guard does not attach submit interception yet.
@@ -763,6 +765,7 @@ function DashboardLayoutInner({
   notificationsPromise,
   notificationsActionUrl: _notificationsActionUrl = '/admin',
   branches,
+  branchGroups,
   branchesHydrationReady = true,
 }: DashboardLayoutProps) {
   const { onboardingGate } = useLoginModalGate();
@@ -1188,8 +1191,10 @@ function DashboardLayoutInner({
         onPruneServerKnown={pruneServerKnown}
         onClearRealtimeNotifications={clearRealtimeNotifications}
         branches={branches}
+        branchGroups={branchGroups}
         branchesHydrationReady={branchesHydrationReady}
         currentBranchId={user?.currentBranchId}
+        selectedBranchIds={(user as { selectedBranchIds?: string[] | null })?.selectedBranchIds ?? undefined}
         mirroredBy={user?.mirroredBy ?? null}
       />
 

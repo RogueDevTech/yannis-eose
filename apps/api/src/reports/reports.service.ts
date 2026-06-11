@@ -182,6 +182,9 @@ export class ReportsService {
       phone: o.customerPhoneDisplay ?? '',
       status: o.status,
       amount: o.totalAmount ?? '',
+      product: o.productLines || o.primaryProductName || '—',
+      quantity: o.itemCount ?? 0,
+      address: o.deliveryAddress ?? '—',
       created: new Date(o.createdAt).toLocaleDateString(),
     }));
     const filteredRows = rows.filter((row) => {
@@ -195,6 +198,9 @@ export class ReportsService {
       { key: 'phone', label: 'Phone' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
+      { key: 'product', label: 'Product' },
+      { key: 'quantity', label: 'Quantity' },
+      { key: 'address', label: 'Delivery Address' },
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };

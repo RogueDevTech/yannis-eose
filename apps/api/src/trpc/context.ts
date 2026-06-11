@@ -24,16 +24,32 @@ export interface TrpcContext {
    * scope to IN(effectiveBranchIds) instead of showing all data.
    */
   effectiveBranchIds: string[] | null;
+  /**
+   * The active branch group ("company") for this request, resolved from
+   * the user's currentBranchId → branch.group_id lookup.
+   * NULL = global view (SuperAdmin with no branch selected).
+   * Used to scope products, system settings, commission plans, etc.
+   * CEO directive 2026-06-10.
+   */
+  activeGroupId: string | null;
 }
 
 export function createContext(req: Request, res: Response): TrpcContext {
   const user = (req as Request & { user?: SessionUser }).user ?? null;
   const sessionToken = (req as Request & { sessionToken?: string }).sessionToken ?? null;
   const currentBranchId = user?.currentBranchId ?? null;
-  // Global users (scopeGlobal) see everything — no branch guard needed.
+  // Multi-branch selection: when a global user picks a subset of branches
+  // via the header checkbox switcher, scope queries to that subset instead
+  // of showing everything. CEO directive 2026-06-10.
+  const selectedSubset = user?.selectedBranchIds?.length ? user.selectedBranchIds : null;
+  // Global users (scopeGlobal) see everything — no branch guard needed,
+  // UNLESS they have an active multi-branch selection.
   // Non-global users who selected "All branches" (currentBranchId=null) must
   // still be scoped to their assigned branches.
   const effectiveBranchIds =
-    user?.scopeGlobal ? null : (user?.branchIds?.length ? user.branchIds : null);
-  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds };
+    selectedSubset
+      ? selectedSubset
+      : user?.scopeGlobal ? null : (user?.branchIds?.length ? user.branchIds : null);
+  const activeGroupId = user?.activeGroupId ?? null;
+  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };
 }

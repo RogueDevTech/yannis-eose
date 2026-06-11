@@ -35,7 +35,7 @@ export class HrService {
   // Commission Plans
   // ============================================
 
-  async createCommissionPlan(input: CreateCommissionPlanInput, actor: SessionUser) {
+  async createCommissionPlan(input: CreateCommissionPlanInput, actor: SessionUser, groupId?: string | null) {
     // Dept-scoped: each Head can only create plans for the roles in their own department.
     // HR Manager and admins can create plans for any role.
     const manageable = getManageableRolesForViewer(actor);
@@ -54,6 +54,7 @@ export class HrService {
         .insert(schema.commissionPlans)
         .values({
           role: input.role,
+          groupId: groupId ?? null,
           planName: input.planName,
           rules: input.rules,
           effectiveFrom: new Date(input.effectiveFrom),
@@ -120,8 +121,13 @@ export class HrService {
     });
   }
 
-  async listCommissionPlans(input: ListCommissionPlansInput, viewer: SessionUser) {
+  async listCommissionPlans(input: ListCommissionPlansInput, viewer: SessionUser, groupId?: string | null) {
     const conditions = [];
+
+    // Group isolation — only show plans from the active branch group.
+    if (groupId) {
+      conditions.push(eq(schema.commissionPlans.groupId, groupId));
+    }
 
     // Auto-scope by viewer: Heads only see plans for their dept; admins/HR see everything.
     const manageable = getManageableRolesForViewer(viewer);
@@ -775,7 +781,7 @@ export class HrService {
   // Settlement Window Config
   // ============================================
 
-  async setSettlementConfig(input: SetSettlementConfigInput, actorId: string) {
+  async setSettlementConfig(input: SetSettlementConfigInput, actorId: string, groupId?: string | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .insert(schema.settlementConfigs)
@@ -783,6 +789,7 @@ export class HrService {
           windowType: input.windowType,
           startDay: input.startDay,
           createdBy: actorId,
+          groupId: groupId ?? null,
         })
         .returning();
 
@@ -794,21 +801,24 @@ export class HrService {
     });
   }
 
-  async getActiveSettlementConfig() {
-    // Return the most recently created settlement config
+  async getActiveSettlementConfig(groupId?: string | null) {
+    const conditions = groupId ? [eq(schema.settlementConfigs.groupId, groupId)] : [];
     const rows = await this.db
       .select()
       .from(schema.settlementConfigs)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.settlementConfigs.createdAt))
       .limit(1);
 
     return rows[0] ?? null;
   }
 
-  async listSettlementConfigs() {
+  async listSettlementConfigs(groupId?: string | null) {
+    const conditions = groupId ? [eq(schema.settlementConfigs.groupId, groupId)] : [];
     return this.db
       .select()
       .from(schema.settlementConfigs)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.settlementConfigs.createdAt));
   }
 

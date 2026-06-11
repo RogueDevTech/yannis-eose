@@ -75,6 +75,92 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     if (!orderRes.ok) {
       if (trpcOrderGetByIdIsNotFound(orderRes.status, orderRes.data)) {
+        // Fallback: check follow_up_orders table — the ID may be a follow-up order
+        const fuRes = await apiRequest<unknown>(
+          `/trpc/orders.followUpOrdersDetail?input=${encodeURIComponent(JSON.stringify({ id: orderId }))}`,
+          deferredOpt,
+        ).catch(() => ({ ok: false as const, status: 500, data: null }));
+        if (fuRes.ok) {
+          const fuData = (fuRes.data as { result?: { data?: Record<string, unknown> } })?.result?.data;
+          if (fuData) {
+            // Map follow-up order to OrderDetail shape for the detail page
+            const fuItems = (fuData.items as Array<Record<string, unknown>> | undefined) ?? [];
+            const fuTimeline = (fuData.timeline as Array<Record<string, unknown>> | undefined) ?? [];
+            const order: OrderDetail = {
+              id: fuData.id as string,
+              orderNumber: fuData.orderNumber != null ? Number(fuData.orderNumber) : null,
+              customerName: fuData.customerName as string,
+              customerPhoneDisplay: (fuData.customerPhone as string) ? `••••${(fuData.customerPhone as string).slice(-4)}` : '••••••••',
+              customerAddress: (fuData.customerAddress as string) ?? null,
+              deliveryAddress: (fuData.deliveryAddress as string) ?? null,
+              deliveryNotes: (fuData.deliveryNotes as string) ?? null,
+              status: fuData.status as string,
+              totalAmount: (fuData.totalAmount as string) ?? null,
+              landedCost: (fuData.landedCost as string) ?? null,
+              deliveryFee: (fuData.deliveryFee as string) ?? null,
+              createdAt: fuData.createdAt as string,
+              confirmedAt: (fuData.confirmedAt as string) ?? null,
+              allocatedAt: (fuData.allocatedAt as string) ?? null,
+              dispatchedAt: (fuData.dispatchedAt as string) ?? null,
+              deliveredAt: (fuData.deliveredAt as string) ?? null,
+              assignedCsId: (fuData.assignedCsId as string) ?? null,
+              assignedCsName: (fuData.assignedCsName as string) ?? null,
+              mediaBuyerId: (fuData.mediaBuyerId as string) ?? null,
+              mediaBuyerName: (fuData.mediaBuyerName as string) ?? null,
+              campaignId: (fuData.campaignId as string) ?? null,
+              campaignName: null,
+              branchId: (fuData.servicingBranchId as string) ?? (fuData.branchId as string) ?? null,
+              paymentMethod: (fuData.paymentMethod as string) ?? null,
+              paymentStatus: (fuData.paymentStatus as string) ?? null,
+              customerEmail: (fuData.customerEmail as string) ?? null,
+              customerGender: (fuData.customerGender as string) ?? null,
+              deliveryState: (fuData.deliveryState as string) ?? null,
+              preferredDeliveryDate: (fuData.preferredDeliveryDate as string) ?? null,
+              // orderSource not in OrderDetail type
+              frozenForFollowUp: false,
+              orderItems: fuItems.map((it) => ({
+                id: it.id as string,
+                productId: it.productId as string,
+                productName: (it.productName as string) ?? null,
+                quantity: it.quantity as number,
+                unitPrice: it.unitPrice as string,
+                offerLabel: (it.offerLabel as string) ?? null,
+              })),
+              // Synthesise a MANUAL_CALL call log if timeline has a call event — gates the Confirm button.
+              callLogs: fuTimeline.some((t) =>
+                ['ORDER_MANUALLY_ASSIGNED', 'MANUAL_CALL'].includes((t.eventType as string) ?? '') ||
+                ((t.description as string) ?? '').toLowerCase().includes('call'),
+              )
+                ? [{ id: 'fu-call', callStatus: 'COMPLETED', durationSeconds: 60, startedAt: fuData.createdAt as string }]
+                : [],
+              // Follow-up lifecycle: UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → DELIVERED
+              // No skipping — must go through engagement before confirming.
+              allowedTransitions: (() => {
+                const s = fuData.status as string;
+                const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'HEAD_OF_CS';
+                if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
+                if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
+                if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
+                if (s === 'CONFIRMED') return elevated ? ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'] : ['DELIVERED', 'DELETED'];
+                if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
+                if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
+                if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
+                if (s === 'DELIVERED') return ['REMITTED'];
+                return ['DELETED'];
+              })(),
+            };
+            const fuPhone = (fuData.customerPhone as string) ?? null;
+            return {
+              order,
+              voipEnabled: false,
+              voipProviderDisplayName: '',
+              latestCall: Promise.resolve(null),
+              itemOffers: [],
+              callablePhone: fuPhone ? { phone: fuPhone, isDialable: true } : null,
+              isFollowUpOrder: true,
+            };
+          }
+        }
         return { notFound: true };
       }
       return {
@@ -165,6 +251,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       voipProviderDisplayName,
       itemOffers: itemOffersValue,
       callablePhone: callablePhoneValue,
+      isFollowUpOrder: false,
     };
   })();
 
@@ -247,6 +334,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return [];
     });
 
+  // Await order detail early so the page renders with data on navigation completion.
+  const orderDetailResolved = await orderDetailPromise;
+
+  // Follow-up orders get the same supporting data as normal orders — closers, locations, templates.
   const [agentsRes, locationsRes, templatesRes] = await Promise.all([
     apiRequest<unknown>('/trpc/orders.listCSClosers', deferredOpt).catch(
       onError('orders.listCSClosers'),
@@ -264,10 +355,32 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let csClosersForAssign: Array<{ id: string; name: string }> | undefined;
   // `orders.listCSClosers` returns the full roster for HoCS/Admin (`orders.reassign`) and supervised
   // Sales closers only for branch Sales team supervisors; others get an empty list.
+  // For follow-up orders: also fetch branch memberships so we can filter to the order's branch.
+  const isFollowUpResult = 'order' in orderDetailResolved && (orderDetailResolved as { isFollowUpOrder?: boolean }).isFollowUpOrder;
+  const fuOrderBranchId = isFollowUpResult && 'order' in orderDetailResolved
+    ? (orderDetailResolved as { order: { branchId?: string | null } }).order.branchId
+    : null;
   if (agentsRes.ok) {
-    const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
-    const list = agentsData?.result?.data ?? [];
-    csClosersForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+    const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string; branches?: Array<{ branchId: string }> }> } };
+    let list = agentsData?.result?.data ?? [];
+    // For follow-up orders scoped to a branch, filter closers to that branch
+    if (isFollowUpResult && fuOrderBranchId) {
+      // listCSClosers doesn't include branches — fetch with branches for filtering
+      try {
+        const withBranchesRes = await apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches?input=%7B%7D', deferredOpt);
+        if (withBranchesRes.ok) {
+          const branchData = (withBranchesRes.data as { result?: { data?: Array<{ agentId: string; agentName: string; branches: Array<{ branchId: string }> }> } })?.result?.data ?? [];
+          const branchClosers = branchData.filter((c) => c.branches.some((b) => b.branchId === fuOrderBranchId));
+          csClosersForAssign = branchClosers.map((a) => ({ id: a.agentId, name: a.agentName }));
+        } else {
+          csClosersForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+        }
+      } catch {
+        csClosersForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+      }
+    } else {
+      csClosersForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+    }
   } else {
     logOrderDetailLoaderWarning(orderId, 'orders.listCSClosers', `status ${agentsRes.status}`);
   }
@@ -323,10 +436,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // completion — no skeleton flash after the progress bar finishes.
   // `allocatableLocationsDeferred` runs in parallel with `orderDetailPromise` +
   // the agents/locations/templates batch (already awaited above).
-  const [orderDetail, resolvedAllocatable] = await Promise.all([
-    orderDetailPromise,
-    allocatableLocationsDeferred,
-  ]);
+  const orderDetail = orderDetailResolved;
+  const resolvedAllocatable = await allocatableLocationsDeferred;
 
   return {
     pageData: {
@@ -376,6 +487,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: 'Agent required' }, { status: 400 });
     }
     const reason = formData.get('reason')?.toString().trim();
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+
+    if (isFollowUp) {
+      // Follow-up orders live in a separate table — use the dedicated assignment endpoint.
+      const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersAssign', {
+        method: 'POST',
+        cookie,
+        body: { orderId, closerId: toCsAgentId },
+      });
+      if (!res.ok) {
+        const err = extractApiErrorMessage(res.data, 'Assign failed');
+        return json({ error: err }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
     const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
       method: 'POST',
       cookie,
@@ -394,6 +521,29 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'ensureInvoice') {
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    if (isFollowUp) {
+      // Follow-up orders: use the same approach as the auto-generate on CONFIRMED
+      const res = await apiRequest<unknown>('/trpc/orders.followUpEnsureInvoice', {
+        method: 'POST',
+        cookie,
+        body: { orderId },
+        timeoutMs: 20_000,
+      });
+      if (!res.ok) {
+        // Fallback to normal endpoint (might work after graduation)
+        const fallbackRes = await apiRequest<unknown>('/trpc/finance.ensureInvoiceByOrder', {
+          method: 'POST',
+          cookie,
+          body: { orderId },
+          timeoutMs: 20_000,
+        });
+        if (!fallbackRes.ok) {
+          return json({ error: extractApiErrorMessage(fallbackRes.data, 'Could not generate invoice') }, { status: safeStatus(fallbackRes.status) });
+        }
+      }
+      return json({ success: true });
+    }
     const res = await apiRequest<unknown>('/trpc/finance.ensureInvoiceByOrder', {
       method: 'POST',
       cookie,
@@ -408,6 +558,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'initiateCall') {
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+
+    if (isFollowUp) {
+      // Follow-up orders: transition to CS_ENGAGED (records timeline event) instead of main orders.initiateCall
+      const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+        method: 'POST',
+        cookie,
+        body: { orderId, newStatus: 'CS_ENGAGED', note: 'Manual call recorded.' },
+        timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
+      });
+      if (!res.ok) {
+        return json({ error: extractApiErrorMessage(res.data, 'Failed to record call') }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true, callInitiated: true, callLog: null });
+    }
+
     const res = await apiRequest<unknown>('/trpc/orders.initiateCall', {
       method: 'POST',
       cookie,
@@ -556,13 +722,35 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'editOrderDetails') {
-    const body: Record<string, unknown> = { orderId, ...branchIdFromForm(formData) };
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
     const customerName = formData.get('customerName')?.toString()?.trim();
     const deliveryAddress = formData.get('deliveryAddress')?.toString()?.trim();
     const deliveryState = formData.get('deliveryState')?.toString()?.trim();
     const deliveryNotes = formData.get('deliveryNotes')?.toString()?.trim();
     const customerEmail = formData.get('customerEmail')?.toString()?.trim();
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString()?.trim();
+
+    if (isFollowUp) {
+      const body: Record<string, unknown> = { orderId };
+      if (customerName !== undefined && customerName !== '') body.customerName = customerName;
+      if (deliveryAddress !== undefined) body.deliveryAddress = deliveryAddress || null;
+      if (deliveryState !== undefined) body.deliveryState = deliveryState || null;
+      if (deliveryNotes !== undefined) body.deliveryNotes = deliveryNotes || null;
+      if (customerEmail !== undefined && customerEmail !== '') body.customerEmail = customerEmail || null;
+      if (preferredDeliveryDate !== undefined) body.preferredDeliveryDate = preferredDeliveryDate || null;
+      const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersUpdate', {
+        method: 'POST',
+        cookie,
+        body,
+      });
+      if (!res.ok) {
+        const err = extractApiErrorMessage(res.data, 'Failed to update order details');
+        return json({ error: err }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
+    const body: Record<string, unknown> = { orderId, ...branchIdFromForm(formData) };
     if (customerName !== undefined && customerName !== '') body.customerName = customerName;
     if (deliveryAddress !== undefined) body.deliveryAddress = deliveryAddress;
     if (deliveryState !== undefined) body.deliveryState = deliveryState;
@@ -813,6 +1001,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (trimmed.length > 2000) {
       return json({ error: 'Comment must be at most 2000 characters' }, { status: 400 });
     }
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    if (isFollowUp) {
+      const res = await apiRequest<unknown>('/trpc/orders.addFollowUpOrderComment', {
+        method: 'POST',
+        cookie,
+        body: { orderId, comment: trimmed },
+      });
+      if (!res.ok) {
+        return json({ error: extractApiErrorMessage(res.data, 'Could not save comment') }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
     const res = await apiRequest<unknown>('/trpc/orders.addCsOrderComment', {
       method: 'POST',
       cookie,
@@ -904,6 +1104,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // Bump the timeout — the user is actively waiting on this single click,
     // and timing out leaves the order in a half-confirmed state from the UI's
     // perspective even when the server transaction succeeds.
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+
+    if (isFollowUp) {
+      const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+        method: 'POST',
+        cookie,
+        body: {
+          orderId,
+          newStatus,
+          note: reason,
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        },
+        timeoutMs: 20_000,
+      });
+      if (!res.ok) {
+        const message = extractApiErrorMessage(res.data, 'Transition failed');
+        return json({ error: message }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
       cookie,
@@ -922,6 +1143,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     return json({ success: true });
+  }
+
+  if (intent === 'unfreezeOrder') {
+    const reason = formData.get('reason')?.toString()?.trim() || undefined;
+    const res = await apiRequest<unknown>('/trpc/orders.unfreezeOrder', {
+      method: 'POST',
+      cookie,
+      body: { orderId, ...(reason ? { reason } : {}) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to unfreeze order') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, message: 'Order unfrozen — CS can resume.' });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });
@@ -998,6 +1232,7 @@ export default function OrderDetailRoute() {
       voipProviderDisplayName={(orderDetail as OrderDetailStreamData).voipProviderDisplayName}
       itemOffers={(orderDetail as OrderDetailStreamData).itemOffers}
       callablePhone={(orderDetail as OrderDetailStreamData).callablePhone}
+      isFollowUpOrder={(orderDetail as OrderDetailStreamData).isFollowUpOrder}
       canEditOrder={canEditOrder}
       userRole={userRole}
       userId={userId}

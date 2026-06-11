@@ -880,6 +880,7 @@ export function OrderDetailPage({
   invoice,
   itemOffers = [],
   callablePhone,
+  isFollowUpOrder = false,
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const recordCallFetcher = useFetcher();
@@ -1054,6 +1055,8 @@ export function OrderDetailPage({
   const [shareError, setShareError] = useState<string | null>(null);
   const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
   const [duplicateCompareOpen, setDuplicateCompareOpen] = useState(false);
+  const [unfreezeModalOpen, setUnfreezeModalOpen] = useState(false);
+  const [unfreezeReason, setUnfreezeReason] = useState('');
   // Resolve the deferred allocatable-locations promise once into local state so
   // both the Assign modal AND the Mark Delivered dropdown can show per-product
   // stock counts. The sync `allocatableLocations` prop is currently empty in the
@@ -1222,7 +1225,7 @@ export function OrderDetailPage({
     if (invoiceFetcher.state !== 'idle' || invoiceFetcher.data) return;
     invoiceFetcher.load(`/api/order-invoice/${order.id}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order.id, currentStatusIndex, invoice]);
+  }, [order.id, currentStatusIndex, invoice, isFollowUpOrder]);
 
   useEffect(() => {
     if (timeline !== undefined) return; // loader provided it (streaming mode)
@@ -1333,6 +1336,9 @@ export function OrderDetailPage({
     userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT' ||
     userRole === 'HEAD_OF_LOGISTICS' || userRole === 'HEAD_OF_CS';
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
+  // CEO directive 2026-06-10: block ALL forward transitions while item/price
+  // approval is pending — not just CONFIRMED.
+  const hasPendingItemApproval = !!order.pendingOrderLinePriceRequestId;
   // Campaign-scoped offer tiers keyed by product — feeds the Adjust order items
   // offer picker so a discounted bundle can be applied in one selection.
   const offersByProduct = useMemo(() => {
@@ -1524,6 +1530,10 @@ export function OrderDetailPage({
       setEditStatusTarget('');
       setEditStatusReason('');
     }
+    if (unfreezeModalOpen) {
+      setUnfreezeModalOpen(false);
+      setUnfreezeReason('');
+    }
     // Chain assign → share: when the assignment succeeds AND a WhatsApp group
     // exists for some logistics location AND a dispatch template exists, pop
     // the Share-to-3PL modal next so the operator's hand-off is one continuous
@@ -1551,6 +1561,7 @@ export function OrderDetailPage({
     restoreModalOpen,
     allocateModalOpen,
     deliverModalOpen,
+    unfreezeModalOpen,
     logisticsLocations,
     logisticsDispatchTemplates,
     order.logisticsLocationId,
@@ -1670,6 +1681,30 @@ export function OrderDetailPage({
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
+      )}
+
+      {/* Frozen for follow-up — order was pulled by follow-up config rules.
+          No further mutations allowed. */}
+      {order.frozenForFollowUp && (
+        <div className="rounded-lg border border-yellow-300 bg-yellow-50 dark:border-yellow-600/40 dark:bg-yellow-900/20 px-3 py-2.5">
+          <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-300">
+            Frozen for follow-up
+          </p>
+          <p className="mt-0.5 text-xs text-yellow-700 dark:text-yellow-400">
+            A follow-up copy was created. No further changes allowed.
+          </p>
+          {(isAdminLevel({ role: userRole }) || userRole === 'HEAD_OF_CS') && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="mt-2 w-full sm:w-auto"
+              onClick={() => { setUnfreezeModalOpen(true); setUnfreezeReason(''); }}
+            >
+              Unfreeze order
+            </Button>
+          )}
+        </div>
       )}
 
       {/* Duplicate linkage — surface the cross-order tie so a Sales closer / MB
@@ -1829,54 +1864,47 @@ export function OrderDetailPage({
               ) : null}
             </div>
 
-            {/* Order Items — card layout (typically 3–4 items) */}
-            <div className="card">
-              <h2 className="text-lg font-semibold text-app-fg mb-3">Order Items</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {order.orderItems.map((item) => {
-                  return (
-                    <div
-                      key={item.id}
-                      className="rounded-lg border border-app-border bg-app-hover p-3 flex flex-col"
-                    >
-                      <p className="font-medium text-app-fg line-clamp-2" title={item.productName ?? item.productId}>
+            {/* Order Items — compact horizontal rows */}
+            <div className="card !p-0 overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-app-border flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-app-fg">Order Items</h2>
+                {order.totalAmount && (
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-xs text-app-fg-muted">Total:</span>
+                    <NairaPrice amount={Number(order.totalAmount)} className="text-sm font-bold text-app-fg" />
+                  </div>
+                )}
+              </div>
+              <div className="divide-y divide-app-border">
+                {order.orderItems.map((item) => (
+                  <div key={item.id} className="px-4 py-2 flex items-center gap-3 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-app-fg truncate" title={item.productName ?? item.productId}>
                         {item.productName ?? `${item.productId.slice(0, 8)}...`}
                       </p>
-                      <div className="mt-2 flex items-center justify-between text-sm text-app-fg-muted">
-                        <span>Qty: {item.quantity}</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-app-fg-muted">Qty: {item.quantity}</span>
                         {item.offerLabel && (
-                          <span className="text-xs text-app-fg-muted">{item.offerLabel}</span>
+                          <span className="text-xs text-app-fg-muted">· {item.offerLabel}</span>
                         )}
                       </div>
-                      <p className="mt-1.5 text-sm font-semibold text-app-fg flex items-center gap-1">
-                        <span>Price:</span>
-                        <NairaPrice amount={Number(item.unitPrice)} />
-                      </p>
-                      <Link
-                        to={`/admin/products/${item.productId}`}
-                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        View product
-                      </Link>
                     </div>
-                  );
-                })}
+                    <NairaPrice amount={Number(item.unitPrice)} className="text-sm font-semibold text-app-fg shrink-0" />
+                    <Link
+                      to={`/admin/products/${item.productId}`}
+                      className="shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+                    >
+                      View
+                    </Link>
+                  </div>
+                ))}
               </div>
-              {order.totalAmount && (
-                <div className="mt-3 pt-3 border-t border-app-border flex justify-end items-baseline gap-2">
-                  <span className="text-base font-bold text-app-fg">Total:</span>
-                  <NairaPrice amount={Number(order.totalAmount)} className="text-base font-bold text-app-fg" />
-                </div>
-              )}
             </div>
 
             {/* Invoice card — auto-generated on CONFIRMED. Visible to CS, Logistics, etc.
                 Some legacy orders may not have one yet; in that case we still render
-                the section so it doesn't "disappear" from the page. */}
+                the section so it doesn't "disappear" from the page.
+                Invoice auto-generated on CONFIRMED. Follow-up orders generate on demand. */}
             {currentStatusIndex >= getProgressIndex('CONFIRMED', orderStatusFlow) && (() => {
               // Loader may stream invoice, but in the "fetch after mount" mode it will be undefined.
               const invoiceLoadedViaFetcher = invoiceFetcher.data?.ok ? invoiceFetcher.data.invoice : null;
@@ -1984,6 +2012,7 @@ export function OrderDetailPage({
                       <div className="mt-3 flex justify-end">
                         <ensureInvoiceFetcher.Form method="post">
                           <input type="hidden" name="intent" value="ensureInvoice" />
+                          {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
                           <Button
                             type="submit"
                             variant="primary"
@@ -2157,7 +2186,7 @@ export function OrderDetailPage({
                 Manual timeline comments stay available while the actor can act on the order,
                 including after line-item edits are closed (e.g. DELIVERED).
                 Read-only viewers keep this page for visibility only; they never see action controls. */}
-            {canEditOrder && isCSOrHoS && (orderAllowsLineItemEdits || canPerformCSActionsOnOrder) && (
+            {canEditOrder && isCSOrHoS && (orderAllowsLineItemEdits || canPerformCSActionsOnOrder || order.frozenForFollowUp) && (
               <div className="card order-[-2] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
@@ -2167,6 +2196,19 @@ export function OrderDetailPage({
                     Without this, an admin could engage / confirm an order directly and the
                     "Closer" column on `/admin/sales/orders` ends up blank because no CS_CLOSER
                     is on the row. */}
+                {order.frozenForFollowUp ? (
+                  <div className="space-y-2">
+                    {showCopyOrderSummary && (
+                      <Button type="button" variant="secondary" className="w-full" onClick={() => void handleCopyOrderSummary()}>
+                        Copy order
+                      </Button>
+                    )}
+                    <Button type="button" variant="secondary" className="w-full" onClick={() => setAddCommentModalOpen(true)} disabled={csCommentFetcher.state === 'submitting'}>
+                      Add comment
+                    </Button>
+                  </div>
+                ) : (
+                <>
                 {order.status === 'UNPROCESSED' && !order.assignedCsId && (
                   <div className="rounded-lg bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-700/50 px-4 py-3 mb-3">
                     <p className="text-sm text-info-800 dark:text-info-200">
@@ -2217,15 +2259,22 @@ export function OrderDetailPage({
 
                   {/* CS_ENGAGED → Confirm order is the next step */}
                   {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && canConfirm && canTransitionTo('CONFIRMED') && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => setConfirmModalOpen(true)}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Confirm order
-                    </Button>
+                    <>
+                      {hasPendingItemApproval && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
+                          Item/price change pending approval — cannot move forward
+                        </p>
+                      )}
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => setConfirmModalOpen(true)}
+                        disabled={fetcher.state === 'submitting' || hasPendingItemApproval}
+                      >
+                        Confirm order
+                      </Button>
+                    </>
                   )}
 
                   {/* CS_ENGAGED → Call customer is secondary (already called once) */}
@@ -2243,34 +2292,48 @@ export function OrderDetailPage({
 
                   {/* CONFIRMED → Assign for delivery is the next step */}
                   {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => { setAllocateLocationId(''); setAllocateModalOpen(true); }}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Assign for delivery
-                    </Button>
+                    <>
+                      {hasPendingItemApproval && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
+                          Item/price change pending approval — cannot move forward
+                        </p>
+                      )}
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => { setAllocateLocationId(''); setAllocateModalOpen(true); }}
+                        disabled={fetcher.state === 'submitting' || hasPendingItemApproval}
+                      >
+                        Assign for delivery
+                      </Button>
+                    </>
                   )}
 
                   {/* AGENT_ASSIGNED → Mark delivered is the next step */}
                   {(order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && canTransitionTo('DELIVERED') && (
-                    <Button
-                      type="button"
-                      variant="success"
-                      className="w-full"
-                      onClick={() => {
-                        setDeliverNote('');
-                        setDeliverProofUrl('');
-                        setDeliverLocationId(order.logisticsLocationId ?? '');
-                        setDeliverCost('');
-                        setDeliverModalOpen(true);
-                      }}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Mark delivered
-                    </Button>
+                    <>
+                      {hasPendingItemApproval && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
+                          Item/price change pending approval — cannot move forward
+                        </p>
+                      )}
+                      <Button
+                        type="button"
+                        variant="success"
+                        className="w-full"
+                        onClick={() => {
+                          setDeliverNote('');
+                          setDeliverProofUrl('');
+                          setDeliverLocationId(order.logisticsLocationId ?? '');
+                          setDeliverCost('');
+                          setDeliverModalOpen(true);
+                        }}
+                        disabled={fetcher.state === 'submitting' || hasPendingItemApproval}
+                      >
+                        Mark delivered
+                      </Button>
+                    </>
                   )}
 
                   {/* Reassign to another location — secondary after mark delivered */}
@@ -2457,6 +2520,7 @@ export function OrderDetailPage({
                       </p>
                       <fetcher.Form method="post" className="space-y-2">
                         <input type="hidden" name="intent" value="assignToCS" />
+                        {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
                         {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                         <input type="hidden" name="toCsAgentId" value={assignToId} />
                         <div className="flex items-stretch gap-2">
@@ -2499,6 +2563,8 @@ export function OrderDetailPage({
                     </div>
                   )}
                 </div>
+                </>
+                )}
               </div>
             )}
 
@@ -2675,6 +2741,7 @@ export function OrderDetailPage({
           <ModalFetcherInlineError message={fetcherErrorForTransition('CONFIRMED')} />
           <fetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="transition" />
+                {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
             <input type="hidden" name="newStatus" value="CONFIRMED" />
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
@@ -2853,6 +2920,7 @@ export function OrderDetailPage({
           </p>
           <fetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="editOrderDetails" />
+            {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <input type="hidden" name="customerName" value={order.customerName ?? ''} />
             <TextInput
@@ -2909,6 +2977,7 @@ export function OrderDetailPage({
           <ModalFetcherInlineError message={csCommentSurface.errorMatchingIntent('addCsOrderComment')} />
           <csCommentFetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="addCsOrderComment" />
+            {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <input type="hidden" name="comment" value={csCommentDraft} />
             <Textarea
@@ -2996,6 +3065,7 @@ export function OrderDetailPage({
                 method="post"
               >
                 <input type="hidden" name="intent" value="transition" />
+                {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
                 <input type="hidden" name="newStatus" value="DELETED" />
                 {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                 <input type="hidden" name="reason" value={cancelReason} />
@@ -3031,6 +3101,7 @@ export function OrderDetailPage({
             </Button>
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
+                {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
               <input type="hidden" name="newStatus" value="UNPROCESSED" />
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               <Button
@@ -3096,6 +3167,7 @@ export function OrderDetailPage({
                   </Button>
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
+                {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
                     <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
@@ -3229,6 +3301,7 @@ export function OrderDetailPage({
             </Button>
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
+                {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
               <input type="hidden" name="newStatus" value="DELIVERED" />
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               {deliverLocationId && (
@@ -3402,6 +3475,7 @@ export function OrderDetailPage({
                             {
                               intent: 'initiateCall',
                               branchId: order.branchId || branchId,
+                              ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
                             },
                             { method: 'post' },
                           ),
@@ -3482,6 +3556,7 @@ export function OrderDetailPage({
                   </Button>
                   <recordCallFetcher.Form method="post">
                     <input type="hidden" name="intent" value="initiateCall" />
+                    {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <Button
                       type="submit"
@@ -3506,6 +3581,7 @@ export function OrderDetailPage({
                   </Button>
                   <recordCallFetcher.Form method="post">
                     <input type="hidden" name="intent" value="initiateCall" />
+                    {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <Button
                       type="submit"
@@ -3547,6 +3623,7 @@ export function OrderDetailPage({
                             {
                               intent: 'initiateCall',
                               branchId: order.branchId || branchId,
+                              ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
                             },
                             { method: 'post' },
                           ),
@@ -3569,6 +3646,7 @@ export function OrderDetailPage({
                             {
                               intent: 'initiateCall',
                               branchId: order.branchId || branchId,
+                              ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
                             },
                             { method: 'post' },
                           ),
@@ -3671,6 +3749,7 @@ export function OrderDetailPage({
           order={order}
           fetcher={fetcher}
           onClose={() => setEditDetailsModalOpen(false)}
+          isFollowUpOrder={isFollowUpOrder}
         />
       )}
 
@@ -3934,6 +4013,41 @@ export function OrderDetailPage({
           />
         </Suspense>
       )}
+
+      {/* Unfreeze confirmation modal — requires reason */}
+      {unfreezeModalOpen && (
+        <Modal open onClose={() => setUnfreezeModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-app-fg">Unfreeze order</h3>
+          <p className="text-sm text-app-fg-muted">
+            This will allow CS to resume working on the original order. The follow-up copy will remain active. Provide a reason for the audit trail.
+          </p>
+          <TextInput
+            label="Reason"
+            id="unfreeze-reason"
+            value={unfreezeReason}
+            onChange={(e) => setUnfreezeReason(e.target.value)}
+            placeholder="e.g. Customer called back on original number"
+            required
+          />
+          <div className="flex justify-end gap-2 pt-2 border-t border-app-border">
+            <Button variant="secondary" onClick={() => setUnfreezeModalOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={!unfreezeReason.trim() || fetcher.state === 'submitting'}
+              loading={fetcher.state === 'submitting'}
+              loadingText="Unfreezing..."
+              onClick={() => {
+                fetcher.submit(
+                  { intent: 'unfreezeOrder', reason: unfreezeReason.trim() },
+                  { method: 'post' },
+                );
+              }}
+            >
+              Unfreeze
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -3961,10 +4075,12 @@ function EditOrderDetailsModal({
   order,
   fetcher,
   onClose,
+  isFollowUpOrder = false,
 }: {
   order: OrderDetail;
   fetcher: ReturnType<typeof useFetcher>;
   onClose: () => void;
+  isFollowUpOrder?: boolean;
 }) {
   const [customerName, setCustomerName] = useState(order.customerName ?? '');
   const [deliveryAddress, setDeliveryAddress] = useState(order.deliveryAddress ?? '');
@@ -3992,6 +4108,7 @@ function EditOrderDetailsModal({
       </p>
       <fetcher.Form method="post" className="space-y-4">
         <input type="hidden" name="intent" value="editOrderDetails" />
+            {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
         {order.branchId && <input type="hidden" name="branchId" value={order.branchId} />}
 
         <TextInput

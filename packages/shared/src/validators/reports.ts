@@ -22,7 +22,7 @@ export const exportDateRangeSchema = z.object({
 export type ExportDateRange = z.infer<typeof exportDateRangeSchema>;
 
 export const reportColumnsByKey = {
-  cs_orders: ['id', 'customer', 'assignedCs', 'phone', 'status', 'amount', 'created'] as const,
+  cs_orders: ['id', 'customer', 'assignedCs', 'phone', 'status', 'amount', 'product', 'quantity', 'address', 'created'] as const,
   cs_team: [
     'name',
     'role',

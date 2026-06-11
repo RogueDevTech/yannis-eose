@@ -1,6 +1,7 @@
 import { uuid, pgTable, text, numeric, jsonb, integer, index } from 'drizzle-orm/pg-core';
 import { recordStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
+import { branchGroups } from './branch-groups';
 
 // Product categories — brand info for invoices, SMS, WhatsApp
 export const productCategories = pgTable('product_categories', {
@@ -19,6 +20,8 @@ export const productCategories = pgTable('product_categories', {
 // Products
 export const products = pgTable('products', {
   id: uuidv7Pk(),
+  /** Branch group ("company") this product belongs to. CEO directive 2026-06-10. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   name: text('name').notNull(),
   description: text('description'),
   /** Catalog gallery (public-safe URLs); offer tiers store images on `offer_templates.image_urls`. */

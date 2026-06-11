@@ -78,7 +78,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch user's branches for the branch switcher (non-blocking). `status` is
   // kept so the switcher can tag a disabled branch instead of dropping it.
-  type BranchListEntry = { id: string; name: string; code: string; status?: string };
+  type BranchListEntry = { id: string; name: string; code: string; status?: string; groupId?: string | null };
   const branchesPromise = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
     .then((res) => {
       if (!res.ok) return [] as BranchListEntry[];
@@ -87,8 +87,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => [] as BranchListEntry[]);
 
+  // Fetch branch groups for the SuperAdmin header switcher (non-blocking).
+  type BranchGroupEntry = { id: string; name: string };
+  const branchGroupsPromise = user?.role === 'SUPER_ADMIN'
+    ? apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie })
+        .then((res) => {
+          if (!res.ok) return [] as BranchGroupEntry[];
+          const data = (res.data as { result?: { data?: BranchGroupEntry[] } })?.result?.data;
+          return data ?? [];
+        })
+        .catch(() => [] as BranchGroupEntry[])
+    : Promise.resolve([] as BranchGroupEntry[]);
+
   // Stream branches like notifications — avoids blocking the document on branches.list
-  return defer({ user, notifications: notificationsPromise, branches: branchesPromise });
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise });
 }
 
 /**
@@ -114,7 +126,10 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   defaultShouldRevalidate,
   formAction,
   formMethod,
+  nextUrl,
 }) => {
+  // Force revalidation when session identity changed (mirror start/stop redirects add _reload).
+  if (nextUrl.searchParams.has('_reload')) return true;
   if (formAction && formMethod && formMethod !== 'GET') {
     return defaultShouldRevalidate;
   }
@@ -169,7 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
     for (const c of res.setCookies) {
       headers.append('Set-Cookie', c);
     }
-    throw redirect('/admin', { headers });
+    throw redirect('/admin?_reload=1', { headers });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });
@@ -190,10 +205,11 @@ export async function action({ request }: ActionFunctionArgs) {
  * Single mount + state bridge keeps the Outlet alive across resolution.
  */
 export default function AdminLayout() {
-  const { user, notifications, branches } = useLoaderData<typeof loader>();
+  const { user, notifications, branches, branchGroups } = useLoaderData<typeof loader>();
   const [resolvedBranches, setResolvedBranches] = useState<
-    Array<{ id: string; name: string; code: string; status?: string }> | null
+    Array<{ id: string; name: string; code: string; status?: string; groupId?: string | null }> | null
   >(null);
+  const [resolvedGroups, setResolvedGroups] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,7 +217,10 @@ export default function AdminLayout() {
     // (a request aborted by rapid branch switching) — every user has at least
     // one branch. Keep the last-known-good non-empty list rather than blinking
     // the switcher out; the next loader run refills it.
-    const apply = (value: Array<{ id: string; name: string; code: string; status?: string }>) => {
+    Promise.resolve(branchGroups)
+      .then((groups) => { if (!cancelled && Array.isArray(groups)) setResolvedGroups(groups); })
+      .catch(() => {});
+    const apply = (value: Array<{ id: string; name: string; code: string; status?: string; groupId?: string | null }>) => {
       if (cancelled) return;
       setResolvedBranches((prev) =>
         value.length === 0 && prev && prev.length > 0 ? prev : value,
@@ -213,12 +232,13 @@ export default function AdminLayout() {
     return () => {
       cancelled = true;
     };
-  }, [branches]);
+  }, [branches, branchGroups]);
 
   return (
     <DashboardLayout
       user={user}
       branches={resolvedBranches ?? []}
+      branchGroups={resolvedGroups}
       branchesHydrationReady={resolvedBranches !== null}
       notificationsPromise={notifications}
       notificationsActionUrl="/admin"

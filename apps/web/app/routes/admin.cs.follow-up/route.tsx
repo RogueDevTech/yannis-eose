@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { defer, json } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { defer, json, redirect } from '@remix-run/node';
+import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
@@ -16,10 +16,13 @@ import { CachedAwait } from '~/components/ui/cached-await';
 import { FollowUpPage } from '~/features/cs/FollowUpPage';
 import type { FollowUpPageData } from '~/features/cs/FollowUpPage';
 import { FollowUpBatchesPage } from '~/features/cs/FollowUpBatchesPage';
-import type { FollowUpBatchesPageData } from '~/features/cs/FollowUpBatchesPage';
-import { FollowUpGroupsPage } from '~/features/cs/FollowUpGroupsPage';
-import type { FollowUpGroupItem, CloserWithBranches } from '~/features/cs/FollowUpGroupsPage';
+import type { FollowUpBranchRow } from '~/features/cs/FollowUpBatchesPage';
 import type { PendingCart } from '~/features/cs/types';
+import { FollowUpOrdersPage } from '~/features/cs/FollowUpOrdersPage';
+import { OrdersListPage } from '~/features/orders/OrdersListPage';
+import type { Order } from '~/features/orders/types';
+import { FollowUpBatchesLoadingShell, FollowUpOrdersLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
+import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
 
 export const meta: MetaFunction = () => [
   { title: 'Follow Up — Yannis EOSE' },
@@ -36,43 +39,146 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const isCloser = user?.role === 'CS_CLOSER';
-  // Closers only see batches view (no create/groups)
-  const view = isCloser ? 'batches' : (url.searchParams.get('view') || 'batches');
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  const isHoCS = user?.role === 'HEAD_OF_CS';
+  // Admins + HoCS see branch summary so they can drill into a specific branch. Closers go straight to orders.
+  const view = url.searchParams.get('view') || (isAdmin || isHoCS ? 'batches' : 'orders');
 
-  // ── Groups view ──────────────────────────────────────────────
-  if (view === 'groups') {
-    type GroupItem = { id: string; name: string; createdByName: string | null; memberCount: number; members: Array<{ userId: string; userName: string }>; createdAt: string };
-    type CloserWithBranchesItem = { agentId: string; agentName: string; branches: Array<{ branchId: string; branchName: string }> };
-    type GroupsBundle = { groups: GroupItem[]; closers: CloserWithBranchesItem[] };
-    const pageData = (async (): Promise<GroupsBundle> => {
+  // ── Follow-Up Orders view ────────────────────────────────────
+  if (view === 'orders') {
+    const statusParam = url.searchParams.get('status') || undefined;
+    const search = url.searchParams.get('search') || undefined;
+    const csCloserId = url.searchParams.get('csCloserId') || undefined;
+    const assignedCsId = isCloser ? user.id : csCloserId;
+    const unassignedOnly = url.searchParams.get('unassigned') === '1' && !isCloser;
+    const perPage = Math.min(Math.max(parseInt(url.searchParams.get('perPage') || '50', 10), 10), 100);
+    const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+    const sortBy = url.searchParams.get('sortBy') || 'createdAt';
+    const sortOrder = url.searchParams.get('sortOrder') || 'desc';
+
+    const ruleId = url.searchParams.get('ruleId') || undefined;
+    const startDate = url.searchParams.get('startDate') || undefined;
+    const endDate = url.searchParams.get('endDate') || undefined;
+    const branchId = url.searchParams.get('branchId') || undefined;
+    const backToParam = url.searchParams.get('backTo') || undefined;
+
+    const listInput: Record<string, unknown> = { page, limit: perPage, sortBy, sortOrder };
+    if (statusParam) listInput.status = statusParam;
+    if (search) listInput.search = search;
+    if (assignedCsId) listInput.assignedCsId = assignedCsId;
+    if (unassignedOnly) listInput.unassignedOnly = true;
+    if (ruleId) listInput.ruleId = ruleId;
+    if (startDate) listInput.startDate = startDate;
+    if (endDate) listInput.endDate = endDate;
+    if (branchId) listInput.branchId = branchId;
+    const listInputStr = encodeURIComponent(JSON.stringify(listInput));
+
+    const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
+
+    // Branch name for page title — resolved inside pageData (non-blocking) to avoid delaying the shell.
+    // branches.list is also used for the "move to branch" picker, so one call serves both.
+    const pageData = (async () => {
       try {
-        const [groupsRes, closersRes] = await Promise.all([
-          apiRequest<unknown>('/trpc/orders.listFollowUpGroups', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
-          apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
-        ]);
-        const groups: GroupItem[] = groupsRes.ok
-          ? ((groupsRes.data as { result?: { data?: GroupItem[] } })?.result?.data ?? [])
-          : [];
-        const closers: CloserWithBranchesItem[] = closersRes.ok
-          ? ((closersRes.data as { result?: { data?: CloserWithBranchesItem[] } })?.result?.data ?? [])
-          : [];
-        return { groups, closers };
+      const [ordersRes, countsRes, closersRes, branchesRes, workloadRes] = await Promise.all([
+        apiRequest<unknown>(`/trpc/orders.followUpOrdersList?input=${listInputStr}`, deferredOpt),
+        apiRequest<unknown>(`/trpc/orders.followUpOrdersStatusCounts?input=${encodeURIComponent(JSON.stringify({
+          ...(branchId ? { branchId } : {}),
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+        }))}`, deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null })),
+        apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches?input=%7B%7D', deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null })),
+        apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>('/trpc/branches.list', { method: 'GET', cookie }).catch(() => ({ ok: false as const, status: 500, data: null })),
+        isCloser
+          ? apiRequest<unknown>('/trpc/orders.myCSWorkload', deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null }))
+          : Promise.resolve(null),
+      ]);
+      const ordersRaw = (ordersRes.ok ? (ordersRes.data as { result?: { data?: unknown } })?.result?.data : null) as { orders: unknown[]; pagination: { total: number } } | null;
+      const countsData = (countsRes.ok ? (countsRes.data as { result?: { data?: unknown } })?.result?.data : null) as Record<string, number> | null;
+      type CloserItem = { agentId: string; agentName: string };
+      const closersData = (closersRes.ok ? (closersRes.data as { result?: { data?: CloserItem[] } })?.result?.data : null) ?? [];
+      type BranchItem = { id: string; name: string };
+      const branchesData: BranchItem[] = (branchesRes.ok ? (branchesRes.data as { result?: { data?: BranchItem[] } })?.result?.data : null) ?? [];
+      type WorkloadData = { agentId: string; agentName: string; capacity: number; pendingCount: number; todayClosesCount?: number; lastActionAt: string | null };
+      const workloadData: WorkloadData | null = workloadRes && (workloadRes as { ok: boolean }).ok
+        ? ((workloadRes as { data?: { result?: { data?: WorkloadData } } }).data?.result?.data ?? null)
+        : null;
+
+      // Resolve branch name from the already-fetched branches list (no extra call).
+      const branchName = branchId
+        ? branchesData.find((b) => b.id === branchId)?.name ?? ''
+        : '';
+
+      // Map follow-up orders to the Order type used by OrdersListPage
+      const orders: Order[] = ((ordersRaw?.orders ?? []) as Array<Record<string, unknown>>).map((o) => ({
+        id: o.id as string,
+        orderNumber: o.orderNumber as number | null,
+        customerName: o.customerName as string,
+        customerPhoneDisplay: '',
+        status: o.status as string,
+        totalAmount: (o.totalAmount as string) ?? null,
+        createdAt: o.createdAt as string,
+        preferredDeliveryDate: (o.preferredDeliveryDate as string) ?? null,
+        callbackScheduledAt: (o.callbackScheduledAt as string) ?? null,
+        assignedCsId: (o.assignedCsId as string) ?? null,
+        assignedCsName: (o.assignedCsName as string) ?? null,
+        mediaBuyerId: (o.mediaBuyerId as string) ?? null,
+        mediaBuyerName: (o.mediaBuyerName as string) ?? null,
+        primaryProductName: (o.primaryProductName as string) ?? null,
+        itemCount: (o.itemCount as number) ?? 0,
+        campaignId: (o.campaignId as string) ?? null,
+        campaignName: (o.campaignName as string) ?? null,
+        cartId: null,
+        isDuplicate: null,
+        lastCsComment: null,
+      }));
+
+      const total = ordersRaw?.pagination?.total ?? 0;
+      return {
+        orders,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / perPage)),
+        statusCounts: countsData ?? {},
+        csClosersForFilter: closersData,
+        branchesForMove: branchesData,
+        myWorkload: workloadData,
+        branchName,
+      };
       } catch {
-        return { groups: [], closers: [] };
+        return { orders: [] as Order[], total: 0, totalPages: 1, statusCounts: {} as Record<string, number>, csClosersForFilter: [] as Array<{ agentId: string; agentName: string }>, branchesForMove: [] as Array<{ id: string; name: string }>, myWorkload: null, branchName: '' };
       }
     })();
 
     return defer({
-      shell: { view: 'groups' as const },
+      shell: {
+        view: 'orders' as const,
+        status: statusParam ?? '',
+        search: search ?? '',
+        csCloserId: csCloserId ?? '',
+        page,
+        perPage,
+        sortBy,
+        sortOrder,
+        isCloser,
+        isAdmin,
+        userRole: user?.role ?? '',
+        userId: user?.id ?? '',
+        branchId: branchId ?? '',
+        startDate: startDate ?? '',
+        endDate: endDate ?? '',
+        backTo: backToParam ?? '',
+      },
       pageData,
     });
   }
 
-  // ── Batches view (default) ──────────────────────────────────
-  if (view === 'batches' || view !== 'create') {
-    const batchesPage = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  // Groups view moved to config page
+  if (view === 'groups') {
+    return redirect('/admin/settings/follow-up-config?tab=groups');
+  }
+
+  // ── Branches view (default for non-closers) ─────────────────
+  if (view === 'batches' || (view !== 'create' && view !== 'orders')) {
     const batchesPeriodAllTime = url.searchParams.get('period') === 'all_time';
-    // Default to this month if no date params and not all-time
     const now = new Date();
     const defaultStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -80,35 +186,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const startDate = batchesPeriodAllTime ? '' : (url.searchParams.get('startDate') || defaultStart);
     const endDate = batchesPeriodAllTime ? '' : (url.searchParams.get('endDate') || defaultEnd);
 
-    const emptyBatches = { batches: [] as Array<{ id: string; name: string; source: string; branchName: string | null; createdByName: string | null; orderCount: number; confirmed: number; delivered: number; deliveredRevenue: string; confirmationRate: number; deliveryRate: number; createdAt: string }>, pagination: { page: 1, limit: 20, total: 0, totalPages: 1 } };
-    type GroupItem = { id: string; name: string; createdByName: string | null; memberCount: number; members: Array<{ userId: string; userName: string }>; createdAt: string };
-    type CloserWithBranchesItem = { agentId: string; agentName: string; branches: Array<{ branchId: string; branchName: string }> };
+    const branchInput = { ...(startDate && { startDate }), ...(endDate && { endDate }) };
     const batchesData = (async () => {
       try {
-        const [batchesRes, groupsRes, closersRes] = await Promise.all([
-          apiRequest<unknown>(
-            `/trpc/orders.listFollowUpBatches?input=${encodeURIComponent(JSON.stringify({ page: batchesPage, limit: 20, ...(startDate && { startDate }), ...(endDate && { endDate }) }))}`,
-            { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
-          ),
-          apiRequest<unknown>('/trpc/orders.listFollowUpGroups', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
-          apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches', { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS }),
-        ]);
-        const batches = batchesRes.ok
-          ? ((batchesRes.data as { result?: { data?: typeof emptyBatches } })?.result?.data) ?? emptyBatches
-          : emptyBatches;
-        const groups: GroupItem[] = groupsRes.ok
-          ? ((groupsRes.data as { result?: { data?: GroupItem[] } })?.result?.data ?? [])
+        const res = await apiRequest<unknown>(
+          `/trpc/orders.listFollowUpBranches?input=${encodeURIComponent(JSON.stringify(branchInput))}`,
+          { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+        );
+        const branches: FollowUpBranchRow[] = res.ok
+          ? ((res.data as { result?: { data?: FollowUpBranchRow[] } })?.result?.data ?? [])
           : [];
-        const closers: CloserWithBranchesItem[] = closersRes.ok
-          ? ((closersRes.data as { result?: { data?: CloserWithBranchesItem[] } })?.result?.data ?? [])
-          : [];
-        return { ...batches, groups, closers };
+        return { branches };
       } catch {
-        return { ...emptyBatches, groups: [] as GroupItem[], closers: [] as CloserWithBranchesItem[] };
+        return { branches: [] as FollowUpBranchRow[] };
       }
     })();
     return defer({
-      shell: { view: 'batches' as const, page: batchesPage, startDate, endDate, periodAllTime: batchesPeriodAllTime, isCloser, userId: user?.id },
+      shell: { view: 'batches' as const, startDate, endDate, periodAllTime: batchesPeriodAllTime, isCloser, userId: user?.id },
       batchesData,
     });
   }
@@ -476,7 +570,168 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // ── OrdersListPage bulk assign (maps to follow-up assign) ────
+  if (intent === 'bulkAssign') {
+    const orderIds = JSON.parse(formData.get('orderIds')?.toString() ?? '[]');
+    const csCloserIds = JSON.parse(formData.get('csCloserIds')?.toString() ?? '[]');
+    if (!orderIds.length || !csCloserIds.length) return json({ error: 'Orders and closers required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersBulkAssign', {
+      method: 'POST', cookie, body: { orderIds, closerIds: csCloserIds }, timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to assign') }, { status: safeStatus(res.status) });
+    const data = (res.data as { result?: { data?: { assigned?: number; sameCloserSkipped?: string[] } } })?.result?.data;
+    const skipped = data?.sameCloserSkipped?.length ?? 0;
+    return json({
+      success: true,
+      assigned: data?.assigned ?? 0,
+      message: skipped > 0
+        ? `Assigned ${data?.assigned ?? 0} orders. ${skipped} skipped (same closer as original).`
+        : `Assigned ${data?.assigned ?? 0} orders.`,
+    });
+  }
+
+  // ── OrdersListPage bulk transition (maps to follow-up status transition) ──
+  if (intent === 'bulkTransition') {
+    const orderIds: string[] = JSON.parse(formData.get('orderIds')?.toString() ?? '[]');
+    const newStatus = formData.get('newStatus')?.toString() ?? '';
+    const reason = formData.get('reason')?.toString() ?? undefined;
+    if (!orderIds.length || !newStatus) return json({ error: 'Orders and status required' }, { status: 400 });
+    const results = await Promise.all(
+      orderIds.map((orderId: string) =>
+        apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+          method: 'POST', cookie,
+          body: { orderId, newStatus, ...(reason ? { note: reason } : {}) },
+          timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+        }).then((res) => res.ok).catch(() => false),
+      ),
+    );
+    const succeeded = results.filter(Boolean).length;
+    const failed = results.length - succeeded;
+    return json({
+      success: succeeded > 0,
+      message: failed > 0
+        ? `${succeeded} succeeded, ${failed} failed.`
+        : `${succeeded} orders updated.`,
+      succeeded,
+      failed,
+    });
+  }
+
+  // ── Move orders to branch (bulk transfer from OrdersListPage) ──
+  if (intent === 'moveOrdersToBranch') {
+    const orderIds: string[] = JSON.parse(formData.get('orderIds')?.toString() ?? '[]');
+    const targetBranchId = formData.get('targetBranchId')?.toString();
+    if (!orderIds.length || !targetBranchId) return json({ error: 'Orders and branch required' }, { status: 400 });
+    const results = await Promise.all(
+      orderIds.map((orderId: string) =>
+        apiRequest<unknown>('/trpc/orders.transferFollowUpOrder', {
+          method: 'POST', cookie, body: { orderId, targetBranchId },
+          timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+        }).then((res) => res.ok).catch(() => false),
+      ),
+    );
+    const succeeded = results.filter(Boolean).length;
+    const failed = results.length - succeeded;
+    return json({
+      success: succeeded > 0,
+      succeeded,
+      failed,
+      message: failed > 0
+        ? `Moved ${succeeded} orders. ${failed} failed.`
+        : `Moved ${succeeded} orders to new branch.`,
+    });
+  }
+
+  // ── Transfer follow-up order to another branch ───────────────
+  if (intent === 'transferFollowUpOrder') {
+    const orderId = formData.get('orderId')?.toString();
+    const targetBranchId = formData.get('targetBranchId')?.toString();
+    if (!orderId || !targetBranchId) return json({ error: 'Order ID and target branch required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/orders.transferFollowUpOrder', {
+      method: 'POST', cookie, body: { orderId, targetBranchId },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to transfer') }, { status: safeStatus(res.status) });
+    return json({ success: true, message: 'Order transferred to new branch' });
+  }
+
+  // ── OrdersListPage inline assign — routes to follow-up assign ──
+  if (intent === 'assignToCS') {
+    const orderId = formData.get('orderId')?.toString();
+    const closerId = formData.get('toCsAgentId')?.toString();
+    if (!orderId || !closerId) return json({ error: 'Order ID and closer ID required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersAssign', {
+      method: 'POST', cookie, body: { orderId, closerId },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to assign') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  // ── Follow-up orders single assign (with same-closer check) ──
+  if (intent === 'assignFollowUpOrder') {
+    const orderId = formData.get('orderId')?.toString();
+    const closerId = formData.get('closerId')?.toString();
+    const force = formData.get('force') === 'true';
+    if (!orderId || !closerId) return json({ error: 'Order ID and closer ID required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersAssign', {
+      method: 'POST', cookie, body: { orderId, closerId, force },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to assign') }, { status: safeStatus(res.status) });
+    const data = (res.data as { result?: { data?: { sameCloserWarning?: boolean; originalCloserName?: string; message?: string; success?: boolean } } })?.result?.data;
+    if (data?.sameCloserWarning) {
+      return json({ sameCloserWarning: true, originalCloserName: data.originalCloserName, message: data.message });
+    }
+    return json({ success: true, message: 'Order assigned' });
+  }
+
+  // ── Follow-up orders bulk assign ──────────────────────────────
+  if (intent === 'bulkAssignFollowUpOrders') {
+    const orderIds = JSON.parse(formData.get('orderIds')?.toString() ?? '[]');
+    const closerIds = JSON.parse(formData.get('closerIds')?.toString() ?? '[]');
+    const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersBulkAssign', {
+      method: 'POST', cookie, body: { orderIds, closerIds },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to assign') }, { status: safeStatus(res.status) });
+    const data = (res.data as { result?: { data?: { assigned?: number; sameCloserSkipped?: string[] } } })?.result?.data;
+    const skipped = data?.sameCloserSkipped?.length ?? 0;
+    const msg = skipped > 0
+      ? `Assigned ${data?.assigned ?? 0} orders. ${skipped} skipped (same closer as original).`
+      : `Assigned ${data?.assigned ?? 0} orders.`;
+    return json({ success: true, assigned: data?.assigned ?? 0, message: msg });
+  }
+
+  // ── OrdersListPage single transition — routes to follow-up transition ──
+  if (intent === 'transition') {
+    const orderId = formData.get('orderId')?.toString();
+    const newStatus = formData.get('newStatus')?.toString();
+    const reason = formData.get('reason')?.toString() || undefined;
+    if (!orderId || !newStatus) return json({ error: 'Order ID and status required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+      method: 'POST', cookie,
+      body: { orderId, newStatus, ...(reason ? { note: reason } : {}) },
+      timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Transition failed') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const isResponse = isRouteErrorResponse(error);
+  const status = isResponse ? error.status : 500;
+  const errorData = isResponse ? error.data : error instanceof Error ? error.message : undefined;
+  return (
+    <AdminErrorBoundary
+      error={error}
+      isResponse={isResponse}
+      status={status}
+      errorData={errorData}
+      homePath="/admin"
+      homeLabel="Dashboard"
+    />
+  );
 }
 
 export default function FollowUpRoute() {
@@ -485,37 +740,89 @@ export default function FollowUpRoute() {
   const shell = loaderData.shell;
   const view: string = shell?.view ?? 'batches';
 
-  if (view === 'groups') {
-    type GroupsBundle = { groups: FollowUpGroupItem[]; closers: CloserWithBranches[] };
+  if (view === 'orders') {
+    type OrdersBundle = {
+      orders: Order[];
+      total: number;
+      totalPages: number;
+      statusCounts: Record<string, number>;
+      csClosersForFilter: Array<{ agentId: string; agentName: string }>;
+      branchesForMove: Array<{ id: string; name: string }>;
+      myWorkload: { agentId: string; agentName: string; capacity: number; pendingCount: number; todayClosesCount?: number; lastActionAt: string | null } | null;
+      branchName: string;
+    };
+    const baseShellProps = {
+      page: shell?.page ?? 1,
+      limit: shell?.perPage ?? 50,
+      statusFilter: shell?.status ?? '',
+      searchFilter: shell?.search ?? '',
+      sortBy: shell?.sortBy ?? 'createdAt',
+      sortOrder: shell?.sortOrder ?? 'desc',
+      isCSCloser: shell?.isCloser ?? false,
+      showCSCloserColumn: !shell?.isCloser,
+      userRole: shell?.userRole ?? '',
+      currentUserId: shell?.userId ?? '',
+      canBulkPick: !shell?.isCloser,
+      canAssignDirectly: !shell?.isCloser,
+      orderDetailFrom: 'followup' as const,
+      backTo: shell?.backTo || (shell?.isCloser ? undefined : '/admin/cs/follow-up'),
+      detailBasePath: '/admin/orders',
+      hideOfflineAndCartStats: true,
+      filters: {
+        startDate: shell?.startDate ?? '',
+        endDate: shell?.endDate ?? '',
+        periodAllTime: false,
+      },
+    };
     return (
-      <CachedAwait<GroupsBundle>
-        resolve={loaderData.pageData as Promise<GroupsBundle>}
-        fallback={<FollowUpGroupsPage groups={[]} closers={[]} deferredLoading />}
+      <CachedAwait<OrdersBundle>
+        resolve={loaderData.pageData as Promise<OrdersBundle>}
+        fallback={
+          <FollowUpOrdersLoadingShell
+            pageTitle="Follow-Up Orders"
+            pageDescription="Orders pulled by follow-up rules for re-engagement."
+            backTo={baseShellProps.backTo}
+          />
+        }
         loaderShell={{ shell }}
         deferredKey="pageData"
       >
-        {(data) => <FollowUpGroupsPage groups={data.groups} closers={data.closers} />}
+        {(data) => {
+          const resolvedBranchName = (data as OrdersBundle).branchName ?? '';
+          const pageTitle = resolvedBranchName ? `Follow-Up · ${resolvedBranchName}` : 'Follow-Up Orders';
+          const pageDescription = resolvedBranchName ? `Follow-up orders for ${resolvedBranchName}.` : 'Orders pulled by follow-up rules for re-engagement.';
+          return (
+          <OrdersListPage
+            orders={data.orders ?? []}
+            total={data.total ?? 0}
+            totalPages={data.totalPages ?? 1}
+            statusCounts={data.statusCounts ?? {}}
+            csClosersForFilter={data.csClosersForFilter ?? []}
+            branchesForMove={data.branchesForMove ?? []}
+            myWorkload={data.myWorkload ?? null}
+            excludeStatuses={['REMITTED', 'DELETED']}
+            pageTitle={pageTitle}
+            pageDescription={pageDescription}
+            {...baseShellProps}
+          />
+          );
+        }}
       </CachedAwait>
     );
   }
 
   if (view === 'batches') {
-    type BatchesBundle = FollowUpBatchesPageData & { groups: FollowUpGroupItem[]; closers: CloserWithBranches[] };
-    const batchesPage: number = shell?.page ?? 1;
+    type BranchesBundle = { branches: FollowUpBranchRow[] };
     return (
-      <CachedAwait<BatchesBundle>
-        resolve={loaderData.batchesData as Promise<BatchesBundle>}
+      <CachedAwait<BranchesBundle>
+        resolve={loaderData.batchesData as Promise<BranchesBundle>}
         fallback={
           <FollowUpBatchesPage
-            batches={[]}
-            pagination={{ page: 1, limit: 20, total: 0, totalPages: 1 }}
-            page={batchesPage}
+            branches={[]}
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
             periodAllTime={shell?.periodAllTime ?? false}
             isCloser={shell?.isCloser ?? false}
-            groups={[]}
-            closers={[]}
             deferredLoading
           />
         }
@@ -524,8 +831,7 @@ export default function FollowUpRoute() {
       >
         {(data) => (
           <FollowUpBatchesPage
-            {...data}
-            page={batchesPage}
+            branches={data.branches}
             startDate={shell?.startDate ?? ''}
             endDate={shell?.endDate ?? ''}
             periodAllTime={shell?.periodAllTime ?? false}

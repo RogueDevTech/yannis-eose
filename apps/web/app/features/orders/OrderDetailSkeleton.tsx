@@ -62,23 +62,24 @@ export function OrderDetailSkeleton() {
             </div>
           </div>
 
-          {/* Order Items */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-app-fg mb-3">Order Items</h2>
-            <div className="space-y-2">
+          {/* Order Items — compact horizontal rows */}
+          <div className="card !p-0 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-app-border flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-app-fg">Order Items</h2>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-xs text-app-fg-muted">Total:</span>
+                <Pulse className="h-4 w-16" />
+              </div>
+            </div>
+            <div className="divide-y divide-app-border">
               {Array.from({ length: 2 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-app-border bg-app-elevated px-3 py-2.5"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Pulse className="h-10 w-10 rounded-lg" />
-                    <div className="min-w-0 space-y-1.5">
-                      <Pulse className="h-4 w-44" />
-                      <Pulse className="h-3 w-24" />
-                    </div>
+                <div key={i} className="px-4 py-2 flex items-center gap-3 min-w-0">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Pulse className="h-4 w-40" />
+                    <Pulse className="h-3 w-20" />
                   </div>
-                  <Pulse className="h-4 w-16" />
+                  <Pulse className="h-4 w-16 shrink-0" />
+                  <Pulse className="h-3 w-8 shrink-0" />
                 </div>
               ))}
             </div>

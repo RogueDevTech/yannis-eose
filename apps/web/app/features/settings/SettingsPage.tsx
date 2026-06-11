@@ -90,6 +90,8 @@ interface SettingsPageProps {
   voipState?: SettingsVoipState | null;
   /** Per-user notification preferences (visible to all roles). */
   myNotificationPrefs?: MyNotificationPrefs | null;
+  /** Group name shown for SuperAdmin when scoped to a branch group. */
+  activeGroupName?: string | null;
 }
 
 export type SettingsTabId =
@@ -288,6 +290,7 @@ export function SettingsPage({
   notificationEmailConfig,
   voipState,
   myNotificationPrefs,
+  activeGroupName,
 }: SettingsPageProps) {
   const fetcher = useFetcher();
   const location = useLocation();
@@ -888,6 +891,17 @@ export function SettingsPage({
 
       {/* System Tab — grouped form: toggle VOIP, Sales routing + distribution then submit once */}
       {activeTab === 'system' && (
+        <div className="space-y-4">
+          {activeGroupName && user?.role === 'SUPER_ADMIN' && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800">
+              <svg className="w-4 h-4 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21" />
+              </svg>
+              <p className="text-sm font-medium text-brand-700 dark:text-brand-300">
+                Settings for: <strong>{activeGroupName}</strong>
+              </p>
+            </div>
+          )}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {isSuperAdmin ? (
             <fetcher.Form method="post" className="contents" ref={systemFormRef}>
@@ -994,9 +1008,9 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">Sales routing — which branch?</h3>
+                        <h3 className="text-lg font-semibold text-app-fg">Sales routing</h3>
                         <p className="text-sm text-app-fg-muted">
-                          Decides which Sales branch handles each new marketing order. Marketing attribution stays on the funnel; only the servicing Sales branch changes.
+                          Which branch handles each new marketing order.
                         </p>
                       </div>
                     </div>
@@ -1030,9 +1044,9 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS dispatch — which closer?</h3>
+                        <h3 className="text-lg font-semibold text-app-fg">CS dispatch</h3>
                         <p className="text-sm text-app-fg-muted">
-                          Once a CS branch is picked by routing, decides which closer in that branch takes the order. Org-wide default; per-squad overrides available on each branch.
+                          Which closer in the branch takes the order.
                         </p>
                       </div>
                     </div>
@@ -1150,6 +1164,42 @@ export function SettingsPage({
                 </Collapsible>
               </div>
 
+              {/* Follow-up order config — auto-pull stale orders into follow-up pipeline */}
+              <div className="card lg:col-span-2">
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">Follow up order config</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          Auto-pull stale orders into follow-up for CS to rework.
+                        </p>
+                      </div>
+                    </div>
+                  }
+                >
+                <div className="rounded-lg border border-app-border p-4">
+                  <p className="text-sm text-app-fg-muted">
+                    Define rules like <strong className="text-app-fg">"Confirmed orders older than 7 days"</strong> and the system auto-pulls matching orders at midnight. Source orders get frozen. HoCS assigns to closers from the follow-up queue.
+                  </p>
+                  <p className="mt-3">
+                    <Link
+                      to="/admin/settings/follow-up-config"
+                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Open follow up order config
+                    </Link>
+                  </p>
+                </div>
+                </Collapsible>
+              </div>
+
               {/* Marketing Profitability — target ROAS + green/red threshold */}
               <div className="card lg:col-span-2">
                 <Collapsible
@@ -1222,6 +1272,44 @@ export function SettingsPage({
                 </div>
                 </Collapsible>
               </div>
+
+              {/* Company Groups — multi-company boundary. SuperAdmin only. */}
+              {user?.role === 'SUPER_ADMIN' && (
+              <div className="card lg:col-span-2">
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">Company groups</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          Group branches into companies for data isolation.
+                        </p>
+                      </div>
+                    </div>
+                  }
+                >
+                <div className="rounded-lg border border-app-border p-4">
+                  <p className="text-sm text-app-fg-muted">
+                    Each group acts as a company boundary. Products, settings, and commission plans are isolated per group. Users see branches as normal.
+                  </p>
+                  <p className="mt-3">
+                    <Link
+                      to="/admin/settings/branch-groups"
+                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Manage company groups
+                    </Link>
+                  </p>
+                </div>
+                </Collapsible>
+              </div>
+              )}
 
               <div className="card lg:col-span-2 pt-4 border-t border-app-border">
                 <Button
@@ -1311,6 +1399,7 @@ export function SettingsPage({
               </div>
             </>
           )}
+        </div>
         </div>
       )}
 

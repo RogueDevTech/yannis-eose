@@ -3,6 +3,7 @@ import { invoiceStatusEnum, approvalRequestTypeEnum, approvalStatusEnum, settlem
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { orders } from './orders';
 import { users } from './users';
+import { branchGroups } from './branch-groups';
 
 // Table 16: invoices — sequential billing
 export const invoices = pgTable('invoices', {
@@ -51,6 +52,8 @@ export const budgets = pgTable('budgets', {
 // Table 22: settlement_configs — HR settlement window configuration
 export const settlementConfigs = pgTable('settlement_configs', {
   id: uuidv7Pk(),
+  /** Branch group this config belongs to. CEO directive 2026-06-10. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   windowType: settlementWindowEnum('window_type').notNull(),
   startDay: integer('start_day').default(1).notNull(), // day of week (1=Mon) or month
   createdBy: uuid('created_by').notNull().references(() => users.id),

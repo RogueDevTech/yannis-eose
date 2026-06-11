@@ -544,6 +544,8 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
         permissions: bundle.permissions,
         logisticsLocationId: bundle.logisticsLocationId,
         currentBranchId: bundle.currentBranchId,
+        selectedBranchIds: bundle.selectedBranchIds,
+        activeGroupId: bundle.activeGroupId,
         branchIds: bundle.branchIds,
         appTheme: bundle.appTheme,
         fontScale: bundle.fontScale,
@@ -575,6 +577,10 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
       permissions?: string[];
       logisticsLocationId?: string | null;
       currentBranchId?: string | null;
+      /** Multi-branch selection — CEO directive 2026-06-10. */
+      selectedBranchIds?: string[] | null;
+      /** Active branch group — CEO directive 2026-06-10. */
+      activeGroupId?: string | null;
       /** All branches this user has membership in — used by `ensureBranchScopeOrRedirect` to skip the modal for single-branch heads. */
       branchIds?: string[];
       appTheme?: string | null;

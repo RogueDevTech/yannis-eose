@@ -20,6 +20,19 @@ export interface SessionUser {
   /** Active branch for multi-branch context. NULL = cross-branch (SuperAdmin). */
   currentBranchId?: string | null;
   /**
+   * Multi-branch selection — when a global user picks a subset of branches
+   * (e.g. Lagos + Abuja) instead of "All" or a single branch.
+   * NULL = no multi-select active (use currentBranchId semantics).
+   * CEO directive 2026-06-10.
+   */
+  selectedBranchIds?: string[] | null;
+  /**
+   * The branch group ("company") the user is currently scoped to, resolved
+   * from their currentBranchId → branch.group_id on switch. Used to scope
+   * products, system settings, commission plans, etc. CEO directive 2026-06-10.
+   */
+  activeGroupId?: string | null;
+  /**
    * The user's branch memberships, captured at login. Used by
    * `requireBranchScopeForGlobalAdminMutations` so a single-branch org-wide
    * head doesn't get blocked with "Branch context required" — we auto-fall

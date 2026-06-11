@@ -649,7 +649,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     for (const c of res.setCookies) {
       headers.append('Set-Cookie', c);
     }
-    throw redirect('/admin', { headers });
+    throw redirect('/admin?_reload=1', { headers });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });

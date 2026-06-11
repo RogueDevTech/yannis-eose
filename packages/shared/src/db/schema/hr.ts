@@ -1,4 +1,5 @@
 import { uuid, pgTable, text, numeric, jsonb, timestamp, integer, date } from 'drizzle-orm/pg-core';
+import { branchGroups } from './branch-groups';
 import {
   payoutStatusEnum,
   adjustmentCategoryEnum,
@@ -13,6 +14,8 @@ import { branches } from './branches';
 // Table 17: commission_plans — JSONB commission rules
 export const commissionPlans = pgTable('commission_plans', {
   id: uuidv7Pk(),
+  /** Branch group this plan belongs to. CEO directive 2026-06-10. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   /** When NULL, the plan is not a role default — staff must reference it via `users.commission_plan_id`. */
   role: userRoleEnum('role'),
   planName: text('plan_name').notNull(),

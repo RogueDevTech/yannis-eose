@@ -20,6 +20,16 @@ import {
   type ListOrdersInput,
   type ScheduleCalendarHeatInput,
   type OrderStatus,
+  createFollowUpRuleSchema,
+  updateFollowUpRuleSchema,
+  deleteFollowUpRuleSchema,
+  listFollowUpRulesSchema,
+  listFollowUpSyncLogsSchema,
+  listFollowUpOrdersSchema,
+  followUpOrderDetailSchema,
+  assignFollowUpOrderSchema,
+  bulkAssignFollowUpOrdersSchema,
+  transitionFollowUpOrderSchema,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -31,12 +41,14 @@ import { getProductsService } from './products.router';
 import { getLogisticsService } from './logistics.router';
 import { getCartService } from './cart.router';
 import { getInventoryService } from './inventory.router';
+import { getFinanceService } from './finance.router';
 import {
   OrdersService,
   type OrdersAggregateSupervisorScope,
 } from '../../orders/orders.service';
 import { CsOrderRoutingService } from '../../orders/cs-order-routing.service';
 import { TestOrderPurgeService } from '../../orders/test-order-purge.service';
+import { FollowUpConfigService } from '../../orders/follow-up-config.service';
 import type { VoipService } from '../../voip/voip.service';
 import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
@@ -49,6 +61,7 @@ let voipServiceInstance: VoipService | null = null;
 let ordersCacheService: CacheService | null = null;
 let csOrderRoutingInstance: CsOrderRoutingService | null = null;
 let testOrderPurgeInstance: TestOrderPurgeService | null = null;
+let followUpConfigInstance: FollowUpConfigService | null = null;
 
 export function setOrdersService(service: OrdersService) {
   ordersServiceInstance = service;
@@ -68,6 +81,17 @@ export function setOrdersCacheService(service: CacheService) {
 
 export function setTestOrderPurgeService(service: TestOrderPurgeService) {
   testOrderPurgeInstance = service;
+}
+
+export function setFollowUpConfigService(service: FollowUpConfigService) {
+  followUpConfigInstance = service;
+}
+
+export function getFollowUpConfigService(): FollowUpConfigService {
+  if (!followUpConfigInstance) {
+    throw new Error('FollowUpConfigService not initialized. Call setFollowUpConfigService() first.');
+  }
+  return followUpConfigInstance;
 }
 
 const ORDERS_AGG_TTL_SECONDS = 15;
@@ -2150,9 +2174,16 @@ export const ordersRouter = router({
     }),
 
   deleteFollowUpGroup: permissionProcedure('orders.followUp')
-    .input(z.object({ groupId: z.string().uuid() }))
+    .input(z.object({
+      groupId: z.string().uuid(),
+      transferToBranchId: z.string().uuid().optional(),
+      transferToGroupId: z.string().uuid().optional(),
+    }))
     .mutation(async ({ input }) => {
-      return getOrdersService().deleteFollowUpGroup(input.groupId);
+      return getOrdersService().deleteFollowUpGroup(input.groupId, {
+        branchId: input.transferToBranchId,
+        groupId: input.transferToGroupId,
+      });
     }),
 
   listFollowUpGroups: permissionProcedure('orders.followUp')
@@ -2182,5 +2213,201 @@ export const ordersRouter = router({
     }))
     .mutation(async ({ input }) => {
       return getOrdersService().bulkAssignBatchItems(input.itemIds, input.csCloserIds);
+    }),
+
+  // ── Follow-Up Config (Admin only) ─────────────────────────────────
+
+  followUpConfigListRules: permissionProcedure('orders.followUpConfig')
+    .input(listFollowUpRulesSchema)
+    .query(async ({ input }) => {
+      return getFollowUpConfigService().listRules(input.enabledOnly);
+    }),
+
+  followUpConfigCreateRule: permissionProcedure('orders.followUpConfig')
+    .input(createFollowUpRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().createRule(ctx.user, input);
+    }),
+
+  followUpConfigUpdateRule: permissionProcedure('orders.followUpConfig')
+    .input(updateFollowUpRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().updateRule(ctx.user, input);
+    }),
+
+  followUpConfigDeleteRule: permissionProcedure('orders.followUpConfig')
+    .input(deleteFollowUpRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().deleteRule(ctx.user, input.ruleId);
+    }),
+
+  followUpConfigDryRun: permissionProcedure('orders.followUpConfig')
+    .query(async () => {
+      return getFollowUpConfigService().dryRunSync();
+    }),
+
+  followUpConfigSyncNow: permissionProcedure('orders.followUpConfig')
+    .mutation(async ({ ctx }) => {
+      return getFollowUpConfigService().runSync('manual', ctx.user.id);
+    }),
+
+  followUpConfigListSyncLogs: permissionProcedure('orders.followUpConfig')
+    .input(listFollowUpSyncLogsSchema)
+    .query(async ({ input }) => {
+      return getFollowUpConfigService().listSyncLogs(input.page, input.limit);
+    }),
+
+  transferFollowUpOrder: permissionProcedure('orders.followUp')
+    .input(z.object({ orderId: z.string().uuid(), targetBranchId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().transferFollowUpOrder(input.orderId, input.targetBranchId, ctx.user);
+    }),
+
+  unfreezeOrder: permissionProcedure('orders.followUpConfig')
+    .input(z.object({ orderId: z.string().uuid(), reason: z.string().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().unfreezeOrder(input.orderId, ctx.user, input.reason);
+    }),
+
+  // ── Follow-Up Branches Summary ─────────────────────────────────────
+
+  listFollowUpBranches: permissionProcedure('orders.followUp')
+    .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional(), branchId: z.string().uuid().optional() }))
+    .query(async ({ input, ctx }) => {
+      return getFollowUpConfigService().listFollowUpBranches({
+        ...input,
+        branchId: input.branchId ?? ctx.currentBranchId ?? undefined,
+      });
+    }),
+
+  // ── Follow-Up Orders (HoCS + Closer) ──────────────────────────────
+
+  followUpOrdersList: permissionProcedure('orders.followUp')
+    .input(listFollowUpOrdersSchema)
+    .query(async ({ input, ctx }) => {
+      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId);
+    }),
+
+  followUpOrdersStatusCounts: permissionProcedure('orders.followUp')
+    .input(z.object({
+      branchId: z.string().uuid().optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+    }).optional().default({}))
+    .query(async ({ input, ctx }) => {
+      const assignedCsId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
+      const branchId = input.branchId ?? ctx.currentBranchId ?? undefined;
+      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate);
+    }),
+
+  /** Lightweight follow-up counts for dashboard stat strips (assigned + delivered). */
+  followUpDashboardCounts: authedProcedure
+    .query(async ({ ctx }) => {
+      const role = ctx.user.role;
+      const isCloser = role === 'CS_CLOSER';
+      return getFollowUpConfigService().getFollowUpDashboardCounts({
+        assignedCsId: isCloser ? ctx.user.id : undefined,
+        branchId: ctx.currentBranchId ?? undefined,
+      });
+    }),
+
+  followUpOrdersUpdate: permissionProcedure('orders.followUp')
+    .input(z.object({
+      orderId: z.string().uuid(),
+      customerName: z.string().min(1).optional(),
+      deliveryAddress: z.string().nullish(),
+      deliveryState: z.string().nullish(),
+      deliveryNotes: z.string().nullish(),
+      customerEmail: z.string().nullish(),
+      preferredDeliveryDate: z.string().nullish(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { orderId, ...updates } = input;
+      return getFollowUpConfigService().updateFollowUpOrder(orderId, updates, ctx.user);
+    }),
+
+  followUpOrdersDetail: permissionProcedure('orders.followUp')
+    .input(followUpOrderDetailSchema)
+    .query(async ({ input }) => {
+      return getFollowUpConfigService().getFollowUpOrderDetail(input.id);
+    }),
+
+  followUpOrdersAssign: permissionProcedure('orders.followUp')
+    .input(assignFollowUpOrderSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().assignFollowUpOrder(input.orderId, input.closerId, ctx.user, input.force ?? false);
+    }),
+
+  followUpOrdersBulkAssign: permissionProcedure('orders.followUp')
+    .input(bulkAssignFollowUpOrdersSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().bulkAssignFollowUpOrders(input.orderIds, input.closerIds, ctx.user);
+    }),
+
+  addFollowUpOrderComment: authedProcedure
+    .input(z.object({ orderId: z.string().uuid(), comment: z.string().min(1).max(2000) }))
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().addFollowUpOrderComment(input.orderId, input.comment, ctx.user);
+    }),
+
+  followUpEnsureInvoice: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+      await getFinanceService().ensureInvoiceForOrder({
+        order: {
+          id: fuDetail.id,
+          confirmedAt: fuDetail.confirmedAt ?? new Date(),
+          customerName: fuDetail.customerName,
+          customerAddress: fuDetail.customerAddress ?? null,
+          orderItems: fuDetail.items.map((it: { quantity: number; unitPrice: string; productName?: string | null; productId: string }) => ({
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            productName: it.productName ?? null,
+            productId: it.productId,
+          })),
+        },
+        actorId: ctx.user.id,
+      });
+      return { success: true };
+    }),
+
+  followUpOrdersTransition: permissionProcedure('orders.followUp')
+    .input(transitionFollowUpOrderSchema)
+    .mutation(async ({ input, ctx }) => {
+      const result = await getFollowUpConfigService().transitionFollowUpOrderStatus(
+        input.orderId,
+        input.newStatus,
+        ctx.user,
+        input.note,
+        input.metadata,
+      );
+
+      // Auto-generate invoice on CONFIRMED — awaited so it's ready when the page reloads
+      if (input.newStatus === 'CONFIRMED') {
+        try {
+          const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+          await getFinanceService().ensureInvoiceForOrder({
+            order: {
+              id: fuDetail.id,
+              confirmedAt: fuDetail.confirmedAt ?? new Date(),
+              customerName: fuDetail.customerName,
+              customerAddress: fuDetail.customerAddress ?? null,
+              orderItems: fuDetail.items.map((it: { quantity: number; unitPrice: string; productName?: string | null; productId: string }) => ({
+                quantity: it.quantity,
+                unitPrice: it.unitPrice,
+                productName: it.productName ?? null,
+                productId: it.productId,
+              })),
+            },
+            actorId: ctx.user.id,
+          });
+        } catch (err) {
+          // Non-critical — user can generate manually via the button
+          console.warn(`[FollowUpInvoice] Auto-generate failed for ${input.orderId}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      return result;
     }),
 });

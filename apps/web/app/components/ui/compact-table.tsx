@@ -30,8 +30,8 @@
  *   />
  */
 
-import { Fragment, type ReactNode } from 'react';
-import { Link } from '@remix-run/react';
+import { Fragment, useCallback, type ReactNode } from 'react';
+import { Link, useNavigate } from '@remix-run/react';
 import type { LinkProps } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -152,6 +152,13 @@ export interface CompactTableProps<T> {
   footer?: ReactNode;
   /** Optional second row under each data row (e.g. payroll adjustments sub-list). */
   renderRowDetail?: (row: T) => ReactNode;
+  /**
+   * Makes each desktop row clickable with hover effect + cursor pointer.
+   * Return a URL string to navigate on click, or return undefined/null to
+   * skip that row. Clicks on interactive elements (buttons, links, inputs,
+   * checkboxes, selects) are ignored — they keep their own behaviour.
+   */
+  rowHref?: (row: T, index: number) => string | undefined | null;
 }
 
 const ALIGN_CLASS: Record<CompactTableAlign, string> = {
@@ -307,7 +314,9 @@ export function CompactTable<T>({
   selection,
   footer,
   renderRowDetail,
+  rowHref,
 }: CompactTableProps<T>) {
+  const navigate = useNavigate();
   const hasRows = rows.length > 0;
   const showOverlay = loading && loadingVariant === 'overlay';
   const colCount = columns.length + (selection ? 1 : 0);
@@ -561,9 +570,39 @@ export function CompactTable<T>({
           {rows.map((row, i) => {
             const rowExtra = rowClassName?.(row, i) ?? '';
             const detailContent = renderRowDetail?.(row);
+            const explicitHref = rowHref?.(row, i);
+            // Auto-clickable: if rowHref is provided use it; otherwise the row
+            // auto-discovers the first <a> inside it on click. Every row gets
+            // the hover treatment so the UX is consistent across all tables.
+            const hasExplicitHref = !!explicitHref;
             return (
               <Fragment key={String(rowKey(row, i))}>
-                <tr className={['bg-transparent transition-colors', rowExtra].filter(Boolean).join(' ')}>
+                <tr
+                  className={[
+                    'bg-transparent transition-opacity cursor-pointer hover:opacity-80',
+                    rowExtra,
+                  ].filter(Boolean).join(' ')}
+                  onClick={(e) => {
+                    // Don't navigate when clicking interactive elements inside the row
+                    const target = e.target as HTMLElement;
+                    if (target.closest('a, button, input, select, textarea, [role="button"], [data-no-row-click]')) return;
+
+                    // Explicit rowHref takes precedence
+                    if (hasExplicitHref) {
+                      navigate(explicitHref!);
+                      return;
+                    }
+
+                    // Auto-discover: find the first <a> with an href in the row
+                    const tr = (e.currentTarget as HTMLElement);
+                    const firstLink = tr.querySelector('a[href]') as HTMLAnchorElement | null;
+                    if (firstLink?.href) {
+                      // Use pathname + search to stay within the SPA
+                      const url = new URL(firstLink.href, window.location.origin);
+                      navigate(url.pathname + url.search);
+                    }
+                  }}
+                >
                   {selection ? (
                     <td className="px-2 py-[5px] align-middle">{renderSelectionCell(row, i)}</td>
                   ) : null}
