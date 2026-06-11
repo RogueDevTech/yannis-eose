@@ -68,7 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const canCreateOffline = true;
   // Gates phone-reveal + recover on the abandoned-cart detail modal.
-  const canManageAbandonedCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
+  const canManageAbandonedCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT' || user.role === 'HEAD_OF_CS';
   // Cancellation is Head of CS / Branch Admin / Admin only (CEO directive 2026-05-20).
   const canCancelOrders =
     user.role === 'SUPER_ADMIN' ||

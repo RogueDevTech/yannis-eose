@@ -44,7 +44,7 @@ function viewerCanSeePermissionRequests(user: {
   role: string;
   permissions?: string[];
 }): boolean {
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT') return true;
   const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   if (APPROVER_CODES.some((code) => perms.includes(canonicalPermissionCode(code)))) {
     return true;

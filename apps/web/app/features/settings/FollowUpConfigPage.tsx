@@ -569,26 +569,29 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
 
       {/* ── View Rule Detail Modal ──────────────────────────── */}
       {viewRule && (
-        <Modal open onClose={() => setViewRule(null)} maxWidth="max-w-md">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-app-fg">{viewRule.name}</h3>
-              <StatusBadge status={viewRule.enabled ? 'ACTIVE' : 'INACTIVE'} />
-            </div>
-            <div className="divide-y divide-app-border">
-              <ViewRow label="Source Status" value={viewRule.sourceStatus === 'CART_ABANDONMENT' ? 'Cart Abandonment' : (STATUS_LABEL[viewRule.sourceStatus] ?? viewRule.sourceStatus)} />
-              <ViewRow label="Age Threshold" value={`${viewRule.ageThresholdDays} day${viewRule.ageThresholdDays !== 1 ? 's' : ''}`} />
-              {viewRule.maxAgeDays != null && (
-                <ViewRow label="Max Age" value={`${viewRule.maxAgeDays} day${viewRule.maxAgeDays !== 1 ? 's' : ''}`} />
-              )}
-              <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
-              <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
-              <ViewRow label="Priority" value={String(viewRule.priority)} />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setViewRule(null)}>Close</Button>
-              <Button size="sm" variant="primary" onClick={() => { setViewRule(null); openEdit(viewRule); }}>Edit</Button>
-            </div>
+        <Modal open onClose={() => setViewRule(null)} maxWidth="max-w-md" contentClassName="p-0 flex flex-col overflow-hidden min-h-0">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 border-b border-app-border">
+            <h3 className="text-lg font-semibold text-app-fg min-w-0 truncate">{viewRule.name}</h3>
+            <StatusBadge status={viewRule.enabled ? 'ACTIVE' : 'INACTIVE'} />
+          </div>
+
+          {/* Details */}
+          <div className="px-5 py-4 divide-y divide-app-border">
+            <ViewRow label="Source Status" value={viewRule.sourceStatus === 'CART_ABANDONMENT' ? 'Cart Abandonment' : (STATUS_LABEL[viewRule.sourceStatus] ?? viewRule.sourceStatus)} />
+            <ViewRow label="Age Threshold" value={`${viewRule.ageThresholdDays} day${viewRule.ageThresholdDays !== 1 ? 's' : ''}`} />
+            {viewRule.maxAgeDays != null && (
+              <ViewRow label="Max Age" value={`${viewRule.maxAgeDays} day${viewRule.maxAgeDays !== 1 ? 's' : ''}`} />
+            )}
+            <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
+            <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
+            <ViewRow label="Priority" value={String(viewRule.priority)} />
+          </div>
+
+          {/* Footer */}
+          <div className="flex justify-end gap-2 px-5 py-3 border-t border-app-border">
+            <Button size="sm" variant="secondary" onClick={() => setViewRule(null)}>Close</Button>
+            <Button size="sm" variant="primary" onClick={() => { setViewRule(null); openEdit(viewRule); }}>Edit</Button>
           </div>
         </Modal>
       )}
@@ -948,8 +951,8 @@ function GroupsAndBranchesTab({
 
 function ViewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-2.5 gap-4">
-      <span className="text-sm text-app-fg-muted">{label}</span>
+    <div className="flex items-center justify-between py-3 gap-6">
+      <span className="text-sm text-app-fg-muted shrink-0">{label}</span>
       <span className="text-sm font-medium text-app-fg text-right">{value}</span>
     </div>
   );
