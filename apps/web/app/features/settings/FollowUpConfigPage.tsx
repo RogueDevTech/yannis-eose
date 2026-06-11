@@ -362,7 +362,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                           View breakdown
                         </button>
                       ) : null}
-                      {l.totalPulled > 0 && !l.errorMessage && l.startedAt && (
+                      {l.totalPulled > 0 && l.startedAt && (
                         <Link
                           to={`/admin/cs/follow-up?view=orders&startDate=${new Date(l.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(l.startedAt).toISOString().slice(0, 10)}`}
                           className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
@@ -390,20 +390,21 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                     { key: 'pulled', header: 'Pulled', align: 'right', render: (l: SyncLog) => <span className="tabular-nums">{l.totalPulled}</span> },
                     {
                       key: 'details', header: 'Breakdown',
-                      render: (l: SyncLog) => {
-                        if (l.errorMessage) return <span className="text-danger-600 dark:text-danger-400 text-xs">{l.errorMessage}</span>;
-                        if (!l.ruleResults?.length) return <span className="text-xs text-app-fg-muted">—</span>;
-                        return (
-                          <button type="button" onClick={() => setBreakdownLog(l)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
-                            View breakdown
-                          </button>
-                        );
-                      },
+                      render: (l: SyncLog) => (
+                        <div className="space-y-0.5">
+                          {l.errorMessage && <span className="text-danger-600 dark:text-danger-400 text-xs block">{l.errorMessage}</span>}
+                          {l.ruleResults?.length ? (
+                            <button type="button" onClick={() => setBreakdownLog(l)} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                              View breakdown
+                            </button>
+                          ) : !l.errorMessage ? <span className="text-xs text-app-fg-muted">—</span> : null}
+                        </div>
+                      ),
                     },
                     {
                       key: 'actions', header: '', align: 'right',
                       render: (l: SyncLog) => {
-                        if (!l.totalPulled || l.errorMessage) return null;
+                        if (!l.totalPulled) return null;
                         const d = l.startedAt ? new Date(l.startedAt).toISOString().slice(0, 10) : '';
                         if (!d) return null;
                         return (
