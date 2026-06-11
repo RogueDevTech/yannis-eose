@@ -62,8 +62,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const branchId = url.searchParams.get('branchId') || undefined;
     const backToParam = url.searchParams.get('backTo') || undefined;
 
+    const isDeletedFilter = statusParam === 'DELETED';
     const listInput: Record<string, unknown> = { page, limit: perPage, sortBy, sortOrder };
-    if (statusParam) listInput.status = statusParam;
+    if (isDeletedFilter) {
+      listInput.showDeleted = true;
+    } else if (statusParam) {
+      listInput.status = statusParam;
+    }
     if (search) listInput.search = search;
     if (assignedCsId) listInput.assignedCsId = assignedCsId;
     if (unassignedOnly) listInput.unassignedOnly = true;
@@ -800,7 +805,7 @@ export default function FollowUpRoute() {
             csClosersForFilter={data.csClosersForFilter ?? []}
             branchesForMove={data.branchesForMove ?? []}
             myWorkload={data.myWorkload ?? null}
-            excludeStatuses={['REMITTED', 'DELETED']}
+            excludeStatuses={['REMITTED']}
             pageTitle={pageTitle}
             pageDescription={pageDescription}
             {...baseShellProps}

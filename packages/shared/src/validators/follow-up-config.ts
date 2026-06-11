@@ -92,6 +92,8 @@ export const listFollowUpOrdersSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  /** When true, show only soft-deleted follow-up orders (unfrozen originals). */
+  showDeleted: z.boolean().optional(),
 });
 
 export const followUpOrderDetailSchema = z.object({
