@@ -41,6 +41,8 @@ interface RawSessionBundlePayload {
   /** Bitmask-encoded permissions — see `@yannis/shared/permission-bitmask.ts`. */
   p: string;
   currentBranchId: string | null;
+  selectedBranchIds?: string[] | null;
+  activeGroupId?: string | null;
   branchIds: string[];
   appTheme: string | null;
   fontScale: string | null;

@@ -911,7 +911,7 @@ export function MarketingOrdersPage({
                       ];
                     })(),
                     {
-                      label: 'Open carts',
+                      label: 'Cart Abandonment',
                       value: activeSecondary.abandonedCartCount,
                       valueClassName:
                         activeSecondary.abandonedCartCount > 0
@@ -939,7 +939,7 @@ export function MarketingOrdersPage({
                   hideMobileSheet
                   badgeCount={ordersToolbarFilterBadge}
                   searchRow={
-                    <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
+                    <form onSubmit={handleSearchSubmit} className="flex min-w-0 w-full gap-2">
                       <SearchInput
                         placeholder="Search by name, order number, or ID..."
                         value={searchQuery}
@@ -1071,31 +1071,7 @@ export function MarketingOrdersPage({
                           wrapperClassName="w-full min-w-0 sm:w-44"
                         />
                       </div>
-                      <div className="relative">
-                        {(searchParams.get('orderSource') || '') !== '' && (
-                          <FilterDismiss onClear={() => {
-                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('orderSource'); n.set('page', '1'); return n; });
-                          }} />
-                        )}
-                        <FormSelect
-                          value={searchParams.get('orderSource') || 'ALL'}
-                          onChange={(e) => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('page', '1');
-                              if (e.target.value && e.target.value !== 'ALL') next.set('orderSource', e.target.value);
-                              else next.delete('orderSource');
-                              return next;
-                            });
-                          }}
-                          options={[
-                            { value: 'ALL', label: 'All sources' },
-                            { value: 'edge-form', label: 'Online orders' },
-                            { value: 'offline', label: 'Offline orders' },
-                          ]}
-                          wrapperClassName="w-full min-w-0 sm:w-40"
-                        />
-                      </div>
+                      {/* Source filter removed — only relevant on the Sales orders page */}
                     </>
                   }
                   sheetFilterBody={null}

@@ -3058,6 +3058,7 @@ function BranchOverviewPage({
 
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const branchDetailSurface = useFetcherActionSurface(fetcher);
+  const toggleStatusFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
@@ -3067,6 +3068,18 @@ function BranchOverviewPage({
     successMessage: 'Saved',
     skipErrorToast: editOpen || addMemberOpen,
   });
+  useFetcherToast(toggleStatusFetcher.data, {
+    successMessage: branch.status === 'ACTIVE' ? 'Branch deactivated' : 'Branch activated',
+  });
+
+  const isActive = branch.status === 'ACTIVE';
+  const isToggling = toggleStatusFetcher.state !== 'idle';
+  const handleToggleStatus = () => {
+    toggleStatusFetcher.submit(
+      { intent: 'update', branchId: branch.id, status: isActive ? 'INACTIVE' : 'ACTIVE' },
+      { method: 'post' },
+    );
+  };
 
   // Drop the cachedClientLoader entry the moment a submit starts so Remix's
   // auto-revalidation (which fires after the action completes) falls through
@@ -3160,6 +3173,18 @@ function BranchOverviewPage({
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusBadge status={branch.status} />
+                {canManageBranchPage && (
+                  <Button
+                    variant={isActive ? 'danger' : 'primary'}
+                    size="sm"
+                    onClick={handleToggleStatus}
+                    disabled={isToggling}
+                    loading={isToggling}
+                    loadingText={isActive ? 'Deactivating...' : 'Activating...'}
+                  >
+                    {isActive ? 'Deactivate' : 'Activate'}
+                  </Button>
+                )}
                 {canManageBranchPage ? (
                   <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}>
                     Edit
@@ -3177,6 +3202,17 @@ function BranchOverviewPage({
                 {canManageBranchPage && (
                   <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setAddMemberOpen(true); }}>
                     Add member
+                  </Button>
+                )}
+                {canManageBranchPage && (
+                  <Button
+                    variant={isActive ? 'danger' : 'primary'}
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => { closeSheet(); handleToggleStatus(); }}
+                    disabled={isToggling}
+                  >
+                    {isActive ? 'Deactivate branch' : 'Activate branch'}
                   </Button>
                 )}
               </>

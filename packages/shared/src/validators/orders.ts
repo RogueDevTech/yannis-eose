@@ -321,6 +321,8 @@ export const listOrdersSchema = z
     excludeFollowUp: z.boolean().optional(),
     /** When true, only return follow-up orders. Used by the "Follow Up" pseudo-status filter. */
     isFollowUp: z.boolean().optional(),
+    /** Filter by frozen status: 'frozen' = frozenForFollowUp true, 'active' = false, omit = all. */
+    frozenFilter: z.enum(['frozen', 'active']).optional(),
     sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount', 'preferredDeliveryDate']).default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).default('desc'),
   })

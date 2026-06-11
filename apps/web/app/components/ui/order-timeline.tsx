@@ -118,6 +118,27 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
     );
   }
 
+  // Follow-up order creation — make the source order ID a clickable link
+  if (event.eventType === 'ORDER_RECEIVED') {
+    const sourceOrderId = strMeta(m, 'sourceOrderId');
+    if (sourceOrderId && isUuid(sourceOrderId)) {
+      // Try metadata first, then extract from description text (e.g. "... from YNS-00007 ...")
+      const sourceOrderNumber = m?.sourceOrderNumber as number | undefined;
+      const descMatch = /YNS-(\d+)/.exec(event.description);
+      const orderLabel = sourceOrderNumber
+        ? `YNS-${String(sourceOrderNumber).padStart(5, '0')}`
+        : descMatch
+          ? descMatch[0]
+          : sourceOrderId.slice(0, 8);
+      return (
+        <>
+          Follow-up order created from{' '}
+          <TimelineLink to={`/admin/orders/${sourceOrderId}`}>{orderLabel}</TimelineLink>.
+        </>
+      );
+    }
+  }
+
   if (event.eventType === 'ORDER_AUTO_ASSIGNED') {
     const id = strMeta(m, 'agentId') ?? event.actorId;
     const match = /^Auto-assigned to (.+)$/.exec(event.description);
@@ -209,6 +230,23 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
           {prefix}
           <TimelineLink to={`/admin/orders/${winnerId}`}>{label}</TimelineLink>
           )
+        </>
+      );
+    }
+  }
+
+  // Graduation event — make the follow-up order number a clickable link
+  if (event.eventType === 'ORDER_DELIVERED' || event.eventType === 'ORDER_RECEIVED') {
+    const fuOrderId = strMeta(m, 'followUpOrderId');
+    const ynsMatch = /YNS-(\d+)/.exec(event.description);
+    if (fuOrderId && isUuid(fuOrderId) && ynsMatch) {
+      const prefix = event.description.slice(0, event.description.indexOf(ynsMatch[0]));
+      const suffix = event.description.slice(event.description.indexOf(ynsMatch[0]) + ynsMatch[0].length);
+      return (
+        <>
+          {prefix}
+          <TimelineLink to={`/admin/orders/${fuOrderId}?from=followup`}>{ynsMatch[0]}</TimelineLink>
+          {suffix}
         </>
       );
     }

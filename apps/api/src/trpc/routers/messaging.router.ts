@@ -465,7 +465,28 @@ export const messagingRouter = router({
           .limit(1),
       ]);
 
-      const order = orderRows[0];
+      let order = orderRows[0];
+      let isFollowUpOrder = false;
+      // Fall back to follow-up orders table if not found in regular orders.
+      if (!order) {
+        const fuRows = await db
+          .select({
+            id: schema.followUpOrders.id,
+            orderNumber: schema.followUpOrders.orderNumber,
+            customerName: schema.followUpOrders.customerName,
+            customerPhone: schema.followUpOrders.customerPhone,
+            deliveryAddress: schema.followUpOrders.deliveryAddress,
+            totalAmount: schema.followUpOrders.totalAmount,
+            paymentStatus: schema.followUpOrders.paymentStatus,
+            preferredDeliveryDate: schema.followUpOrders.preferredDeliveryDate,
+            branchId: schema.followUpOrders.servicingBranchId,
+          })
+          .from(schema.followUpOrders)
+          .where(eq(schema.followUpOrders.id, input.orderId))
+          .limit(1);
+        order = fuRows[0] ?? undefined;
+        if (order) isFollowUpOrder = true;
+      }
       const location = locationRows[0];
       const template = templateRows[0];
       if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
@@ -482,14 +503,23 @@ export const messagingRouter = router({
       }
 
       // Fetch order items for product_name / quantity placeholders (join products for the name).
-      const items = await db
-        .select({
-          productName: schema.products.name,
-          quantity: schema.orderItems.quantity,
-        })
-        .from(schema.orderItems)
-        .innerJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
-        .where(eq(schema.orderItems.orderId, order.id));
+      const items = isFollowUpOrder
+        ? await db
+            .select({
+              productName: schema.products.name,
+              quantity: schema.followUpOrderItems.quantity,
+            })
+            .from(schema.followUpOrderItems)
+            .innerJoin(schema.products, eq(schema.products.id, schema.followUpOrderItems.productId))
+            .where(eq(schema.followUpOrderItems.followUpOrderId, order.id))
+        : await db
+            .select({
+              productName: schema.products.name,
+              quantity: schema.orderItems.quantity,
+            })
+            .from(schema.orderItems)
+            .innerJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+            .where(eq(schema.orderItems.orderId, order.id));
 
       const renderedBody = resolvePlaceholders(template.body, {
         id: order.id,
@@ -503,36 +533,54 @@ export const messagingRouter = router({
         items,
       });
 
-      await db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(schema.outboundMessages)
-          .values({
-            orderId: order.id,
-            agentId: ctx.user.id,
-            channel: 'WHATSAPP_GROUP',
-            templateId: template.id,
-            renderedBody,
-            status: 'SENT',
-            branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
-          })
-          .returning({ id: schema.outboundMessages.id });
-
-        await tx.insert(schema.orderTimelineEvents).values({
-          orderId: order.id,
-          eventType: 'WHATSAPP_SENT' as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+      if (isFollowUpOrder) {
+        // Follow-up orders live in a separate table — log to follow-up timeline only.
+        await db.insert(schema.followUpOrderTimelineEvents).values({
+          followUpOrderId: order.id,
+          eventType: 'WHATSAPP_SENT',
           actorId: ctx.user.id,
           actorName: ctx.user.name ?? null,
           description: `Order shared to ${location.name} via WhatsApp group`,
           metadata: {
             channel: 'WHATSAPP_GROUP',
-            outboundMessageId: inserted[0]?.id ?? null,
             templateId: template.id,
             locationId: location.id,
             locationName: location.name,
           },
           branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
         });
-      });
+      } else {
+        await db.transaction(async (tx) => {
+          const inserted = await tx
+            .insert(schema.outboundMessages)
+            .values({
+              orderId: order.id,
+              agentId: ctx.user.id,
+              channel: 'WHATSAPP_GROUP',
+              templateId: template.id,
+              renderedBody,
+              status: 'SENT',
+              branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
+            })
+            .returning({ id: schema.outboundMessages.id });
+
+          await tx.insert(schema.orderTimelineEvents).values({
+            orderId: order.id,
+            eventType: 'WHATSAPP_SENT' as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+            actorId: ctx.user.id,
+            actorName: ctx.user.name ?? null,
+            description: `Order shared to ${location.name} via WhatsApp group`,
+            metadata: {
+              channel: 'WHATSAPP_GROUP',
+              outboundMessageId: inserted[0]?.id ?? null,
+              templateId: template.id,
+              locationId: location.id,
+              locationName: location.name,
+            },
+            branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
+          });
+        });
+      }
 
       return {
         success: true,

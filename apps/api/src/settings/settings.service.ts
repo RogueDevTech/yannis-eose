@@ -64,24 +64,27 @@ export class SettingsService {
   ) {}
 
   /**
-   * Get a system setting by key.
+   * Get a system setting by key, scoped to the active branch group.
    * Checks Redis cache first, falls back to DB, then caches.
    */
-  async get(key: string): Promise<Record<string, unknown> | null> {
+  async get(key: string, groupId?: string | null): Promise<Record<string, unknown> | null> {
+    const cacheKey = groupId ? `${REDIS_PREFIX}${groupId}:${key}` : `${REDIS_PREFIX}${key}`;
     const cacheOn = isReadThroughCacheEnabled();
 
     if (cacheOn) {
-      const cached = await this.redis.get(`${REDIS_PREFIX}${key}`);
+      const cached = await this.redis.get(cacheKey);
       if (cached) {
         return JSON.parse(cached) as Record<string, unknown>;
       }
     }
 
-    // Fallback to DB
+    // Fallback to DB — scope by groupId when provided.
+    const conditions = [eq(schema.systemSettings.key, key)];
+    if (groupId) conditions.push(eq(schema.systemSettings.groupId, groupId));
     const rows = await this.db
       .select()
       .from(schema.systemSettings)
-      .where(eq(schema.systemSettings.key, key))
+      .where(and(...conditions))
       .limit(1);
 
     const row = rows[0];
@@ -90,21 +93,16 @@ export class SettingsService {
     const value = row.value as Record<string, unknown>;
 
     if (cacheOn) {
-      await this.redis.set(
-        `${REDIS_PREFIX}${key}`,
-        JSON.stringify(value),
-        'EX',
-        CACHE_TTL_SECONDS,
-      );
+      await this.redis.set(cacheKey, JSON.stringify(value), 'EX', CACHE_TTL_SECONDS);
     }
 
     return value;
   }
 
   /**
-   * Get all system settings.
+   * Get all system settings, scoped to the active branch group.
    */
-  async getAll(): Promise<
+  async getAll(groupId?: string | null): Promise<
     Array<{
       key: string;
       value: Record<string, unknown>;
@@ -113,7 +111,11 @@ export class SettingsService {
       updatedAt: Date;
     }>
   > {
-    const rows = await this.db.select().from(schema.systemSettings);
+    const conditions = groupId ? [eq(schema.systemSettings.groupId, groupId)] : [];
+    const rows = await this.db
+      .select()
+      .from(schema.systemSettings)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
 
     return rows.map((row) => ({
       key: row.key,
@@ -133,12 +135,15 @@ export class SettingsService {
     value: Record<string, unknown>,
     actorId: string,
     isEnforced?: boolean,
+    groupId?: string | null,
   ): Promise<void> {
     await withActor(this.db, { id: actorId }, async (tx) => {
+      const conditions = [eq(schema.systemSettings.key, key)];
+      if (groupId) conditions.push(eq(schema.systemSettings.groupId, groupId));
       const existing = await tx
         .select()
         .from(schema.systemSettings)
-        .where(eq(schema.systemSettings.key, key))
+        .where(and(...conditions))
         .limit(1);
 
       if (existing[0]) {
@@ -151,7 +156,7 @@ export class SettingsService {
         await tx
           .update(schema.systemSettings)
           .set(update)
-          .where(eq(schema.systemSettings.key, key));
+          .where(and(...conditions));
       } else {
         await tx
           .insert(schema.systemSettings)
@@ -160,22 +165,27 @@ export class SettingsService {
             value,
             isEnforced: isEnforced ?? false,
             updatedBy: actorId,
+            groupId: groupId ?? null,
           });
       }
     });
 
-    await this.redis.del(`${REDIS_PREFIX}${key}`);
+    const cacheKey = groupId ? `${REDIS_PREFIX}${groupId}:${key}` : `${REDIS_PREFIX}${key}`;
+    await this.redis.del(cacheKey);
   }
 
   /** Toggle the enforcement lock on a system setting. */
-  async setEnforced(key: string, isEnforced: boolean, actorId: string): Promise<void> {
+  async setEnforced(key: string, isEnforced: boolean, actorId: string, groupId?: string | null): Promise<void> {
+    const conditions = [eq(schema.systemSettings.key, key)];
+    if (groupId) conditions.push(eq(schema.systemSettings.groupId, groupId));
     await withActor(this.db, { id: actorId }, async (tx) => {
       await tx
         .update(schema.systemSettings)
         .set({ isEnforced, updatedBy: actorId, updatedAt: new Date() })
-        .where(eq(schema.systemSettings.key, key));
+        .where(and(...conditions));
     });
-    await this.redis.del(`${REDIS_PREFIX}${key}`);
+    const cacheKey = groupId ? `${REDIS_PREFIX}${groupId}:${key}` : `${REDIS_PREFIX}${key}`;
+    await this.redis.del(cacheKey);
   }
 
   // ── Per-team overrides (Phase C) ───────────────────────────────────────
@@ -185,11 +195,13 @@ export class SettingsService {
    * Resolution order: enforced system > team override > system default.
    * Returns metadata so the UI can show all three layers.
    */
-  async getEffectiveTeamSetting(teamId: string, key: string): Promise<EffectiveTeamSetting> {
+  async getEffectiveTeamSetting(teamId: string, key: string, groupId?: string | null): Promise<EffectiveTeamSetting> {
+    const systemConditions = [eq(schema.systemSettings.key, key)];
+    if (groupId) systemConditions.push(eq(schema.systemSettings.groupId, groupId));
     const [systemRow] = await this.db
       .select()
       .from(schema.systemSettings)
-      .where(eq(schema.systemSettings.key, key))
+      .where(and(...systemConditions))
       .limit(1);
 
     const [teamRow] = await this.db

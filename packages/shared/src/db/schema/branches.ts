@@ -2,6 +2,7 @@ import { uuid, pgTable, text, jsonb, boolean, uniqueIndex } from 'drizzle-orm/pg
 import { branchStatusEnum, userRoleEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
+import { branchGroups } from './branch-groups';
 
 /**
  * branches — each branch is an independent operational unit within the master account.
@@ -9,6 +10,8 @@ import { users } from './users';
  */
 export const branches = pgTable('branches', {
   id: uuidv7Pk(),
+  /** Branch group ("company") this branch belongs to. CEO directive 2026-06-10. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   name: text('name').notNull(),
   /** Short unique code for the branch, e.g. "LGS", "ABJ". */
   code: text('code').notNull().unique(),

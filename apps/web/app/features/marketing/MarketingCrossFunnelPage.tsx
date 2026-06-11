@@ -301,7 +301,7 @@ export function MarketingCrossFunnelPage({
             desktop={
               <>
                 <PageRefreshButton />
-                <DateFilterBar chrome="pill" />
+                <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime} chrome="pill" />
               </>
             }
             filters={

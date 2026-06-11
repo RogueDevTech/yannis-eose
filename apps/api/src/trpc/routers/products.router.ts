@@ -46,7 +46,7 @@ export const productsRouter = router({
   list: authedProcedure
     .input(listProductsSchema)
     .query(async ({ input, ctx }) => {
-      return getProductsService().list(input, ctx.user.id, ctx.user.role);
+      return getProductsService().list(input, ctx.user.id, ctx.user.role, ctx.activeGroupId);
     }),
 
   /**
@@ -65,19 +65,20 @@ export const productsRouter = router({
       const effective = { status: input?.status ?? 'ACTIVE' } as const;
 
       if (!productsCacheService) {
-        return getProductsService().listOptions(effective, ctx.user.id, ctx.user.role);
+        return getProductsService().listOptions(effective, ctx.user.id, ctx.user.role, ctx.activeGroupId);
       }
 
       const key =
-        'cache:products:options:v2:' +
+        'cache:products:options:v3:' +
         CacheService.hashInput({
           status: effective.status,
           viewerRole: ctx.user.role,
-          viewerId: ctx.user.id, // MEDIA_BUYER catalog scoping can vary per user
+          viewerId: ctx.user.id,
+          groupId: ctx.activeGroupId,
         });
 
       return productsCacheService.getOrSet(key, PRODUCTS_OPTIONS_TTL_SECONDS, () =>
-        getProductsService().listOptions(effective, ctx.user.id, ctx.user.role),
+        getProductsService().listOptions(effective, ctx.user.id, ctx.user.role, ctx.activeGroupId),
       );
     }),
 
@@ -98,7 +99,7 @@ export const productsRouter = router({
   create: permissionProcedure('products.create')
     .input(createProductSchema)
     .mutation(async ({ input, ctx }) => {
-      const res = await getProductsService().create(input, ctx.user);
+      const res = await getProductsService().create(input, ctx.user, ctx.activeGroupId);
       await invalidateProductsOptionsCache();
       return res;
     }),

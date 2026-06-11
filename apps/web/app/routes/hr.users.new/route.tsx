@@ -46,7 +46,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
+  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes, branchGroupsRes] =
     await Promise.all([
     apiRequest<unknown>(`/trpc/products.options?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.locationOptions?input=${locationsInput}`, { method: 'GET', cookie }),
@@ -56,6 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie }),
   ]);
 
   const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
@@ -140,6 +141,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     permissionCatalog,
     templatePermissionsById,
     defaultMembershipBranchId,
+    branchGroups: branchGroupsRes.ok
+      ? ((branchGroupsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? [])
+      : [],
+    viewerRole: viewer.role,
   };
   })();
 

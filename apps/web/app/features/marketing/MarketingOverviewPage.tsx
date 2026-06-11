@@ -391,7 +391,7 @@ export function MarketingOverviewPage({
       valueClassName: 'text-app-fg',
     },
     {
-      label: 'Open carts',
+      label: 'Cart Abandonment',
       value: abandonedCartCount,
       valueClassName:
         abandonedCartCount > 0

@@ -221,6 +221,17 @@ export class AuthService {
     // required" for newly-invited users.
     const initialPermissions = await this.permissions.getEffectivePermissions(user.id);
 
+    // Resolve activeGroupId from the branch the user lands on.
+    let activeGroupId: string | null = null;
+    if (currentBranchId) {
+      const [branchRow] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, currentBranchId))
+        .limit(1);
+      activeGroupId = branchRow?.groupId ?? null;
+    }
+
     const sessionUser: SessionUser = {
       id: user.id,
       email: user.email,
@@ -233,6 +244,7 @@ export class AuthService {
       permissions: Array.from(initialPermissions),
       logisticsLocationId: user.logisticsLocationId,
       currentBranchId,
+      activeGroupId,
       // Captured here so the tRPC branch-scope guard can fall back to the
       // sole branch for single-branch org-wide heads instead of throwing.
       branchIds: memberships.map((m) => m.branchId as string),
@@ -718,7 +730,7 @@ export class AuthService {
    * Updates Redis session and returns the full updated SessionUser so the
    * controller can re-issue the bundle cookie in the same response.
    */
-  async switchBranch(sessionToken: string, branchId: string | null): Promise<SessionUser> {
+  async switchBranch(sessionToken: string, branchId: string | null, selectedBranchIds?: string[] | null): Promise<SessionUser> {
     const sessionData = await this.sessionStore.getSession(sessionToken);
     if (!sessionData) {
       throw new UnauthorizedException('Session not found');
@@ -755,7 +767,32 @@ export class AuthService {
       }
     }
 
-    const updated: SessionUser = { ...user, currentBranchId: branchId };
+    // Multi-branch selection: when selectedBranchIds is provided and non-empty,
+    // store it on the session. Cleared when a single branch is selected or
+    // when all branches are cleared. CEO directive 2026-06-10.
+    const resolvedSelectedIds =
+      selectedBranchIds && selectedBranchIds.length > 0 ? selectedBranchIds : null;
+
+    // Resolve the active group from the branch. When branchId is set, look up
+    // its group_id. When selectedBranchIds is set, derive from the first branch.
+    // When null (All Branches), activeGroupId is null (no group filter).
+    let activeGroupId: string | null = null;
+    const groupLookupBranchId = branchId ?? resolvedSelectedIds?.[0] ?? null;
+    if (groupLookupBranchId) {
+      const [row] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, groupLookupBranchId))
+        .limit(1);
+      activeGroupId = row?.groupId ?? null;
+    }
+
+    const updated: SessionUser = {
+      ...user,
+      currentBranchId: branchId,
+      selectedBranchIds: resolvedSelectedIds,
+      activeGroupId,
+    };
     await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
 
     return updated;

@@ -104,6 +104,10 @@ function formatPeriodLabel(
     const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
     if (startDate === toYMD(firstOfLastMonth) && endDate === toYMD(lastOfLastMonth)) return 'Last month';
+    const firstOf2MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    if (startDate === toYMD(firstOf2MonthsAgo) && endDate === toYMD(lastOfLastMonth)) return 'Last 2 months';
+    const firstOf3MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    if (startDate === toYMD(firstOf3MonthsAgo) && endDate === toYMD(lastOfLastMonth)) return 'Last 3 months';
   }
   const s = new Date(startDate);
   const e = new Date(endDate);
@@ -112,7 +116,7 @@ function formatPeriodLabel(
   return `${startBit} – ${endBit}`;
 }
 
-type DatePreset = 'today' | 'yesterday' | '2_days_ago' | '3_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month';
+type DatePreset = 'today' | 'yesterday' | '2_days_ago' | '3_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_2_months' | 'last_3_months';
 
 type DraftSelectionId = DatePreset | 'all_time' | 'custom' | null;
 
@@ -125,7 +129,7 @@ function getActiveDraftSelectionId(
   if (draftPeriodAllTime) return 'all_time';
   if (!draftStart && !draftEnd) return null;
   if (!draftStart || !draftEnd) return 'custom';
-  const presets: DatePreset[] = ['today', 'yesterday', '2_days_ago', '3_days_ago', 'this_week', 'last_week', 'this_month', 'last_month'];
+  const presets: DatePreset[] = ['today', 'this_month', 'yesterday', '2_days_ago', '3_days_ago', 'this_week', 'last_week', 'last_month', 'last_2_months', 'last_3_months'];
   for (const p of presets) {
     const { startDate, endDate } = getPresetRange(p);
     if (draftStart === startDate && draftEnd === endDate) return p;
@@ -184,6 +188,16 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
     }
     case 'last_month': {
       const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { startDate: toYMD(first), endDate: toYMD(last) };
+    }
+    case 'last_2_months': {
+      const first = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { startDate: toYMD(first), endDate: toYMD(last) };
+    }
+    case 'last_3_months': {
+      const first = new Date(now.getFullYear(), now.getMonth() - 3, 1);
       const last = new Date(now.getFullYear(), now.getMonth(), 0);
       return { startDate: toYMD(first), endDate: toYMD(last) };
     }
@@ -385,13 +399,15 @@ export function DateFilterBar({
                 {(
                   [
                     { id: 'today' as const, label: 'Today' },
+                    { id: 'this_month' as const, label: 'This month' },
                     { id: 'yesterday' as const, label: 'Yesterday' },
                     { id: '2_days_ago' as const, label: '2 days ago' },
                     { id: '3_days_ago' as const, label: '3 days ago' },
                     { id: 'this_week' as const, label: 'This week' },
                     { id: 'last_week' as const, label: 'Last week' },
-                    { id: 'this_month' as const, label: 'This month' },
                     { id: 'last_month' as const, label: 'Last month' },
+                    { id: 'last_2_months' as const, label: 'Last 2 months' },
+                    { id: 'last_3_months' as const, label: 'Last 3 months' },
                     { id: 'all_time' as const, label: 'All time' },
                   ] as const
                 ).map(({ id, label }) => {

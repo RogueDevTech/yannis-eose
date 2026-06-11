@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { FinanceService } from '../../finance/finance.service';
-import { getOrdersService } from './orders.router';
+import { getOrdersService, getFollowUpConfigService } from './orders.router';
 import { getLogisticsService } from './logistics.router';
 import { getPayrollBatchService } from './hr.router';
 import { getUsersService } from './users.router';
@@ -72,8 +72,14 @@ export const financeRouter = router({
   getInvoiceByOrder: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      const order = await getOrdersService().getById(input.orderId);
-      getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
+      // Try main orders first; fall back to follow-up orders for visibility check
+      try {
+        const order = await getOrdersService().getById(input.orderId);
+        getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
+      } catch {
+        // Follow-up order — visibility check passes for authed users
+        await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+      }
       return getFinanceService().getInvoiceByOrderId(input.orderId);
     }),
 
@@ -90,8 +96,34 @@ export const financeRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to generate invoices' });
       }
 
-      const order = await getOrdersService().getById(input.orderId);
-      getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
+      // Try main orders table first, fall back to follow-up orders
+      let order: {
+        id: string;
+        confirmedAt: string | Date | null;
+        customerName: string;
+        customerAddress: string | null;
+        orderItems: Array<{ quantity: number; unitPrice: string; productName: string | null; productId: string }>;
+      };
+      try {
+        const mainOrder = await getOrdersService().getById(input.orderId);
+        getOrdersService().assertActorMayViewOrderForRead(ctx.user, mainOrder);
+        order = mainOrder;
+      } catch {
+        // Not in main orders — try follow-up orders
+        const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+        order = {
+          id: fuDetail.id,
+          confirmedAt: fuDetail.confirmedAt,
+          customerName: fuDetail.customerName,
+          customerAddress: fuDetail.customerAddress,
+          orderItems: fuDetail.items.map((it: { quantity: number; unitPrice: string; productName?: string | null; productId: string }) => ({
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            productName: it.productName ?? null,
+            productId: it.productId,
+          })),
+        };
+      }
 
       return getFinanceService().ensureInvoiceForOrder({ order, actorId: ctx.user.id });
     }),

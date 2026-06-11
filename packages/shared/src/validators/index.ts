@@ -62,6 +62,26 @@ export type {
   SetCsRoutingRelationshipModeInput,
 } from './cs-order-routing';
 
+export {
+  followUpRuleSourceStatuses,
+  createFollowUpRuleSchema,
+  updateFollowUpRuleSchema,
+  deleteFollowUpRuleSchema,
+  listFollowUpRulesSchema,
+  listFollowUpSyncLogsSchema,
+  listFollowUpOrdersSchema,
+  followUpOrderDetailSchema,
+  assignFollowUpOrderSchema,
+  bulkAssignFollowUpOrdersSchema,
+  transitionFollowUpOrderSchema,
+} from './follow-up-config';
+
+export type {
+  CreateFollowUpRuleInput,
+  UpdateFollowUpRuleInput,
+  ListFollowUpOrdersInput,
+} from './follow-up-config';
+
 // User validators
 export {
   userRoleSchema,

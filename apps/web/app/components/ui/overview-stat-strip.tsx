@@ -21,6 +21,8 @@ export type OverviewStatStripItem = {
   title?: string;
   /** When true, value is not forced to text-xl font-bold (e.g. badges). */
   plainValue?: boolean;
+  /** Extra classes on the individual tile (e.g. `text-left` to override centering). */
+  itemClassName?: string;
   /**
    * When set, the tile becomes a navigation link to this URL (e.g. a status
    * filter like `?status=CANCELLED`). Tiles without `to` stay plain display.
@@ -302,16 +304,17 @@ export function OverviewStatStrip({
           </>
         );
         const activeClass = item.active ? activeTileClass : '';
+        const itemCls = item.itemClassName ?? '';
         return item.to ? (
-          <Link key={i} to={item.to} onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass}`} title={item.title}>
+          <Link key={i} to={item.to} onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} ${itemCls}`} title={item.title}>
             {inner}
           </Link>
         ) : item.onClick ? (
-          <button key={i} type="button" onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} text-center`} title={item.title}>
+          <button key={i} type="button" onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} ${itemCls} text-center`} title={item.title}>
             {inner}
           </button>
         ) : (
-          <div key={i} className={`${gridTile} ${activeClass}`} title={item.title}>
+          <div key={i} className={`${gridTile} ${activeClass} ${itemCls}`} title={item.title}>
             {inner}
           </div>
         );
@@ -344,16 +347,17 @@ export function OverviewStatStrip({
             </div>
           );
           const activeClass = item.active ? activeTileClass : '';
+          const itemCls = item.itemClassName ?? '';
           return item.to ? (
-            <Link key={i} to={item.to} onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass}`} title={item.title}>
+            <Link key={i} to={item.to} onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass} ${itemCls}`} title={item.title}>
               {inner}
             </Link>
           ) : item.onClick ? (
-            <button key={i} type="button" onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass} text-left`} title={item.title}>
+            <button key={i} type="button" onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass} ${itemCls} text-left`} title={item.title}>
               {inner}
             </button>
           ) : (
-            <div key={i} className={`${tileBase} ${activeClass}`} title={item.title}>
+            <div key={i} className={`${tileBase} ${activeClass} ${itemCls}`} title={item.title}>
               {inner}
             </div>
           );

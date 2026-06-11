@@ -15,6 +15,7 @@ import {
 } from '~/features/dashboard/DashboardSkeleton';
 import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
 import { SuperAdminDashboard } from '~/features/dashboard/SuperAdminDashboard';
+import { DashboardSecondaryProvider } from '~/features/dashboard/dashboard-secondary-context';
 import type { CEODashboardData } from '~/features/ceo/types';
 import type { DashboardData, OrdersAndCounts } from '~/features/dashboard/types';
 
@@ -154,11 +155,13 @@ export default function AdminDashboard() {
         errorElement={() => <DeferredError />}
       >
         {(data) => (
-          <SuperAdminDashboard
-            data={data}
-            userName={userName}
-            filters={loaderData.filters}
-          />
+          <DashboardSecondaryProvider filters={loaderData.filters}>
+            <SuperAdminDashboard
+              data={data}
+              userName={userName}
+              filters={loaderData.filters}
+            />
+          </DashboardSecondaryProvider>
         )}
       </CachedAwait>
     );

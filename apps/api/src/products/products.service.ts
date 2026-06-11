@@ -242,7 +242,7 @@ export class ProductsService {
    * Optionally adds initial stock at a location when initialStockQty > 0.
    * Uses transaction so set_config and insert run on same connection (audit trigger).
    */
-  async create(input: CreateProductInput, actor: SessionUser) {
+  async create(input: CreateProductInput, actor: SessionUser, groupId?: string | null) {
     const baseSalePrice = input.baseSalePrice;
     this.logger.log('create input', {
       costPrice: input.costPrice,
@@ -268,6 +268,7 @@ export class ProductsService {
               costPrice: sql`${input.costPrice}::numeric`,
               category: input.category ?? null,
               categoryId: input.categoryId ?? null,
+              groupId: groupId ?? null,
               status: 'ACTIVE' as const,
             } as unknown as typeof schema.products.$inferInsert)
             .returning();
@@ -359,7 +360,7 @@ export class ProductsService {
    * List products with filtering, search, and pagination.
    * Financial field stripping is handled by the tRPC CLS middleware.
    */
-  async list(input: ListProductsInput, viewerId: string, viewerRole: string) {
+  async list(input: ListProductsInput, viewerId: string, viewerRole: string, groupId?: string | null) {
     const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
     if (allowedProductIds !== null && allowedProductIds.length === 0) {
       return {
@@ -375,6 +376,10 @@ export class ProductsService {
 
     const conditions = [];
 
+    // Group isolation — only show products from the active branch group.
+    if (groupId) {
+      conditions.push(eq(schema.products.groupId, groupId));
+    }
     if (allowedProductIds !== null) {
       conditions.push(inArray(schema.products.id, allowedProductIds));
     }
@@ -542,11 +547,15 @@ export class ProductsService {
     input: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' },
     viewerId: string,
     viewerRole: string,
+    groupId?: string | null,
   ): Promise<Array<{ id: string; name: string; status: string; offers?: ProductOffer[] }>> {
     const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
     if (allowedProductIds !== null && allowedProductIds.length === 0) return [];
 
     const conditions = [];
+    if (groupId) {
+      conditions.push(eq(schema.products.groupId, groupId));
+    }
     if (allowedProductIds !== null) {
       conditions.push(inArray(schema.products.id, allowedProductIds));
     }

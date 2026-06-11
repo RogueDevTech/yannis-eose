@@ -92,6 +92,8 @@ function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
     logisticsLocationId: user.logisticsLocationId ?? null,
     p: encodePermissionsToBitmask(user.permissions ?? []),
     currentBranchId: user.currentBranchId ?? null,
+    selectedBranchIds: user.selectedBranchIds ?? null,
+    activeGroupId: user.activeGroupId ?? null,
     branchIds: user.branchIds ?? [],
     appTheme: user.appTheme ?? null,
     fontScale: user.fontScale ?? null,
@@ -445,7 +447,7 @@ export class AuthController {
   @Post('switch-branch')
   @HttpCode(HttpStatus.OK)
   async switchBranch(
-    @Body() body: { branchId: string | null },
+    @Body() body: { branchId: string | null; selectedBranchIds?: string[] | null },
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -454,7 +456,11 @@ export class AuthController {
       throw new ForbiddenException('No active session.');
     }
 
-    const updated = await this.authService.switchBranch(sessionToken, body?.branchId ?? null);
+    const updated = await this.authService.switchBranch(
+      sessionToken,
+      body?.branchId ?? null,
+      body?.selectedBranchIds ?? null,
+    );
 
     const merged = await this.branchTeams.attachTeamSupervisorSessionFlags(updated);
     setBundleCookie(res, merged, BUNDLE_TTL_SECONDS * 60);

@@ -59,6 +59,8 @@ export interface OrderDetail {
   deliveryNotes: string | null;
   status: string;
   totalAmount: string | null;
+  /** When true, order is frozen — pulled into follow-up pipeline. No mutations allowed. */
+  frozenForFollowUp?: boolean;
   createdAt: string;
   confirmedAt: string | null;
   allocatedAt: string | null;
@@ -213,6 +215,8 @@ export interface OrderDetailStreamData {
   itemOffers: OrderItemOffers[];
   /** Pre-loaded callable phone when VOIP is off and viewer is authorised — no separate reveal fetch. */
   callablePhone?: { phone: string; isDialable: boolean } | null;
+  /** True when this is a follow-up order (lives in follow_up_orders, not orders). */
+  isFollowUpOrder?: boolean;
 }
 
 /** Passed from route when user has view-only access (e.g. Media Buyer) */

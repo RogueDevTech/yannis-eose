@@ -7,7 +7,8 @@ import { z } from 'zod';
 export const saveCartSchema = z.object({
   campaignId: z.string().uuid(),
   mediaBuyerId: z.string().uuid().optional(),
-  customerName: z.string().min(2, 'Customer name is required'),
+  /** Name is optional — phone alone is enough to capture a cart. Defaults to "Unknown" when absent. */
+  customerName: z.string().min(1).optional().default('Unknown'),
   customerPhoneHash: z.string().min(1, 'Phone hash is required'),
   /**
    * Raw phone alongside the hash so the API can persist it for the

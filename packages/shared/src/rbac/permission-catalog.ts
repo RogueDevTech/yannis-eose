@@ -26,6 +26,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'orders.reassign', resource: 'orders', action: 'reassign', description: 'Reassign Sales orders' },
   { code: 'orders.bulkTransition', resource: 'orders', action: 'bulkTransition', description: 'Bulk order status transitions' },
   { code: 'orders.followUp', resource: 'orders', action: 'followUp', description: 'Follow-up: reassign closed orders to another branch' },
+  { code: 'orders.followUpConfig', resource: 'orders', action: 'followUpConfig', description: 'Configure follow-up auto-pull rules and trigger manual sync' },
   { code: 'orders.bulkAssign', resource: 'orders', action: 'bulkAssign', description: 'Bulk assign orders to Sales' },
   { code: 'orders.csWorkloads', resource: 'orders', action: 'csWorkloads', description: 'View Sales workloads' },
   { code: 'orders.releaseLocks', resource: 'orders', action: 'releaseLocks', description: 'Release expired order locks' },
@@ -360,6 +361,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   CS_CLOSER: [
     'orders.read',
+    'orders.followUp',
     'orders.csLeaderboard',
     'orders.callbackQueue',
     'orders.scheduledCallbacks',
