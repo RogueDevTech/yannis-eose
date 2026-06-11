@@ -165,4 +165,22 @@ export class EventsService {
     const payload = { ...data, lastActionAt: new Date().toISOString() };
     this.safeEmit('cs-all', 'agent:state_update', payload);
   }
+
+  // ── Follow-Up Sync Progress ──────────────────────────────────────
+
+  emitFollowUpSyncProgress(data: {
+    syncId: string;
+    triggeredBy: 'cron' | 'manual';
+    startedAt: string;
+    totalRules: number;
+    currentRuleIndex: number;
+    currentRuleName: string;
+    currentRulePulled: number;
+    totalPulledSoFar: number;
+    ruleResults: Array<{ ruleName: string; pulled: number }>;
+    status: 'running' | 'complete' | 'error';
+    errorMessage?: string;
+  }) {
+    this.safeEmit('admin', 'followup:sync_progress', data);
+  }
 }

@@ -275,6 +275,7 @@ export function CEODashboardPage({
       {/* Page header: title and subtitle first, then filters/actions below */}
       <PageHeader
         title="Executive Overview"
+        backTo="/admin"
         mobileInlineActions
         description="Real-time business intelligence across all departments."
         actions={

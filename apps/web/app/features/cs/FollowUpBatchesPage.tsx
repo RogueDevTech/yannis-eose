@@ -4,6 +4,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -163,12 +164,18 @@ export function FollowUpBatchesPage({
             triggerAriaLabel="Follow-up tools"
             desktop={
               <>
-                {!isCloser && <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />}
+                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={startDate}
+        endDate={endDate}
+        periodAllTime={periodAllTime}
       />
 
       <OverviewStatStrip
