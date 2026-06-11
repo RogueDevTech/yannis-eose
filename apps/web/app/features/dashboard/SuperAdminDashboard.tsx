@@ -1,12 +1,13 @@
 import { Link } from '@remix-run/react';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatNaira } from '~/lib/format-amount';
+import { DashboardFollowUpSection } from './dashboard-secondary-context';
 import type { CEODashboardData } from '~/features/ceo/types';
 
 function fmt(n: number): string {
@@ -222,6 +223,81 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           </div>
         );
       })()}
+
+      {/* ── Follow-Up Orders ── */}
+      <DashboardFollowUpSection fallback={<OverviewStatStripSkeleton count={6} />}>
+        {(sc) => {
+          const unassigned = sc['UNPROCESSED'] ?? 0;
+          const assigned = sc['CS_ASSIGNED'] ?? 0;
+          const engaged = sc['CS_ENGAGED'] ?? 0;
+          const confirmed =
+            (sc['CONFIRMED'] ?? 0) +
+            (sc['AGENT_ASSIGNED'] ?? 0) +
+            (sc['DISPATCHED'] ?? 0) +
+            (sc['IN_TRANSIT'] ?? 0);
+          const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+          const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+          return (
+            <div>
+              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                Follow-Up Orders
+              </h2>
+              <OverviewStatStrip
+                mobileGrid
+                tileClassName="!py-2.5"
+                items={[
+                  {
+                    label: 'Total',
+                    value: total,
+                    valueClassName: 'text-app-fg',
+                    to: '/admin/cs/follow-up',
+                  },
+                  {
+                    label: 'Unassigned',
+                    value: unassigned,
+                    valueClassName: 'text-warning-600 dark:text-warning-400',
+                    to: '/admin/cs/follow-up',
+                  },
+                  {
+                    label: 'Assigned',
+                    value: assigned,
+                    valueClassName: 'text-info-600 dark:text-info-400',
+                    to: '/admin/cs/follow-up',
+                  },
+                  {
+                    label: 'Engaged',
+                    value: engaged,
+                    valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                    to: '/admin/cs/follow-up',
+                  },
+                  {
+                    label: 'Confirmed',
+                    value: confirmed,
+                    valueClassName: 'text-brand-600 dark:text-brand-400',
+                    to: '/admin/cs/follow-up',
+                  },
+                  {
+                    label: 'Delivered',
+                    value: delivered,
+                    valueClassName: 'text-success-600 dark:text-success-400',
+                    to: '/admin/cs/follow-up',
+                  },
+                  {
+                    label: 'CR',
+                    value: pct(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                    valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                  },
+                  {
+                    label: 'DR',
+                    value: pct(total > 0 ? delivered / total * 100 : 0),
+                    valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
+                  },
+                ]}
+              />
+            </div>
+          );
+        }}
+      </DashboardFollowUpSection>
 
       {/* ── Marketing Spend ── */}
       <div>

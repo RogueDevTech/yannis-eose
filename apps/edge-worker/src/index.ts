@@ -1083,7 +1083,8 @@ function getFormScript(
       var cartSaveTimeout = null;
       var cartSaveInflight = null; // Promise of the in-flight cart save
       var cartSaveDisabled = false; // kill switch — set after successful submit
-      var CART_DEBOUNCE_MS = 10000;
+      var CART_DEBOUNCE_MS = 3000;
+      var lastCartPayloadJson = ''; // dedup: skip save if payload is identical to last
       function isValidNgPhone(value) {
         return NG_PHONE_RE.test((value || '').trim());
       }
@@ -1092,12 +1093,10 @@ function getFormScript(
         if (!selectedProduct || !selectedOffer) return;
         var nameEl = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
         var phoneEl = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
-        if (!nameEl || !phoneEl) return;
-        var name = (nameEl.value || '').trim();
-        if (name.length < 2) return;
-        // Gate on a real Nigerian phone — prevents a noisy 400 on /cart while the
-        // user is mid-type. The save was already best-effort (errors swallowed),
-        // but a malformed phone produces a visible network error otherwise.
+        if (!phoneEl) return;
+        var name = nameEl ? (nameEl.value || '').trim() : '';
+        // Gate on a real Nigerian phone — phone alone is enough to capture a cart.
+        // Name is optional; defaults to "Unknown" on the API side.
         if (!isValidNgPhone(phoneEl.value)) return;
         if (!isOnline) return;
         // Helper: read a field by name, return trimmed value or undefined if blank.
@@ -1138,11 +1137,12 @@ function getFormScript(
           var payload = {
             campaignId: '${campaignId}',
             mediaBuyerId: ${mediaBuyerIdJson},
-            customerName: name,
             customerPhone: phoneEl.value,
             productId: selectedProduct,
             offerLabel: selectedOffer.label
           };
+          // Name is optional — phone alone captures the cart.
+          if (name.length >= 1) payload.customerName = name;
           // Progressive capture — only include fields that have a value right now.
           // API merges field-by-field, so a missing value never wipes earlier capture.
           var addr = fv('customerAddress');
@@ -1168,12 +1168,18 @@ function getFormScript(
           }
           var cfv = readCustomFieldValues();
           if (cfv) payload.customFieldValues = cfv;
+          // Dedup: skip the network call if the payload is identical to the last
+          // successful save. Avoids redundant /cart hits on progressive-capture
+          // re-fires where nothing actually changed.
+          var payloadJson = JSON.stringify(payload);
+          if (payloadJson === lastCartPayloadJson) { return; }
           cartSaveInflight = fetch('${endpointBase}/cart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: payloadJson
           }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.id) savedCartId = d.id;
+            lastCartPayloadJson = payloadJson;
             cartSaveInflight = null;
             // Fields may have changed while in-flight — schedule one more save.
             maybeSaveCart();
@@ -1185,8 +1191,60 @@ function getFormScript(
       // on name + valid phone before issuing a request, so empty progressive
       // fields are harmless. Use event delegation on the form so dynamically
       // rendered fields (custom builder fields) are covered automatically.
-      form.addEventListener('input', maybeSaveCart);
-      form.addEventListener('blur', maybeSaveCart, true);
+      // Flush any pending debounce immediately — used before form submit and on
+      // page-leave events to maximise cart capture. Returns the in-flight
+      // promise (if any) so callers can await it.
+      function flushCartSave() {
+        if (cartSaveDisabled) return cartSaveInflight;
+        // If a debounce is pending, cancel it and fire immediately.
+        if (cartSaveTimeout) {
+          clearTimeout(cartSaveTimeout);
+          cartSaveTimeout = null;
+          // Re-invoke with debounce set to 0 so the setTimeout fires on the
+          // next microtask. We temporarily override the debounce window.
+          var origDebounce = CART_DEBOUNCE_MS;
+          CART_DEBOUNCE_MS = 0;
+          maybeSaveCart();
+          CART_DEBOUNCE_MS = origDebounce;
+        }
+        return cartSaveInflight;
+      }
+      // Capture cart on page-leave — covers users who fill name+phone then
+      // navigate away or close the tab before the debounce fires.
+      function onPageLeave() { flushCartSave(); }
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') onPageLeave();
+      });
+      window.addEventListener('pagehide', onPageLeave);
+      // Primary trigger: phone field input/blur fires the initial cart save.
+      // Progressive trigger: other fields only fire maybeSaveCart after the
+      // first cart has been saved (savedCartId is set), so typing in name/
+      // address/etc. doesn't reset the debounce before the phone is even entered.
+      var phoneInput2 = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
+      if (phoneInput2) {
+        phoneInput2.addEventListener('input', maybeSaveCart);
+        phoneInput2.addEventListener('blur', maybeSaveCart);
+      }
+      // Name field also triggers — captures the name progressively after the
+      // initial phone-only cart save.
+      var nameInput2 = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
+      if (nameInput2) {
+        nameInput2.addEventListener('input', maybeSaveCart);
+        nameInput2.addEventListener('blur', maybeSaveCart);
+      }
+      // All other fields: only trigger progressive updates after initial save.
+      form.addEventListener('input', function(ev) {
+        if (!savedCartId) return; // no cart yet — wait for phone
+        var t = ev.target;
+        if (t === phoneInput2 || t === nameInput2) return; // already handled above
+        maybeSaveCart();
+      });
+      form.addEventListener('blur', function(ev) {
+        if (!savedCartId) return;
+        var t = ev.target;
+        if (t === phoneInput2 || t === nameInput2) return;
+        maybeSaveCart();
+      }, true);
       // phoneInput is still consumed by the phone validation + sanitizer block
       // below — keep the local handle even though save listening is delegated to
       // the form element above.
@@ -1353,9 +1411,14 @@ function getFormScript(
 
       form.addEventListener('submit', function(e) {
         e.preventDefault();
-        // Kill cart saves immediately — no more /cart calls after submit is clicked.
+        // Flush any pending cart save so the cart row exists before the order
+        // is created — this ensures savedCartId is populated and the API can
+        // link the order to the cart. The flush is fire-and-forget (we don't
+        // block submit on it) but with a 0ms debounce override it fires on the
+        // next microtask, well ahead of the network round-trip for the order.
+        flushCartSave();
+        // Kill further cart saves — no more /cart calls after submit is clicked.
         cartSaveDisabled = true;
-        clearTimeout(cartSaveTimeout);
         btn.disabled = true;
         btn.textContent = 'Submitting...';
         msg.className = 'msg hidden';
@@ -1523,7 +1586,17 @@ function getFormScript(
           });
         }
 
-        submitOrder(orderData).then(function(result) {
+        // Wait for any in-flight cart save to finish so savedCartId is set
+        // before we build the order payload. The promise resolves instantly if
+        // nothing is in flight. Cap the wait at 2s to avoid blocking submit.
+        var cartWait = cartSaveInflight
+          ? Promise.race([cartSaveInflight, new Promise(function(r) { setTimeout(r, 2000); })])
+          : Promise.resolve();
+        cartWait.then(function() {
+          // Re-read cartId after flush — it may have been set while we waited.
+          orderData.cartId = savedCartId || undefined;
+          return submitOrder(orderData);
+        }).then(function(result) {
           if (result.ok) {
             // Kill cart saves — order is submitted, any further input/blur events
             // (including form.reset()) must NOT create or update cart rows.

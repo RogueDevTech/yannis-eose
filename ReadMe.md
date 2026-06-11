@@ -12,6 +12,10 @@ docker restart yannis-eose-api-1
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
+docker exec yannis-eose-api-1 sh -c 'node -e "const r=require(\"ioredis\");const c=new r(process.env.REDIS_URL);c.keys(\"cache:orders:aggregates:*\").then(k=>k.length?c.del(...k).then(n=>console.log(\"Busted\",n,\"keys\")):console.log(\"No keys\")).then(()=>c.quit())"' 
+
+
+
 pnpm --filter @yannis/api dev
 START NEW DB
 

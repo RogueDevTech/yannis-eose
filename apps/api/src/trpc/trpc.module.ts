@@ -4,12 +4,14 @@ import { OrdersModule } from '../orders/orders.module';
 import { OrdersService } from '../orders/orders.service';
 import { CsOrderRoutingService } from '../orders/cs-order-routing.service';
 import { TestOrderPurgeService } from '../orders/test-order-purge.service';
+import { FollowUpConfigService } from '../orders/follow-up-config.service';
 import {
   setOrdersCacheService,
   setOrdersService,
   setVoipService,
   setCsOrderRoutingService,
   setTestOrderPurgeService,
+  setFollowUpConfigService,
 } from './routers/orders.router';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
@@ -108,6 +110,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly ordersService: OrdersService,
     private readonly csOrderRoutingService: CsOrderRoutingService,
     private readonly testOrderPurgeService: TestOrderPurgeService,
+    private readonly followUpConfigService: FollowUpConfigService,
     private readonly usersService: UsersService,
     private readonly productsService: ProductsService,
     private readonly productCategoriesService: ProductCategoriesService,
@@ -139,6 +142,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setOrdersService(this.ordersService);
     setCsOrderRoutingService(this.csOrderRoutingService);
     setTestOrderPurgeService(this.testOrderPurgeService);
+    setFollowUpConfigService(this.followUpConfigService);
     setOrdersCacheService(this.cacheService);
     setUsersService(this.usersService);
     setUsersSessionStore(this.sessionStore);

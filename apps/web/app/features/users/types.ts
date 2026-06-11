@@ -106,6 +106,7 @@ export interface UserCreateBranch {
   name: string;
   code: string;
   status: string;
+  groupId?: string | null;
 }
 
 export interface ActiveHeadUser {
@@ -145,6 +146,10 @@ export interface UserCreateLoaderData {
   templatePermissionsById: Record<string, string[]>;
   /** Session branch or sole ACTIVE branch — used to pre-check memberships on Add User. */
   defaultMembershipBranchId: string | null;
+  /** Branch groups for the group-scoped branch picker (SuperAdmin / multi-group HR). */
+  branchGroups?: Array<{ id: string; name: string }>;
+  /** Viewer's role — drives group-section visibility in the branch picker. */
+  viewerRole?: string;
 }
 
 // ─── User Detail Page Types ──────────────────────────────

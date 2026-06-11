@@ -183,6 +183,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderSource = orderSourceParam === 'offline' ? 'offline' : undefined;
 
   const productIdParam = url.searchParams.get('productId') || undefined;
+  const frozenParam = url.searchParams.get('frozen') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
@@ -207,6 +208,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortOrder,
     ...(assignedCsId && { assignedCsId }),
     ...(productIdParam && { productId: productIdParam }),
+    ...(frozenParam === 'frozen' || frozenParam === 'active' ? { frozenFilter: frozenParam } : {}),
     ...(testOrders && { testOrders: true }),
     ...(orderSource && { orderSource }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
@@ -277,7 +279,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'branchesForMove'
       | 'enableFromCartStatusOption'
       | 'isCartAbandonmentView'
-    > & { sortBy?: string; sortOrder?: string; productFilter?: string }
+    > & { sortBy?: string; sortOrder?: string; productFilter?: string; frozenFilter?: string }
   > => {
   // Cart-abandonment view: swap the orders table for the abandoned-cart backlog.
   // Each cart is mapped into an Order-shaped row with synthetic status 'CART'
@@ -447,6 +449,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canExport,
     canBulkPick,
     productFilter: productIdParam,
+    frozenFilter: frozenParam,
     branchesForMove,
     filters: {
       startDate: startDate ?? '',

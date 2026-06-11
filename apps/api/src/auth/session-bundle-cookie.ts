@@ -84,6 +84,10 @@ export interface SessionBundlePayload {
    */
   p: string;
   currentBranchId: string | null;
+  /** Multi-branch selection — CEO directive 2026-06-10. */
+  selectedBranchIds?: string[] | null;
+  /** Active branch group ("company") — CEO directive 2026-06-10. */
+  activeGroupId?: string | null;
   branchIds: string[];
   appTheme: string | null;
   fontScale: string | null;

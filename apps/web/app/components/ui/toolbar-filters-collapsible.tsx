@@ -124,7 +124,7 @@ export function ToolbarFiltersCollapsible({
           )}
 
           {searchRow != null && searchRow !== false ? (
-            <div className="min-w-0 flex-1 md:basis-[44%] md:shrink-0">{searchRow}</div>
+            <div className="min-w-0 w-full md:w-auto md:contents">{searchRow}</div>
           ) : null}
 
           <div className={showInlineFilters(bp)}>{desktopInlineFilters}</div>

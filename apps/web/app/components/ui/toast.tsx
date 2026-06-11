@@ -63,10 +63,10 @@ export function useFetcherToast(
     if (fetcherData === prevRef.current) return;
     prevRef.current = fetcherData;
     if (!fetcherData || typeof fetcherData !== 'object') return;
-    const data = fetcherData as { success?: boolean; error?: string };
+    const data = fetcherData as { success?: boolean; error?: string; message?: string };
     if (data.success) {
       if (!options?.skipSuccessToast) {
-        toast.success(options?.successMessage ?? 'Action completed');
+        toast.success(data.message ?? options?.successMessage ?? 'Action completed');
       }
     } else if (data.error && !options?.skipErrorToast) {
       toast.error('Error', data.error);

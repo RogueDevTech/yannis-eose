@@ -243,10 +243,13 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
   }
 
   /**
-   * Universal 7-day dedup purge (CEO directive 2026-05-26):
+   * Universal 7-day dedup flagging (CEO directive 2026-05-26):
    * Same phone + any overlapping product within 7 days = duplicate.
    * Winner: highest lifecycle status, ties → oldest created_at.
-   * Loser: soft-deleted regardless of status, CFA row recorded.
+   * Loser: flagged as duplicate (isDuplicate='FLAGGED') but NEVER deleted —
+   * orders must never disappear from the system. CFA row recorded for MB
+   * visibility. The flag lets CS and reporting surfaces highlight duplicates
+   * without destroying audit trails or orphaning stock reservations.
    */
   async purgeUniversalDuplicates(
     allDates = false,
@@ -368,16 +371,15 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
     const now = new Date();
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      // 1. Soft-delete all loser orders (regardless of status).
-      //    The loser is always the one behind in lifecycle — the winner
-      //    (e.g. DELIVERED) stays, the loser (e.g. CONFIRMED) gets deleted.
+      // 1. Flag loser orders as duplicates — NEVER delete them.
+      //    Orders must stay in the system with their original status so
+      //    they remain visible in counts, CS queues, and audit trails.
+      //    Stock-moved orders (CONFIRMED+) would orphan inventory if deleted.
       await tx
         .update(schema.orders)
         .set({
-          status: 'DELETED',
-          deletedAt: now,
-          updatedAt: now,
           isDuplicate: 'FLAGGED',
+          updatedAt: now,
         })
         .where(
           and(
@@ -394,10 +396,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
             : e.winnerId.slice(0, 8);
           return {
             orderId: e.loserId,
-            eventType: 'ORDER_DELETED' as const,
+            eventType: 'ORDER_DUPLICATE_FLAGGED' as const,
             actorId: null,
             actorName: 'System' as const,
-            description: `Auto-deleted: universal dedup (same phone + product within 7 days — winner: ${winnerLabel})`,
+            description: `Flagged as duplicate: same phone + product within 7 days (winner: ${winnerLabel})`,
             metadata: { winnerId: e.winnerId },
             branchId: e.branchId ?? null,
           };
@@ -431,7 +433,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
-      `Deleted ${loserIds.length} universal duplicate(s) → Deleted tab + cross_funnel_attempts recorded. Targets: ${preview}` +
+      `Flagged ${loserIds.length} universal duplicate(s) (isDuplicate=FLAGGED, status unchanged) + cross_funnel_attempts recorded. Targets: ${preview}` +
         (loserIds.length > 20 ? ` … +${loserIds.length - 20} more` : ''),
     );
     return { deleted: loserIds.length, skipped: 0 };

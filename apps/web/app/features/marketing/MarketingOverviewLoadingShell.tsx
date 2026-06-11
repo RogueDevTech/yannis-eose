@@ -97,7 +97,7 @@ export function MarketingOverviewLoadingShell({
     'Confirmation Rate',
     'True ROAS',
     'Del. Revenue',
-    'Open carts',
+    'Cart Abandonment',
   ];
 
   return (

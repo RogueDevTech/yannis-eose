@@ -149,7 +149,8 @@ export class CartService {
             // Revive an ABANDONED cart back to PENDING — the customer is active
             // again, so the abandonment clock restarts from this save.
             status: 'PENDING',
-            customerName: input.customerName,
+            // Only overwrite name when caller sent a real name (not the "Unknown" default).
+            customerName: input.customerName && input.customerName !== 'Unknown' ? input.customerName : existingRow.customerName,
             productId: input.productId,
             offerLabel: input.offerLabel ?? null,
             mediaBuyerId: input.mediaBuyerId ?? existingRow.mediaBuyerId,

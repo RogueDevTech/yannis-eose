@@ -119,7 +119,7 @@ async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
 export async function listBranchesForUser(user: {
   id: string;
   role: string;
-}): Promise<Array<{ id: string; name: string; code: string; status: string }>> {
+}): Promise<Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>> {
   const db = getDb();
   // Org-wide roles see every branch even without explicit branch memberships:
   // SuperAdmin / Admin manage anything; HR creates / edits staff across the
@@ -139,14 +139,16 @@ export async function listBranchesForUser(user: {
 
   // Explicit projection — `status` is threaded through so the header branch
   // switcher can tag a disabled (INACTIVE) branch instead of dropping it.
+  // `groupId` is included for the multi-company group switcher (CEO 2026-06-10).
   const branchCols = {
     id: schema.branches.id,
     name: schema.branches.name,
     code: schema.branches.code,
     status: schema.branches.status,
+    groupId: schema.branches.groupId,
   };
   const fetchRows = async (): Promise<
-    Array<{ id: string; name: string; code: string; status: string }>
+    Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>
   > => {
     if (seesAll) {
       return db.select(branchCols).from(schema.branches);
@@ -667,6 +669,7 @@ export const branchesRouter = router({
       z.object({
         name: z.string().min(2).max(100),
         code: z.string().min(2).max(20).toUpperCase(),
+        groupId: z.string().uuid(),
         settings: z.record(z.unknown()).optional(),
       }),
     )
@@ -679,6 +682,7 @@ export const branchesRouter = router({
           .values({
             name: input.name,
             code: input.code,
+            groupId: input.groupId,
             status: 'ACTIVE',
             settings: input.settings ?? null,
           })
@@ -1467,5 +1471,192 @@ export const branchesRouter = router({
       }
 
       return { currentBranchId: input.branchId ?? null };
+    }),
+
+  /* ── Branch Groups (multi-company) ─────────────────────────────── */
+
+  /** List all branch groups with their member branch count. SuperAdmin only. */
+  listGroups: permissionProcedure('branches.manage')
+    .query(async () => {
+      const db = getDb();
+      const groups = await db
+        .select({
+          id: schema.branchGroups.id,
+          name: schema.branchGroups.name,
+          createdAt: schema.branchGroups.createdAt,
+        })
+        .from(schema.branchGroups)
+        .orderBy(asc(schema.branchGroups.createdAt));
+
+      // Count branches per group
+      const branchCounts = await db
+        .select({
+          groupId: schema.branches.groupId,
+          count: count(),
+        })
+        .from(schema.branches)
+        .groupBy(schema.branches.groupId);
+
+      const countMap = new Map(branchCounts.map((r) => [r.groupId, Number(r.count)]));
+      return groups.map((g) => ({
+        ...g,
+        branchCount: countMap.get(g.id) ?? 0,
+      }));
+    }),
+
+  /** Get a single branch group with its member branches. */
+  getGroup: authedProcedure
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const [group] = await db
+        .select()
+        .from(schema.branchGroups)
+        .where(eq(schema.branchGroups.id, input.groupId))
+        .limit(1);
+      if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
+
+      const members = await db
+        .select({
+          id: schema.branches.id,
+          name: schema.branches.name,
+          code: schema.branches.code,
+          status: schema.branches.status,
+        })
+        .from(schema.branches)
+        .where(eq(schema.branches.groupId, input.groupId))
+        .orderBy(asc(schema.branches.name));
+
+      return { ...group, branches: members };
+    }),
+
+  /** Get detailed overview of a branch group — branches, member counts, scoped entity totals. */
+  getGroupDetail: permissionProcedure('branches.manage')
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const [group] = await db
+        .select()
+        .from(schema.branchGroups)
+        .where(eq(schema.branchGroups.id, input.groupId))
+        .limit(1);
+      if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Company group not found' });
+
+      // Branches in this group
+      const branchRows = await db
+        .select({
+          id: schema.branches.id,
+          name: schema.branches.name,
+          code: schema.branches.code,
+          status: schema.branches.status,
+          createdAt: schema.branches.createdAt,
+        })
+        .from(schema.branches)
+        .where(eq(schema.branches.groupId, input.groupId))
+        .orderBy(asc(schema.branches.name));
+
+      const branchIds = branchRows.map((b) => b.id);
+
+      // Parallel aggregate queries
+      const [memberCountRows, productCount, commissionPlanCount, settlementConfigCount] =
+        await Promise.all([
+          // Members per branch
+          branchIds.length > 0
+            ? db
+                .select({ branchId: schema.userBranches.branchId, count: count() })
+                .from(schema.userBranches)
+                .where(inArray(schema.userBranches.branchId, branchIds))
+                .groupBy(schema.userBranches.branchId)
+            : Promise.resolve([]),
+          // Products scoped to this group
+          db
+            .select({ count: count() })
+            .from(schema.products)
+            .where(eq(schema.products.groupId, input.groupId))
+            .then((r) => Number(r[0]?.count ?? 0)),
+          // Commission plans scoped to this group
+          db
+            .select({ count: count() })
+            .from(schema.commissionPlans)
+            .where(eq(schema.commissionPlans.groupId, input.groupId))
+            .then((r) => Number(r[0]?.count ?? 0)),
+          // Settlement configs scoped to this group
+          db
+            .select({ count: count() })
+            .from(schema.settlementConfigs)
+            .where(eq(schema.settlementConfigs.groupId, input.groupId))
+            .then((r) => Number(r[0]?.count ?? 0)),
+        ]);
+
+      const memberCountMap = new Map(memberCountRows.map((r) => [r.branchId, Number(r.count)]));
+      const totalMembers = memberCountRows.reduce((sum, r) => sum + Number(r.count), 0);
+
+      const branches = branchRows.map((b) => ({
+        ...b,
+        memberCount: memberCountMap.get(b.id) ?? 0,
+      }));
+
+      return {
+        ...group,
+        branches,
+        totals: {
+          branches: branchRows.length,
+          members: totalMembers,
+          products: productCount,
+          commissionPlans: commissionPlanCount,
+          settlementConfigs: settlementConfigCount,
+        },
+      };
+    }),
+
+  /** Create a new branch group. SuperAdmin only. */
+  createGroup: permissionProcedure('branches.manage')
+    .input(z.object({ name: z.string().min(1).max(100) }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const [created] = await db
+        .insert(schema.branchGroups)
+        .values({ name: input.name.trim() })
+        .returning();
+      await invalidateBranchesListCache();
+      return created;
+    }),
+
+  /** Update a branch group name. SuperAdmin only. */
+  updateGroup: permissionProcedure('branches.manage')
+    .input(z.object({ groupId: z.string().uuid(), name: z.string().min(1).max(100) }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const [updated] = await db
+        .update(schema.branchGroups)
+        .set({ name: input.name.trim(), updatedAt: new Date() })
+        .where(eq(schema.branchGroups.id, input.groupId))
+        .returning();
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
+      await invalidateBranchesListCache();
+      return updated;
+    }),
+
+  /** Move a branch to a different group. SuperAdmin only. */
+  assignBranchToGroup: permissionProcedure('branches.manage')
+    .input(z.object({ branchId: z.string().uuid(), groupId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      // Verify group exists
+      const [group] = await db
+        .select({ id: schema.branchGroups.id })
+        .from(schema.branchGroups)
+        .where(eq(schema.branchGroups.id, input.groupId))
+        .limit(1);
+      if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
+
+      const [updated] = await db
+        .update(schema.branches)
+        .set({ groupId: input.groupId, updatedAt: new Date() })
+        .where(eq(schema.branches.id, input.branchId))
+        .returning();
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch not found' });
+      await invalidateBranchesListCache();
+      return updated;
     }),
 });

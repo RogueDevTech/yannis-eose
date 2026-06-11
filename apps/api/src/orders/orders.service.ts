@@ -314,55 +314,6 @@ export class OrdersService {
     });
   }
 
-  /**
-   * Forces submitted line items to existing DB unit prices (per line), recomputes total.
-   * Used when the actor may change quantities but not pricing.
-   */
-  private async clampOrderItemsToExistingUnitPrices(
-    orderId: string,
-    items: NonNullable<UpdateOrderInput['items']>,
-  ): Promise<{ items: NonNullable<UpdateOrderInput['items']>; totalAmount: number }> {
-    const dbRows = await this.db
-      .select()
-      .from(schema.orderItems)
-      .where(eq(schema.orderItems.orderId, orderId))
-      .orderBy(asc(schema.orderItems.id));
-
-    if (dbRows.length !== items.length) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'You cannot add or remove products on this order. Adjust quantities only, or ask a supervisor to change pricing.',
-      });
-    }
-
-    const used = new Set<number>();
-    const nextItems: NonNullable<UpdateOrderInput['items']> = items.map((it) => {
-      const idx = dbRows.findIndex((r, i) => !used.has(i) && r.productId === it.productId);
-      if (idx === -1) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Line items must match the current products on the order.',
-        });
-      }
-      used.add(idx);
-      const row = dbRows[idx]!;
-      const unit = parseFloat(String(row.unitPrice));
-      if (Number.isNaN(unit)) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Invalid stored unit price' });
-      }
-      return {
-        productId: it.productId,
-        quantity: it.quantity,
-        unitPrice: unit,
-        offerLabel: it.offerLabel ?? (row.offerLabel ?? undefined),
-      };
-    });
-
-    // unitPrice is the offer/line total (not per-unit) — do not multiply by quantity
-    const totalAmount = nextItems.reduce((sum, row) => sum + row.unitPrice, 0);
-    return { items: nextItems, totalAmount };
-  }
-
   /** PENDING permission_request for this order's line price change (if any). */
   async findPendingOrderLinePriceRequestId(orderId: string): Promise<string | null> {
     const [row] = await this.db
@@ -1408,6 +1359,25 @@ export class OrdersService {
       }
     }
 
+    // Strip null bytes (\0) from all string fields — Postgres rejects 0x00 in
+    // UTF-8 text columns. Edge-form submissions occasionally carry null bytes
+    // from malformed form data or copy-paste artefacts, which causes
+    // INTERNAL_SERVER_ERROR and lands orders in the QStash DLQ.
+    const strip0 = (v: string | null | undefined): string | null | undefined =>
+      typeof v === 'string' ? v.replace(/\0/g, '') : v;
+    // Deep-strip null bytes from jsonb values (customFields, items).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deepStrip0 = <T>(v: T): T => {
+      if (typeof v === 'string') return v.replace(/\0/g, '') as unknown as T;
+      if (Array.isArray(v)) return v.map(deepStrip0) as unknown as T;
+      if (v && typeof v === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v)) out[k] = deepStrip0(val);
+        return out as T;
+      }
+      return v;
+    };
+
     const insertOrder = async (
       dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
     ) => {
@@ -1418,24 +1388,24 @@ export class OrdersService {
           mediaBuyerId: orderInput.mediaBuyerId ?? null,
           branchId: branchId ?? null,
           servicingBranchId: servicingBranchId ?? null,
-          customerName: orderInput.customerName,
+          customerName: strip0(orderInput.customerName) ?? orderInput.customerName,
           customerPhoneHash: orderInput.customerPhoneHash,
-          customerPhone: orderInput.customerPhone ?? null,
-          customerAddress: orderInput.customerAddress ?? null,
-          deliveryAddress: orderInput.deliveryAddress ?? null,
-          deliveryNotes: orderInput.deliveryNotes ?? null,
-          deliveryState: orderInput.deliveryState ?? null,
+          customerPhone: strip0(orderInput.customerPhone) ?? null,
+          customerAddress: strip0(orderInput.customerAddress) ?? null,
+          deliveryAddress: strip0(orderInput.deliveryAddress) ?? null,
+          deliveryNotes: strip0(orderInput.deliveryNotes) ?? null,
+          deliveryState: strip0(orderInput.deliveryState) ?? null,
           customerGender: orderInput.customerGender ?? null,
           preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
-          customerEmail: orderInput.customerEmail ?? null,
+          customerEmail: strip0(orderInput.customerEmail) ?? null,
           paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
           paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
-          items: orderInput.items,
+          items: deepStrip0(orderInput.items),
           totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : orderSource === 'offline' ? 'offline' : null,
-          customFields: orderInput.customFields ?? null,
+          customFields: orderInput.customFields ? deepStrip0(orderInput.customFields) : null,
           // Back-link to the originating cart so HoCS can filter "Recovered from
           // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
           cartId: cartId ?? null,
@@ -1452,7 +1422,7 @@ export class OrdersService {
             productId: item.productId,
             quantity: item.quantity,
             unitPrice: String(item.unitPrice),
-            offerLabel: item.offerLabel ?? null,
+            offerLabel: strip0(item.offerLabel) ?? null,
           })),
         );
       }
@@ -2567,24 +2537,45 @@ export class OrdersService {
       band: 'ABOVE_THRESHOLD' | 'BELOW_THRESHOLD';
     }> | null;
   }>> {
+    // Check orders table first, then fall back to follow_up_orders
+    let orderItems: Array<{ productId: string; quantity: number; productName: string | null }>;
+
     const [orderRow] = await this.db
       .select({ id: schema.orders.id })
       .from(schema.orders)
       .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
-    if (!orderRow) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
-    }
 
-    const orderItems = await this.db
-      .select({
-        productId: schema.orderItems.productId,
-        quantity: schema.orderItems.quantity,
-        productName: schema.products.name,
-      })
-      .from(schema.orderItems)
-      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
-      .where(eq(schema.orderItems.orderId, orderId));
+    if (orderRow) {
+      orderItems = await this.db
+        .select({
+          productId: schema.orderItems.productId,
+          quantity: schema.orderItems.quantity,
+          productName: schema.products.name,
+        })
+        .from(schema.orderItems)
+        .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+        .where(eq(schema.orderItems.orderId, orderId));
+    } else {
+      // Fallback: follow-up order
+      const [fuRow] = await this.db
+        .select({ id: schema.followUpOrders.id })
+        .from(schema.followUpOrders)
+        .where(and(eq(schema.followUpOrders.id, orderId), isNull(schema.followUpOrders.deletedAt)))
+        .limit(1);
+      if (!fuRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      }
+      orderItems = await this.db
+        .select({
+          productId: schema.followUpOrderItems.productId,
+          quantity: schema.followUpOrderItems.quantity,
+          productName: schema.products.name,
+        })
+        .from(schema.followUpOrderItems)
+        .leftJoin(schema.products, eq(schema.followUpOrderItems.productId, schema.products.id))
+        .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+    }
 
     if (orderItems.length === 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to allocate.' });
@@ -2935,8 +2926,14 @@ export class OrdersService {
    * tap-to-call in WhatsApp/dialers. If nothing is found, paste explains VOIP fallback.
    */
   async getClipboardSummaryText(orderId: string, actor: SessionUser): Promise<string> {
-    const detail = await this.getById(orderId);
-    this.assertActorMayViewOrderForRead(actor, detail);
+    let detail: Awaited<ReturnType<typeof this.getById>>;
+    try {
+      detail = await this.getById(orderId);
+      this.assertActorMayViewOrderForRead(actor, detail);
+    } catch {
+      // Fallback: try follow_up_orders table
+      return this.getFollowUpClipboardSummaryText(orderId);
+    }
 
     const [phoneRow] = await this.db
       .select({
@@ -2982,6 +2979,50 @@ export class OrdersService {
     });
   }
 
+  /** Clipboard summary for a follow-up order (lives in follow_up_orders, not orders). */
+  private async getFollowUpClipboardSummaryText(orderId: string): Promise<string> {
+    const [fu] = await this.db.select().from(schema.followUpOrders).where(eq(schema.followUpOrders.id, orderId)).limit(1);
+    if (!fu) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+
+    const items = await this.db
+      .select({ productId: schema.followUpOrderItems.productId, quantity: schema.followUpOrderItems.quantity, unitPrice: schema.followUpOrderItems.unitPrice, offerLabel: schema.followUpOrderItems.offerLabel, productName: schema.products.name })
+      .from(schema.followUpOrderItems)
+      .innerJoin(schema.products, eq(schema.products.id, schema.followUpOrderItems.productId))
+      .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+
+    const resolved = resolveOrderClipboardPhone({
+      customerPhone: fu.customerPhone,
+      deliveryNotes: fu.deliveryNotes,
+      customerAddress: fu.customerAddress,
+      customFields: fu.customFields as Record<string, unknown> | null | undefined,
+    });
+    const phoneForPaste = resolved != null
+      ? formatNigerianPhoneForClipboardPaste(resolved.trim())
+      : 'Not available';
+
+    return buildOrderClipboardSummaryText({
+      id: fu.id,
+      orderNumber: fu.orderNumber,
+      status: fu.status,
+      customerName: fu.customerName,
+      customerPhoneForPaste: phoneForPaste,
+      deliveryAddress: fu.deliveryAddress ?? null,
+      customerAddress: fu.customerAddress ?? null,
+      deliveryState: fu.deliveryState ?? null,
+      orderItems: items.map((it) => ({ id: it.productId, productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName, offerLabel: it.offerLabel })),
+      totalAmount: fu.totalAmount ?? null,
+      createdAt: fu.createdAt ? String(fu.createdAt) : null,
+      preferredDeliveryDate: fu.preferredDeliveryDate ?? null,
+      logisticsLocationName: null,
+      logisticsProviderName: null,
+      paymentStatus: fu.paymentStatus ?? null,
+      deliveryNotes: fu.deliveryNotes ?? null,
+      assignedCsName: null,
+      campaignCustomFieldDefs: [],
+      customFields: fu.customFields as Record<string, unknown> | null | undefined,
+    });
+  }
+
   /**
    * List orders with filtering, search, and pagination.
    */
@@ -3019,6 +3060,13 @@ export class OrdersService {
       conditions.push(
         sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
       );
+    }
+
+    // Frozen filter — 'frozen' = only frozen orders, 'active' = only non-frozen
+    if (input.frozenFilter === 'frozen') {
+      conditions.push(eq(schema.orders.frozenForFollowUp, true));
+    } else if (input.frozenFilter === 'active') {
+      conditions.push(eq(schema.orders.frozenForFollowUp, false));
     }
 
     if (input.status) {
@@ -3249,6 +3297,10 @@ export class OrdersService {
       isDuplicate: schema.orders.isDuplicate,
       // Follow-up flag — shown as a badge when order was reopened via Follow Up page.
       isFollowUp: schema.orders.isFollowUp,
+      // Frozen flag — order pulled into follow-up pipeline, no further mutations.
+      frozenForFollowUp: schema.orders.frozenForFollowUp,
+      // Delivery address — used in exports.
+      deliveryAddress: schema.orders.deliveryAddress,
     } as const;
 
     const [orders, totalRows] = await Promise.all([
@@ -3293,6 +3345,7 @@ export class OrdersService {
               itemId: schema.orderItems.id,
               productId: schema.orderItems.productId,
               productName: schema.products.name,
+              quantity: schema.orderItems.quantity,
             })
             .from(schema.orderItems)
             .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
@@ -3304,6 +3357,7 @@ export class OrdersService {
               itemId: string;
               productId: string;
               productName: string | null;
+              quantity: number;
             }>,
           ),
       campaignIds.length > 0
@@ -3348,7 +3402,7 @@ export class OrdersService {
 
     const primaryItemByOrder = new Map<
       string,
-      { productId: string; productName: string | null; itemCount: number }
+      { productId: string; productName: string | null; itemCount: number; items: Array<{ name: string | null; qty: number }> }
     >();
     for (const item of itemsRes) {
       const oid = item.orderId;
@@ -3359,9 +3413,11 @@ export class OrdersService {
           productId: item.productId,
           productName: item.productName,
           itemCount: 1,
+          items: [{ name: item.productName, qty: item.quantity }],
         });
       } else {
         cur.itemCount += 1;
+        cur.items.push({ name: item.productName, qty: item.quantity });
       }
     }
 
@@ -3397,6 +3453,7 @@ export class OrdersService {
           primaryProductId: primary?.productId ?? null,
           primaryProductName: primary?.productName ?? null,
           itemCount: primary?.itemCount ?? 0,
+          productLines: primary?.items.map((i) => `${i.name ?? 'Unknown'} x${i.qty}`).join('; ') ?? '',
           campaignName: order.campaignId ? campaignNames.get(order.campaignId) ?? null : null,
           lastCsComment: lastComment,
         };
@@ -3599,6 +3656,11 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
+    // Frozen orders cannot be transitioned (pulled for follow-up config).
+    if (order.frozenForFollowUp) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This order is frozen for follow-up. No further changes allowed.' });
+    }
+
     const currentStatus = order.status as OrderStatus;
     const newStatus = input.newStatus;
 
@@ -3745,6 +3807,25 @@ export class OrdersService {
       }
       // Delivery note is optional (CEO directive 2026-04-24 reversed the prior mandatory rule).
       // The note + screenshot fields are still persisted when provided.
+    }
+
+    // Block ALL forward transitions while a line-item change approval is
+    // pending. CEO directive 2026-06-10: "All edit must seek permission …
+    // if the order is not approved they should not be able to move forward."
+    // Price AND product changes go through the same ORDER_LINE_PRICE_CHANGE
+    // request type, so one check covers both.
+    const forwardStatuses: string[] = [
+      'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED',
+    ];
+    if (forwardStatuses.includes(newStatus) && newStatus !== currentStatus) {
+      const pendingPriceReqId = await this.findPendingOrderLinePriceRequestId(order.id);
+      if (pendingPriceReqId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            'This order has a pending item/price change approval. It cannot move forward until the change is approved or rejected.',
+        });
+      }
     }
 
     // Validate gates based on the transition
@@ -4161,8 +4242,13 @@ export class OrdersService {
         assignedCsId: order.assignedCsId ?? null,
       });
       if (!mayPrice) {
-        const clamped = await this.clampOrderItemsToExistingUnitPrices(input.orderId, workingInput.items);
-        workingInput = { ...workingInput, items: clamped.items, totalAmount: clamped.totalAmount };
+        // CEO directive 2026-06-10: CS closers cannot directly edit items at
+        // all — price, product, quantity, or offer changes must ALL go through
+        // requestLinePriceChangeApproval. Reject the direct update outright.
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Item changes require approval. Use "Submit change for approval" instead of saving directly.',
+        });
       }
     } else if (
       !isLogisticsResolveOnly &&
@@ -7909,7 +7995,29 @@ export class OrdersService {
     // confusing "No timeline events yet" empty state for branch-scoped users
     // when `order_timeline_events.branch_id` (or the synthetic ORDER_RECEIVED)
     // didn't match their active branch session.
-    const order = await this.getById(orderId);
+    let order: Awaited<ReturnType<typeof this.getById>>;
+    try {
+      order = await this.getById(orderId);
+    } catch {
+      // Fallback: the ID may be a follow-up order — return its timeline from
+      // the follow_up_order_timeline_events table instead.
+      const fuRows = await this.db
+        .select()
+        .from(schema.followUpOrderTimelineEvents)
+        .where(eq(schema.followUpOrderTimelineEvents.followUpOrderId, orderId))
+        .orderBy(asc(schema.followUpOrderTimelineEvents.createdAt));
+      const isCloser = actor.role === 'CS_CLOSER';
+      return fuRows.map((r) => ({
+        ...r,
+        orderId,
+        actorName: r.actorName ?? null,
+        // Closers see a generic message — no source order reference
+        ...(isCloser && r.eventType === 'ORDER_RECEIVED' ? {
+          description: 'Order received for follow-up.',
+          metadata: null,
+        } : {}),
+      }));
+    }
     this.assertActorMayViewOrderForRead(actor, order);
 
     // CS_CLOSER viewing a follow-up order sees it as a fresh order — no prior history.
@@ -8696,7 +8804,7 @@ export class OrdersService {
       source: batch.source,
       branchName,
       createdByName: creator?.name ?? null,
-      orderCount: batch.orderCount,
+      orderCount: items.length,
       assignmentMode: batch.assignmentMode,
       batchStatus: batch.status,
       groupId: batch.groupId,
@@ -8711,8 +8819,8 @@ export class OrdersService {
         statusCounts,
         confirmed,
         delivered,
-        confirmationRate: batch.orderCount > 0 ? Math.round((confirmed / batch.orderCount) * 100) : 0,
-        deliveryRate: batch.orderCount > 0 ? Math.round((delivered / batch.orderCount) * 100) : 0,
+        confirmationRate: items.length > 0 ? Math.round((confirmed / items.length) * 100) : 0,
+        deliveryRate: items.length > 0 ? Math.round((delivered / items.length) * 100) : 0,
         totalRevenue: String(totalRevenue),
         deliveredRevenue: String(deliveredRevenue),
       },
@@ -8816,19 +8924,40 @@ export class OrdersService {
     return { success: true };
   }
 
-  async deleteFollowUpGroup(groupId: string) {
-    // Check if any active batches reference this group
-    const [ref] = await this.db
-      .select({ id: schema.followUpBatches.id })
-      .from(schema.followUpBatches)
-      .where(eq(schema.followUpBatches.groupId, groupId))
-      .limit(1);
-    if (ref) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: 'Cannot delete a group that has follow-up batches. Remove the group from batches first.',
-      });
+  async deleteFollowUpGroup(groupId: string, transferTo?: { branchId?: string; groupId?: string }) {
+    // Check if any rules target this group
+    const rulesUsingGroup = await this.db
+      .select({ id: schema.followUpRules.id })
+      .from(schema.followUpRules)
+      .where(eq(schema.followUpRules.targetGroupId, groupId));
+
+    if (rulesUsingGroup.length > 0) {
+      if (transferTo?.branchId) {
+        // Transfer rules to target a branch instead
+        await this.db
+          .update(schema.followUpRules)
+          .set({ targetGroupId: null, targetBranchId: transferTo.branchId })
+          .where(eq(schema.followUpRules.targetGroupId, groupId));
+      } else if (transferTo?.groupId) {
+        // Transfer rules to another group
+        await this.db
+          .update(schema.followUpRules)
+          .set({ targetGroupId: transferTo.groupId })
+          .where(eq(schema.followUpRules.targetGroupId, groupId));
+      } else {
+        // Clear the group target — rules become "All branches"
+        await this.db
+          .update(schema.followUpRules)
+          .set({ targetGroupId: null, targetBranchId: null })
+          .where(eq(schema.followUpRules.targetGroupId, groupId));
+      }
     }
+
+    // Clear group reference on any batches
+    await this.db
+      .update(schema.followUpBatches)
+      .set({ groupId: null })
+      .where(eq(schema.followUpBatches.groupId, groupId));
 
     await this.db.delete(schema.followUpGroups).where(eq(schema.followUpGroups.id, groupId));
     return { success: true };

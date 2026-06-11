@@ -96,7 +96,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })
     : Promise.resolve({ notificationEmailConfig: null, voipState: null });
 
-  return defer({ user, systemSettings, myNotificationPrefs, adminPanelData });
+  // Resolve active group name for the "Settings for: [Group]" label (SuperAdmin only).
+  const activeGroupId = (user as { activeGroupId?: string | null } | null)?.activeGroupId ?? null;
+  let activeGroupName: string | null = null;
+  if (activeGroupId && user?.role === 'SUPER_ADMIN') {
+    const groupRes = await apiRequest<{ result?: { data?: { name: string } } }>(
+      `/trpc/branches.getGroup?input=${encodeURIComponent(JSON.stringify({ groupId: activeGroupId }))}`,
+      { method: 'GET', cookie },
+    );
+    activeGroupName = groupRes.ok ? groupRes.data?.result?.data?.name ?? null : null;
+  }
+
+  return defer({ user, systemSettings, myNotificationPrefs, adminPanelData, activeGroupName });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -362,7 +373,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SettingsIndexRoute() {
-  const { user, systemSettings, myNotificationPrefs, adminPanelData } = useLoaderData<typeof loader>();
+  const { user, systemSettings, myNotificationPrefs, adminPanelData, activeGroupName } = useLoaderData<typeof loader>();
   return (
     <CachedAwait
       resolve={adminPanelData}
@@ -384,6 +395,7 @@ export default function SettingsIndexRoute() {
           notificationEmailConfig={notificationEmailConfig}
           voipState={voipState}
           myNotificationPrefs={myNotificationPrefs}
+          activeGroupName={activeGroupName}
         />
       )}
     </CachedAwait>

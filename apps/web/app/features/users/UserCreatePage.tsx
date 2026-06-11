@@ -219,6 +219,8 @@ export function UserCreatePage({
     permissionCatalog,
     templatePermissionsById,
     defaultMembershipBranchId,
+    branchGroups,
+    viewerRole,
   } = picklists ?? EMPTY_USER_PICKLISTS;
   const isEditMode = !!editingUser;
   const actionData = useActionData<{
@@ -737,19 +739,47 @@ export function UserCreatePage({
                   </label>
                 ) : null}
                 <div className="max-h-48 overflow-y-auto">
-                  {activeBranches.map((branch: UserCreateBranch) => (
-                    <label
-                      key={branch.id}
-                      className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
-                    >
-                      <Checkbox
-                        checked={selectedBranchIds.includes(branch.id)}
-                        onChange={() => toggleBranch(branch.id)}
-                      />
-                      <span className="text-sm text-app-fg">{branch.name}</span>
-                      <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
-                    </label>
-                  ))}
+                  {/* Group branches by branch group when multiple groups exist and viewer is SuperAdmin or multi-group */}
+                  {branchGroups && branchGroups.length > 1 && (viewerRole === 'SUPER_ADMIN' || new Set(activeBranches.map((b) => b.groupId).filter(Boolean)).size > 1) ? (
+                    branchGroups.map((group) => {
+                      const groupBranches = activeBranches.filter((b: UserCreateBranch) => b.groupId === group.id);
+                      if (groupBranches.length === 0) return null;
+                      return (
+                        <div key={group.id}>
+                          <div className="px-3 py-1.5 bg-app-hover/40 border-b border-app-border">
+                            <span className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">{group.name}</span>
+                          </div>
+                          {groupBranches.map((branch: UserCreateBranch) => (
+                            <label
+                              key={branch.id}
+                              className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                            >
+                              <Checkbox
+                                checked={selectedBranchIds.includes(branch.id)}
+                                onChange={() => toggleBranch(branch.id)}
+                              />
+                              <span className="text-sm text-app-fg">{branch.name}</span>
+                              <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+                            </label>
+                          ))}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    activeBranches.map((branch: UserCreateBranch) => (
+                      <label
+                        key={branch.id}
+                        className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                      >
+                        <Checkbox
+                          checked={selectedBranchIds.includes(branch.id)}
+                          onChange={() => toggleBranch(branch.id)}
+                        />
+                        <span className="text-sm text-app-fg">{branch.name}</span>
+                        <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+                      </label>
+                    ))
+                  )}
                 </div>
               </div>
               <SearchableSelect

@@ -12,7 +12,7 @@ import { formatOrderTimestamp } from '~/lib/format-date';
 import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { OrdersChartViewShellSkeleton } from '~/components/ui/deferred-skeletons';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -234,6 +234,8 @@ export interface OrdersListPageProps {
   campaignsForFilter?: Array<{ id: string; name: string }>;
   /** Available products for the Product filter dropdown. */
   productsForFilter?: Array<{ id: string; name: string }>;
+  /** Active frozen filter from URL: 'frozen' | 'active' | undefined. */
+  frozenFilter?: string;
   /** When true, show "Create offline order" button (CS_CLOSER / HEAD_OF_CS). */
   canCreateOffline?: boolean;
   /**
@@ -277,6 +279,16 @@ export interface OrdersListPageProps {
   cartAbandonmentCount?: number;
   /** Branches available for the "Move to branch" bulk action (Admin/HoCS only). */
   branchesForMove?: Array<{ id: string; name: string }>;
+  /** Override the default page title ("Sales Orders" / "My Orders"). */
+  pageTitle?: string;
+  /** Override the default page description. */
+  pageDescription?: string;
+  /** Override the default back-to link. */
+  backTo?: string;
+  /** Override the base path for order detail links (default: '/admin/orders'). */
+  detailBasePath?: string;
+  /** Hide Offline + Open carts stat tiles (follow-up surface — always zero). */
+  hideOfflineAndCartStats?: boolean;
 }
 
 type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
@@ -303,6 +315,7 @@ function OrdersListPageImpl({
   showCampaignColumn = false,
   campaignFilter,
   productFilter,
+  frozenFilter: frozenFilterProp,
   campaignsForFilter,
   productsForFilter,
   csClosersForFilter,
@@ -326,11 +339,16 @@ function OrdersListPageImpl({
   cartAbandonmentCount = 0,
   bulkSelectAllMatchingInput,
   branchesForMove,
+  pageTitle,
+  pageDescription,
+  backTo,
+  detailBasePath,
+  hideOfflineAndCartStats = false,
 }: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
-    (orderId: string) => orderDetailHref('/admin/orders', orderId, orderDetailFrom ?? undefined),
-    [orderDetailFrom],
+    (orderId: string) => orderDetailHref(detailBasePath ?? '/admin/orders', orderId, orderDetailFrom ?? undefined),
+    [orderDetailFrom, detailBasePath],
   );
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const [showChartView, setShowChartView] = useState(false);
@@ -1047,22 +1065,45 @@ function OrdersListPageImpl({
       {
         key: 'customer',
         header: 'Customer',
-        render: (order) => (
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate font-medium text-app-fg" title={order.customerName ?? undefined}>
-              {clipName(order.customerName)}
-              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+        render: (order) => {
+          type TagInfo = { label: string; colorClass: string; hex: string };
+          const tags: TagInfo[] = [];
+          if ((order as { isFollowUp?: boolean }).isFollowUp) tags.push({ label: 'Follow Up', colorClass: 'bg-info-500', hex: '#3b82f6' });
+          if ((order as { frozenForFollowUp?: boolean }).frozenForFollowUp) tags.push({ label: 'Frozen', colorClass: 'bg-slate-400', hex: '#94a3b8' });
+          if (isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery due today', colorClass: 'bg-warning-500', hex: '#f59e0b' });
+          if (isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery overdue', colorClass: 'bg-danger-500', hex: '#ef4444' });
+          if (isCallbackDue(order.callbackScheduledAt, order.status)) tags.push({ label: 'Callback due', colorClass: 'bg-purple-500', hex: '#a855f7' });
+          const isFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
+          return (
+            <div className="group/cust relative flex min-w-0 items-center gap-2">
+              <span className={`min-w-0 truncate font-medium ${isFrozen ? 'text-app-fg/60' : 'text-app-fg'}`}>
+                {clipName(order.customerName)}
+                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+                )}
+              </span>
+              {/* Tag dots + tooltip — outside truncated span so tooltip isn't clipped */}
+              {tags.length > 0 && (
+                <span className="relative inline-flex shrink-0 items-center gap-0.5">
+                  {tags.map((t) => (
+                    <span key={t.label} className={`inline-flex w-2 h-2 rounded-full ${t.colorClass}`} />
+                  ))}
+                  {/* Tooltip with arrow — appears on hover */}
+                  <span className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 z-50 ml-2 hidden group-hover/cust:inline-flex items-center min-w-max">
+                    <span className="shrink-0 -mr-px w-0 h-0 border-y-[5px] border-y-transparent border-r-[6px]" style={{ borderRightColor: tags[0]?.hex ?? '#374151' }} />
+                    <span className="inline-flex gap-1">
+                      {tags.map((t) => (
+                        <span key={t.label} className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white whitespace-nowrap shadow-lg ${t.colorClass}`}>
+                          {t.label}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                </span>
               )}
-              {(order as { isFollowUp?: boolean }).isFollowUp && !isCSCloser && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-info-300 bg-info-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-info-600 dark:border-info-700 dark:bg-info-900/30 dark:text-info-400">Follow Up</span>
-              )}
-            </span>
-            {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
-            {isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ? <OverdueTag /> : null}
-            {isCallbackDue(order.callbackScheduledAt, order.status) ? <CallbackDueTag /> : null}
-          </div>
-        ),
+            </div>
+          );
+        },
       },
     ];
     if (showCSCloserColumn) {
@@ -1120,14 +1161,18 @@ function OrdersListPageImpl({
       {
         key: 'status',
         header: 'Status',
-        render: (order) =>
-          order.status === 'CART' ? (
+        render: (order) => {
+          const frozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
+          return order.status === 'CART' ? (
             <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
               Cart
             </span>
           ) : (
-            <OrderStatusBadge status={order.status} />
-          ),
+            <span className={frozen ? 'opacity-60' : ''}>
+              <OrderStatusBadge status={order.status} />
+            </span>
+          );
+        },
       },
       {
         key: 'amount',
@@ -1220,19 +1265,23 @@ function OrdersListPageImpl({
         isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ||
         isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ||
         isCallbackDue(order.callbackScheduledAt, order.status);
+      const mobileFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
       const body = (
         <>
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={order.customerName ?? undefined}>
+            <span className={`min-w-0 truncate text-sm font-medium ${mobileFrozen ? 'text-app-fg/60' : 'text-app-fg'}`} title={order.customerName ?? undefined}>
               {clipName(order.customerName)}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
               {(order as { isFollowUp?: boolean }).isFollowUp && !isCSCloser && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-info-300 bg-info-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-info-600 dark:border-info-700 dark:bg-info-900/30 dark:text-info-400">Follow Up</span>
+                <span className="ml-1.5 inline-flex shrink-0 w-2 h-2 rounded-full bg-info-500" title="Follow Up" />
+              )}
+              {mobileFrozen && (
+                <span className="ml-1.5 inline-flex shrink-0 w-2 h-2 rounded-full bg-slate-400 opacity-70" title="Frozen" />
               )}
             </span>
-            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName={`text-sm font-medium ${mobileFrozen ? 'text-app-fg/60' : 'text-app-fg'}`} />
           </div>
           <div className="flex items-center justify-between gap-2">
             {isCart ? (
@@ -1240,7 +1289,9 @@ function OrdersListPageImpl({
                 Cart
               </span>
             ) : (
-              <OrderStatusBadge status={order.status} />
+              <span className={mobileFrozen ? 'opacity-60' : ''}>
+                <OrderStatusBadge status={order.status} />
+              </span>
             )}
             <span className="whitespace-nowrap text-xs text-app-fg-muted">
               {formatOrderTimestamp(order.createdAt)}
@@ -1300,8 +1351,8 @@ function OrdersListPageImpl({
     ...(!excludeStatuses?.includes('DELETED')
       ? [{ value: 'DELETED', label: 'Deleted' }]
       : []),
-    { value: OFFLINE_STATUS_VALUE, label: `Offline orders (${offlineCount ?? 0})` },
-    ...(enableFromCartStatusOption
+    ...(hideOfflineAndCartStats ? [] : [{ value: OFFLINE_STATUS_VALUE, label: `Offline orders (${offlineCount ?? 0})` }]),
+    ...(!hideOfflineAndCartStats && enableFromCartStatusOption
       ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
       : []),
     ...(enableTestOrdersOption
@@ -1322,6 +1373,7 @@ function OrdersListPageImpl({
     if (scheduleFilters?.scheduleKind) n += 1;
     if (productFilter) n += 1;
     if (showCampaignColumn && campaignFilter) n += 1;
+    if (frozenFilterProp) n += 1;
     return n;
   }, [
     selectedStatus,
@@ -1332,6 +1384,7 @@ function OrdersListPageImpl({
     productFilter,
     showCampaignColumn,
     campaignFilter,
+    frozenFilterProp,
   ]);
 
   // `boxed` → the mobile tools-sheet variant: same boxed/centered/grey chrome
@@ -1431,9 +1484,10 @@ function OrdersListPageImpl({
 
       {/* Page header — Live tag sits directly in front of the refresh button per Sales request. */}
       <PageHeader
-        title={isCSCloser ? 'My Orders' : 'Sales Orders'}
+        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Sales Orders')}
         mobileInlineActions
-        description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
+        backTo={backTo}
+        description={pageDescription ?? (isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders')}
         actions={
           <PageHeaderMobileTools
               sheetTitle="Actions"
@@ -1711,10 +1765,63 @@ function OrdersListPageImpl({
         periodAllTime={filters?.periodAllTime ?? false}
       />
 
+      {/* My workload (Sales closer only) — compact strip above funnel */}
+      {isCSCloser && (myWorkload || deferredLoading) && (
+        myWorkload ? (() => {
+          const closes = myWorkload.todayClosesCount ?? 0;
+          const dailyPct = myWorkload.capacity > 0 ? (closes / myWorkload.capacity) * 100 : 0;
+          const barColor =
+            dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
+          const dutyColor =
+            dailyPct >= 100 ? 'text-success-600 dark:text-success-400' : dailyPct >= 70 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg';
+          return (
+            <div className="card !py-2.5 !px-4 flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={`text-sm font-semibold tabular-nums ${dutyColor}`}>
+                  Today&apos;s duty: {closes} / {myWorkload.capacity}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-sm text-app-fg-muted">Pipeline backlog:</span>
+                <span className={`text-sm font-semibold tabular-nums ${myWorkload.pendingCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
+                  {myWorkload.pendingCount}
+                </span>
+              </div>
+              <div className="flex-1 min-w-[6rem] flex items-center gap-2">
+                <div className="flex-1 h-1.5 bg-app-hover rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                    style={{ width: `${Math.min(dailyPct, 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs text-app-fg-muted tabular-nums shrink-0">{Math.round(Math.min(dailyPct, 100))}%</span>
+              </div>
+            </div>
+          );
+        })() : deferredLoading ? (
+          <div className="card !py-2.5 !px-4 flex items-center gap-4 flex-wrap" aria-hidden>
+            <span className="text-sm text-app-fg-muted">Today&apos;s duty: <span className="inline-block h-4 w-10 rounded bg-app-hover animate-pulse align-middle" /></span>
+            <span className="text-sm text-app-fg-muted">Pipeline backlog: <span className="inline-block h-4 w-6 rounded bg-app-hover animate-pulse align-middle" /></span>
+            <div className="flex-1 min-w-[6rem] flex items-center gap-2">
+              <div className="flex-1 h-1.5 bg-app-hover rounded-full overflow-hidden" />
+              <span className="inline-block h-3 w-6 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ) : null
+      )}
+
       {/* Status totals — funnel snapshot. */}
       {deferredLoading && Object.keys(statusCounts).length === 0 ? (
         <OverviewStatStripSkeleton
           count={1 + PIPELINE_KEYS.length + 3}
+          labels={[
+            'Total',
+            ...(hideOfflineAndCartStats ? [] : ['Offline']),
+            ...PIPELINE_KEYS.map((s) => STATUS_LABELS[s] ?? formatStatus(s)),
+            'CR', 'DR',
+            ...(PIPELINE_KEYS.includes('DELETED') ? [] : ['Deleted']),
+            ...(hideOfflineAndCartStats ? [] : ['Cart Abandonment']),
+          ]}
         />
       ) : (
         // One strip in every mode — the order funnel snapshot stays put when you
@@ -1735,14 +1842,14 @@ function OrdersListPageImpl({
               active: selectedStatus === 'ALL',
               onClick: () => handleStatusSelect('ALL'),
             },
-            {
+            ...(hideOfflineAndCartStats ? [] : [{
               label: 'Offline',
               value: offlineCount ?? 0,
               valueClassName: (offlineCount ?? 0) > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
               title: 'Orders created manually via offline order',
               onClick: () => handleStatusSelect(OFFLINE_STATUS_VALUE),
               active: selectedStatus === OFFLINE_STATUS_VALUE,
-            },
+            }]),
             ...pipelineItems,
             {
               label: 'CR',
@@ -1757,8 +1864,8 @@ function OrdersListPageImpl({
               title: 'Delivery Rate — delivered / total orders',
             },
             ...(deletedItem ? [deletedItem] : []),
-            {
-              label: 'Open carts',
+            ...(hideOfflineAndCartStats ? [] : [{
+              label: 'Cart Abandonment',
               value: cartAbandonmentCount ?? 0,
               valueClassName: (cartAbandonmentCount ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
               title: 'Captured carts not yet recovered — tap to view the cart backlog',
@@ -1766,83 +1873,9 @@ function OrdersListPageImpl({
               ...(enableFromCartStatusOption
                 ? { onClick: () => handleStatusSelect(FROM_CART_STATUS_VALUE) }
                 : {}),
-            },
+            }]),
           ]}
         />
-      )}
-
-      {/* My workload (Sales closer only) */}
-      {isCSCloser && (myWorkload || deferredLoading) && (
-        myWorkload ? (
-          <div className="card">
-            <h2 className="text-sm font-semibold text-app-fg mb-2">
-              My Workload
-            </h2>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
-                <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
-                  {myWorkload.agentName
-                    .split(' ')
-                    .map((n) => n[0])
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-app-fg truncate">
-                  {myWorkload.agentName}
-                </p>
-                <p className="text-xs text-app-fg-muted">
-                  Today&apos;s duty: {myWorkload.todayClosesCount ?? 0} / {myWorkload.capacity}
-                  <span className="text-app-fg-muted/80"> (Lagos)</span>
-                </p>
-                <p className="text-mini text-app-fg-muted mt-0.5">Pipeline backlog: {myWorkload.pendingCount}</p>
-              </div>
-            </div>
-            {(() => {
-              const closes = myWorkload.todayClosesCount ?? 0;
-              const dailyPct = myWorkload.capacity > 0 ? (closes / myWorkload.capacity) * 100 : 0;
-              const barColor =
-                dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
-              return (
-                <>
-                  <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                      style={{ width: `${Math.min(dailyPct, 100)}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
-                    <span className="text-xs text-app-fg-muted">
-                      {Math.round(Math.min(dailyPct, 100))}% of daily target
-                    </span>
-                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                      {closes >= myWorkload.capacity && (
-                        <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
-                      )}
-                      {myWorkload.pendingCount >= myWorkload.capacity && (
-                        <span className="text-xs font-medium text-warning-600 dark:text-warning-400">At quota</span>
-                      )}
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        ) : deferredLoading ? (
-          <div className="card animate-pulse space-y-3" aria-hidden>
-            <div className="h-4 w-28 rounded bg-app-hover" />
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-app-hover shrink-0" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <div className="h-4 w-40 rounded bg-app-hover" />
-                <div className="h-3 w-52 rounded bg-app-hover" />
-              </div>
-            </div>
-            <div className="h-2 w-full rounded-full bg-app-hover" />
-          </div>
-        ) : null
       )}
 
       {/* Bulk Action Toolbar */}
@@ -1903,10 +1936,16 @@ function OrdersListPageImpl({
                 </Button>
               )}
               {/* Bulk Transition buttons */}
-              {availableTransitions.map((status: string) => (
+              {availableTransitions
+                .filter((status: string) => {
+                  // Delete is SuperAdmin/Admin only — HoCS cannot delete orders
+                  if (status === 'DELETED' && userRole !== 'SUPER_ADMIN' && userRole !== 'ADMIN') return false;
+                  return true;
+                })
+                .map((status: string) => (
                 <Button
                   key={status}
-                  variant={status === 'CANCELLED' ? 'danger' : 'primary'}
+                  variant={status === 'DELETED' || status === 'CANCELLED' ? 'danger' : 'primary'}
                   size="sm"
                   onClick={() => submitBulkTransition(status)}
                   disabled={isSubmitting}
@@ -2048,10 +2087,10 @@ function OrdersListPageImpl({
           hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
           searchRow={
-            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3 md:flex-1">
+            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-2">
               <form
                 method="get"
-                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1 md:min-w-[280px]"
+                className="flex min-w-0 w-full gap-2 sm:flex-row sm:items-center md:w-[350px]"
                 onSubmit={(e) => {
                   e.preventDefault();
                   setSearchParams((p) => {
@@ -2083,7 +2122,7 @@ function OrdersListPageImpl({
                   wrapperClassName="min-w-0 w-full flex-1"
                 />
               </form>
-              <div className="hidden items-center gap-3 md:flex md:flex-wrap">
+              <div className="hidden items-center gap-2 md:flex md:flex-wrap">
                 <div className="relative">
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss
@@ -2226,13 +2265,29 @@ function OrdersListPageImpl({
                   </div>
                 ) : null}
                 <div className="relative">
-                  {(sortByProp !== 'createdAt' || sortOrderProp !== 'desc') && (
+                  {frozenFilterProp && (
                     <FilterDismiss
                       onClear={() => {
                         setSearchParams((p) => {
                           const next = new URLSearchParams(p);
+                          next.delete('frozen');
+                          next.set('page', '1');
+                          return next;
+                        });
+                      }}
+                    />
+                  )}
+                  {/* Combined sort + frozen filter */}
+                  {(sortByProp !== 'createdAt' || sortOrderProp !== 'desc' || frozenFilterProp) && (
+                    <FilterDismiss
+                      onClear={() => {
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
                           next.delete('sortBy');
                           next.delete('sortOrder');
+                          next.delete('frozen');
                           next.set('page', '1');
                           return next;
                         });
@@ -2240,16 +2295,25 @@ function OrdersListPageImpl({
                     />
                   )}
                   <FormSelect
-                    value={`${sortByProp}:${sortOrderProp}`}
+                    value={frozenFilterProp ? `frozen:${frozenFilterProp}` : `${sortByProp}:${sortOrderProp}`}
                     onChange={(e) => {
-                      const [newSortBy, newSortOrder] = e.target.value.split(':');
+                      const val = e.target.value;
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
                       setSearchParams((p) => {
                         const next = new URLSearchParams(p);
                         next.set('page', '1');
-                        if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
-                        else next.delete('sortBy');
-                        if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
-                        else next.delete('sortOrder');
+                        if (val.startsWith('frozen:')) {
+                          next.set('frozen', val.split(':')[1]!);
+                          // Keep current sort
+                        } else {
+                          next.delete('frozen');
+                          const [newSortBy, newSortOrder] = val.split(':');
+                          if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                          else next.delete('sortBy');
+                          if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                          else next.delete('sortOrder');
+                        }
                         return next;
                       });
                     }}
@@ -2261,14 +2325,18 @@ function OrdersListPageImpl({
                       { value: 'updatedAt:desc', label: 'Recently updated' },
                       { value: 'status:asc', label: 'Status A–Z' },
                       { value: 'status:desc', label: 'Status Z–A' },
+                      { value: '---', label: '──────────', disabled: true },
+                      { value: 'frozen:active', label: 'Non Frozen' },
+                      { value: 'frozen:frozen', label: 'Frozen only' },
                     ]}
                     wrapperClassName="w-full min-w-0 sm:w-44"
                   />
                 </div>
+                {renderScheduleFilter(false)}
               </div>
             </div>
           }
-          desktopInlineFilters={renderScheduleFilter(false)}
+          desktopInlineFilters={null}
           sheetFilterBody={null}
         />
       </div>

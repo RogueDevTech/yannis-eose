@@ -48,6 +48,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const branchId = raw === '' ? null : raw;
   const next = safeNext(form.get('next')?.toString() ?? null);
 
+  // Multi-branch selection: comma-separated IDs from the checkbox switcher.
+  // CEO directive 2026-06-10 — combine 2+ branches to see combined data.
+  const selectedRaw = form.get('selectedBranchIds')?.toString() ?? '';
+  const selectedBranchIds = selectedRaw ? selectedRaw.split(',').filter(Boolean) : null;
+
   // Call the NestJS controller endpoint (not the tRPC procedure) so the API
   // can re-issue the signed bundle cookie alongside the Redis session update.
   // Without that re-issuance, the bundle cookie keeps the old currentBranchId
@@ -56,7 +61,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const switchRes = await apiRequest('/auth/switch-branch', {
     method: 'POST',
     cookie,
-    body: { branchId },
+    body: { branchId, selectedBranchIds },
   });
 
   if (!switchRes.ok) {
