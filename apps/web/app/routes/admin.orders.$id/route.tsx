@@ -137,7 +137,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               // No skipping — must go through engagement before confirming.
               allowedTransitions: (() => {
                 const s = fuData.status as string;
-                const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'HEAD_OF_CS';
+                const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
                 if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
                 if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
                 if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];

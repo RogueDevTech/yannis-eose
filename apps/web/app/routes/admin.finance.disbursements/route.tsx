@@ -71,7 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const preselectedReceiverId = url.searchParams.get('receiverId') || null;
 
   const perms = user?.permissions ?? [];
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT';
   const canDisburseToHoM = isSuperAdmin || perms.includes('finance.disburse');
   const canDisburseToMediaBuyers = false;
 
