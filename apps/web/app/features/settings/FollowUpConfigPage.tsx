@@ -38,7 +38,7 @@ interface Rule {
   enabled: boolean;
 }
 
-interface Branch { id: string; name: string }
+interface Branch { id: string; name: string; status?: string }
 interface Group { id: string; name: string }
 
 interface SyncLog {
@@ -58,6 +58,8 @@ interface Props {
   syncLogs: SyncLog[];
   followUpGroups?: FollowUpGroupItem[];
   closers?: CloserWithBranches[];
+  excludedIds?: string[];
+  activeCsBranchIds?: string[];
 }
 
 const STATUS_OPTIONS = [
@@ -84,7 +86,7 @@ function formatAge(r: Rule) {
   return r.maxAgeDays ? `${r.ageThresholdDays}–${r.maxAgeDays}d` : `>${r.ageThresholdDays}d`;
 }
 
-export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUpGroups = [], closers = [] }: Props) {
+export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUpGroups = [], closers = [], excludedIds = [], activeCsBranchIds = [] }: Props) {
   const [tab, setTab] = useState('rules');
   const [modalOpen, setModalOpen] = useState(false);
   const [editRule, setEditRule] = useState<Rule | null>(null);
@@ -230,11 +232,15 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   };
   const handleSyncConfirm = () => {
     setSyncPreview(null);
+    setTab('history');
     const fd = new FormData(); fd.set('intent', 'syncNow');
     syncFetcher.submit(fd, { method: 'post' });
   };
 
-  const branchOptions = (branches ?? []).map((b: Branch) => ({ value: b.id, label: b.name }));
+  const activeCsSet = new Set(activeCsBranchIds);
+  const branchOptions = (branches ?? [])
+    .filter((b: Branch) => b.status !== 'INACTIVE' && activeCsSet.has(b.id))
+    .map((b: Branch) => ({ value: b.id, label: b.name }));
   const groupOptions = (groups ?? []).map((g: Group) => ({ value: g.id, label: g.name }));
   const isSyncing = syncFetcher.state !== 'idle';
   const safeRules = rules ?? [];
@@ -312,7 +318,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       {r.sourceStatus === 'CART_ABANDONMENT' ? (
                         <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">Cart</span>
                       ) : (
-                        <OrderStatusBadge status={r.sourceStatus} />
+                        <OrderStatusBadge status={r.sourceStatus} expanded />
                       )}
                       <span>{formatAge(r)}</span>
                       <span>from {r.sourceBranchName ?? 'All'}</span>
@@ -336,7 +342,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                     { key: 'sourceStatus', header: 'Status', render: (r: Rule) => r.sourceStatus === 'CART_ABANDONMENT' ? (
                         <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">Cart</span>
                       ) : (
-                        <OrderStatusBadge status={r.sourceStatus} />
+                        <OrderStatusBadge status={r.sourceStatus} expanded />
                       ) },
                     { key: 'age', header: 'Age', render: (r: Rule) => formatAge(r) },
                     { key: 'sourceBranch', header: 'From', render: (r: Rule) => r.sourceBranchName ?? 'All' },
@@ -367,6 +373,8 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
           branches={branches}
           followUpGroups={followUpGroups}
           closers={closers}
+          excludedIds={excludedIds}
+          activeCsBranchIds={activeCsBranchIds}
           createGroupFetcher={createGroupFetcher}
           onCreateGroup={() => setCreateGroupOpen(true)}
         />
@@ -492,7 +500,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       ) : null}
                       {l.totalPulled > 0 && l.startedAt && (
                         <Link
-                          to={`/admin/cs/follow-up?view=orders&startDate=${new Date(l.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(l.startedAt).toISOString().slice(0, 10)}`}
+                          to={`/admin/cs/follow-up?startDate=${new Date(l.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(l.startedAt).toISOString().slice(0, 10)}`}
                           className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
                         >
                           View orders
@@ -548,7 +556,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                         const d = l.startedAt ? new Date(l.startedAt).toISOString().slice(0, 10) : '';
                         if (!d) return null;
                         return (
-                          <TableActionButton to={`/admin/cs/follow-up?view=orders&startDate=${d}&endDate=${d}&backTo=/admin/settings/follow-up-config`} variant="primary">
+                          <TableActionButton to={`/admin/cs/follow-up?startDate=${d}&endDate=${d}`} variant="primary">
                             View orders
                           </TableActionButton>
                         );
@@ -625,7 +633,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
 
           <div>
             <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
-            <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={branchOptions} placeholder="All branches" searchPlaceholder="Search..." />
+            <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={[{ value: '', label: 'All branches' }, ...branchOptions]} placeholder="All branches" searchPlaceholder="Search..." />
           </div>
 
           <div>
@@ -837,7 +845,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
           <div className="border-t border-app-border p-3 shrink-0">
             {breakdownLog.totalPulled > 0 && breakdownLog.startedAt && (
               <Link
-                to={`/admin/cs/follow-up?view=orders&startDate=${new Date(breakdownLog.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(breakdownLog.startedAt).toISOString().slice(0, 10)}&backTo=/admin/settings/follow-up-config`}
+                to={`/admin/cs/follow-up?startDate=${new Date(breakdownLog.startedAt).toISOString().slice(0, 10)}&endDate=${new Date(breakdownLog.startedAt).toISOString().slice(0, 10)}`}
                 className="btn-primary btn-sm w-full inline-flex items-center justify-center gap-1.5"
                 onClick={() => setBreakdownLog(null)}
               >
@@ -861,12 +869,16 @@ function GroupsAndBranchesTab({
   branches,
   followUpGroups,
   closers,
+  excludedIds = [],
+  activeCsBranchIds = [],
   createGroupFetcher,
   onCreateGroup,
 }: {
   branches: Branch[];
   followUpGroups: FollowUpGroupItem[];
   closers: CloserWithBranches[];
+  excludedIds?: string[];
+  activeCsBranchIds?: string[];
   createGroupFetcher: ReturnType<typeof useFetcher>;
   onCreateGroup: () => void;
 }) {
@@ -882,6 +894,17 @@ function GroupsAndBranchesTab({
   useFetcherToast(deleteFetcher.data, { successMessage: 'Group deleted' });
   useCloseOnFetcherSuccess(deleteFetcher, () => setDeleteGroup(null));
 
+  const toggleFetcher = useFetcher<{ success?: boolean; error?: string; redistributed?: number }>();
+  useFetcherToast(toggleFetcher.data, {
+    successMessage: toggleFetcher.data?.redistributed
+      ? `Updated — ${toggleFetcher.data.redistributed} orders redistributed`
+      : 'Updated',
+  });
+  const [toggleTarget, setToggleTarget] = useState<{ id: string; name: string; kind: string; isExcluded: boolean } | null>(null);
+  const tabRev = useRevalidator();
+  useCloseOnFetcherSuccess(toggleFetcher, () => { setToggleTarget(null); tabRev.revalidate(); });
+  const excludedSet = new Set(excludedIds);
+
   // Compute closer count per branch from the closers array
   const branchCloserCounts = new Map<string, number>();
   for (const c of closers) {
@@ -890,15 +913,19 @@ function GroupsAndBranchesTab({
     }
   }
 
+  // Show all active branches — branches with disabled CS are shown but marked inactive
+  const activeCsSet = new Set(activeCsBranchIds ?? []);
+  const visibleBranches = branches.filter((b) => b.status !== 'INACTIVE');
+
   const rows: UnifiedRow[] = [
-    ...branches.map((b): UnifiedRow => ({ kind: 'branch', id: b.id, name: b.name, closerCount: branchCloserCounts.get(b.id) ?? 0 })),
+    ...visibleBranches.map((b): UnifiedRow => ({ kind: 'branch', id: b.id, name: b.name, closerCount: branchCloserCounts.get(b.id) ?? 0 })),
     ...followUpGroups.map((g): UnifiedRow => ({ kind: 'group', ...g })),
   ];
 
   return (
     <>
       <p className="text-sm text-app-fg-muted mb-3">
-        {branches.length} branch{branches.length !== 1 ? 'es' : ''} · {followUpGroups.length} group{followUpGroups.length !== 1 ? 's' : ''}
+        {visibleBranches.length} branch{visibleBranches.length !== 1 ? 'es' : ''} · {followUpGroups.length} group{followUpGroups.length !== 1 ? 's' : ''}
       </p>
 
       {rows.length === 0 ? (
@@ -906,6 +933,7 @@ function GroupsAndBranchesTab({
       ) : (
         <CompactTable<UnifiedRow>
           rowKey={(r) => `${r.kind}-${r.id}`}
+          rowClassName={() => ''}
           columns={[
             {
               key: 'name',
@@ -968,15 +996,45 @@ function GroupsAndBranchesTab({
               },
             },
             {
+              key: 'status',
+              header: 'Status',
+              render: (r) => {
+                const isExcluded = excludedSet.has(r.id);
+                const hasCsDisabled = r.kind === 'branch' && !activeCsSet.has(r.id);
+                const isInactive = isExcluded || hasCsDisabled;
+                return (
+                  <span title={hasCsDisabled ? 'CS department disabled on this branch' : undefined}>
+                    <StatusBadge status={isInactive ? 'INACTIVE' : 'ACTIVE'} />
+                  </span>
+                );
+              },
+            },
+            {
               key: 'actions',
               header: '',
               align: 'right',
               render: (r) => {
+                const isExcluded = excludedSet.has(r.id);
                 if (r.kind === 'branch') {
+                  const hasCsDisabled = !activeCsSet.has(r.id);
                   return (
-                    <TableActionButton to={`/admin/cs/follow-up?view=orders&branchId=${r.id}`} variant="primary">
-                      View
-                    </TableActionButton>
+                    <div className="flex gap-1 justify-end">
+                      <TableActionButton to={`/admin/cs/follow-up?view=orders&branchId=${r.id}&backTo=/admin/settings/follow-up-config`} variant="primary">
+                        View
+                      </TableActionButton>
+                      {hasCsDisabled ? (
+                        <TableActionButton to={`/admin/branches/${r.id}`} variant="success">
+                          Activate
+                        </TableActionButton>
+                      ) : (
+                        <TableActionButton
+                          onClick={() => setToggleTarget({ id: r.id, name: r.name, kind: r.kind, isExcluded })}
+                          variant={isExcluded ? undefined : 'danger'}
+                        >
+                          {isExcluded ? 'Activate' : 'Disable'}
+                        </TableActionButton>
+                      )}
+                    </div>
                   );
                 }
                 const g = r as FollowUpGroupItem;
@@ -984,6 +1042,12 @@ function GroupsAndBranchesTab({
                   <div className="flex gap-1 justify-end">
                     <TableActionButton onClick={() => setPeekGroup(g)}>View</TableActionButton>
                     <TableActionButton onClick={() => setEditGroup(g)}>Edit</TableActionButton>
+                    <TableActionButton
+                      onClick={() => setToggleTarget({ id: r.id, name: r.name, kind: r.kind, isExcluded })}
+                      variant={isExcluded ? undefined : 'danger'}
+                    >
+                      {isExcluded ? 'Activate' : 'Disable'}
+                    </TableActionButton>
                   </div>
                 );
               },
@@ -994,7 +1058,7 @@ function GroupsAndBranchesTab({
             if (r.kind === 'branch') {
               return (
                 <Link
-                  to={`/admin/cs/follow-up?view=orders&branchId=${r.id}`}
+                  to={`/admin/cs/follow-up?view=orders&branchId=${r.id}&backTo=/admin/settings/follow-up-config`}
                   className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -1059,6 +1123,38 @@ function GroupsAndBranchesTab({
               }}
             >
               Delete
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Toggle follow-up active/inactive confirmation */}
+      {toggleTarget && (
+        <Modal open onClose={() => setToggleTarget(null)} maxWidth="max-w-sm" contentClassName="p-5 space-y-4">
+          <h3 className="text-base font-semibold text-app-fg">
+            {toggleTarget.isExcluded ? 'Enable' : 'Disable'} follow-up distribution
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            {toggleTarget.isExcluded
+              ? `Re-enable follow-up order distribution to ${toggleTarget.name}. New syncs will include this ${toggleTarget.kind}.`
+              : `Disable follow-up distribution to ${toggleTarget.name}. Unprocessed orders will be redistributed to other active branches.`}
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button size="sm" variant="secondary" onClick={() => setToggleTarget(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              variant={toggleTarget.isExcluded ? 'primary' : 'danger'}
+              disabled={toggleFetcher.state === 'submitting'}
+              loading={toggleFetcher.state === 'submitting'}
+              loadingText={toggleTarget.isExcluded ? 'Enabling...' : 'Disabling...'}
+              onClick={() => {
+                toggleFetcher.submit(
+                  { intent: 'toggleFollowUpActive', targetId: toggleTarget.id },
+                  { method: 'post' },
+                );
+              }}
+            >
+              {toggleTarget.isExcluded ? 'Enable' : 'Disable'}
             </Button>
           </div>
         </Modal>

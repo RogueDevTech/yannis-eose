@@ -1,4 +1,4 @@
-import { boolean, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { branchTeamDepartmentEnum } from './enums';
 import { uuidv7Pk, timestampColumns, temporalColumns } from './helpers';
 import { branches } from './branches';
@@ -16,6 +16,9 @@ export const branchDepartments = pgTable(
       .notNull()
       .references(() => branches.id, { onDelete: 'cascade' }),
     department: branchTeamDepartmentEnum('department').notNull(),
+    status: text('status').notNull().default('ACTIVE'),
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
+    deactivatedBy: uuid('deactivated_by').references(() => users.id),
     ...timestampColumns,
   },
   (t) => ({

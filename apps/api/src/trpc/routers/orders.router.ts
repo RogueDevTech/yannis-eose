@@ -2263,6 +2263,14 @@ export const ordersRouter = router({
       return getFollowUpConfigService().getSyncProgress();
     }),
 
+  /** Redistribute unprocessed follow-up orders from a branch to remaining active branches. */
+  followUpConfigRedistribute: permissionProcedure('orders.followUpConfig')
+    .input(z.object({ branchId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const moved = await getFollowUpConfigService().redistributeFromBranch(input.branchId);
+      return { moved };
+    }),
+
   transferFollowUpOrder: permissionProcedure('orders.followUp')
     .input(z.object({ orderId: z.string().uuid(), targetBranchId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
@@ -2273,6 +2281,12 @@ export const ordersRouter = router({
     .input(z.object({ orderId: z.string().uuid(), reason: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getFollowUpConfigService().unfreezeOrder(input.orderId, ctx.user, input.reason);
+    }),
+
+  /** Branches with an active CS department — for follow-up config dropdowns. */
+  listActiveCsBranches: permissionProcedure('orders.followUp')
+    .query(async () => {
+      return getFollowUpConfigService().listActiveCsBranches();
     }),
 
   // ── Follow-Up Branches Summary ─────────────────────────────────────

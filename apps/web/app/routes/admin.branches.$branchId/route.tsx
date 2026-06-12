@@ -47,6 +47,135 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 
+// ── Deactivate department modal ────────────────────────────────────────────────
+
+function DeactivateDepartmentModal({
+  deptBlock,
+  branchId,
+  onClose,
+}: {
+  deptBlock: BranchOrgDepartmentBlock;
+  branchId: string;
+  onClose: () => void;
+}) {
+  const [preflight, setPreflight] = useState<{
+    activeOrders: number; followUpOrders: number; users: number; campaigns: number;
+    eligibleTargets: Array<{ branchId: string; branchName: string }>;
+    isLast: boolean;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [targetBranchId, setTargetBranchId] = useState('');
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(fetcher.data, { successMessage: 'Department deactivated', skipErrorToast: false });
+
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data?.success) onClose();
+  }, [fetcher.state, fetcher.data, onClose]);
+
+  useEffect(() => {
+    const url = `${window.__ENV?.API_URL ?? ''}/trpc/branches.preflightDeactivateDepartment?input=${encodeURIComponent(JSON.stringify({ branchDepartmentId: deptBlock.department.id }))}`;
+    fetch(url, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((json) => {
+        const data = (json as { result?: { data?: typeof preflight } })?.result?.data ?? null;
+        setPreflight(data);
+      })
+      .catch(() => setPreflight(null))
+      .finally(() => setLoading(false));
+  }, [deptBlock.department.id]);
+
+  const deptLabel = deptBlock.department.department === 'CS' ? 'Customer Support' : 'Marketing';
+  const hasData = preflight && (preflight.activeOrders > 0 || preflight.followUpOrders > 0 || preflight.users > 0 || preflight.campaigns > 0);
+
+  return (
+    <Modal open onClose={onClose} maxWidth="max-w-md" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
+      <div className="px-5 pt-5 pb-3 border-b border-app-border shrink-0">
+        <h3 className="text-lg font-semibold text-app-fg">Deactivate {deptLabel}</h3>
+        <p className="text-xs text-app-fg-muted mt-1">
+          This department will be hidden from all dropdowns and new assignments.
+        </p>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+        {loading ? (
+          <div className="py-8 text-center text-sm text-app-fg-muted">Loading impact summary...</div>
+        ) : preflight?.isLast ? (
+          <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 p-4">
+            <p className="text-sm font-semibold text-danger-700 dark:text-danger-400">Cannot deactivate</p>
+            <p className="text-xs text-danger-600 dark:text-danger-400 mt-1">
+              This is the last active {deptLabel} department. At least one must remain active.
+            </p>
+          </div>
+        ) : preflight ? (
+          <>
+            {/* Impact summary */}
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Active orders', value: preflight.activeOrders },
+                { label: 'Follow-up orders', value: preflight.followUpOrders },
+                { label: 'Users', value: preflight.users },
+                { label: 'Campaigns', value: preflight.campaigns },
+              ].map((s) => (
+                <div key={s.label} className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
+                  <p className="text-micro uppercase tracking-wide text-app-fg-muted">{s.label}</p>
+                  <p className={`text-lg font-semibold tabular-nums ${s.value > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {hasData && (
+              <p className="text-xs text-app-fg-muted">
+                Active orders, follow-up orders, users, and campaigns will be transferred to the target branch.
+                Order history stays for reporting.
+              </p>
+            )}
+
+            {/* Target branch picker */}
+            <div>
+              <label className="block text-sm font-medium text-app-fg mb-1.5">Transfer to</label>
+              {preflight.eligibleTargets.length === 0 ? (
+                <p className="text-sm text-danger-600 dark:text-danger-400">No eligible target branches found.</p>
+              ) : (
+                <select
+                  value={targetBranchId}
+                  onChange={(e) => setTargetBranchId(e.target.value)}
+                  className="w-full rounded-lg border border-app-border bg-app-canvas px-3 py-2 text-sm text-app-fg focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">Select a branch...</option>
+                  {preflight.eligibleTargets.map((t) => (
+                    <option key={t.branchId} value={t.branchId}>{t.branchName}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-danger-600">Failed to load impact data. Please try again.</p>
+        )}
+      </div>
+
+      <div className="border-t border-app-border px-5 py-3 flex justify-end gap-2 shrink-0">
+        <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={!targetBranchId || fetcher.state === 'submitting' || !!preflight?.isLast}
+          loading={fetcher.state === 'submitting'}
+          loadingText="Deactivating..."
+          onClick={() => {
+            fetcher.submit(
+              { intent: 'deactivateDepartment', branchDepartmentId: deptBlock.department.id, targetBranchId },
+              { method: 'post' },
+            );
+          }}
+        >
+          Deactivate & transfer
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
 function RemoveModal({ member, onClose }: { member: OverviewMember; onClose: () => void }) {
@@ -210,6 +339,7 @@ interface BranchOrgDepartmentBlock {
     id: string;
     branchId: string;
     department: 'CS' | 'MARKETING';
+    status?: string;
     createdAt: string;
     updatedAt: string | null;
   };
@@ -978,6 +1108,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { status: safeStatus(res.status) },
       );
     }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'deactivateDepartment') {
+    const branchDepartmentId = form.get('branchDepartmentId')?.toString();
+    const targetBranchId = form.get('targetBranchId')?.toString();
+    if (!branchDepartmentId || !targetBranchId) return Response.json({ error: 'Department and target branch required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.deactivateDepartment', {
+      method: 'POST', cookie, body: { branchDepartmentId, targetBranchId },
+    });
+    if (!res.ok) return Response.json({ error: extractApiErrorMessage(res.data, 'Failed to deactivate department') }, { status: safeStatus(res.status) });
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'reactivateDepartment') {
+    const branchDepartmentId = form.get('branchDepartmentId')?.toString();
+    if (!branchDepartmentId) return Response.json({ error: 'Department ID required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.reactivateDepartment', {
+      method: 'POST', cookie, body: { branchDepartmentId },
+    });
+    if (!res.ok) return Response.json({ error: extractApiErrorMessage(res.data, 'Failed to reactivate department') }, { status: safeStatus(res.status) });
     return Response.json({ success: true });
   }
 
@@ -1767,6 +1918,7 @@ function TeamSettingsSection({
 
 function BranchSupervisorTeamsPanel({
   orgStructure: serverOrgStructure,
+  branchId: panelBranchId,
   branchMembers,
   canManageCSTeams,
   canManageMarketingTeams,
@@ -1776,6 +1928,7 @@ function BranchSupervisorTeamsPanel({
   dateFilters,
 }: {
   orgStructure: BranchOrgStructurePayload;
+  branchId: string;
   branchMembers: OverviewMember[];
   canManageCSTeams: boolean;
   canManageMarketingTeams: boolean;
@@ -1793,6 +1946,10 @@ function BranchSupervisorTeamsPanel({
   useEffect(() => {
     if (selectedDeptId) setDeptTab('overview');
   }, [selectedDeptId]);
+  // Deactivate/reactivate department
+  const [deactivateDeptLocal, setDeactivateDeptLocal] = useState<BranchOrgDepartmentBlock | null>(null);
+  const reactivateFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(reactivateFetcher.data, { successMessage: 'Department reactivated' });
   // Create-team modal — collects a team name before dispatching the create.
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [createTeamName, setCreateTeamName] = useState('');
@@ -2339,10 +2496,15 @@ function BranchSupervisorTeamsPanel({
                   (acc, t) => acc + t.members.filter((m) => m.isSupervisor).length,
                   0,
                 );
+                const isDeactivated = deptBlock.department.status === 'DEACTIVATED';
                 return (
                   <article
                     key={deptBlock.department.id}
-                    className="group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 flex flex-col min-h-[180px] focus-within:ring-2 focus-within:ring-brand-500"
+                    className={`group relative bg-app-elevated rounded-xl border p-5 shadow-sm transition-all duration-200 flex flex-col min-h-[180px] focus-within:ring-2 focus-within:ring-brand-500 ${
+                      isDeactivated
+                        ? 'border-danger-300 dark:border-danger-700 opacity-60'
+                        : 'border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}
                   >
                     {/* Overlay button covers the whole card so the entire
                         surface opens the dept detail view. Inner content
@@ -2355,9 +2517,16 @@ function BranchSupervisorTeamsPanel({
                     />
 
                     <div className="relative z-10 flex items-start justify-between gap-3 mb-2 pointer-events-none">
-                      <h3 className="font-semibold text-app-fg text-base leading-snug min-w-0 flex-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
-                        {deptTitle}
-                      </h3>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-app-fg text-base leading-snug group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                          {deptTitle}
+                        </h3>
+                        {isDeactivated && (
+                          <span className="inline-flex items-center rounded-full bg-danger-50 dark:bg-danger-900/30 border border-danger-200 dark:border-danger-700 px-2 py-0.5 text-micro font-semibold text-danger-600 dark:text-danger-400 mt-1">
+                            Deactivated
+                          </span>
+                        )}
+                      </div>
                       <span
                         className={`shrink-0 inline-flex items-center rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${
                           lane === 'CS'
@@ -2412,6 +2581,38 @@ function BranchSupervisorTeamsPanel({
                     </div>
 
                     <div className="relative z-10 flex items-center gap-2 pt-3 border-t border-app-border pointer-events-none">
+                      {canManageBranchPage && !isDeactivated && (
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          className="pointer-events-auto"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setDeactivateDeptLocal(deptBlock);
+                          }}
+                        >
+                          Deactivate
+                        </Button>
+                      )}
+                      {canManageBranchPage && isDeactivated && (
+                        <reactivateFetcher.Form method="post" className="pointer-events-auto">
+                          <input type="hidden" name="intent" value="reactivateDepartment" />
+                          <input type="hidden" name="branchDepartmentId" value={deptBlock.department.id} />
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            size="sm"
+                            disabled={reactivateFetcher.state === 'submitting'}
+                            loading={reactivateFetcher.state === 'submitting'}
+                            loadingText="Activating..."
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Activate
+                          </Button>
+                        </reactivateFetcher.Form>
+                      )}
                       <span className="ml-auto text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors">
                         View details
                         <svg
@@ -2451,11 +2652,16 @@ function BranchSupervisorTeamsPanel({
                     >
                       ← Back to departments
                     </button>
-                    <h2 className="text-lg font-semibold text-app-fg">
+                    <h2 className="text-lg font-semibold text-app-fg inline-flex items-center gap-2">
                       {DEPT_TEAM_LABEL[selectedDept.department.department]} department
+                      {selectedDept.department.status === 'DEACTIVATED' && (
+                        <span className="inline-flex items-center rounded-full bg-danger-50 dark:bg-danger-900/30 border border-danger-200 dark:border-danger-700 px-2 py-0.5 text-micro font-semibold text-danger-600 dark:text-danger-400">
+                          Deactivated
+                        </span>
+                      )}
                     </h2>
                   </div>
-                  {canCreateTeam && (
+                  {canCreateTeam && selectedDept.department.status !== 'DEACTIVATED' && (
                     <PageHeaderMobileTools
                       sheetTitle="Department tools"
                       triggerAriaLabel="Department actions"
@@ -2488,6 +2694,15 @@ function BranchSupervisorTeamsPanel({
                   )}
                 </div>
 
+                {selectedDept.department.status === 'DEACTIVATED' ? (
+                  <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 p-4 mt-4">
+                    <p className="text-sm font-semibold text-danger-700 dark:text-danger-400">This department is deactivated</p>
+                    <p className="text-xs text-danger-600 dark:text-danger-400 mt-1">
+                      All members, orders, and campaigns have been transferred. Reactivate from the departments overview to start using it again.
+                    </p>
+                  </div>
+                ) : (
+                <>
                 {/* Inner tabs — Overview / Members / Teams */}
                 <div className="border-b border-app-border -mb-px">
                   <Tabs
@@ -2501,6 +2716,8 @@ function BranchSupervisorTeamsPanel({
                     ]}
                   />
                 </div>
+                </>
+                )}
               </>
             );
           })()}
@@ -3030,6 +3247,14 @@ function BranchSupervisorTeamsPanel({
           </div>
         </Modal>
       )}
+      {/* Deactivate department modal */}
+      {deactivateDeptLocal && (
+        <DeactivateDepartmentModal
+          deptBlock={deactivateDeptLocal}
+          branchId={panelBranchId}
+          onClose={() => setDeactivateDeptLocal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -3061,7 +3286,6 @@ function BranchOverviewPage({
   const toggleStatusFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
-  const [deactivateDept, setDeactivateDept] = useState<BranchOrgDepartmentBlock | null>(null);
   const [isPrimary, setIsPrimary] = useState(false);
   const [addMemberUserId, setAddMemberUserId] = useState('');
 
@@ -3193,6 +3417,7 @@ function BranchOverviewPage({
 
       <BranchSupervisorTeamsPanel
         orgStructure={orgStructure}
+        branchId={branch.id}
         branchMembers={overview.members}
         canManageCSTeams={overview.viewer?.canManageCSTeams ?? canManageBranchPage}
         canManageMarketingTeams={overview.viewer?.canManageMarketingTeams ?? canManageBranchPage}
