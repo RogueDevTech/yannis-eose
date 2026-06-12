@@ -273,7 +273,11 @@ export const ORDERS_DEEP_SELECT_MAX = 2000;
  * server applies the same authz/scope as the visible list, so we don't have to
  * recreate that on the client.
  */
-export async function fetchOrdersMatchingIds(serializedListInput: string): Promise<{
+export async function fetchOrdersMatchingIds(
+  serializedListInput: string,
+  /** tRPC endpoint to query — defaults to `orders.list`. Pass `orders.followUpOrdersList` for follow-up scoped lists. */
+  endpoint = 'orders.list',
+): Promise<{
   ids: string[];
   capped: boolean;
 }> {
@@ -289,7 +293,7 @@ export async function fetchOrdersMatchingIds(serializedListInput: string): Promi
     JSON.stringify({ ...parsed, page: 1, limit: ORDERS_DEEP_SELECT_MAX }),
   );
   try {
-    const res = await fetch(`${base}/trpc/orders.list?input=${input}`, {
+    const res = await fetch(`${base}/trpc/${endpoint}?input=${input}`, {
       credentials: 'include',
     });
     if (!res.ok) return { ids: [], capped: false };
