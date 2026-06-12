@@ -1,5 +1,5 @@
 import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { Await, Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
 import { clipName } from '~/lib/clip-name';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -30,7 +30,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { ExportModal } from '~/components/ui/export-modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
-import { useLiveIndicator } from '~/hooks/useSocket';
+import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -58,6 +58,7 @@ import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
 import { useToast } from '~/components/ui/toast';
 import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
+import { BulkProgressModal, BULK_PROGRESS_IDLE, type BulkProgressState } from '~/components/ui/bulk-progress-modal';
 
 /** Deferred loader bundle for `/admin/sales/orders` (counts, chart series, heat, picklists). */
 export type CsOrdersDeferredSecondary = {
@@ -266,6 +267,14 @@ export interface OrdersListPageProps {
   bulkSelectAllMatchingInput?: string;
   /** tRPC endpoint for deep-select. Defaults to `orders.list`. Pass `orders.followUpOrdersList` for follow-up surfaces. */
   bulkSelectEndpoint?: string;
+  /** When true, hides SmartPick presets but keeps the "Select all matching" checkbox. */
+  hideSmartPickPresets?: boolean;
+  /**
+   * When true, "Move to branch" processes orders one-by-one with a progress modal
+   * instead of a single batch POST. Required for follow-up orders which use a
+   * per-item tRPC mutation (`orders.transferFollowUpOrder`).
+   */
+  bulkMovePerItem?: boolean;
   /** Sales orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
   deferredSecondary?: Promise<CsOrdersDeferredSecondary>;
   /**
@@ -341,6 +350,8 @@ function OrdersListPageImpl({
   cartAbandonmentCount = 0,
   bulkSelectAllMatchingInput,
   bulkSelectEndpoint,
+  hideSmartPickPresets = false,
+  bulkMovePerItem = false,
   branchesForMove,
   pageTitle,
   pageDescription,
@@ -562,6 +573,15 @@ function OrdersListPageImpl({
     setMoveBranchId('');
     clearSelection();
   });
+  // Bulk move with server-side processing + WebSocket progress (follow-up surfaces).
+  const [bulkMoveProgress, setBulkMoveProgress] = useState<BulkProgressState>(BULK_PROGRESS_IDLE);
+  const { revalidate } = useRevalidator();
+  useSocketEvent<BulkProgressState>('bulk:progress', useCallback((data: BulkProgressState) => {
+    setBulkMoveProgress(data);
+    if (data.status === 'complete' || data.status === 'error') {
+      revalidate();
+    }
+  }, [revalidate]));
 
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
@@ -805,46 +825,48 @@ function OrdersListPageImpl({
     const smartPickCeiling = Math.min(total, ORDERS_DEEP_SELECT_MAX);
     return (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <SmartPick
-          total={smartPickCeiling}
-          selectedCount={selectedIds.size}
-          onPick={async (count) => {
-            // Fast path: requested count fits on the current page — slice locally.
-            if (count <= filteredOrders.length) {
-              if (selectAllMatchingActive) {
-                setSelectAllMatchingActive(false);
-                setSelectAllMatchingCapped(false);
-              }
-              setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)));
-              return;
-            }
-            // Cross-page path: fetch matching IDs from the server (same authz
-            // and scope as the visible list), then slice to the requested count.
-            if (!bulkSelectAllMatchingInput) {
-              setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
-              return;
-            }
-            setSelectAllMatchingLoading(true);
-            setSelectAllMatchingError(null);
-            try {
-              const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput, bulkSelectEndpoint);
-              if (ids.length === 0) {
-                setSelectAllMatchingError('Could not load matching orders. Try again.');
+        {!hideSmartPickPresets && (
+          <SmartPick
+            total={smartPickCeiling}
+            selectedCount={selectedIds.size}
+            onPick={async (count) => {
+              // Fast path: requested count fits on the current page — slice locally.
+              if (count <= filteredOrders.length) {
+                if (selectAllMatchingActive) {
+                  setSelectAllMatchingActive(false);
+                  setSelectAllMatchingCapped(false);
+                }
+                setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)));
                 return;
               }
-              const picked = ids.slice(0, count);
-              setSelectedIds(new Set(picked));
-              setSelectAllMatchingActive(true);
-              setSelectAllMatchingCapped(capped && count >= ids.length);
-            } catch {
-              setSelectAllMatchingError('Could not load matching orders. Try again.');
-            } finally {
-              setSelectAllMatchingLoading(false);
-            }
-          }}
-          onClear={clearSelection}
-          itemNoun="orders"
-        />
+              // Cross-page path: fetch matching IDs from the server (same authz
+              // and scope as the visible list), then slice to the requested count.
+              if (!bulkSelectAllMatchingInput) {
+                setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
+                return;
+              }
+              setSelectAllMatchingLoading(true);
+              setSelectAllMatchingError(null);
+              try {
+                const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput, bulkSelectEndpoint);
+                if (ids.length === 0) {
+                  setSelectAllMatchingError('Could not load matching orders. Try again.');
+                  return;
+                }
+                const picked = ids.slice(0, count);
+                setSelectedIds(new Set(picked));
+                setSelectAllMatchingActive(true);
+                setSelectAllMatchingCapped(capped && count >= ids.length);
+              } catch {
+                setSelectAllMatchingError('Could not load matching orders. Try again.');
+              } finally {
+                setSelectAllMatchingLoading(false);
+              }
+            }}
+            onClear={clearSelection}
+            itemNoun="orders"
+          />
+        )}
         {canBulkAction && bulkSelectAllMatchingInput && total > 0 && (
           <label className="flex items-center gap-1.5 text-sm">
             <Checkbox
@@ -2074,20 +2096,56 @@ function OrdersListPageImpl({
           <Button variant="secondary" onClick={() => { setMoveBranchModalOpen(false); setMoveBranchId(''); }}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={!moveBranchId || moveBranchFetcher.state === 'submitting'}
+            disabled={!moveBranchId || moveBranchFetcher.state === 'submitting' || bulkMoveProgress.status === 'running'}
             loading={moveBranchFetcher.state === 'submitting'}
             loadingText="Moving…"
-            onClick={() => {
-              moveBranchFetcher.submit(
-                { intent: 'moveOrdersToBranch', orderIds: JSON.stringify([...selectedIds]), targetBranchId: moveBranchId },
-                { method: 'post' },
-              );
+            onClick={async () => {
+              if (bulkMovePerItem) {
+                // Close confirmation modal — progress comes via WebSocket
+                const ids = [...selectedIds];
+                const branch = moveBranchId;
+                setMoveBranchModalOpen(false);
+                setMoveBranchId('');
+                setBulkMoveProgress({ label: 'Moving orders to branch', total: ids.length, completed: 0, failed: 0, status: 'running' });
+                try {
+                  const { getBrowserApiBaseUrl } = await import('~/lib/browser-api-base');
+                  const base = getBrowserApiBaseUrl();
+                  const res = await fetch(`${base}/trpc/orders.bulkTransferFollowUpOrders`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ orderIds: ids, targetBranchId: branch }),
+                  });
+                  if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    const msg = (() => { try { const j = JSON.parse(text); return j?.error?.message ?? text.slice(0, 120); } catch { return text.slice(0, 120); } })();
+                    setBulkMoveProgress((p) => ({ ...p, status: 'error', errors: [msg || `HTTP ${res.status}`] }));
+                  }
+                  // On success the final socket event already set state to 'complete'
+                } catch (err) {
+                  setBulkMoveProgress((p) => ({ ...p, status: 'error', errors: [(err as Error).message ?? 'Network error'] }));
+                }
+              } else {
+                moveBranchFetcher.submit(
+                  { intent: 'moveOrdersToBranch', orderIds: JSON.stringify([...selectedIds]), targetBranchId: moveBranchId },
+                  { method: 'post' },
+                );
+              }
             }}
           >
             Move {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
           </Button>
         </div>
       </Modal>
+      {/* Bulk progress modal (server-side processing + WebSocket progress) */}
+      <BulkProgressModal
+        state={bulkMoveProgress}
+        onDone={() => {
+          setBulkMoveProgress(BULK_PROGRESS_IDLE);
+          clearSelection();
+          revalidate();
+        }}
+      />
 
       <div className="list-panel">
         <ToolbarFiltersCollapsible

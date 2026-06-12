@@ -27,6 +27,7 @@ interface Rule {
   name: string;
   sourceStatus: string;
   ageThresholdDays: number;
+  ageThresholdHours: number | null;
   maxAgeDays: number | null;
   sourceBranchId: string | null;
   sourceBranchName: string | null;
@@ -76,13 +77,32 @@ const STATUS_OPTIONS = [
 const STATUS_LABEL: Record<string, string> = Object.fromEntries(STATUS_OPTIONS.map((o) => [o.value, o.label]));
 
 const AGE_OPTIONS = [
+  { value: 'h:1', label: '1 hour' }, { value: 'h:2', label: '2 hours' }, { value: 'h:4', label: '4 hours' },
+  { value: 'h:6', label: '6 hours' }, { value: 'h:8', label: '8 hours' }, { value: 'h:12', label: '12 hours' },
   { value: '1', label: '1 day' }, { value: '2', label: '2 days' }, { value: '3', label: '3 days' }, { value: '5', label: '5 days' }, { value: '7', label: '7 days' },
   { value: '14', label: '14 days' }, { value: '21', label: '21 days' }, { value: '30', label: '30 days' },
   { value: '45', label: '45 days' }, { value: '60', label: '60 days' }, { value: '90', label: '90 days' },
   { value: '120', label: '120 days' }, { value: '180', label: '180 days' }, { value: '365', label: '365 days' },
 ];
 
+/** Encode rule age into the combo value used by the age dropdown. */
+function ageToValue(r: { ageThresholdHours?: number | null; ageThresholdDays: number }): string {
+  return r.ageThresholdHours ? `h:${r.ageThresholdHours}` : String(r.ageThresholdDays);
+}
+
+/** Decode the combo dropdown value into hours / days. */
+function parseAgeValue(v: string): { ageThresholdDays: number; ageThresholdHours: number | null } {
+  if (v.startsWith('h:')) {
+    const hours = parseInt(v.slice(2), 10);
+    return { ageThresholdDays: 1, ageThresholdHours: hours };
+  }
+  return { ageThresholdDays: parseInt(v, 10), ageThresholdHours: null };
+}
+
 function formatAge(r: Rule) {
+  if (r.ageThresholdHours) {
+    return r.maxAgeDays ? `${r.ageThresholdHours}h–${r.maxAgeDays}d` : `>${r.ageThresholdHours}h`;
+  }
   return r.maxAgeDays ? `${r.ageThresholdDays}–${r.maxAgeDays}d` : `>${r.ageThresholdDays}d`;
 }
 
@@ -157,7 +177,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
 
   const [name, setName] = useState('');
   const [sourceStatus, setSourceStatus] = useState('CONFIRMED');
-  const [ageThresholdDays, setAgeThresholdDays] = useState(7);
+  const [ageValue, setAgeValue] = useState('7');
   const [maxAgeDays, setMaxAgeDays] = useState<number | null>(null);
   const [sourceBranchId, setSourceBranchId] = useState<string | null>(null);
   const [targetType, setTargetType] = useState<'all' | 'branch' | 'group'>('all');
@@ -183,20 +203,21 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   useCloseOnFetcherSuccess(createGroupFetcher, () => { setCreateGroupOpen(false); rev.revalidate(); });
 
   const openCreate = () => {
-    setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeThresholdDays(7); setMaxAgeDays(null);
+    setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeValue('7'); setMaxAgeDays(null);
     setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
     setEnabled(true); setModalOpen(true);
   };
   const openEdit = (rule: Rule) => {
     setEditRule(rule); setName(rule.name); setSourceStatus(rule.sourceStatus);
-    setAgeThresholdDays(rule.ageThresholdDays); setMaxAgeDays(rule.maxAgeDays ?? null); setSourceBranchId(rule.sourceBranchId);
+    setAgeValue(ageToValue(rule)); setMaxAgeDays(rule.maxAgeDays ?? null); setSourceBranchId(rule.sourceBranchId);
     setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
     setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
     setEnabled(rule.enabled); setModalOpen(true);
   };
   const handleSave = () => {
+    const parsed = parseAgeValue(ageValue);
     const payload: Record<string, unknown> = {
-      name, sourceStatus, ageThresholdDays, maxAgeDays: maxAgeDays || null, sourceBranchId: sourceBranchId || null,
+      name, sourceStatus, ageThresholdDays: parsed.ageThresholdDays, ageThresholdHours: parsed.ageThresholdHours, maxAgeDays: maxAgeDays || null, sourceBranchId: sourceBranchId || null,
       targetBranchId: targetType === 'branch' ? targetBranchId : null,
       targetGroupId: targetType === 'group' ? targetGroupId : null,
       targetAll: targetType === 'all',
@@ -623,7 +644,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-app-fg-muted mb-1">Older than</label>
-              <FormSelect id="fu-age" value={String(ageThresholdDays)} onChange={(e) => setAgeThresholdDays(parseInt(e.target.value, 10))} options={AGE_OPTIONS} />
+              <FormSelect id="fu-age" value={ageValue} onChange={(e) => setAgeValue(e.target.value)} options={AGE_OPTIONS} />
             </div>
             <div>
               <label className="block text-xs font-medium text-app-fg-muted mb-1">Max age (optional)</label>
@@ -728,7 +749,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
           {/* Details */}
           <div className="px-5 py-4 divide-y divide-app-border">
             <ViewRow label="Source Status" value={viewRule.sourceStatus === 'CART_ABANDONMENT' ? 'Cart Abandonment' : (STATUS_LABEL[viewRule.sourceStatus] ?? viewRule.sourceStatus)} />
-            <ViewRow label="Age Threshold" value={`${viewRule.ageThresholdDays} day${viewRule.ageThresholdDays !== 1 ? 's' : ''}`} />
+            <ViewRow label="Age Threshold" value={viewRule.ageThresholdHours ? `${viewRule.ageThresholdHours} hour${viewRule.ageThresholdHours !== 1 ? 's' : ''}` : `${viewRule.ageThresholdDays} day${viewRule.ageThresholdDays !== 1 ? 's' : ''}`} />
             {viewRule.maxAgeDays != null && (
               <ViewRow label="Max Age" value={`${viewRule.maxAgeDays} day${viewRule.maxAgeDays !== 1 ? 's' : ''}`} />
             )}
