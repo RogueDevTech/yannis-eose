@@ -11,8 +11,6 @@
 -- Orders whose follow-up copies have progressed beyond UNPROCESSED are left
 -- alone — CS already started working them.
 
-BEGIN;
-
 -- Step 1: Identify follow-up copies that are still UNPROCESSED and were
 -- pulled by a rule. Re-check each against the rule's age threshold using the
 -- correct status timestamp. If the original order does NOT meet the threshold
@@ -45,15 +43,19 @@ WHERE fo.status = 'UNPROCESSED'
     )
   );
 
--- Step 2: Delete follow-up order items for unjust copies
+-- Step 2: Delete follow-up timeline events for unjust copies
+DELETE FROM follow_up_order_timeline_events
+WHERE follow_up_order_id IN (SELECT followup_id FROM _unjust_followups);
+
+-- Step 3: Delete follow-up order items for unjust copies
 DELETE FROM follow_up_order_items
 WHERE follow_up_order_id IN (SELECT followup_id FROM _unjust_followups);
 
--- Step 3: Delete the unjust follow-up copies
+-- Step 4: Delete the unjust follow-up copies
 DELETE FROM follow_up_orders
 WHERE id IN (SELECT followup_id FROM _unjust_followups);
 
--- Step 4: Unfreeze the original orders (only those that no longer have
+-- Step 5: Unfreeze the original orders (only those that no longer have
 -- ANY follow-up copy — in case another rule validly pulled them too)
 UPDATE orders
 SET frozen_for_follow_up = false
@@ -65,5 +67,3 @@ WHERE frozen_for_follow_up = true
   );
 
 DROP TABLE _unjust_followups;
-
-COMMIT;
