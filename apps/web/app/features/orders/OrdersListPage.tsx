@@ -270,9 +270,9 @@ export interface OrdersListPageProps {
   /** When true, hides SmartPick presets but keeps the "Select all matching" checkbox. */
   hideSmartPickPresets?: boolean;
   /**
-   * When true, "Move to branch" processes orders one-by-one with a progress modal
-   * instead of a single batch POST. Required for follow-up orders which use a
-   * per-item tRPC mutation (`orders.transferFollowUpOrder`).
+   * When true, bulk actions (move, transition) use server-side per-item
+   * processing with WebSocket progress instead of the Remix action fetcher.
+   * Required for follow-up orders which use dedicated tRPC mutations.
    */
   bulkMovePerItem?: boolean;
   /** Sales orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
@@ -940,6 +940,33 @@ function OrdersListPageImpl({
       return;
     }
     setBulkResult(null);
+
+    if (bulkMovePerItem) {
+      // Follow-up surface: single bulk API call + WebSocket progress
+      const ids = [...selectedIds];
+      setBulkMoveProgress({ label: 'Transitioning orders', total: ids.length, completed: 0, failed: 0, status: 'running' });
+      (async () => {
+        try {
+          const { getBrowserApiBaseUrl } = await import('~/lib/browser-api-base');
+          const base = getBrowserApiBaseUrl();
+          const res = await fetch(`${base}/trpc/orders.bulkTransitionFollowUpOrders`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ orderIds: ids, newStatus }),
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            const msg = (() => { try { const j = JSON.parse(text); return j?.error?.message ?? text.slice(0, 120); } catch { return text.slice(0, 120); } })();
+            setBulkMoveProgress((p) => ({ ...p, status: 'error', errors: [msg || `HTTP ${res.status}`] }));
+          }
+        } catch (err) {
+          setBulkMoveProgress((p) => ({ ...p, status: 'error', errors: [(err as Error).message ?? 'Network error'] }));
+        }
+      })();
+      return;
+    }
+
     const doSubmit = (branchId: string) =>
       fetcher.submit(
         {
@@ -1052,6 +1079,33 @@ function OrdersListPageImpl({
   const submitBulkCancel = () => {
     setBulkResult(null);
     setCancelModalOpen(false);
+
+    if (bulkMovePerItem) {
+      const ids = [...selectedIds];
+      const reason = cancelReason;
+      setBulkMoveProgress({ label: 'Deleting orders', total: ids.length, completed: 0, failed: 0, status: 'running' });
+      (async () => {
+        try {
+          const { getBrowserApiBaseUrl } = await import('~/lib/browser-api-base');
+          const base = getBrowserApiBaseUrl();
+          const res = await fetch(`${base}/trpc/orders.bulkTransitionFollowUpOrders`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ orderIds: ids, newStatus: 'DELETED', ...(reason ? { note: reason } : {}) }),
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            const msg = (() => { try { const j = JSON.parse(text); return j?.error?.message ?? text.slice(0, 120); } catch { return text.slice(0, 120); } })();
+            setBulkMoveProgress((p) => ({ ...p, status: 'error', errors: [msg || `HTTP ${res.status}`] }));
+          }
+        } catch (err) {
+          setBulkMoveProgress((p) => ({ ...p, status: 'error', errors: [(err as Error).message ?? 'Network error'] }));
+        }
+      })();
+      return;
+    }
+
     const doSubmit = (branchId: string) =>
       fetcher.submit(
         {

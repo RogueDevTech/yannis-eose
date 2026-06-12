@@ -2283,6 +2283,40 @@ export const ordersRouter = router({
       return getFollowUpConfigService().bulkTransferFollowUpOrders(input.orderIds, input.targetBranchId, ctx.user);
     }),
 
+  bulkTransitionFollowUpOrders: permissionProcedure('orders.followUp')
+    .input(z.object({
+      orderIds: z.array(z.string().uuid()).min(1).max(2000),
+      newStatus: z.string(),
+      note: z.string().optional(),
+      metadata: z.record(z.unknown()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await getFollowUpConfigService().bulkTransitionFollowUpOrders(
+        input.orderIds, input.newStatus, ctx.user, input.note, input.metadata,
+      );
+      // Auto-generate invoices for orders that transitioned to CONFIRMED
+      if (input.newStatus === 'CONFIRMED' && result.succeededIds.length > 0) {
+        for (const orderId of result.succeededIds) {
+          try {
+            const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(orderId);
+            await getFinanceService().ensureInvoiceForOrder({
+              order: {
+                id: fuDetail.id,
+                confirmedAt: fuDetail.confirmedAt ?? new Date(),
+                customerName: fuDetail.customerName,
+                customerAddress: fuDetail.customerAddress ?? null,
+                orderItems: fuDetail.items.map((it: { quantity: number; unitPrice: string; productName?: string | null; productId: string }) => ({
+                  quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName ?? null, productId: it.productId,
+                })),
+              },
+              actorId: ctx.user.id,
+            });
+          } catch { /* non-critical */ }
+        }
+      }
+      return { succeeded: result.succeeded, failed: result.failed, total: result.total };
+    }),
+
   unfreezeOrder: permissionProcedure('orders.followUpConfig')
     .input(z.object({ orderId: z.string().uuid(), reason: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
