@@ -30,7 +30,7 @@ import type { LinkProps } from '@remix-run/react';
  * <TableActionButton onClick={() => openAdjust(level, 'increase')} variant="neutral">Add</TableActionButton>
  * ```
  */
-export type TableActionVariant = 'primary' | 'neutral' | 'danger';
+export type TableActionVariant = 'primary' | 'neutral' | 'danger' | 'success';
 
 const SHARED_BASE =
   'inline-flex min-h-10 items-center justify-center px-3 py-2 rounded-lg text-sm font-medium leading-none transition-colors focus:outline-none focus-visible:ring-1 disabled:opacity-50 disabled:cursor-not-allowed md:min-h-0 md:px-0 md:py-0 md:rounded md:text-xs';
@@ -42,6 +42,8 @@ const VARIANT_CLASSES: Record<TableActionVariant, string> = {
     'text-app-fg-muted hover:text-app-fg hover:bg-app-hover focus-visible:ring-surface-400',
   danger:
     'text-danger-600 hover:text-danger-700 hover:bg-danger-50 focus-visible:ring-danger-500 dark:text-danger-400 dark:hover:text-danger-300 dark:hover:bg-danger-900/20',
+  success:
+    'text-success-600 hover:text-success-700 hover:bg-success-50 focus-visible:ring-success-500 dark:text-success-400 dark:hover:text-success-300 dark:hover:bg-success-900/20',
 };
 
 export function tableActionClass(variant: TableActionVariant, extra?: string): string {

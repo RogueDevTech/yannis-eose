@@ -29,9 +29,9 @@ export const createFollowUpRuleSchema = z
   })
   .refine(
     (d) =>
-      (d.targetBranchId != null && d.targetGroupId == null) ||
-      (d.targetBranchId == null && d.targetGroupId != null),
-    { message: 'Exactly one of targetBranchId or targetGroupId is required' },
+      // Both null = All branches (round-robin). One set = specific target. Both set = invalid.
+      !(d.targetBranchId != null && d.targetGroupId != null),
+    { message: 'Cannot set both targetBranchId and targetGroupId' },
   );
 
 export const updateFollowUpRuleSchema = z
@@ -49,16 +49,11 @@ export const updateFollowUpRuleSchema = z
   })
   .refine(
     (d) => {
-      // If both target fields are provided, enforce XOR
-      if (d.targetBranchId !== undefined || d.targetGroupId !== undefined) {
-        return (
-          (d.targetBranchId != null && d.targetGroupId == null) ||
-          (d.targetBranchId == null && d.targetGroupId != null)
-        );
-      }
-      return true; // Neither provided = keep existing targets
+      // Both set = invalid. Both null or one set = fine.
+      if (d.targetBranchId != null && d.targetGroupId != null) return false;
+      return true;
     },
-    { message: 'Exactly one of targetBranchId or targetGroupId is required when updating target' },
+    { message: 'Cannot set both targetBranchId and targetGroupId' },
   );
 
 export const deleteFollowUpRuleSchema = z.object({

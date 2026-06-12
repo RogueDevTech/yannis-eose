@@ -1659,4 +1659,24 @@ export const branchesRouter = router({
       await invalidateBranchesListCache();
       return updated;
     }),
+
+  // ── Department Deactivation ──────────────────────────────────────
+
+  preflightDeactivateDepartment: permissionProcedure('branches.manage')
+    .input(z.object({ branchDepartmentId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getBranchTeamsService().preflightDeactivateDepartment(input.branchDepartmentId);
+    }),
+
+  deactivateDepartment: permissionProcedure('branches.manage')
+    .input(z.object({ branchDepartmentId: z.string().uuid(), targetBranchId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getBranchTeamsService().deactivateDepartment(input.branchDepartmentId, input.targetBranchId, ctx.user);
+    }),
+
+  reactivateDepartment: permissionProcedure('branches.manage')
+    .input(z.object({ branchDepartmentId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getBranchTeamsService().reactivateDepartment(input.branchDepartmentId, ctx.user);
+    }),
 });

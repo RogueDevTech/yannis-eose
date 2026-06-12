@@ -1068,11 +1068,14 @@ function OrdersListPageImpl({
         render: (order) => {
           type TagInfo = { label: string; colorClass: string; hex: string };
           const tags: TagInfo[] = [];
+          const isFollowUpSurface = orderDetailFrom === 'followup';
           if ((order as { isFollowUp?: boolean }).isFollowUp) tags.push({ label: 'Follow Up', colorClass: 'bg-info-500', hex: '#3b82f6' });
           if ((order as { frozenForFollowUp?: boolean }).frozenForFollowUp) tags.push({ label: 'Frozen', colorClass: 'bg-slate-400', hex: '#94a3b8' });
-          if (isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery due today', colorClass: 'bg-warning-500', hex: '#f59e0b' });
-          if (isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery overdue', colorClass: 'bg-danger-500', hex: '#ef4444' });
-          if (isCallbackDue(order.callbackScheduledAt, order.status)) tags.push({ label: 'Callback due', colorClass: 'bg-purple-500', hex: '#a855f7' });
+          // Suppress stale delivery/callback tags on the follow-up surface — these dates
+          // carry over from source orders and don't apply to the fresh follow-up engagement.
+          if (!isFollowUpSurface && isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery due today', colorClass: 'bg-warning-500', hex: '#f59e0b' });
+          if (!isFollowUpSurface && isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery overdue', colorClass: 'bg-danger-500', hex: '#ef4444' });
+          if (!isFollowUpSurface && isCallbackDue(order.callbackScheduledAt, order.status)) tags.push({ label: 'Callback due', colorClass: 'bg-purple-500', hex: '#a855f7' });
           const isFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
           return (
             <div className="group/cust relative flex min-w-0 items-center gap-2">
@@ -1261,10 +1264,12 @@ function OrdersListPageImpl({
   const renderOrderMobileCard = useCallback(
     (order: Order, _index: number, helpers: CompactTableMobileCardHelpers<Order>) => {
       const isCart = order.status === 'CART';
-      const hasTags =
+      const isFollowUpSurface = orderDetailFrom === 'followup';
+      const hasTags = !isFollowUpSurface && (
         isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ||
         isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ||
-        isCallbackDue(order.callbackScheduledAt, order.status);
+        isCallbackDue(order.callbackScheduledAt, order.status)
+      );
       const mobileFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
       const body = (
         <>

@@ -19,6 +19,7 @@ export interface FollowUpBranchRow {
   branchName: string | null;
   totalOrders: number;
   unprocessed: number;
+  assigned: number;
   confirmed: number;
   delivered: number;
   deliveredRevenue: string;
@@ -55,6 +56,8 @@ export function FollowUpBatchesPage({
   const isRevalidating = navigation.state === 'loading' && !deferredLoading;
 
   const totalOrders = branches.reduce((s, b) => s + b.totalOrders, 0);
+  const totalUnassigned = branches.reduce((s, b) => s + b.unprocessed, 0);
+  const totalAssigned = branches.reduce((s, b) => s + (b.assigned ?? 0), 0);
   const totalConfirmed = branches.reduce((s, b) => s + b.confirmed, 0);
   const totalDelivered = branches.reduce((s, b) => s + b.delivered, 0);
   const totalRevenue = branches.reduce((s, b) => s + (Number(b.deliveredRevenue) || 0), 0);
@@ -91,15 +94,23 @@ export function FollowUpBatchesPage({
         align: 'right',
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[3rem]" />
-          : (b) => <span className="text-sm tabular-nums text-app-fg">{b.totalOrders}</span>,
+          : (b) => <span className="text-sm tabular-nums font-semibold text-app-fg">{b.totalOrders}</span>,
       },
       {
         key: 'unprocessed',
-        header: 'Unprocessed',
+        header: 'Unassigned',
         align: 'right',
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[3rem]" />
-          : (b) => <span className="text-sm tabular-nums text-app-fg-muted">{b.unprocessed}</span>,
+          : (b) => <span className="text-sm tabular-nums text-warning-600 dark:text-warning-400">{b.unprocessed}</span>,
+      },
+      {
+        key: 'assigned',
+        header: 'Assigned',
+        align: 'right',
+        render: showSkeleton
+          ? () => <TableCellTextPulse className="w-[3rem]" />
+          : (b) => <span className="text-sm tabular-nums text-info-600 dark:text-info-400">{b.assigned}</span>,
       },
       {
         key: 'confirmed',
@@ -108,8 +119,8 @@ export function FollowUpBatchesPage({
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[4rem]" />
           : (b) => (
-              <span className="text-sm tabular-nums text-app-fg">
-                {b.confirmed} <span className="text-app-fg-muted text-xs">({b.confirmationRate}%)</span>
+              <span className="text-sm tabular-nums text-brand-600 dark:text-brand-400">
+                {b.confirmed} <span className="text-xs opacity-70">({b.confirmationRate}%)</span>
               </span>
             ),
       },
@@ -120,8 +131,8 @@ export function FollowUpBatchesPage({
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[4rem]" />
           : (b) => (
-              <span className="text-sm tabular-nums text-app-fg">
-                {b.delivered} <span className="text-app-fg-muted text-xs">({b.deliveryRate}%)</span>
+              <span className="text-sm tabular-nums text-success-600 dark:text-success-400">
+                {b.delivered} <span className="text-xs opacity-70">({b.deliveryRate}%)</span>
               </span>
             ),
       },
@@ -181,10 +192,12 @@ export function FollowUpBatchesPage({
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Batches', value: String(branches.length) },
-          { label: 'Orders', value: totalOrders.toString() },
-          { label: 'Confirmed', value: totalOrders > 0 ? `${Math.round((totalConfirmed / totalOrders) * 100)}%` : '—', valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
-          { label: 'Delivered', value: totalOrders > 0 ? `${Math.round((totalDelivered / totalOrders) * 100)}%` : '—', valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
+          { label: 'Batches', value: String(branches.length), valueClassName: 'text-app-fg' },
+          { label: 'Total', value: totalOrders.toString(), valueClassName: 'text-app-fg' },
+          { label: 'Unassigned', value: totalUnassigned.toString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
+          { label: 'Assigned', value: totalAssigned.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
+          { label: 'Confirmed', value: totalConfirmed.toString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Delivered', value: totalDelivered.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
           { label: 'Revenue', value: formatNaira(totalRevenue), valueClassName: 'text-app-fg tabular-nums' },
         ]}
       />
@@ -202,7 +215,7 @@ export function FollowUpBatchesPage({
       ) : (
         <CompactTable<FollowUpBranchRow>
           columns={columns}
-          rows={showSkeleton ? Array.from({ length: 3 }, (_, i) => ({ branchId: `sk-${i}`, branchName: null, totalOrders: 0, unprocessed: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0 })) : branches}
+          rows={showSkeleton ? Array.from({ length: 3 }, (_, i) => ({ branchId: `sk-${i}`, branchName: null, totalOrders: 0, unprocessed: 0, assigned: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0 })) : branches}
           rowKey={(b) => b.branchId ?? '__unassigned'}
           loading={isRevalidating}
           loadingVariant="overlay"
@@ -217,12 +230,11 @@ export function FollowUpBatchesPage({
                 </span>
                 <span className="shrink-0 text-sm tabular-nums text-app-fg">{b.totalOrders} orders</span>
               </div>
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="text-app-fg-muted">{b.unprocessed} unprocessed</span>
-              </div>
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="text-success-600 dark:text-success-400">{b.confirmationRate}% confirmed</span>
-                <span className="text-brand-600 dark:text-brand-400">{b.deliveryRate}% delivered</span>
+              <div className="flex items-center gap-3 text-xs flex-wrap">
+                <span className="text-warning-600 dark:text-warning-400">{b.unprocessed} unassigned</span>
+                <span className="text-info-600 dark:text-info-400">{b.assigned} assigned</span>
+                <span className="text-brand-600 dark:text-brand-400">{b.confirmed} confirmed</span>
+                <span className="text-success-600 dark:text-success-400">{b.delivered} delivered</span>
               </div>
             </Link>
           )}

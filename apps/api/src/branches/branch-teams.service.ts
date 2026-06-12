@@ -1091,6 +1091,196 @@ export class BranchTeamsService {
    * report's staff profile, they should also see the mirror affordance there,
    * even before their active branch is switched to that supervisee's branch.
    */
+  // ── Department Deactivation ──────────────────────────────────────
+
+  /** Pre-flight counts for the deactivation modal. */
+  async preflightDeactivateDepartment(branchDepartmentId: string) {
+    const [dept] = await this.db
+      .select({ id: schema.branchDepartments.id, branchId: schema.branchDepartments.branchId, department: schema.branchDepartments.department, status: schema.branchDepartments.status })
+      .from(schema.branchDepartments)
+      .where(eq(schema.branchDepartments.id, branchDepartmentId))
+      .limit(1);
+    if (!dept) throw new TRPCError({ code: 'NOT_FOUND', message: 'Department not found' });
+    if (dept.status !== 'ACTIVE') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Department is already deactivated' });
+
+    // Check if this is the last active department of its type
+    const [sameTypeCount] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.branchDepartments)
+      .where(and(eq(schema.branchDepartments.department, dept.department), eq(schema.branchDepartments.status, 'ACTIVE')));
+    const isLast = (sameTypeCount?.count ?? 0) <= 1;
+
+    // Count affected data
+    const isCS = dept.department === 'CS';
+    const activeOrderStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
+    const branchColName = isCS ? 'servicing_branch_id' : 'branch_id';
+    const [[orderCount], [fuOrderCount], [userCount], [campaignCount]] = await Promise.all([
+      this.db.execute<{ count: number }>(sql`SELECT count(*)::int AS count FROM orders WHERE ${sql.raw(branchColName)} = ${dept.branchId} AND status IN (${sql.join(activeOrderStatuses.map(s => sql`${s}`), sql`, `)}) AND deleted_at IS NULL`),
+      this.db.execute<{ count: number }>(sql`SELECT count(*)::int AS count FROM follow_up_orders WHERE ${sql.raw(branchColName)} = ${dept.branchId} AND deleted_at IS NULL`),
+      this.db.select({ count: sql<number>`count(*)::int` }).from(schema.branchDepartmentMembers)
+        .where(eq(schema.branchDepartmentMembers.branchDepartmentId, branchDepartmentId)),
+      this.db.select({ count: sql<number>`count(*)::int` }).from(schema.campaigns)
+        .where(and(eq(schema.campaigns.branchId, dept.branchId), eq(schema.campaigns.status, 'ACTIVE'))),
+    ]);
+
+    // Get eligible target branches (same department type, active)
+    const targets = await this.db
+      .select({ branchId: schema.branchDepartments.branchId, branchName: schema.branches.name })
+      .from(schema.branchDepartments)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.branchDepartments.branchId))
+      .where(and(
+        eq(schema.branchDepartments.department, dept.department),
+        eq(schema.branchDepartments.status, 'ACTIVE'),
+        ne(schema.branchDepartments.id, branchDepartmentId),
+      ));
+
+    return {
+      department: dept.department,
+      branchId: dept.branchId,
+      isLast,
+      activeOrders: orderCount?.count ?? 0,
+      followUpOrders: fuOrderCount?.count ?? 0,
+      users: userCount?.count ?? 0,
+      campaigns: campaignCount?.count ?? 0,
+      eligibleTargets: targets,
+    };
+  }
+
+  /** Deactivate a department and transfer active data to the target branch. */
+  async deactivateDepartment(branchDepartmentId: string, targetBranchId: string, actor: SessionUser) {
+    const [dept] = await this.db
+      .select()
+      .from(schema.branchDepartments)
+      .where(eq(schema.branchDepartments.id, branchDepartmentId))
+      .limit(1);
+    if (!dept) throw new TRPCError({ code: 'NOT_FOUND', message: 'Department not found' });
+    if (dept.status !== 'ACTIVE') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Department is already deactivated' });
+
+    // Block if last of its type
+    const [sameTypeCount] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.branchDepartments)
+      .where(and(eq(schema.branchDepartments.department, dept.department), eq(schema.branchDepartments.status, 'ACTIVE')));
+    if ((sameTypeCount?.count ?? 0) <= 1) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: `Cannot deactivate the last active ${dept.department} department.` });
+    }
+
+    // Verify target has same department type
+    const [targetDept] = await this.db
+      .select({ id: schema.branchDepartments.id })
+      .from(schema.branchDepartments)
+      .where(and(
+        eq(schema.branchDepartments.branchId, targetBranchId),
+        eq(schema.branchDepartments.department, dept.department),
+        eq(schema.branchDepartments.status, 'ACTIVE'),
+      ))
+      .limit(1);
+    if (!targetDept) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Target branch does not have an active department of the same type.' });
+
+    const isCS = dept.department === 'CS';
+    const activeOrderStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
+    const nowIso = new Date().toISOString();
+
+    await withActor(this.db, actor, async (tx) => {
+      // 1. Transfer active orders (keep assignedCsId — follows the CS)
+      if (isCS) {
+        await tx.execute(sql`UPDATE orders SET servicing_branch_id = ${targetBranchId}, updated_at = ${nowIso}::timestamptz WHERE servicing_branch_id = ${dept.branchId} AND status IN (${sql.join(activeOrderStatuses.map(s => sql`${s}`), sql`, `)}) AND deleted_at IS NULL`);
+      } else {
+        await tx.execute(sql`UPDATE orders SET branch_id = ${targetBranchId}, updated_at = ${nowIso}::timestamptz WHERE branch_id = ${dept.branchId} AND status IN (${sql.join(activeOrderStatuses.map(s => sql`${s}`), sql`, `)}) AND deleted_at IS NULL`);
+      }
+
+      // 2. Transfer active follow-up orders
+      if (isCS) {
+        await tx.execute(sql`UPDATE follow_up_orders SET servicing_branch_id = ${targetBranchId}, updated_at = ${nowIso}::timestamptz WHERE servicing_branch_id = ${dept.branchId} AND deleted_at IS NULL`);
+      } else {
+        await tx.execute(sql`UPDATE follow_up_orders SET branch_id = ${targetBranchId}, updated_at = ${nowIso}::timestamptz WHERE branch_id = ${dept.branchId} AND deleted_at IS NULL`);
+      }
+
+      // 3. Move users: add to target department + target branch
+      const members = await tx
+        .select({ userId: schema.branchDepartmentMembers.userId })
+        .from(schema.branchDepartmentMembers)
+        .where(eq(schema.branchDepartmentMembers.branchDepartmentId, branchDepartmentId));
+
+      if (members.length > 0) {
+        const memberIds = members.map((m) => m.userId);
+
+        // Add to target department roster (skip duplicates)
+        for (const m of members) {
+          await tx.insert(schema.branchDepartmentMembers)
+            .values({ branchDepartmentId: targetDept.id, userId: m.userId })
+            .onConflictDoNothing();
+        }
+
+        // Add to target branch membership (skip duplicates)
+        for (const m of members) {
+          const [existing] = await tx
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(and(eq(schema.userBranches.userId, m.userId), eq(schema.userBranches.branchId, targetBranchId)))
+            .limit(1);
+          if (!existing) {
+            await tx.insert(schema.userBranches).values({ userId: m.userId, branchId: targetBranchId, isPrimary: false });
+          }
+        }
+
+        // Remove from source department roster
+        await tx.delete(schema.branchDepartmentMembers)
+          .where(eq(schema.branchDepartmentMembers.branchDepartmentId, branchDepartmentId));
+
+        // Remove from source branch team memberships
+        const sourceTeams = await tx
+          .select({ id: schema.branchTeams.id })
+          .from(schema.branchTeams)
+          .where(eq(schema.branchTeams.branchDepartmentId, branchDepartmentId));
+        if (sourceTeams.length > 0) {
+          await tx.delete(schema.branchTeamMembers)
+            .where(and(
+              inArray(schema.branchTeamMembers.teamId, sourceTeams.map((t) => t.id)),
+              inArray(schema.branchTeamMembers.userId, memberIds),
+            ));
+        }
+      }
+
+      // 4. Move active campaigns (Marketing department only)
+      if (!isCS) {
+        await tx.execute(sql`UPDATE campaigns SET branch_id = ${targetBranchId} WHERE branch_id = ${dept.branchId} AND status = 'ACTIVE'`);
+      }
+
+      // 5. Mark department as deactivated
+      await tx.update(schema.branchDepartments)
+        .set({ status: 'DEACTIVATED', deactivatedAt: new Date(), deactivatedBy: actor.id, updatedAt: new Date() })
+        .where(eq(schema.branchDepartments.id, branchDepartmentId));
+    });
+
+    // Invalidate caches
+    await this.cache.delPattern('cache:branchTeams:*').catch(() => {});
+    await this.cache.delPattern('cache:branches:*').catch(() => {});
+
+    return { success: true };
+  }
+
+  /** Reactivate a previously deactivated department. */
+  async reactivateDepartment(branchDepartmentId: string, _actor: SessionUser) {
+    const [dept] = await this.db
+      .select()
+      .from(schema.branchDepartments)
+      .where(eq(schema.branchDepartments.id, branchDepartmentId))
+      .limit(1);
+    if (!dept) throw new TRPCError({ code: 'NOT_FOUND', message: 'Department not found' });
+    if (dept.status === 'ACTIVE') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Department is already active' });
+
+    await this.db
+      .update(schema.branchDepartments)
+      .set({ status: 'ACTIVE', deactivatedAt: null, deactivatedBy: null, updatedAt: new Date() })
+      .where(eq(schema.branchDepartments.id, branchDepartmentId));
+
+    await this.cache.delPattern('cache:branchTeams:*').catch(() => {});
+    await this.cache.delPattern('cache:branches:*').catch(() => {});
+
+    return { success: true };
+  }
+
   async actorCanMirrorViaSupervision(
     actor: { id: string; currentBranchId?: string | null },
     target: { id: string; role: string },
