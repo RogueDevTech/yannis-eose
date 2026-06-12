@@ -1273,8 +1273,8 @@ export function SettingsPage({
                 </Collapsible>
               </div>
 
-              {/* Company Groups — multi-company boundary. SuperAdmin only. */}
-              {user?.role === 'SUPER_ADMIN' && (
+              {/* Company Groups — multi-company boundary. Admin-level only. */}
+              {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT') && (
               <div className="card lg:col-span-2">
                 <Collapsible
                   contentClassName="mt-4"

@@ -35,6 +35,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     await this.seedDefaultRules();
     await this.seedDefaultGroup();
 
+    // Ensure all CS closers are in all active branches.
+    await this.syncCloserBranchMemberships();
+
     // One-time fix: sync servicingBranchId for assigned follow-up orders
     // to match the closer's branch (pre-fix orders had stale round-robin branches).
     await this.syncAssignedOrderBranches();
@@ -194,6 +197,58 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   /**
+   * Ensure all active CS_CLOSERs are members of every active branch.
+   * Idempotent — only inserts missing memberships (unique index prevents dupes).
+   * Runs on boot so newly created closers or branches are auto-linked.
+   */
+  private async syncCloserBranchMemberships() {
+    try {
+      const [closers, activeBranches, existingMemberships] = await Promise.all([
+        this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE'))),
+        this.db
+          .select({ id: schema.branches.id })
+          .from(schema.branches)
+          .where(eq(schema.branches.status, 'ACTIVE')),
+        this.db
+          .select({ userId: schema.userBranches.userId, branchId: schema.userBranches.branchId })
+          .from(schema.userBranches),
+      ]);
+      if (closers.length === 0 || activeBranches.length === 0) return;
+
+      const existingSet = new Set(existingMemberships.map((m) => `${m.userId}:${m.branchId}`));
+      const toInsert: Array<{ userId: string; branchId: string; isPrimary: boolean }> = [];
+
+      for (const closer of closers) {
+        for (const branch of activeBranches) {
+          if (!existingSet.has(`${closer.id}:${branch.id}`)) {
+            // First branch becomes primary if the closer has no existing memberships
+            const hasPrimary = existingMemberships.some((m) => m.userId === closer.id);
+            toInsert.push({
+              userId: closer.id,
+              branchId: branch.id,
+              isPrimary: !hasPrimary && toInsert.filter((r) => r.userId === closer.id).length === 0,
+            });
+          }
+        }
+      }
+
+      if (toInsert.length > 0) {
+        // Insert in batches to avoid hitting query limits
+        const BATCH = 500;
+        for (let i = 0; i < toInsert.length; i += BATCH) {
+          await this.db.insert(schema.userBranches).values(toInsert.slice(i, i + BATCH)).onConflictDoNothing();
+        }
+        this.logger.log(`Synced closer branch memberships: ${toInsert.length} new assignments across ${activeBranches.length} branches`);
+      }
+    } catch (err) {
+      this.logger.warn(`syncCloserBranchMemberships failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /**
    * One-time fix: for follow-up orders that were assigned to a closer before
    * the branch-sync fix, update servicingBranchId to match the closer's branch.
    */
@@ -254,6 +309,33 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   // Hourly cron removed — midnight + boot + manual sync is sufficient.
+
+  /** Returns branches with an active CS department — for follow-up config dropdowns. */
+  async listActiveCsBranches(): Promise<Array<{ id: string; name: string }>> {
+    return this.db
+      .select({ id: schema.branches.id, name: schema.branches.name })
+      .from(schema.branchDepartments)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.branchDepartments.branchId))
+      .where(and(
+        eq(schema.branchDepartments.department, 'CS'),
+        eq(schema.branchDepartments.status, 'ACTIVE'),
+        eq(schema.branches.status, 'ACTIVE'),
+      ));
+  }
+
+  /** Returns branch IDs that have an active CS department — used for follow-up distribution. */
+  private async getActiveCsBranchIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ branchId: schema.branchDepartments.branchId })
+      .from(schema.branchDepartments)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.branchDepartments.branchId))
+      .where(and(
+        eq(schema.branchDepartments.department, 'CS'),
+        eq(schema.branchDepartments.status, 'ACTIVE'),
+        eq(schema.branches.status, 'ACTIVE'),
+      ));
+    return rows.map((r) => r.branchId);
+  }
 
   // ── Rule CRUD ──────────────────────────────────────────────────────
 
@@ -350,6 +432,28 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
 
   // ── Sync Engine ────────────────────────────────────────────────────
+
+  /** Read excluded branch/group IDs from system settings. */
+  private async getExcludedIds(): Promise<Set<string>> {
+    try {
+      const [row] = await this.db
+        .select({ value: schema.systemSettings.value })
+        .from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, 'FOLLOW_UP_EXCLUDED_IDS'))
+        .limit(1);
+      if (row?.value) {
+        // jsonb: value is already parsed. Handles { ids: [...] }, raw array, or string.
+        const v = row.value as unknown;
+        if (typeof v === 'object' && v !== null && 'ids' in v) {
+          const ids = (v as { ids: unknown }).ids;
+          if (Array.isArray(ids)) return new Set(ids as string[]);
+        }
+        if (Array.isArray(v)) return new Set(v as string[]);
+        if (typeof v === 'string') return new Set(JSON.parse(v) as string[]);
+      }
+    } catch { /* ignore */ }
+    return new Set();
+  }
 
   /** Read current sync progress from Redis (survives page refresh). */
   async getSyncProgress(): Promise<unknown> {
@@ -535,15 +639,14 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // Resolve target branch(es) for the follow-up orders.
     // When rule has a specific target branch, all orders go there.
     // When null, round-robin across all active branches for equal distribution.
+    // Excluded branches (follow-up config toggle) are filtered out.
+    const excludedIds = await this.getExcludedIds();
     let activeBranches: string[] = [];
     if (rule.targetBranchId) {
-      activeBranches = [rule.targetBranchId];
+      activeBranches = excludedIds.has(rule.targetBranchId) ? [] : [rule.targetBranchId];
     } else {
-      const rows = await this.db
-        .select({ id: schema.branches.id })
-        .from(schema.branches)
-        .where(eq(schema.branches.status, 'ACTIVE'));
-      activeBranches = rows.map((r) => r.id);
+      const csIds = await this.getActiveCsBranchIds();
+      activeBranches = csIds.filter((id) => !excludedIds.has(id));
     }
 
     // Validate FK references: collect all user IDs referenced by source orders
@@ -762,12 +865,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     if (carts.length === 0) return 0;
 
-    // Get active branches for round-robin distribution
-    const activeBranches = (await this.db
-      .select({ id: schema.branches.id })
-      .from(schema.branches)
-      .where(eq(schema.branches.status, 'ACTIVE')))
-      .map((r) => r.id);
+    // Get branches with active CS departments for round-robin distribution
+    const cartExcludedIds = await this.getExcludedIds();
+    const activeBranches = (await this.getActiveCsBranchIds())
+      .filter((id) => !cartExcludedIds.has(id));
 
     // Resolve product prices for order total
     const productIds = [...new Set(carts.map((c) => c.productId))];
@@ -917,6 +1018,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         branchId: schema.followUpOrders.servicingBranchId,
         totalOrders: sql<number>`count(*)::int`,
         unprocessed: sql<number>`count(*) filter (where ${schema.followUpOrders.status} = 'UNPROCESSED')::int`,
+        assigned: sql<number>`count(*) filter (where ${schema.followUpOrders.status} in ('CS_ASSIGNED', 'CS_ENGAGED'))::int`,
         confirmed: sql<number>`count(*) filter (where ${schema.followUpOrders.status} in (${sql.join(confirmedStatuses.map((s) => sql`${s}`), sql`, `)}))::int`,
         delivered: sql<number>`count(*) filter (where ${schema.followUpOrders.status} in (${sql.join(deliveredStatuses.map((s) => sql`${s}`), sql`, `)}))::int`,
         deliveredRevenue: sql<string>`coalesce(sum(${schema.followUpOrders.totalAmount}) filter (where ${schema.followUpOrders.status} in (${sql.join(deliveredStatuses.map((s) => sql`${s}`), sql`, `)})), 0)::text`,
@@ -940,6 +1042,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         branchName: r.branchId ? branchNames.get(r.branchId) ?? null : null,
         totalOrders: r.totalOrders,
         unprocessed: r.unprocessed,
+        assigned: r.assigned,
         confirmed: r.confirmed,
         delivered: r.delivered,
         deliveredRevenue: r.deliveredRevenue,
@@ -1125,28 +1228,31 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   /** Lightweight per-status counts for dashboard stat strips. */
   async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; startDate?: string; endDate?: string }) {
-    const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
-    if (opts?.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, opts.assignedCsId));
-    if (opts?.branchId) conditions.push(eq(schema.followUpOrders.servicingBranchId, opts.branchId));
-    if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(opts.startDate)));
-    if (opts?.endDate) {
-      const end = new Date(opts.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.followUpOrders.createdAt, end));
-    }
+    const cacheKey = `cache:followup:dashboard_counts:${opts?.assignedCsId ?? 'all'}:${opts?.branchId ?? 'all'}:${opts?.startDate ?? ''}:${opts?.endDate ?? ''}`;
+    return this.cache.getOrSet(cacheKey, 30, async () => {
+      const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
+      if (opts?.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, opts.assignedCsId));
+      if (opts?.branchId) conditions.push(eq(schema.followUpOrders.servicingBranchId, opts.branchId));
+      if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(opts.startDate)));
+      if (opts?.endDate) {
+        const end = new Date(opts.endDate);
+        end.setHours(23, 59, 59, 999);
+        conditions.push(lte(schema.followUpOrders.createdAt, end));
+      }
 
-    const rows = await this.db
-      .select({
-        status: schema.followUpOrders.status,
-        count: sql<number>`COUNT(*)::int`,
-      })
-      .from(schema.followUpOrders)
-      .where(and(...conditions))
-      .groupBy(schema.followUpOrders.status);
+      const rows = await this.db
+        .select({
+          status: schema.followUpOrders.status,
+          count: sql<number>`COUNT(*)::int`,
+        })
+        .from(schema.followUpOrders)
+        .where(and(...conditions))
+        .groupBy(schema.followUpOrders.status);
 
-    const byStatus: Record<string, number> = {};
-    for (const row of rows) byStatus[row.status] = row.count;
-    return byStatus;
+      const byStatus: Record<string, number> = {};
+      for (const row of rows) byStatus[row.status] = row.count;
+      return byStatus;
+    });
   }
 
   async getFollowUpOrderDetail(id: string) {
@@ -1621,6 +1727,56 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
    * Transfer a follow-up order to a different servicing branch.
    * HoCS / SuperAdmin / Admin only. Resets assignedCsId (new branch = new closer).
    */
+  /**
+   * Redistribute unprocessed follow-up orders from a deactivated branch to remaining active branches.
+   * Only moves orders in UNPROCESSED/CS_ASSIGNED status (no work done yet).
+   */
+  async redistributeFromBranch(branchId: string): Promise<number> {
+    const excludedIds = await this.getExcludedIds();
+    // Get eligible target branches (active + not excluded)
+    const targetBranches = (await this.db
+      .select({ id: schema.branches.id })
+      .from(schema.branches)
+      .where(eq(schema.branches.status, 'ACTIVE')))
+      .map((r) => r.id)
+      .filter((id) => id !== branchId && !excludedIds.has(id));
+
+    if (targetBranches.length === 0) {
+      this.logger.warn(`redistributeFromBranch: no eligible target branches for ${branchId}`);
+      return 0;
+    }
+
+    // Find unprocessed orders on the deactivated branch
+    const orders = await this.db
+      .select({ id: schema.followUpOrders.id })
+      .from(schema.followUpOrders)
+      .where(
+        and(
+          eq(schema.followUpOrders.servicingBranchId, branchId),
+          inArray(schema.followUpOrders.status, ['UNPROCESSED', 'CS_ASSIGNED']),
+          isNull(schema.followUpOrders.deletedAt),
+        ),
+      );
+
+    if (orders.length === 0) return 0;
+
+    // Round-robin redistribute
+    for (let i = 0; i < orders.length; i++) {
+      const targetBranch = targetBranches[i % targetBranches.length]!;
+      await this.db
+        .update(schema.followUpOrders)
+        .set({
+          servicingBranchId: targetBranch,
+          assignedCsId: null, // Clear assignment — new branch = new closer
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.followUpOrders.id, orders[i]!.id));
+    }
+
+    this.logger.log(`Redistributed ${orders.length} follow-up orders from branch ${branchId} to ${targetBranches.length} branches`);
+    return orders.length;
+  }
+
   async transferFollowUpOrder(orderId: string, targetBranchId: string, actor: SessionUser) {
     const [order] = await this.db
       .select({ id: schema.followUpOrders.id, servicingBranchId: schema.followUpOrders.servicingBranchId, status: schema.followUpOrders.status })

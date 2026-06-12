@@ -33,7 +33,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const closersRaw = closersRes.ok ? (closersRes.data as Record<string, unknown>)?.result : null;
   const closers = Array.isArray(closersRaw) ? closersRaw : (closersRaw as Record<string, unknown>)?.data ?? [];
 
-  return json({ rules, branches, groups, syncLogs, closers });
+  // Fetch excluded IDs + active CS branches for follow-up distribution
+  let excludedIds: string[] = [];
+  let activeCsBranchIds: string[] = [];
+  try {
+    const [settingRes, activeCsRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/settings.getSystemSetting?input=${encodeURIComponent(JSON.stringify({ key: 'FOLLOW_UP_EXCLUDED_IDS' }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/orders.listActiveCsBranches?input=%7B%7D', { method: 'GET', cookie }),
+    ]);
+    if (settingRes.ok) {
+      const val = (settingRes.data as { result?: { data?: { value?: unknown } } })?.result?.data?.value;
+      if (val && typeof val === 'object' && 'ids' in (val as Record<string, unknown>)) {
+        excludedIds = (val as { ids: string[] }).ids;
+      } else if (Array.isArray(val)) {
+        excludedIds = val;
+      }
+    }
+    if (activeCsRes.ok) {
+      const csData = (activeCsRes.data as { result?: { data?: Array<{ id: string }> } })?.result?.data;
+      if (Array.isArray(csData)) activeCsBranchIds = csData.map((b) => b.id);
+    }
+  } catch { /* non-critical */ }
+
+  return json({ rules, branches, groups, syncLogs, closers, excludedIds, activeCsBranchIds });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -102,6 +127,60 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, message: 'Group deleted' });
   }
 
+  // ── Toggle follow-up active/inactive for a branch or group ──
+  if (intent === 'toggleFollowUpActive') {
+    const targetId = formData.get('targetId')?.toString();
+    if (!targetId) return json({ error: 'Missing target ID' }, { status: 400 });
+    // Read current excluded list
+    let excluded: string[] = [];
+    try {
+      const settingRes = await apiRequest<unknown>(
+        `/trpc/settings.getSystemSetting?input=${encodeURIComponent(JSON.stringify({ key: 'FOLLOW_UP_EXCLUDED_IDS' }))}`,
+        { method: 'GET', cookie },
+      );
+      if (settingRes.ok) {
+        const val = (settingRes.data as { result?: { data?: { value?: unknown } } })?.result?.data?.value;
+        if (val && typeof val === 'object' && 'ids' in (val as Record<string, unknown>)) {
+          excluded = (val as { ids: string[] }).ids;
+        } else if (Array.isArray(val)) {
+          excluded = val;
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Toggle: add or remove the ID
+    const isDeactivating = !excluded.includes(targetId);
+    if (isDeactivating) {
+      excluded.push(targetId);
+    } else {
+      excluded = excluded.filter((id) => id !== targetId);
+    }
+
+    const res = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: 'FOLLOW_UP_EXCLUDED_IDS', value: { ids: excluded } },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to update') }, { status: safeStatus(res.status) });
+
+    // When deactivating a branch, redistribute its unprocessed follow-up orders
+    let redistributed = 0;
+    if (isDeactivating) {
+      try {
+        const redistRes = await apiRequest<unknown>('/trpc/orders.followUpConfigRedistribute', {
+          method: 'POST',
+          cookie,
+          body: { branchId: targetId },
+        });
+        if (redistRes.ok) {
+          redistributed = ((redistRes.data as { result?: { data?: { moved?: number } } })?.result?.data?.moved) ?? 0;
+        }
+      } catch { /* non-critical */ }
+    }
+
+    return json({ success: true, redistributed });
+  }
+
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
@@ -137,6 +216,8 @@ export default function FollowUpConfigRoute() {
       syncLogs={Array.isArray(data.syncLogs) ? data.syncLogs as never[] : []}
       followUpGroups={Array.isArray(data.groups) ? data.groups as never[] : []}
       closers={Array.isArray(data.closers) ? data.closers as never[] : []}
+      excludedIds={Array.isArray(data.excludedIds) ? data.excludedIds : []}
+      activeCsBranchIds={Array.isArray(data.activeCsBranchIds) ? data.activeCsBranchIds : []}
     />
   );
 }
