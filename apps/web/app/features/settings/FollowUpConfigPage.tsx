@@ -69,7 +69,7 @@ const STATUS_OPTIONS = [
   { value: 'CS_ASSIGNED', label: 'Assigned' },
   { value: 'CS_ENGAGED', label: 'Unconfirmed' },
   { value: 'CONFIRMED', label: 'Confirmed' },
-  { value: 'DISPATCHED', label: 'Dispatched' },
+  { value: 'AGENT_ASSIGNED', label: 'Agent Assigned' },
   { value: 'DELIVERED', label: 'Delivered' },
   { value: 'REMITTED', label: 'Cash Remitted' },
 ];
