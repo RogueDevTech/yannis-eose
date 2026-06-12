@@ -264,6 +264,8 @@ export interface OrdersListPageProps {
    * Omit it to hide the feature for a given surface.
    */
   bulkSelectAllMatchingInput?: string;
+  /** tRPC endpoint for deep-select. Defaults to `orders.list`. Pass `orders.followUpOrdersList` for follow-up surfaces. */
+  bulkSelectEndpoint?: string;
   /** Sales orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
   deferredSecondary?: Promise<CsOrdersDeferredSecondary>;
   /**
@@ -338,6 +340,7 @@ function OrdersListPageImpl({
   offlineCount = 0,
   cartAbandonmentCount = 0,
   bulkSelectAllMatchingInput,
+  bulkSelectEndpoint,
   branchesForMove,
   pageTitle,
   pageDescription,
@@ -744,7 +747,7 @@ function OrdersListPageImpl({
     setSelectAllMatchingLoading(true);
     setSelectAllMatchingError(null);
     try {
-      const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput);
+      const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput, bulkSelectEndpoint);
       if (ids.length === 0) {
         setSelectAllMatchingError('Could not load matching orders. Try again.');
         return;
@@ -824,7 +827,7 @@ function OrdersListPageImpl({
             setSelectAllMatchingLoading(true);
             setSelectAllMatchingError(null);
             try {
-              const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput);
+              const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput, bulkSelectEndpoint);
               if (ids.length === 0) {
                 setSelectAllMatchingError('Could not load matching orders. Try again.');
                 return;
@@ -1066,14 +1069,14 @@ function OrdersListPageImpl({
         key: 'customer',
         header: 'Customer',
         render: (order) => {
-          type TagInfo = { label: string; colorClass: string; hex: string };
+          type TagInfo = { label: string; colorClass: string; hex: string; textClass?: string };
           const tags: TagInfo[] = [];
           const isFollowUpSurface = orderDetailFrom === 'followup';
           if ((order as { isFollowUp?: boolean }).isFollowUp) tags.push({ label: 'Follow Up', colorClass: 'bg-info-500', hex: '#3b82f6' });
           if ((order as { frozenForFollowUp?: boolean }).frozenForFollowUp) tags.push({ label: 'Frozen', colorClass: 'bg-slate-400', hex: '#94a3b8' });
           // Suppress stale delivery/callback tags on the follow-up surface — these dates
           // carry over from source orders and don't apply to the fresh follow-up engagement.
-          if (!isFollowUpSurface && isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery due today', colorClass: 'bg-warning-500', hex: '#f59e0b' });
+          if (!isFollowUpSurface && isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery due today', colorClass: 'bg-warning-500', hex: '#f59e0b', textClass: 'text-black' });
           if (!isFollowUpSurface && isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery overdue', colorClass: 'bg-danger-500', hex: '#ef4444' });
           if (!isFollowUpSurface && isCallbackDue(order.callbackScheduledAt, order.status)) tags.push({ label: 'Callback due', colorClass: 'bg-purple-500', hex: '#a855f7' });
           const isFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
@@ -1096,7 +1099,7 @@ function OrdersListPageImpl({
                     <span className="shrink-0 -mr-px w-0 h-0 border-y-[5px] border-y-transparent border-r-[6px]" style={{ borderRightColor: tags[0]?.hex ?? '#374151' }} />
                     <span className="inline-flex gap-1">
                       {tags.map((t) => (
-                        <span key={t.label} className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white whitespace-nowrap shadow-lg ${t.colorClass}`}>
+                        <span key={t.label} className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold whitespace-nowrap shadow-lg ${t.textClass ?? 'text-white'} ${t.colorClass}`}>
                           {t.label}
                         </span>
                       ))}

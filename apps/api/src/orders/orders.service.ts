@@ -5767,12 +5767,11 @@ export class OrdersService {
       supervisorScope: extra?.supervisorScope,
     });
     if (extra?.logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, extra.logisticsLocationId));
-    if (extra?.status) {
-      conditions.push(eq(schema.orders.status, extra.status as (typeof schema.orders.$inferSelect)['status']));
-    }
-    if (extra?.statuses?.length) {
-      conditions.push(inArray(schema.orders.status, extra.statuses));
-    }
+    // NOTE: intentionally do NOT apply extra.status / extra.statuses here.
+    // The delivered line shows delivery throughput regardless of which status
+    // tab the user is viewing. Adding e.g. `status = 'AGENT_ASSIGNED'` would
+    // conflict with the `IN ('DELIVERED','REMITTED')` condition above and
+    // return zero rows.
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
 
     const rows = await this.db
