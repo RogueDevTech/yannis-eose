@@ -597,13 +597,32 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     return cutoff;
   }
 
+  /** Map source status to the timestamp column that records when the order entered that status. */
+  private static statusTimestampCol(sourceStatus: string) {
+    switch (sourceStatus) {
+      case 'CONFIRMED': return schema.orders.confirmedAt;
+      case 'AGENT_ASSIGNED': return schema.orders.allocatedAt;
+      case 'DISPATCHED': return schema.orders.dispatchedAt;
+      case 'DELIVERED': return schema.orders.deliveredAt;
+      default: return null; // pre-confirmation statuses have no dedicated ts — use createdAt
+    }
+  }
+
   private async pullOrdersForRule(rule: typeof schema.followUpRules.$inferSelect, _actorId?: string): Promise<number> {
     const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
+
+    // Use status-specific timestamp when available (e.g. confirmedAt for CONFIRMED),
+    // so "5 days" means 5 days since entering that status, not since order creation.
+    // COALESCE handles old orders where the status timestamp wasn't populated.
+    const statusTsCol = FollowUpConfigService.statusTimestampCol(rule.sourceStatus);
+    const ageExpr = statusTsCol
+      ? sql`COALESCE(${statusTsCol}, ${schema.orders.createdAt})`
+      : schema.orders.createdAt;
 
     // Find matching orders not yet pulled
     const conditions = [
       sql`${schema.orders.status} = ${rule.sourceStatus}`,
-      lte(schema.orders.createdAt, minCutoff),
+      sql`${ageExpr} <= ${minCutoff.toISOString()}::timestamptz`,
       eq(schema.orders.frozenForFollowUp, false),
       eq(schema.orders.isFollowUp, false),
       isNull(schema.orders.deletedAt),
@@ -613,7 +632,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (rule.maxAgeDays) {
       const maxCutoff = new Date();
       maxCutoff.setDate(maxCutoff.getDate() - rule.maxAgeDays);
-      conditions.push(gte(schema.orders.createdAt, maxCutoff));
+      conditions.push(sql`${ageExpr} >= ${maxCutoff.toISOString()}::timestamptz`);
     }
 
     if (rule.sourceBranchId) {
@@ -1929,6 +1948,53 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     emitProgress(finalStatus);
 
     return { succeeded, failed, total };
+  }
+
+  /**
+   * Bulk-transition follow-up orders to a new status with per-item WebSocket
+   * progress. Mirrors `transitionFollowUpOrderStatus` but avoids N parallel
+   * HTTP requests from the client. Returns succeeded IDs so the router can
+   * handle side-effects (invoice generation) in bulk.
+   */
+  async bulkTransitionFollowUpOrders(
+    orderIds: string[],
+    newStatus: string,
+    actor: SessionUser,
+    note?: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    const total = orderIds.length;
+    let succeeded = 0;
+    let failed = 0;
+    const errors: string[] = [];
+    const succeededIds: string[] = [];
+    const label = 'Transitioning orders';
+
+    const emitProgress = (status: 'running' | 'complete' | 'error') => {
+      this.events.emitToUser(actor.id, 'bulk:progress', {
+        label, total, completed: succeeded, failed, status,
+        errors: errors.length > 0 ? errors.slice(-5) : undefined,
+      });
+    };
+
+    emitProgress('running');
+
+    for (const orderId of orderIds) {
+      try {
+        await this.transitionFollowUpOrderStatus(orderId, newStatus, actor, note, metadata);
+        succeeded++;
+        succeededIds.push(orderId);
+      } catch (err) {
+        failed++;
+        errors.push(err instanceof Error ? err.message : 'Failed to transition order');
+      }
+      emitProgress('running');
+    }
+
+    const finalStatus = failed === total ? 'error' : 'complete';
+    emitProgress(finalStatus);
+
+    return { succeeded, failed, total, succeededIds };
   }
 
   // ── Unfreeze Order ─────────────────────────────────────────────────
