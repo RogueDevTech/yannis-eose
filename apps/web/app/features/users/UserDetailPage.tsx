@@ -973,6 +973,15 @@ export function UserDetailPage({
         <div className={`relative isolate overflow-hidden ${profileHeaderTone}`}>
           <div className="relative px-4 sm:px-6 pt-5 sm:pt-7 pb-16 sm:pb-20">
             <div className="flex items-start justify-between gap-3">
+              <Link
+                to={usersBasePath}
+                className="mt-1 flex-shrink-0 h-9 w-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors"
+                aria-label="Back to staff list"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+              </Link>
               <div className="max-w-3xl min-w-0">
                 <p className="text-mini font-semibold uppercase tracking-[0.22em] text-white/75">
                   {profileHeroLabel}

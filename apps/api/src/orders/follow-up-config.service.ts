@@ -71,9 +71,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         priority: 5,
       },
       {
-        name: 'Cart abandonments older than 24 hours',
+        name: 'Cart abandonments older than 2 hours',
         sourceStatus: 'CART_ABANDONMENT',
         ageThresholdDays: 1,
+        ageThresholdHours: 2,
         maxAgeDays: null as number | null,
         priority: 15,
       },
@@ -92,6 +93,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           name: rule.name,
           sourceStatus: rule.sourceStatus,
           ageThresholdDays: rule.ageThresholdDays,
+          ageThresholdHours: ('ageThresholdHours' in rule ? rule.ageThresholdHours : null) as number | null,
           maxAgeDays: rule.maxAgeDays,
           sourceBranchId: null,
           targetBranchId: null,
@@ -298,11 +300,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   // ── Cron ───────────────────────────────────────────────────────────
 
-  @Cron('0 0 0 * * *', { timeZone: 'Africa/Lagos' })
+  @Cron('0 0 */2 * * *', { timeZone: 'Africa/Lagos' })
   async handleMidnightSync() {
     try {
       const result = await this.runSync('cron');
-      this.logger.log(`Midnight sync complete: ${result.totalPulled} orders pulled`);
+      this.logger.log(`Follow-up sync complete: ${result.totalPulled} orders pulled`);
     } catch (err) {
       this.logger.error(`Midnight sync failed: ${err instanceof Error ? err.message : err}`);
     }
@@ -381,6 +383,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           name: input.name,
           sourceStatus: input.sourceStatus,
           ageThresholdDays: input.ageThresholdDays,
+          ageThresholdHours: input.ageThresholdHours ?? null,
           maxAgeDays: input.maxAgeDays ?? null,
           sourceBranchId: input.sourceBranchId ?? null,
           targetBranchId: input.targetBranchId ?? null,
@@ -406,6 +409,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (input.name !== undefined) set.name = input.name;
       if (input.sourceStatus !== undefined) set.sourceStatus = input.sourceStatus;
       if (input.ageThresholdDays !== undefined) set.ageThresholdDays = input.ageThresholdDays;
+      if (input.ageThresholdHours !== undefined) set.ageThresholdHours = input.ageThresholdHours;
       if (input.maxAgeDays !== undefined) set.maxAgeDays = input.maxAgeDays;
       if (input.sourceBranchId !== undefined) set.sourceBranchId = input.sourceBranchId;
       if (input.targetBranchId !== undefined) set.targetBranchId = input.targetBranchId;
@@ -518,7 +522,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         });
 
         const pulled = rule.sourceStatus === 'CART_ABANDONMENT'
-          ? await this.pullAbandonedCarts(rule.ageThresholdDays)
+          ? await this.pullAbandonedCarts(rule.ageThresholdHours, rule.ageThresholdDays)
           : await this.pullOrdersForRule(rule, actorId);
         ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled });
         totalPulled += pulled;
@@ -582,9 +586,19 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     return { totalPulled };
   }
 
+  /** Compute the age cutoff from hours (preferred) or days. */
+  private static ageCutoff(hours: number | null | undefined, days: number): Date {
+    const cutoff = new Date();
+    if (hours != null) {
+      cutoff.setTime(cutoff.getTime() - hours * 60 * 60 * 1000);
+    } else {
+      cutoff.setDate(cutoff.getDate() - days);
+    }
+    return cutoff;
+  }
+
   private async pullOrdersForRule(rule: typeof schema.followUpRules.$inferSelect, _actorId?: string): Promise<number> {
-    const minCutoff = new Date();
-    minCutoff.setDate(minCutoff.getDate() - rule.ageThresholdDays);
+    const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
 
     // Find matching orders not yet pulled
     const conditions = [
@@ -802,8 +816,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     for (const rule of rules) {
       if (rule.sourceStatus === 'CART_ABANDONMENT') {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - rule.ageThresholdDays);
+        const cutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
         const [row] = await this.db
           .select({ count: count() })
           .from(schema.cartAbandonments)
@@ -816,8 +829,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           );
         results.push({ ruleId: rule.id, ruleName: rule.name, eligible: Number(row?.count ?? 0) });
       } else {
-        const minCutoff = new Date();
-        minCutoff.setDate(minCutoff.getDate() - rule.ageThresholdDays);
+        const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
         const conditions = [
           sql`${schema.orders.status} = ${rule.sourceStatus}`,
           lte(schema.orders.createdAt, minCutoff),
@@ -844,9 +856,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     return results;
   }
 
-  async pullAbandonedCarts(ageThresholdDays = 1): Promise<number> {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - ageThresholdDays);
+  async pullAbandonedCarts(ageThresholdHours?: number | null, ageThresholdDays = 1): Promise<number> {
+    const cutoff = FollowUpConfigService.ageCutoff(ageThresholdHours, ageThresholdDays);
 
     const carts = await this.db
       .select()
@@ -1820,6 +1831,104 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Bulk-transfer follow-up orders to a different branch. One DB transaction
+   * per order (so partial success is possible). Emits `bulk:progress` via
+   * WebSocket so the client can show a live progress bar.
+   */
+  async bulkTransferFollowUpOrders(
+    orderIds: string[],
+    targetBranchId: string,
+    actor: SessionUser,
+    /** Socket event key the client listens on — lets the same emitter serve multiple bulk actions. */
+    progressEvent = 'bulk:progress',
+  ) {
+    // Validate target branch once
+    const [branch] = await this.db
+      .select({ id: schema.branches.id, name: schema.branches.name })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, targetBranchId))
+      .limit(1);
+    if (!branch) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Target branch not found' });
+
+    // Fetch all orders in one query
+    const orders = await this.db
+      .select({
+        id: schema.followUpOrders.id,
+        servicingBranchId: schema.followUpOrders.servicingBranchId,
+        status: schema.followUpOrders.status,
+      })
+      .from(schema.followUpOrders)
+      .where(and(inArray(schema.followUpOrders.id, orderIds), isNull(schema.followUpOrders.deletedAt)));
+    const orderMap = new Map(orders.map((o) => [o.id, o]));
+
+    const total = orderIds.length;
+    let succeeded = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    const emitProgress = (status: 'running' | 'complete' | 'error') => {
+      this.events.emitToUser(actor.id, progressEvent, {
+        label: 'Moving orders to branch',
+        total,
+        completed: succeeded,
+        failed,
+        status,
+        errors: errors.length > 0 ? errors.slice(-5) : undefined,
+      });
+    };
+
+    emitProgress('running');
+
+    for (const orderId of orderIds) {
+      const order = orderMap.get(orderId);
+      if (!order) {
+        failed++;
+        errors.push('Order not found');
+        emitProgress('running');
+        continue;
+      }
+      if (order.servicingBranchId === targetBranchId) {
+        failed++;
+        errors.push('Order is already in this branch');
+        emitProgress('running');
+        continue;
+      }
+      try {
+        await withActor(this.db, actor, async (tx) => {
+          await tx
+            .update(schema.followUpOrders)
+            .set({
+              servicingBranchId: targetBranchId,
+              assignedCsId: null,
+              status: order.status === 'CS_ASSIGNED' ? 'UNPROCESSED' : order.status,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.followUpOrders.id, orderId));
+          await tx.insert(schema.followUpOrderTimelineEvents).values({
+            followUpOrderId: orderId,
+            eventType: 'ORDER_MANUALLY_ASSIGNED',
+            actorId: actor.id,
+            actorName: actor.name,
+            description: `Transferred to ${branch.name}.`,
+            metadata: { targetBranchId, targetBranchName: branch.name, previousBranchId: order.servicingBranchId },
+            branchId: targetBranchId,
+          });
+        });
+        succeeded++;
+      } catch {
+        failed++;
+        errors.push(`Failed to transfer order`);
+      }
+      emitProgress('running');
+    }
+
+    const finalStatus = failed === total ? 'error' : 'complete';
+    emitProgress(finalStatus);
+
+    return { succeeded, failed, total };
   }
 
   // ── Unfreeze Order ─────────────────────────────────────────────────

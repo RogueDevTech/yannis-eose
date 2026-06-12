@@ -1488,19 +1488,31 @@ export const branchesRouter = router({
         .from(schema.branchGroups)
         .orderBy(asc(schema.branchGroups.createdAt));
 
-      // Count branches per group
-      const branchCounts = await db
-        .select({
-          groupId: schema.branches.groupId,
-          count: count(),
-        })
-        .from(schema.branches)
-        .groupBy(schema.branches.groupId);
+      // Count branches and distinct users per group
+      const [branchCounts, userCounts] = await Promise.all([
+        db
+          .select({
+            groupId: schema.branches.groupId,
+            count: count(),
+          })
+          .from(schema.branches)
+          .groupBy(schema.branches.groupId),
+        db
+          .select({
+            groupId: schema.branches.groupId,
+            count: sql<number>`COUNT(DISTINCT ${schema.userBranches.userId})`,
+          })
+          .from(schema.userBranches)
+          .innerJoin(schema.branches, eq(schema.userBranches.branchId, schema.branches.id))
+          .groupBy(schema.branches.groupId),
+      ]);
 
-      const countMap = new Map(branchCounts.map((r) => [r.groupId, Number(r.count)]));
+      const branchCountMap = new Map(branchCounts.map((r) => [r.groupId, Number(r.count)]));
+      const userCountMap = new Map(userCounts.map((r) => [r.groupId, Number(r.count)]));
       return groups.map((g) => ({
         ...g,
-        branchCount: countMap.get(g.id) ?? 0,
+        branchCount: branchCountMap.get(g.id) ?? 0,
+        userCount: userCountMap.get(g.id) ?? 0,
       }));
     }),
 

@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 /** Valid source statuses for follow-up rules — only statuses where orders can go stale. */
 export const followUpRuleSourceStatuses = [
+  'CART_ABANDONMENT',
   'UNPROCESSED',
   'CS_ASSIGNED',
   'CS_ENGAGED',
@@ -20,6 +21,7 @@ export const createFollowUpRuleSchema = z
     name: z.string().min(1).max(200),
     sourceStatus: z.enum(followUpRuleSourceStatuses),
     ageThresholdDays: z.number().int().min(1).max(365),
+    ageThresholdHours: z.number().int().min(1).max(8760).nullable().optional(),
     maxAgeDays: z.number().int().min(1).max(365).nullable().optional(),
     sourceBranchId: z.string().uuid().nullable().optional(),
     targetBranchId: z.string().uuid().nullable().optional(),
@@ -40,6 +42,7 @@ export const updateFollowUpRuleSchema = z
     name: z.string().min(1).max(200).optional(),
     sourceStatus: z.enum(followUpRuleSourceStatuses).optional(),
     ageThresholdDays: z.number().int().min(1).max(365).optional(),
+    ageThresholdHours: z.number().int().min(1).max(8760).nullable().optional(),
     maxAgeDays: z.number().int().min(1).max(365).nullable().optional(),
     sourceBranchId: z.string().uuid().nullable().optional(),
     targetBranchId: z.string().uuid().nullable().optional(),
@@ -75,7 +78,7 @@ export const listFollowUpSyncLogsSchema = z.object({
 
 export const listFollowUpOrdersSchema = z.object({
   page: z.number().int().min(1).optional().default(1),
-  limit: z.number().int().min(1).max(100).optional().default(50),
+  limit: z.number().int().min(1).max(2000).optional().default(50),
   status: z.string().optional(),
   statuses: z.array(z.string()).optional(),
   assignedCsId: z.string().uuid().optional(),
