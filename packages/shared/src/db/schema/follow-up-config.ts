@@ -21,6 +21,8 @@ export const followUpRules = pgTable('follow_up_rules', {
   sourceStatus: text('source_status').notNull(),
   /** Minimum age in days for the order to qualify. */
   ageThresholdDays: integer('age_threshold_days').notNull(),
+  /** Optional hours-based threshold. When set, takes precedence over ageThresholdDays (for sub-day rules like cart abandonment). */
+  ageThresholdHours: integer('age_threshold_hours'),
   /** Maximum age in days (optional). When set, only orders between ageThresholdDays and maxAgeDays old match. */
   maxAgeDays: integer('max_age_days'),
   /** Optional source branch filter. NULL = org-wide (all branches). */

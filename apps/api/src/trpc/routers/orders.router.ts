@@ -2277,6 +2277,12 @@ export const ordersRouter = router({
       return getFollowUpConfigService().transferFollowUpOrder(input.orderId, input.targetBranchId, ctx.user);
     }),
 
+  bulkTransferFollowUpOrders: permissionProcedure('orders.followUp')
+    .input(z.object({ orderIds: z.array(z.string().uuid()).min(1).max(2000), targetBranchId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().bulkTransferFollowUpOrders(input.orderIds, input.targetBranchId, ctx.user);
+    }),
+
   unfreezeOrder: permissionProcedure('orders.followUpConfig')
     .input(z.object({ orderId: z.string().uuid(), reason: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {

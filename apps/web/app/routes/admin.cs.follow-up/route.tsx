@@ -811,6 +811,7 @@ export default function FollowUpRoute() {
             pageDescription={pageDescription}
             bulkSelectAllMatchingInput={shell?.bulkSelectAllMatchingInput}
             bulkSelectEndpoint="orders.followUpOrdersList"
+            bulkMovePerItem
             {...baseShellProps}
           />
           );

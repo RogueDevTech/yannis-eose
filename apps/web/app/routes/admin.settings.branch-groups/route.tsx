@@ -22,6 +22,7 @@ interface BranchGroup {
   name: string;
   createdAt: string;
   branchCount: number;
+  userCount: number;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -131,6 +132,8 @@ export default function CompanyGroupsPage() {
 
             <div className="relative z-10 text-sm text-app-fg-muted mb-4 flex-1 pointer-events-none">
               <span>{group.branchCount} branch{group.branchCount !== 1 ? 'es' : ''}</span>
+              <span className="mx-1.5">·</span>
+              <span>{group.userCount} user{group.userCount !== 1 ? 's' : ''}</span>
               <span className="mx-1.5">·</span>
               <time dateTime={group.createdAt}>
                 {new Date(group.createdAt).toLocaleDateString('en-NG', {
