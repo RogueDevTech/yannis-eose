@@ -964,7 +964,7 @@ function GroupsAndBranchesTab({
             },
             {
               key: 'members',
-              header: 'Members',
+              header: 'CS Closers',
               align: 'right',
               render: (r) => {
                 const count = r.kind === 'group' ? (r as UnifiedRow & { kind: 'group' }).memberCount : (r as UnifiedRow & { kind: 'branch' }).closerCount;

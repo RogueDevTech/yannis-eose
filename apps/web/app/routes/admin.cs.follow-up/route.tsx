@@ -171,6 +171,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         startDate: startDate ?? '',
         endDate: endDate ?? '',
         backTo: backToParam ?? '',
+        bulkSelectAllMatchingInput: JSON.stringify(listInput),
       },
       pageData,
     });
@@ -808,6 +809,8 @@ export default function FollowUpRoute() {
             excludeStatuses={['REMITTED']}
             pageTitle={pageTitle}
             pageDescription={pageDescription}
+            bulkSelectAllMatchingInput={shell?.bulkSelectAllMatchingInput}
+            bulkSelectEndpoint="orders.followUpOrdersList"
             {...baseShellProps}
           />
           );

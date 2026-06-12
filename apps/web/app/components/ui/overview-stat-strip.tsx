@@ -40,7 +40,7 @@ const clickableTileClass =
 
 /** Active tile — border-only highlight, same background as siblings. */
 const activeTileClass =
-  'ring-2 ring-brand-500 dark:ring-brand-400';
+  'ring-2 ring-inset ring-brand-500 dark:ring-brand-400';
 
 const SCROLL_DELTA = 280;
 

@@ -741,13 +741,13 @@ function LogisticsOrdersPageImpl({
         <OverviewStatStrip
           mobileGrid
           items={[
-            { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL') },
-            { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED') },
-            { label: 'Agent Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED') },
-            { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('IN_TRANSIT') },
-            { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED') },
-            { label: 'Remitted', value: remittedCount, valueClassName: 'text-purple-600 dark:text-purple-400', to: buildStatusQuery('REMITTED') },
-            { label: 'Overdue', value: overdueCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('OVERDUE') },
+            { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL'), active: selectedStatus === 'ALL' },
+            { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED'), active: selectedStatus === 'CONFIRMED' },
+            { label: 'Agent Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED'), active: selectedStatus === 'AGENT_ASSIGNED' },
+            { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('IN_TRANSIT'), active: selectedStatus === 'IN_TRANSIT' },
+            { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED'), active: selectedStatus === 'DELIVERED' },
+            { label: 'Remitted', value: remittedCount, valueClassName: 'text-purple-600 dark:text-purple-400', to: buildStatusQuery('REMITTED'), active: selectedStatus === 'REMITTED' },
+            { label: 'Overdue', value: overdueCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('OVERDUE'), active: selectedStatus === 'OVERDUE' },
           ]}
         />
       )}
