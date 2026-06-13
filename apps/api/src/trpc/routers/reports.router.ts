@@ -19,7 +19,7 @@ export const reportsRouter = router({
   exportCsv: authedProcedure
     .input(exportReportSchema)
     .mutation(async ({ input, ctx }) => {
-      return getReportsService().exportCsv(input, ctx.user, ctx.currentBranchId);
+      return getReportsService().exportCsv(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 });
 

@@ -26,8 +26,8 @@ export const productCategoriesRouter = router({
    */
   list: authedProcedure
     .input(listProductCategoriesSchema)
-    .query(async ({ input }) => {
-      return getService().list(input);
+    .query(async ({ input, ctx }) => {
+      return getService().list(input, ctx.activeGroupId);
     }),
 
   /**
@@ -52,7 +52,7 @@ export const productCategoriesRouter = router({
   create: permissionProcedure('categories.write')
     .input(createProductCategorySchema)
     .mutation(async ({ input, ctx }) => {
-      return getService().create(input, ctx.user);
+      return getService().create(input, ctx.user, ctx.activeGroupId);
     }),
 
   /**

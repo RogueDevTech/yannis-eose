@@ -42,14 +42,17 @@ export function createContext(req: Request, res: Response): TrpcContext {
   // via the header checkbox switcher, scope queries to that subset instead
   // of showing everything. CEO directive 2026-06-10.
   const selectedSubset = user?.selectedBranchIds?.length ? user.selectedBranchIds : null;
+  const activeGroupId = user?.activeGroupId ?? null;
   // Global users (scopeGlobal) see everything — no branch guard needed,
-  // UNLESS they have an active multi-branch selection.
-  // Non-global users who selected "All branches" (currentBranchId=null) must
-  // still be scoped to their assigned branches.
+  // UNLESS they have an active multi-branch selection OR an active company
+  // group. When a company group is active, even org-wide roles (Finance,
+  // HR, etc.) must be scoped to that group's branches — they are
+  // "company-wide", not "all-companies-wide".
   const effectiveBranchIds =
     selectedSubset
       ? selectedSubset
-      : user?.scopeGlobal ? null : (user?.branchIds?.length ? user.branchIds : null);
-  const activeGroupId = user?.activeGroupId ?? null;
+      : user?.scopeGlobal
+        ? (activeGroupId && user?.branchIds?.length ? user.branchIds : null)
+        : (user?.branchIds?.length ? user.branchIds : null);
   return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };
 }

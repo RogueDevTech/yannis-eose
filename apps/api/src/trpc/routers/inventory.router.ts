@@ -74,8 +74,8 @@ export const inventoryRouter = router({
    */
   levels: authedProcedure
     .input(listInventorySchema)
-    .query(async ({ input }) => {
-      return getInventoryService().listLevels(input);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().listLevels(input, ctx.activeGroupId);
     }),
 
   /** Aggregated stock per (product, location) — no batch rows, no pagination. */
@@ -228,7 +228,7 @@ export const inventoryRouter = router({
   movements: authedProcedure
     .input(listMovementsSchema)
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listMovements(input, ctx.user, ctx.currentBranchId ?? null);
+      return getInventoryService().listMovements(input, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -237,7 +237,7 @@ export const inventoryRouter = router({
   transfers: authedProcedure
     .input(z.object({ status: z.string().optional(), page: z.number().int().min(1).optional(), limit: z.number().int().min(1).max(1000).optional() }))
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listTransfers(input.status, ctx.user, input.page, input.limit);
+      return getInventoryService().listTransfers(input.status, ctx.user, input.page, input.limit, ctx.activeGroupId);
     }),
 
   /**
@@ -373,6 +373,7 @@ export const inventoryRouter = router({
           movementsInput,
           ctx.user,
           ctx.currentBranchId ?? null,
+          ctx.effectiveBranchIds,
         ),
         getProductsService().listOptions(
           {},
@@ -464,24 +465,27 @@ export const inventoryRouter = router({
         shipments,
         warehouses,
       ] = await Promise.all([
-        getInventoryService().listLevels(levelsInput),
+        getInventoryService().listLevels(levelsInput, ctx.activeGroupId),
         getInventoryService().listMovements(
           movementsInput,
           ctx.user,
           ctx.currentBranchId ?? null,
+          ctx.effectiveBranchIds,
         ),
         getProductsService().listOptions(
           {},
           ctx.user.id,
           ctx.user.role,
+          ctx.activeGroupId,
         ),
         getLogisticsService().listLocationOptions({
           status: 'ACTIVE',
           providerKind: 'WAREHOUSE',
+          groupId: ctx.activeGroupId,
         }),
-        getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
-        getSettingsService().getAll().catch(() => [] as unknown[]),
-        getInventoryService().getLowStockAlerts().catch((err) => {
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        getSettingsService().getAll(ctx.activeGroupId).catch(() => [] as unknown[]),
+        getInventoryService().getLowStockAlerts(ctx.activeGroupId).catch((err) => {
           console.error('[inventoryAdminPageBundle] getLowStockAlerts failed:', err?.message ?? err);
           return { threshold: 10, items: [] as unknown[] };
         }),
@@ -493,10 +497,12 @@ export const inventoryRouter = router({
             { page: 1, limit: input.shipmentsLimit },
             ctx.user,
             ctx.currentBranchId ?? null,
+            ctx.effectiveBranchIds,
+            ctx.activeGroupId,
           )
           .catch(() => null),
         getLogisticsServiceForInventory()
-          .listWarehouses({ status: 'ACTIVE', listScope: 'our', page: 1, limit: input.warehousesLimit })
+          .listWarehouses({ status: 'ACTIVE', listScope: 'our', page: 1, limit: input.warehousesLimit, groupId: ctx.activeGroupId })
           .catch(() => null),
       ]);
 
@@ -530,7 +536,7 @@ export const inventoryRouter = router({
     list: permissionProcedure('inventory.shipments.read')
       .input(listShipmentsSchema)
       .query(async ({ input, ctx }) => {
-        return getShipmentsService().listShipments(input, ctx.user, ctx.user.currentBranchId ?? null);
+        return getShipmentsService().listShipments(input, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds, ctx.activeGroupId);
       }),
 
     get: permissionProcedure('inventory.shipments.read')
@@ -539,7 +545,8 @@ export const inventoryRouter = router({
         return getShipmentsService().getShipment(
           input.shipmentId,
           ctx.user,
-          ctx.user.currentBranchId ?? null,
+          ctx.currentBranchId ?? null,
+          ctx.effectiveBranchIds,
         );
       }),
 
@@ -592,13 +599,13 @@ export const inventoryRouter = router({
   warehouses: router({
     list: permissionProcedure('inventory.read')
       .input(listWarehousesSchema)
-      .query(async ({ input }) => {
-        return getLogisticsServiceForInventory().listWarehouses(input);
+      .query(async ({ input, ctx }) => {
+        return getLogisticsServiceForInventory().listWarehouses({ ...input, groupId: ctx.activeGroupId });
       }),
 
     overview: permissionProcedure('inventory.read')
-      .query(async () => {
-        return getLogisticsServiceForInventory().getWarehousesOverview({ status: 'ACTIVE' });
+      .query(async ({ ctx }) => {
+        return getLogisticsServiceForInventory().getWarehousesOverview({ status: 'ACTIVE', groupId: ctx.activeGroupId });
       }),
 
     get: permissionProcedure('inventory.read')

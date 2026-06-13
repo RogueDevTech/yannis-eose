@@ -265,7 +265,10 @@ export function rolesProcedure(...roles: UserRole[]) {
  */
 export function permissionProcedure(...permissionCodes: string[]) {
   return authedProcedure.use(async ({ ctx, next }) => {
-    if (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'SUPPORT') {
+    if (
+      ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'SUPPORT' ||
+      ctx.user.mirroredBy?.role === 'SUPER_ADMIN' || ctx.user.mirroredBy?.role === 'SUPPORT'
+    ) {
       return next({ ctx });
     }
     const required = permissionCodes.map((code) => canonicalPermissionCode(code));

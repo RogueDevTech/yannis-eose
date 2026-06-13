@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch user's branches for the branch switcher (non-blocking, streamed alongside notifications).
   // Must mirror the /admin layout — without this, /hr/* pages silently hide the switcher.
-  const branchesPromise = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
+  const branchesPromise = apiRequest<unknown>('/trpc/branches.listAll', { method: 'GET', cookie })
     .then((res) => {
       if (!res.ok) return [] as Array<{ id: string; name: string; code: string }>;
       const data = (res.data as { result?: { data?: Array<{ id: string; name: string; code: string }> } })?.result?.data;

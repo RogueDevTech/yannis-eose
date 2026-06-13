@@ -94,23 +94,23 @@ export class ReportsService {
     private readonly usersService: UsersService,
   ) {}
 
-  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null): Promise<{ filename: string; csvContent: string }> {
+  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null): Promise<{ filename: string; csvContent: string }> {
     const date = todayISODate();
     switch (input.reportKey) {
       case 'cs_orders':
-        return this.exportCsOrders(input as Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user, currentBranchId, date);
+        return this.exportCsOrders(input as Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user, currentBranchId, date, effectiveBranchIds);
       case 'cs_team':
-        return this.exportCsTeam(input as Extract<ExportReportInput, { reportKey: 'cs_team' }>, user, currentBranchId, date);
+        return this.exportCsTeam(input as Extract<ExportReportInput, { reportKey: 'cs_team' }>, user, currentBranchId, date, effectiveBranchIds);
       case 'marketing_orders':
-        return this.exportMarketingOrders(input as Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user, currentBranchId, date);
+        return this.exportMarketingOrders(input as Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user, currentBranchId, date, effectiveBranchIds);
       case 'marketing_team':
-        return this.exportMarketingTeam(input as Extract<ExportReportInput, { reportKey: 'marketing_team' }>, user, currentBranchId, date);
+        return this.exportMarketingTeam(input as Extract<ExportReportInput, { reportKey: 'marketing_team' }>, user, currentBranchId, date, effectiveBranchIds);
       case 'disbursements':
         return this.exportDisbursements(input as Extract<ExportReportInput, { reportKey: 'disbursements' }>, user, currentBranchId, date);
       case 'inventory':
         return this.exportInventory(input as Extract<ExportReportInput, { reportKey: 'inventory' }>, user, date);
       case 'finance_invoices':
-        return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date);
+        return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date, effectiveBranchIds);
       default:
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unsupported report key' });
     }
@@ -139,6 +139,7 @@ export class ReportsService {
   private async collectOrdersPages(
     base: Omit<ListOrdersInput, 'page' | 'limit'>,
     branchId: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<Awaited<ReturnType<OrdersService['list']>>['orders']> {
     const all: Awaited<ReturnType<OrdersService['list']>>['orders'] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
@@ -149,7 +150,7 @@ export class ReportsService {
         sortBy: base.sortBy ?? 'createdAt',
         sortOrder: base.sortOrder ?? 'desc',
       });
-      const result = await this.ordersService.list(listInput, branchId);
+      const result = await this.ordersService.list(listInput, branchId, { effectiveBranchIds });
       const batch = result.orders ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) return all;
@@ -160,7 +161,7 @@ export class ReportsService {
     });
   }
 
-  private async exportCsOrders(input: Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user: SessionUser, currentBranchId: string | null, date: string) {
+  private async exportCsOrders(input: Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user: SessionUser, currentBranchId: string | null, date: string, effectiveBranchIds?: string[] | null) {
     this.ensureExportPermission(user, 'orders.read', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
     const orders = await this.collectOrdersPages(
@@ -174,6 +175,7 @@ export class ReportsService {
         ...(endDate ? { endDate } : {}),
       },
       currentBranchId,
+      effectiveBranchIds,
     );
     const rows = orders.map((o) => ({
       id: o.id,
@@ -211,6 +213,7 @@ export class ReportsService {
     user: SessionUser,
     currentBranchId: string | null,
     date: string,
+    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'cs.teamOverview', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -220,10 +223,10 @@ export class ReportsService {
         : 'this_month';
 
     const [team, workloads, leaderboard, inactive] = await Promise.all([
-      this.usersService.listCSTeam(currentBranchId),
-      this.ordersService.getCSCloserWorkloads(currentBranchId),
-      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate, currentBranchId),
-      this.ordersService.getInactiveAgents(10, currentBranchId),
+      this.usersService.listCSTeam(currentBranchId, effectiveBranchIds),
+      this.ordersService.getCSCloserWorkloads(currentBranchId, effectiveBranchIds),
+      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate, currentBranchId, effectiveBranchIds),
+      this.ordersService.getInactiveAgents(10, currentBranchId, effectiveBranchIds),
     ]);
 
     const workloadById = new Map(workloads.map((w) => [w.agentId, w]));
@@ -290,6 +293,7 @@ export class ReportsService {
     user: SessionUser,
     currentBranchId: string | null,
     date: string,
+    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'marketing.teamOverview', 'marketing.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -299,8 +303,8 @@ export class ReportsService {
         : 'this_month';
 
     const [balances, leaderboard] = await Promise.all([
-      this.marketingService.listFundingBalances(user, currentBranchId),
-      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId),
+      this.marketingService.listFundingBalances(user, currentBranchId, undefined, effectiveBranchIds),
+      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId, undefined, effectiveBranchIds),
     ]);
 
     // Leaderboard only includes Media Buyers — Heads of Marketing won't have a row.
@@ -362,6 +366,7 @@ export class ReportsService {
     user: SessionUser,
     currentBranchId: string | null,
     date: string,
+    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'marketing.orders', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -379,6 +384,7 @@ export class ReportsService {
         ...(endDate ? { endDate } : {}),
       },
       currentBranchId,
+      effectiveBranchIds,
     );
 
     const ids = orders.map((o) => o.id);
@@ -524,7 +530,7 @@ export class ReportsService {
     return { filename: `inventory-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
-  private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string) {
+  private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string, effectiveBranchIds?: string[] | null) {
     this.ensureExportPermission(user, 'finance.read', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
     const all: Awaited<ReturnType<FinanceService['listInvoices']>>['invoices'] = [];
@@ -536,7 +542,7 @@ export class ReportsService {
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
       });
-      const list = await this.financeService.listInvoices(invoicesInput);
+      const list = await this.financeService.listInvoices(invoicesInput, effectiveBranchIds);
       const batch = list.invoices ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;

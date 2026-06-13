@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, asc, count, desc, eq, ilike, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
@@ -583,6 +583,7 @@ export class OnboardingService {
     input: ListStaffOnboardingDocumentsInput,
     actor: SessionUser,
     currentBranchId: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     if (!this.canManageAnyOnboarding(actor)) {
       throw new TRPCError({
@@ -615,6 +616,17 @@ export class OnboardingService {
           WHERE ub.user_id = ${schema.users.id}
             AND ub.branch_id = ${branchFilter}
         )`,
+      );
+    } else if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      // Company-group isolation: only users in the active group's branches
+      conditions.push(
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
       );
     }
 
@@ -714,6 +726,7 @@ export class OnboardingService {
     actor: SessionUser,
     currentBranchId: string | null,
     opts: { branchId?: string; allBranches?: boolean } = {},
+    effectiveBranchIds?: string[] | null,
   ): Promise<{
     total: number;
     NOT_STARTED: number;
@@ -746,6 +759,16 @@ export class OnboardingService {
           WHERE ub.user_id = ${schema.users.id}
             AND ub.branch_id = ${branchFilter}
         )`,
+      );
+    } else if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
       );
     }
 

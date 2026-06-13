@@ -223,8 +223,8 @@ export class FinanceService {
     });
   }
 
-  async listInvoices(input: ListInvoicesInput) {
-    const conditions = [];
+  async listInvoices(input: ListInvoicesInput, effectiveBranchIds?: string[] | null) {
+    const conditions: SQL[] = [];
     if (input.status) {
       conditions.push(eq(schema.invoices.status, input.status));
     }
@@ -234,31 +234,40 @@ export class FinanceService {
     if (input.endDate) {
       conditions.push(lte(schema.invoices.createdAt, new Date(input.endDate)));
     }
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
+    const needsBranchJoin = !!bCond;
+    if (bCond) conditions.push(bCond);
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    const selectFields = {
+      id: schema.invoices.id,
+      referenceNumber: schema.invoices.referenceNumber,
+      orderId: schema.invoices.orderId,
+      totalAmount: schema.invoices.totalAmount,
+      taxRate: schema.invoices.taxRate,
+      status: schema.invoices.status,
+      dueDate: schema.invoices.dueDate,
+      createdAt: schema.invoices.createdAt,
+      validFrom: schema.invoices.validFrom,
+      validTo: schema.invoices.validTo,
+      modifiedBy: schema.invoices.modifiedBy,
+    };
+    const baseQuery = needsBranchJoin
+      ? this.db.select(selectFields).from(schema.invoices).leftJoin(schema.orders, eq(schema.invoices.orderId, schema.orders.id))
+      : this.db.select(selectFields).from(schema.invoices);
+    const countQuery = needsBranchJoin
+      ? this.db.select({ count: count() }).from(schema.invoices).leftJoin(schema.orders, eq(schema.invoices.orderId, schema.orders.id))
+      : this.db.select({ count: count() }).from(schema.invoices);
+
     const [invoices, totalRows] = await Promise.all([
-      this.db
-        .select({
-          id: schema.invoices.id,
-          referenceNumber: schema.invoices.referenceNumber,
-          orderId: schema.invoices.orderId,
-          totalAmount: schema.invoices.totalAmount,
-          taxRate: schema.invoices.taxRate,
-          status: schema.invoices.status,
-          dueDate: schema.invoices.dueDate,
-          createdAt: schema.invoices.createdAt,
-          validFrom: schema.invoices.validFrom,
-          validTo: schema.invoices.validTo,
-          modifiedBy: schema.invoices.modifiedBy,
-        })
-        .from(schema.invoices)
+      baseQuery
         .where(whereClause)
         .orderBy(desc(schema.invoices.createdAt))
         .limit(input.limit)
         .offset(offset),
-      this.db.select({ count: count() }).from(schema.invoices).where(whereClause),
+      countQuery.where(whereClause),
     ]);
 
     return {
@@ -270,11 +279,20 @@ export class FinanceService {
     };
   }
 
-  async getInvoiceSummary() {
-    const statusCounts = await this.db
-      .select({ status: schema.invoices.status, count: count(), total: sum(schema.invoices.totalAmount) })
-      .from(schema.invoices)
-      .groupBy(schema.invoices.status);
+  async getInvoiceSummary(effectiveBranchIds?: string[] | null) {
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
+    const query = bCond
+      ? this.db
+          .select({ status: schema.invoices.status, count: count(), total: sum(schema.invoices.totalAmount) })
+          .from(schema.invoices)
+          .leftJoin(schema.orders, eq(schema.invoices.orderId, schema.orders.id))
+          .where(bCond)
+          .groupBy(schema.invoices.status)
+      : this.db
+          .select({ status: schema.invoices.status, count: count(), total: sum(schema.invoices.totalAmount) })
+          .from(schema.invoices)
+          .groupBy(schema.invoices.status);
+    const statusCounts = await query;
 
     const summary: Record<string, { count: number; total: string }> = {};
     for (const row of statusCounts) {
@@ -315,6 +333,54 @@ export class FinanceService {
     orderConditions.push(eq(schema.orders.isFollowUp, false));
     const orderWhere = and(...orderConditions);
 
+    // ── Branch-group scoping helpers ──────────────────────
+    // When effectiveBranchIds is set, ad spend and commission must be scoped
+    // to the active company group. Ad spend goes through campaigns.branchId;
+    // commissions go through user_branches.branchId; write-offs/shrinkage go
+    // through products.groupId.
+    const branchIds: string[] | null =
+      input.branchId ? [input.branchId]
+        : (effectiveBranchIds && effectiveBranchIds.length > 0 ? effectiveBranchIds : null);
+
+    // Pre-resolve campaign IDs scoped to the active branches (ad spend filter)
+    let scopedCampaignIds: string[] | null = null;
+    if (branchIds) {
+      const cRows = await this.db
+        .select({ id: schema.campaigns.id })
+        .from(schema.campaigns)
+        .where(
+          branchIds.length === 1
+            ? eq(schema.campaigns.branchId, branchIds[0]!)
+            : inArray(schema.campaigns.branchId, branchIds),
+        );
+      scopedCampaignIds = cRows.map((r) => r.id);
+    }
+
+    // Pre-resolve staff IDs scoped to the active branches (commission filter)
+    let scopedStaffIds: string[] | null = null;
+    if (branchIds) {
+      const sRows = await this.db
+        .selectDistinct({ userId: schema.userBranches.userId })
+        .from(schema.userBranches)
+        .where(
+          branchIds.length === 1
+            ? eq(schema.userBranches.branchId, branchIds[0]!)
+            : inArray(schema.userBranches.branchId, branchIds),
+        );
+      scopedStaffIds = sRows.map((r) => r.userId as string);
+    }
+
+    // Resolve groupId from the first effective branch (for product-level scoping)
+    let scopedGroupId: string | null = null;
+    if (branchIds) {
+      const [gRow] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchIds[0]!))
+        .limit(1);
+      scopedGroupId = gRow?.groupId ?? null;
+    }
+
     // ── 2. Ad spend date range — PENDING + APPROVED count toward profit ───────────────────────
     // PENDING spend is real money the MB already spent on ads; excluding it
     // under-counts costs and inflates profit until the HoM clicks Approve.
@@ -329,10 +395,18 @@ export class FinanceService {
     if (input.mediaBuyerId) {
       adSpendConditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
     }
+    if (scopedCampaignIds) {
+      if (scopedCampaignIds.length === 0) {
+        // No campaigns in this group → zero ad spend
+        adSpendConditions.push(sql`false`);
+      } else {
+        adSpendConditions.push(inArray(schema.adSpendLogs.campaignId, scopedCampaignIds));
+      }
+    }
     const adSpendWhere = and(...adSpendConditions);
 
     // ── 3. Commission — approved/paid payouts overlapping period ──
-    const commissionConditions = [
+    const commissionConditions: Parameters<typeof and>[0][] = [
       inArray(schema.payoutRecords.status, ['APPROVED', 'PAID']),
     ];
     if (input.startDate) {
@@ -342,6 +416,13 @@ export class FinanceService {
     if (input.endDate) {
       // Payout period must overlap: periodStart <= endDate
       commissionConditions.push(lte(schema.payoutRecords.periodStart, new Date(input.endDate)));
+    }
+    if (scopedStaffIds) {
+      if (scopedStaffIds.length === 0) {
+        commissionConditions.push(sql`false`);
+      } else {
+        commissionConditions.push(inArray(schema.payoutRecords.staffId, scopedStaffIds));
+      }
     }
     const commissionWhere = and(...commissionConditions);
 
@@ -358,7 +439,7 @@ export class FinanceService {
     // exists, fulfillment = 0 to keep the P&L accurate.
 
     // ── 5. Operational loss — write-offs + shrinkage ──────
-    const writeOffConditions = [
+    const writeOffConditions: Parameters<typeof and>[0][] = [
       eq(schema.stockMovements.movementType, 'WRITE_OFF'),
     ];
     if (input.startDate) {
@@ -367,10 +448,17 @@ export class FinanceService {
     if (input.endDate) {
       writeOffConditions.push(lte(schema.stockMovements.createdAt, new Date(input.endDate)));
     }
+    if (scopedGroupId) {
+      writeOffConditions.push(
+        inArray(schema.stockMovements.productId,
+          this.db.select({ id: schema.products.id }).from(schema.products).where(eq(schema.products.groupId, scopedGroupId)),
+        ),
+      );
+    }
     const writeOffWhere = and(...writeOffConditions);
 
     // Shrinkage from disputed transfers (same date range as fulfillment)
-    const shrinkageConditions = [
+    const shrinkageConditions: Parameters<typeof and>[0][] = [
       eq(schema.stockTransfers.transferStatus, 'DISPUTED'),
     ];
     if (input.startDate) {
@@ -378,6 +466,13 @@ export class FinanceService {
     }
     if (input.endDate) {
       shrinkageConditions.push(lte(schema.stockTransfers.verifiedAt, new Date(input.endDate)));
+    }
+    if (scopedGroupId) {
+      shrinkageConditions.push(
+        inArray(schema.stockTransfers.productId,
+          this.db.select({ id: schema.products.id }).from(schema.products).where(eq(schema.products.groupId, scopedGroupId)),
+        ),
+      );
     }
     const shrinkageWhere = and(...shrinkageConditions);
 
@@ -625,11 +720,11 @@ export class FinanceService {
     return rows;
   }
 
-  async getFinancialOverview() {
+  async getFinancialOverview(effectiveBranchIds?: string[] | null) {
     // Summary across all time
     const [profitData, invoiceSummary] = await Promise.all([
-      this.getProfitReport({ groupBy: 'product' }),
-      this.getInvoiceSummary(),
+      this.getProfitReport({ groupBy: 'product' }, effectiveBranchIds),
+      this.getInvoiceSummary(effectiveBranchIds),
     ]);
 
     return {

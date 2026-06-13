@@ -56,7 +56,7 @@ interface HeaderProps {
   /** Multi-branch selection from session — CEO directive 2026-06-10. */
   selectedBranchIds?: string[] | null;
   /** Branch groups for SuperAdmin header group switcher. */
-  branchGroups?: Array<{ id: string; name: string }>;
+  branchGroups?: Array<{ id: string; name: string; status?: string }>;
   /**
    * When set, the header renders an "Exit Mirror" pill that posts to /auth/mirror/stop.
    * Surfaced from the layout, threaded down from `getCurrentUser`.
@@ -215,6 +215,8 @@ export function Header({
   }, [markAsRead, onRemoveRealtimeNotification]);
 
   // Mobile multi-branch checkbox state — mirrors desktop HeaderBranchSwitcher logic.
+  const mobileActiveGroups = useMemo(() => branchGroups?.filter((g) => g.status !== 'INACTIVE'), [branchGroups]);
+  const mobileHasMultipleGroups = (mobileActiveGroups?.length ?? 0) > 1;
   const allMobileBranchIds = useMemo(() => (branches ?? []).map((b) => b.id), [branches]);
   const [mobileChecked, setMobileChecked] = useState<Set<string>>(() => {
     if (selectedBranchIds && selectedBranchIds.length > 0) return new Set(selectedBranchIds);
@@ -716,8 +718,8 @@ export function Header({
 
                   {mobileCanSwitchBranches ? (
                     <div className="pb-1">
-                      {/* Select All checkbox */}
-                      {canSeeAllBranches && (
+                      {/* Select All checkbox — hidden when multiple groups exist to prevent cross-company mixing */}
+                      {canSeeAllBranches && !mobileHasMultipleGroups && (
                         <label className="w-full flex items-center gap-3 px-5 py-2.5 text-sm cursor-pointer select-none">
                           <input
                             type="checkbox"
@@ -746,8 +748,18 @@ export function Header({
                               onChange={() => {
                                 setMobileChecked((prev) => {
                                   const next = new Set(prev);
-                                  if (next.has(branch.id)) next.delete(branch.id);
-                                  else next.add(branch.id);
+                                  if (next.has(branch.id)) {
+                                    next.delete(branch.id);
+                                  } else {
+                                    // Clear branches from other groups to prevent cross-company mixing
+                                    if (mobileHasMultipleGroups && branch.groupId) {
+                                      for (const id of prev) {
+                                        const b = (branches ?? []).find((br) => br.id === id);
+                                        if (b?.groupId && b.groupId !== branch.groupId) next.delete(id);
+                                      }
+                                    }
+                                    next.add(branch.id);
+                                  }
                                   return next;
                                 });
                               }}
@@ -851,11 +863,22 @@ function HeaderBranchSwitcher({
   selectedBranchIds: initialSelectedBranchIds,
 }: {
   branches: BranchInfo[];
-  branchGroups?: Array<{ id: string; name: string }>;
+  branchGroups?: Array<{ id: string; name: string; status?: string }>;
   currentBranchId: string | null;
   userRole: string;
   selectedBranchIds?: string[] | null;
 }) {
+  // Only show active groups in the branch filter dropdown
+  const activeGroups = useMemo(() => branchGroups?.filter((g) => g.status !== 'INACTIVE'), [branchGroups]);
+  // Hide branches whose group is inactive
+  const inactiveGroupIds = useMemo(() => {
+    if (!branchGroups) return new Set<string>();
+    return new Set(branchGroups.filter((g) => g.status === 'INACTIVE').map((g) => g.id));
+  }, [branchGroups]);
+  const visibleBranches = useMemo(
+    () => branches.filter((b) => !b.groupId || !inactiveGroupIds.has(b.groupId)),
+    [branches, inactiveGroupIds],
+  );
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const submit = useSubmit();
@@ -863,11 +886,11 @@ function HeaderBranchSwitcher({
   const isSubmitting = navigation.state !== 'idle' && navigation.formAction === '/admin/branches/switch';
 
   const canSeeAllBranches = canRoleSeeAllBranchesInHeader(userRole);
-  const canSwitch = shouldShowHeaderBranchSwitcher(branches.length, userRole);
+  const canSwitch = shouldShowHeaderBranchSwitcher(visibleBranches.length, userRole);
 
   // Multi-select state: checked branch IDs within the open dropdown.
-  // Initialised from session state; defaults to all branches checked.
-  const allBranchIds = useMemo(() => branches.map((b) => b.id), [branches]);
+  // Initialised from session state; defaults to all visible branches checked.
+  const allBranchIds = useMemo(() => visibleBranches.map((b) => b.id), [visibleBranches]);
   // Stable string key so the sync effect only fires when IDs actually change.
   const allBranchIdsKey = allBranchIds.join(',');
   const selectedIdsKey = initialSelectedBranchIds?.join(',') ?? '';
@@ -905,11 +928,28 @@ function HeaderBranchSwitcher({
   const allChecked = checked.size === allBranchIds.length && allBranchIds.every((id) => checked.has(id));
   const noneChecked = checked.size === 0;
 
+  // When multiple groups exist, toggling a branch must clear branches from other groups
+  // to prevent cross-company data mixing.
+  const hasMultipleGroups = (activeGroups?.length ?? 0) > 1;
+
   const handleToggle = (branchId: string) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(branchId)) next.delete(branchId);
-      else next.add(branchId);
+      if (next.has(branchId)) {
+        next.delete(branchId);
+      } else {
+        // If multi-group, clear branches from other groups first
+        if (hasMultipleGroups) {
+          const targetBranch = visibleBranches.find((b) => b.id === branchId);
+          if (targetBranch?.groupId) {
+            for (const id of prev) {
+              const b = visibleBranches.find((br) => br.id === id);
+              if (b?.groupId && b.groupId !== targetBranch.groupId) next.delete(id);
+            }
+          }
+        }
+        next.add(branchId);
+      }
       return next;
     });
   };
@@ -949,7 +989,7 @@ function HeaderBranchSwitcher({
 
   // Non-global, single-branch user — static pill, no switcher
   if (!canSwitch) {
-    const display = branches.find((b) => b.id === currentBranchId) ?? branches[0];
+    const display = visibleBranches.find((b) => b.id === currentBranchId) ?? visibleBranches[0];
     if (!display) return null;
     return (
       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-app-hover border border-app-border">
@@ -967,11 +1007,23 @@ function HeaderBranchSwitcher({
   // Trigger label — reflects the current applied state, not the in-progress checkboxes
   const isAllBranches = canSeeAllBranches && !currentBranchId && (!initialSelectedBranchIds || initialSelectedBranchIds.length === 0);
   const isMultiBranch = (initialSelectedBranchIds?.length ?? 0) > 1;
-  const currentBranch = branches.find((b) => b.id === currentBranchId) ?? null;
+  const currentBranch = visibleBranches.find((b) => b.id === currentBranchId) ?? null;
+  // When all branches of a single group are selected, show the group name
+  const selectedGroupLabel = useMemo(() => {
+    if (!isMultiBranch || !activeGroups?.length || !initialSelectedBranchIds?.length) return null;
+    for (const group of activeGroups) {
+      const groupBranches = visibleBranches.filter((b) => b.groupId === group.id);
+      if (groupBranches.length > 0 && groupBranches.length === initialSelectedBranchIds.length &&
+          groupBranches.every((b) => initialSelectedBranchIds.includes(b.id))) {
+        return group.name;
+      }
+    }
+    return null;
+  }, [isMultiBranch, activeGroups, visibleBranches, initialSelectedBranchIds]);
   const triggerLabel = isAllBranches
     ? 'All Branches'
     : isMultiBranch
-      ? `${initialSelectedBranchIds!.length} Branches`
+      ? (selectedGroupLabel ?? `${initialSelectedBranchIds!.length} Branches`)
       : (currentBranch?.name ?? 'Select Branch');
 
   return (
@@ -1017,8 +1069,8 @@ function HeaderBranchSwitcher({
             Filter Branches
           </p>
 
-          {/* Select All checkbox */}
-          {canSeeAllBranches && (
+          {/* Select All checkbox — hidden when multiple company groups exist (group headers serve as select-all) */}
+          {canSeeAllBranches && !(activeGroups && activeGroups.length > 1 && userRole === 'SUPER_ADMIN') && (
             <>
               <label className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-app-hover transition-colors duration-100 cursor-pointer select-none">
                 <input
@@ -1035,12 +1087,11 @@ function HeaderBranchSwitcher({
 
           {/* Branch checkboxes — grouped by branch group for SuperAdmin, flat for others */}
           <div className="py-1 max-h-[320px] overflow-y-auto">
-            {branchGroups && branchGroups.length > 1 && userRole === 'SUPER_ADMIN' ? (
+            {activeGroups && activeGroups.length > 1 && userRole === 'SUPER_ADMIN' ? (
               // Grouped view: branches organized under their group headers
-              branchGroups.map((group) => {
-                const groupBranches = branches.filter((b) => b.groupId === group.id);
-                if (groupBranches.length === 0) return null;
-                const groupAllChecked = groupBranches.every((b) => checked.has(b.id));
+              activeGroups.map((group) => {
+                const groupBranches = visibleBranches.filter((b) => b.groupId === group.id);
+                const groupAllChecked = groupBranches.length > 0 && groupBranches.every((b) => checked.has(b.id));
                 const groupSomeChecked = groupBranches.some((b) => checked.has(b.id));
                 return (
                   <div key={group.id} className="mb-1">
@@ -1056,6 +1107,13 @@ function HeaderBranchSwitcher({
                             if (groupAllChecked) {
                               groupBranches.forEach((b) => next.delete(b.id));
                             } else {
+                              // Clear branches from other groups first
+                              if (hasMultipleGroups) {
+                                for (const id of prev) {
+                                  const b = visibleBranches.find((br) => br.id === id);
+                                  if (b?.groupId && b.groupId !== group.id) next.delete(id);
+                                }
+                              }
                               groupBranches.forEach((b) => next.add(b.id));
                             }
                             return next;
@@ -1100,7 +1158,7 @@ function HeaderBranchSwitcher({
               })
             ) : (
               // Flat view: no groups or non-SuperAdmin
-              branches.map((branch) => {
+              visibleBranches.map((branch) => {
                 const isInactive = branch.status != null && branch.status !== 'ACTIVE';
                 const isChecked = checked.has(branch.id);
                 return (

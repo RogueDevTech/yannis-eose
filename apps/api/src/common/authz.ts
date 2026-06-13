@@ -90,6 +90,7 @@ export type GlobalAuditAccessUser = {
   role: string;
   permissions?: string[];
   currentBranchId?: string | null;
+  effectiveBranchIds?: string[] | null;
 };
 
 /**

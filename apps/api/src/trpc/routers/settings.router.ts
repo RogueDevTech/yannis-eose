@@ -126,11 +126,12 @@ export const settingsRouter = router({
    * Get all system settings.
    * Any authenticated user can read (CS pages need to know the mode).
    */
-  getSystemSettings: authedProcedure.query(async () => {
-    const key = 'cache:settings:systemSettings:v1';
+  getSystemSettings: authedProcedure.query(async ({ ctx }) => {
+    const gId = ctx.activeGroupId;
+    const key = `cache:settings:systemSettings:${gId ?? 'global'}`;
     const TTL_SECONDS = 60;
-    if (!settingsCacheService) return getSettingsService().getAll();
-    return settingsCacheService.getOrSet(key, TTL_SECONDS, () => getSettingsService().getAll());
+    if (!settingsCacheService) return getSettingsService().getAll(gId);
+    return settingsCacheService.getOrSet(key, TTL_SECONDS, () => getSettingsService().getAll(gId));
   }),
 
   /**
@@ -186,7 +187,7 @@ export const settingsRouter = router({
   updateSystemSetting: permissionProcedure('settings.write')
     .input(updateSystemSettingSchema)
     .mutation(async ({ input, ctx }) => {
-      await getSettingsService().set(input.key, input.value, ctx.user.id);
+      await getSettingsService().set(input.key, input.value, ctx.user.id, undefined, ctx.activeGroupId);
       await invalidateSystemSettingsCache();
       return { success: true };
     }),

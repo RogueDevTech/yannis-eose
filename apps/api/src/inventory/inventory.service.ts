@@ -1526,7 +1526,7 @@ export class InventoryService {
     });
   }
 
-  async listLevels(input: ListInventoryInput) {
+  async listLevels(input: ListInventoryInput, groupId?: string | null) {
     const conditions = [];
 
     if (input.productId) {
@@ -1534,6 +1534,16 @@ export class InventoryService {
     }
     if (input.locationId) {
       conditions.push(eq(schema.inventoryLevels.locationId, input.locationId));
+    }
+    // Company-group isolation: only show inventory at locations belonging to providers in this group
+    if (groupId) {
+      conditions.push(
+        sql`${schema.inventoryLevels.locationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
+      );
     }
     if (input.shipmentId) {
       // Fully-qualify the outer-table refs with `inventory_levels.…` — both
@@ -1989,10 +1999,12 @@ export class InventoryService {
   private movementsReadBranchFilter(
     actor: SessionUser,
     currentBranchId: string | null,
-  ): string | null {
-    if (isAdminLevel(actor)) return null;
-    if (!currentBranchId) return null;
-    return currentBranchId;
+    effectiveBranchIds?: string[] | null,
+  ): { branchId: string | null; effectiveBranchIds: string[] | null } {
+    if (isAdminLevel(actor)) return { branchId: null, effectiveBranchIds: null };
+    if (currentBranchId) return { branchId: currentBranchId, effectiveBranchIds: null };
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) return { branchId: null, effectiveBranchIds };
+    return { branchId: null, effectiveBranchIds: null };
   }
 
   /**
@@ -2002,6 +2014,7 @@ export class InventoryService {
     input: ListMovementsInput,
     actor: SessionUser,
     currentBranchId: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const conditions = [];
 
@@ -2037,19 +2050,36 @@ export class InventoryService {
       );
     }
 
-    const branchFilter = this.movementsReadBranchFilter(actor, currentBranchId);
-    if (branchFilter) {
+    const branchScope = this.movementsReadBranchFilter(actor, currentBranchId, effectiveBranchIds);
+    if (branchScope.branchId) {
       conditions.push(
         sql<boolean>`(
           EXISTS (
             SELECT 1 FROM logistics_locations ll
             WHERE ll.id = ${schema.stockMovements.fromLocationId}
-              AND (ll.branch_id IS NULL OR ll.branch_id = ${branchFilter})
+              AND (ll.branch_id IS NULL OR ll.branch_id = ${branchScope.branchId})
           )
           OR EXISTS (
             SELECT 1 FROM logistics_locations ll
             WHERE ll.id = ${schema.stockMovements.toLocationId}
-              AND (ll.branch_id IS NULL OR ll.branch_id = ${branchFilter})
+              AND (ll.branch_id IS NULL OR ll.branch_id = ${branchScope.branchId})
+          )
+        )`,
+      );
+    } else if (branchScope.effectiveBranchIds && branchScope.effectiveBranchIds.length > 0) {
+      const ids = branchScope.effectiveBranchIds;
+      const inClause = sql.join(ids.map(id => sql`${id}`), sql`, `);
+      conditions.push(
+        sql<boolean>`(
+          EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.stockMovements.fromLocationId}
+              AND (ll.branch_id IS NULL OR ll.branch_id IN (${inClause}))
+          )
+          OR EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.stockMovements.toLocationId}
+              AND (ll.branch_id IS NULL OR ll.branch_id IN (${inClause}))
           )
         )`,
       );
@@ -2092,7 +2122,7 @@ export class InventoryService {
    * `canApprove: boolean` so the client can render the Approve / Reject buttons
    * without mirroring the source-authority rule. Server is canonical.
    */
-  async listTransfers(status?: string, viewer?: SessionUser, page = 1, limit = 1000) {
+  async listTransfers(status?: string, viewer?: SessionUser, page = 1, limit = 1000, groupId?: string | null) {
     const conditions = [];
     if (status) {
       conditions.push(
@@ -2100,6 +2130,16 @@ export class InventoryService {
           schema.stockTransfers.transferStatus,
           status as 'PENDING' | 'IN_TRANSIT' | 'RECEIVED' | 'DISPUTED' | 'CANCELLED' | 'REJECTED',
         ),
+      );
+    }
+    // Company-group isolation: only transfers involving locations in this group's providers
+    if (groupId) {
+      conditions.push(
+        sql`${schema.stockTransfers.fromLocationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
       );
     }
 
@@ -2342,10 +2382,14 @@ export class InventoryService {
    * SUM(stock_count - reserved_count) across all locations, grouped by product.
    * Joins product name and brand name via product_categories.
    */
-  async getStockPerProduct(): Promise<
+  async getStockPerProduct(activeGroupId?: string | null): Promise<
     Array<{ productId: string; productName: string; brandName: string | null; available: number }>
   > {
-    const rows = await this.db
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (activeGroupId) {
+      conditions.push(eq(schema.products.groupId, activeGroupId));
+    }
+    let query = this.db
       .select({
         productId: schema.inventoryLevels.productId,
         productName: schema.products.name,
@@ -2356,6 +2400,11 @@ export class InventoryService {
       .from(schema.inventoryLevels)
       .innerJoin(schema.products, eq(schema.inventoryLevels.productId, schema.products.id))
       .leftJoin(schema.productCategories, eq(schema.products.categoryId, schema.productCategories.id))
+      .$dynamic();
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+    const rows = await query
       .groupBy(schema.inventoryLevels.productId, schema.products.name, schema.productCategories.brandName)
       .orderBy(schema.products.name);
 
@@ -2380,7 +2429,7 @@ export class InventoryService {
    * Note: no early-return when the global threshold is 0/disabled — a location
    * with an explicit override should still surface (COALESCE handles it).
    */
-  async getLowStockAlerts() {
+  async getLowStockAlerts(groupId?: string | null) {
     const globalThreshold = await this.getGlobalLowStockThreshold();
     const hasLocCol = await this.locationThresholdColExists();
 
@@ -2389,6 +2438,10 @@ export class InventoryService {
     //  2. active locations with NO inventory_levels rows at all (0 stock)
     // Uses a LEFT JOIN from locations → levels so empty locations appear as NULLs.
     const thresholdSql = hasLocCol ? 'll.low_stock_threshold' : 'NULL::integer';
+    // groupId is a session-validated UUID; still use a safe UUID check before raw interpolation
+    const groupFilter = groupId && /^[0-9a-f-]{36}$/i.test(groupId)
+      ? `AND ll.provider_id IN (SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = '${groupId}')`
+      : '';
 
     const rows = await this.db.execute<{
       level_id: string | null;
@@ -2413,6 +2466,7 @@ export class InventoryService {
       LEFT JOIN inventory_levels il ON il.location_id = ll.id
       LEFT JOIN products p ON p.id = il.product_id
       WHERE ll.status = 'ACTIVE'
+        ${groupFilter}
         AND (
           (il.id IS NOT NULL AND (il.stock_count - il.reserved_count) < COALESCE(${thresholdSql}, ${globalThreshold}))
           OR
