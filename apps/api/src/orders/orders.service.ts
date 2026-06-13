@@ -1173,6 +1173,7 @@ export class OrdersService {
     input: CreateOrderInput & { cartId?: string },
     actorId: string | null,
     orderSource?: 'edge-form' | 'offline' | null,
+    opts?: { isFollowUp?: boolean },
   ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
@@ -1409,6 +1410,8 @@ export class OrdersService {
           // Back-link to the originating cart so HoCS can filter "Recovered from
           // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
           cartId: cartId ?? null,
+          // Cart-recovered orders are follow-up from birth — never appear in main CS queue.
+          ...(opts?.isFollowUp ? { isFollowUp: true } : {}),
         })
         .returning();
       const created = rows[0];
@@ -1863,24 +1866,19 @@ export class OrdersService {
     // mediaBuyerId on the order; orderSource='offline' excludes it from
     // marketing CR/DR/CPA. If campaign tier validation fails (offers changed
     // after cart was abandoned), retry without the campaign.
+    // 3. Create as offline follow-up order — isFollowUp=true from birth so
+    // the order NEVER appears in the main CS queue. CEO 2026-06-09: cart
+    // recovery goes exclusively through Follow-Up assignment.
     let result: { id?: string };
     try {
-      result = await this.create(orderInput, actorId, 'offline');
+      result = await this.create(orderInput, actorId, 'offline', { isFollowUp: true });
     } catch {
       const { campaignId: _dropped, ...inputWithoutCampaign } = orderInput;
-      result = await this.create(inputWithoutCampaign, actorId, 'offline');
+      result = await this.create(inputWithoutCampaign, actorId, 'offline', { isFollowUp: true });
     }
     if (!result.id) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Order creation returned no ID' });
     }
-
-    // 4. Mark as follow-up so the order is excluded from normal CS metrics
-    // until delivered (CEO 2026-06-09). Delivered follow-up offline orders
-    // still count toward the closer's delivery metrics.
-    await this.db
-      .update(schema.orders)
-      .set({ isFollowUp: true })
-      .where(eq(schema.orders.id, result.id));
 
     // 5. Convert the cart — mark as CONVERTED so it disappears from the abandonment list.
     try {

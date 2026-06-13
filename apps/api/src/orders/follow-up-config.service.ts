@@ -268,7 +268,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         });
 
         const pulled = rule.sourceStatus === 'CART_ABANDONMENT'
-          ? await this.pullAbandonedCarts(rule.ageThresholdHours, rule.ageThresholdDays)
+          ? await this.pullAbandonedCarts(rule)
           : await this.pullOrdersForRule(rule, actorId);
         ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled });
         totalPulled += pulled;
@@ -458,6 +458,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const validUserIds = new Set(validUserRows.map((u) => u.id));
     const validCampaignIds = new Set(validCampaignRows.map((c) => c.id));
 
+    // When the rule specifies a target but it's excluded, skip entirely —
+    // never scatter follow-ups to unintended branches.
+    if (activeBranches.length === 0 && rule.targetBranchId) {
+      this.logger.warn(`pullOrdersForRule: target branch ${rule.targetBranchId} is excluded — skipping ${matchingOrders.length} orders`);
+      return 0;
+    }
+
     // Process each order individually — one bad order (trigger error, FK issue)
     // shouldn't block the rest of the batch.
     let succeeded = 0;
@@ -632,8 +639,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     return results;
   }
 
-  async pullAbandonedCarts(ageThresholdHours?: number | null, ageThresholdDays = 1): Promise<number> {
-    const cutoff = FollowUpConfigService.ageCutoff(ageThresholdHours, ageThresholdDays);
+  async pullAbandonedCarts(rule: typeof schema.followUpRules.$inferSelect): Promise<number> {
+    const cutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
 
     const carts = await this.db
       .select()
@@ -652,10 +659,17 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     if (carts.length === 0) return 0;
 
-    // Get branches with active CS departments for round-robin distribution
+    // Respect the rule's target branch — same logic as pullOrdersForRule.
+    // When rule has a specific target, all carts go there. When null,
+    // round-robin across active CS branches.
     const cartExcludedIds = await this.getExcludedIds();
-    const activeBranches = (await this.getActiveCsBranchIds())
-      .filter((id) => !cartExcludedIds.has(id));
+    let activeBranches: string[] = [];
+    if (rule.targetBranchId) {
+      activeBranches = cartExcludedIds.has(rule.targetBranchId) ? [] : [rule.targetBranchId];
+    } else {
+      activeBranches = (await this.getActiveCsBranchIds())
+        .filter((id) => !cartExcludedIds.has(id));
+    }
 
     // Resolve product prices for order total
     const productIds = [...new Set(carts.map((c) => c.productId))];
@@ -700,7 +714,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
             .insert(schema.followUpOrders)
             .values({
               sourceOrderId: null,
-              followUpRuleId: null,
+              followUpRuleId: rule.id,
               campaignId: cart.campaignId,
               mediaBuyerId: safeMbId,
               assignedCsId: null,
