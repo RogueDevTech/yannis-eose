@@ -198,13 +198,13 @@ export const marketingRouter = router({
   listFunding: authedProcedure
     .input(listFundingSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().listFunding(input, ctx.currentBranchId);
+      return getMarketingService().listFunding(input, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   fundingStatusCounts: authedProcedure
     .input(fundingStatusCountsSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().fundingStatusCounts(input, ctx.currentBranchId);
+      return getMarketingService().fundingStatusCounts(input, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   fundingRequestStatusCounts: authedProcedure
@@ -223,12 +223,13 @@ export const marketingRouter = router({
         { ...input, targetUserId: scopedTargetUserId },
         ctx.user,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
   fundingSummary: permissionProcedure('marketing.fundingSummary')
     .query(async ({ ctx }) => {
-      return getMarketingService().getFundingSummary(ctx.currentBranchId);
+      return getMarketingService().getFundingSummary(ctx.currentBranchId, undefined, ctx.effectiveBranchIds);
     }),
 
   /** Per-actor directional summary used by the Funding page top strip — totals received,
@@ -243,7 +244,7 @@ export const marketingRouter = router({
   getFundingBalance: permissionProcedure('marketing.fundingSummary', 'marketing.read', 'users.read')
     .input(getFundingBalanceSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().getFundingBalanceWithAuth(input.userId, ctx.user, ctx.currentBranchId);
+      return getMarketingService().getFundingBalanceWithAuth(input.userId, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /** Chronological ledger of all funding events for a user — transfers, expenses, requests. */
@@ -254,7 +255,7 @@ export const marketingRouter = router({
       if (ctx.user.role === 'MEDIA_BUYER' && input.userId !== ctx.user.id) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own funding ledger.' });
       }
-      return getMarketingService().getFundingLedger(input, ctx.currentBranchId);
+      return getMarketingService().getFundingLedger(input, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /** List funding balances for recipients. HoM sees self + Media Buyers; SA/FO see all HoM + MB.
@@ -272,7 +273,7 @@ export const marketingRouter = router({
       return next({ ctx });
     })
     .query(async ({ ctx }) => {
-      return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId);
+      return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId, undefined, ctx.effectiveBranchIds);
     }),
 
   /** Recipient candidates for the Request Funding modal (migration 0106).
@@ -384,6 +385,7 @@ export const marketingRouter = router({
           limit: input.limit,
         },
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -476,7 +478,7 @@ export const marketingRouter = router({
         ? { ...input, mediaBuyerId: ctx.user.id }
         : input;
       effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
-      return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId);
+      return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -490,7 +492,7 @@ export const marketingRouter = router({
       let effectiveInput =
         ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
       effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
-      return getMarketingService().listAdSpendGrouped(effectiveInput, ctx.currentBranchId);
+      return getMarketingService().listAdSpendGrouped(effectiveInput, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   adSpendStatusCounts: authedProcedure
@@ -499,14 +501,14 @@ export const marketingRouter = router({
       let effectiveInput =
         ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
       effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
-      return getMarketingService().adSpendStatusCounts(effectiveInput, ctx.currentBranchId);
+      return getMarketingService().adSpendStatusCounts(effectiveInput, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /** Orders since last APPROVED spend (same funnel) + indicative CPA — Log Ad Spend form preview. */
   previewAdSpendInterval: permissionProcedure('marketing.adSpend')
     .input(previewAdSpendIntervalSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().previewAdSpendInterval(input, ctx.user.id, ctx.currentBranchId);
+      return getMarketingService().previewAdSpendInterval(input, ctx.user.id, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -521,6 +523,7 @@ export const marketingRouter = router({
         input,
         ctx.user.id,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -578,6 +581,7 @@ export const marketingRouter = router({
         input.spendDate,
         ctx.user.id,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -727,6 +731,8 @@ export const marketingRouter = router({
         input.startDate,
         input.endDate,
         ctx.currentBranchId,
+        undefined,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -753,6 +759,7 @@ export const marketingRouter = router({
     .query(async ({ input, ctx }) => {
       assertMarketingTeamSurfacesAccess(ctx);
       const branchId = ctx.currentBranchId;
+      const eIds = ctx.effectiveBranchIds;
       const viewer = await resolveMarketingTeamViewerScope(ctx);
       const supervisorScope = viewer.supervisorScope;
       const restrictMbIds = viewer.restrictMediaBuyerIds;
@@ -793,6 +800,7 @@ export const marketingRouter = router({
                 limit: perMb,
                 mediaBuyerId,
                 branchId: branchId ?? undefined,
+                effectiveBranchIds: eIds,
               }),
             ),
           );
@@ -805,11 +813,13 @@ export const marketingRouter = router({
             limit: input.liveActivityLimit,
             mediaBuyerId: restrictMbIds[0],
             branchId: branchId ?? undefined,
+            effectiveBranchIds: eIds,
           });
         }
         return getCartService().listActivity({
           limit: input.liveActivityLimit,
           branchId: branchId ?? undefined,
+          effectiveBranchIds: eIds,
         });
       };
 
@@ -833,11 +843,12 @@ export const marketingRouter = router({
           input.endDate,
           branchId,
           restrictMbIds,
+          ctx.effectiveBranchIds,
         ),
-        getMarketingService().listFundingBalances(ctx.user, branchId),
-        getOrdersService().list(recentOrdersInput, branchId, buildOrdersListOpts(ctx.user)),
+        getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds),
+        getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
-        getCartService().countAbandoned({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined, startDate: input.startDate, endDate: input.endDate }),
+        getCartService().countAbandoned({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined, effectiveBranchIds: eIds, startDate: input.startDate, endDate: input.endDate }),
       ]);
 
       return {
@@ -853,7 +864,7 @@ export const marketingRouter = router({
   checkHighCpa: permissionProcedure('marketing.checkHighCpa')
     .input(z.object({ threshold: z.number().positive() }))
     .query(async ({ input, ctx }) => {
-      return getMarketingService().checkHighCpaAlerts(input.threshold, ctx.currentBranchId);
+      return getMarketingService().checkHighCpaAlerts(input.threshold, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   // ── Offer Templates ──────────────────────────────
@@ -889,8 +900,8 @@ export const marketingRouter = router({
 
   listOfferTemplates: authedProcedure
     .input(listOfferTemplatesSchema)
-    .query(async ({ input }) => {
-      return getMarketingService().listOfferTemplates(input);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listOfferTemplates(input, ctx.activeGroupId);
     }),
 
   // ── Offer Groups ─────────────────────────────────
@@ -918,8 +929,8 @@ export const marketingRouter = router({
 
   listOfferGroups: authedProcedure
     .input(listOfferGroupsSchema)
-    .query(async ({ input }) => {
-      return getMarketingService().listOfferGroups(input);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listOfferGroups(input, ctx.activeGroupId);
     }),
 
   clearLegacyOfferTemplates: permissionProcedure('products.offers')
@@ -966,7 +977,7 @@ export const marketingRouter = router({
       // the selected branch filters the forms list. `null` currentBranchId
       // ("All branches") = no filter. `listCampaigns` also surfaces a moved
       // MB's parked (DEACTIVATED) forms under their new primary branch.
-      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId, { callerId: ctx.user.id });
+      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId, { callerId: ctx.user.id, effectiveBranchIds: ctx.effectiveBranchIds });
     }),
 
   /**
@@ -1131,6 +1142,7 @@ export const marketingRouter = router({
                 },
                 ctx.user,
                 ctx.currentBranchId,
+                ctx.effectiveBranchIds,
               )
           : Promise.resolve(null),
         getProductsService().list(
@@ -1152,12 +1164,12 @@ export const marketingRouter = router({
             // An MB's Form-filter dropdown lists their own forms, every branch.
             ...(ctx.user.role === 'MEDIA_BUYER' ? { mediaBuyerId: ctx.user.id } : {}),
           },
-          null, // Forms are global — never branch-scoped
-          { enrichProductIds: false }, // Orders page only needs id+name for the filter dropdown
+          null, // Forms are global — never branch-scoped (but company-group-scoped via effectiveBranchIds)
+          { enrichProductIds: false, effectiveBranchIds: ctx.effectiveBranchIds }, // Orders page only needs id+name for the filter dropdown
         ),
         // Open abandoned-cart count for the overview strip — scoped to the same
         // media buyer / branch / date range the rest of the bundle uses.
-        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId, startDate, endDate }),
+        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId, effectiveBranchIds: ctx.effectiveBranchIds, startDate, endDate }),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
           ordersScope.mediaBuyerId,
@@ -1251,14 +1263,15 @@ export const marketingRouter = router({
         // Team Analysis roster — ACTIVE only, so it lines up with the
         // ACTIVE-only leaderboard and a deactivated account never shows as a
         // metric-less ghost row.
-        getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true }),
-        getMarketingService().getFundingSummary(branchId, Object.keys(fundingOpts).length > 0 ? fundingOpts : undefined),
+        getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true }, ctx.effectiveBranchIds),
+        getMarketingService().getFundingSummary(branchId, Object.keys(fundingOpts).length > 0 ? fundingOpts : undefined, ctx.effectiveBranchIds),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,
           input.startDate,
           input.endDate,
           branchId,
           restrictMbIds,
+          ctx.effectiveBranchIds,
         ),
         getMarketingService().getProfitabilityConfig(),
       ]);
@@ -1280,6 +1293,7 @@ export const marketingRouter = router({
             },
             ctx.user,
             branchId,
+            ctx.effectiveBranchIds,
           ),
           getUsersService().list(
             {
@@ -1292,6 +1306,7 @@ export const marketingRouter = router({
             },
             ctx.user,
             branchId,
+            ctx.effectiveBranchIds,
           ),
         ]);
         usersFallback = [...(homRes.users ?? []), ...(mbRes.users ?? [])].map((u) => ({
@@ -1316,6 +1331,7 @@ export const marketingRouter = router({
           },
           ctx.user,
           branchId,
+          ctx.effectiveBranchIds,
         );
         const allow = new Set(restrictMbIds);
         const picked = (mbRes.users ?? [])
@@ -1387,9 +1403,9 @@ export const marketingRouter = router({
           : null;
 
       const [adSpendStatusCounts, campaigns, buyersResult, teamsRaw] = await Promise.all([
-        getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
-        // Forms are global — never branch-scoped. Skip offer group enrichment (only needs id+name).
-        getMarketingService().listCampaigns(campaignsScope, null, { enrichProductIds: false }),
+        getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId, ctx.effectiveBranchIds),
+        // Forms are global — never branch-scoped (but company-group-scoped via effectiveBranchIds).
+        getMarketingService().listCampaigns(campaignsScope, null, { enrichProductIds: false, effectiveBranchIds: ctx.effectiveBranchIds }),
         canSeeBuyerPicklist
           ? supervisorBuyerIds
             ? getUsersService()
@@ -1407,6 +1423,7 @@ export const marketingRouter = router({
                 },
                 ctx.user,
                 branchId,
+                ctx.effectiveBranchIds,
               )
           : Promise.resolve(null),
         // Marketing teams for the team filter (HoM / admin / supervisor only).
@@ -1439,7 +1456,7 @@ export const marketingRouter = router({
 
       if (canSeeBuyerPicklist && !supervisorBuyerIds) {
         const knownIds = new Set(mediaBuyersForFilter.map((b) => b.id));
-        const extraBuyerIds = await getMarketingService().distinctAdSpendMediaBuyerIds(branchId);
+        const extraBuyerIds = await getMarketingService().distinctAdSpendMediaBuyerIds(branchId, ctx.effectiveBranchIds);
         const missingIds = extraBuyerIds.filter((id) => !knownIds.has(id));
         if (missingIds.length > 0) {
           const extraUsers = await getUsersService().listByIds(missingIds);
@@ -1516,20 +1533,20 @@ export const marketingRouter = router({
       };
 
       // Pre-fetch HoM IDs so we can scope the summary to Finance→HoM transfers only.
-      const homBalances = await getMarketingService().listFundingBalances(ctx.user, branchId);
+      const homBalances = await getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds);
       const homUserIds = homBalances
         .filter((b) => b.role === 'HEAD_OF_MARKETING')
         .map((b) => b.userId);
 
       const [funding, summary, requests, requestsCounts, users] =
         await Promise.all([
-          getMarketingService().listFunding(listFundingInput, branchId),
+          getMarketingService().listFunding(listFundingInput, branchId, ctx.effectiveBranchIds),
           getMarketingService().getFundingSummary(branchId, {
             restrictToReceiverIds: homUserIds,
             ...(input.startDate && { startDate: input.startDate }),
             ...(input.endDate && { endDate: input.endDate }),
-          }),
-          getMarketingService().listFundingRequests(requestsInput, branchId),
+          }, ctx.effectiveBranchIds),
+          getMarketingService().listFundingRequests(requestsInput, branchId, ctx.effectiveBranchIds),
           getMarketingService().fundingRequestStatusCounts(
             {
               requesterRole: 'HEAD_OF_MARKETING',
@@ -1537,6 +1554,7 @@ export const marketingRouter = router({
             },
             ctx.user,
             branchId,
+            ctx.effectiveBranchIds,
           ),
           // Requesters list — id + name + role only.
           getUsersService().list(
@@ -1549,6 +1567,7 @@ export const marketingRouter = router({
             },
             ctx.user,
             branchId,
+            ctx.effectiveBranchIds,
           ),
         ]);
       const balances = homBalances;
@@ -1689,7 +1708,7 @@ export const marketingRouter = router({
         distributingTransfers,
         distributingRequests,
       ] = await Promise.all([
-        getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange),
+        getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange, ctx.effectiveBranchIds),
         isFundingAdmin
           ? (async () => {
               // Supervisors see only their team members as funding recipients
@@ -1701,20 +1720,22 @@ export const marketingRouter = router({
                   { page: 1, limit: 200, sortBy: 'createdAt' as const, sortOrder: 'desc' as const, includeBranchMemberships: false, userIds: teamMemberIds },
                   ctx.user,
                   branchId,
+                  ctx.effectiveBranchIds,
                 );
               }
               return getUsersService().list(
                 { page: 1, limit: 200, sortBy: 'createdAt' as const, sortOrder: 'desc' as const, includeBranchMemberships: false },
                 ctx.user,
                 branchId,
+                ctx.effectiveBranchIds,
               );
             })()
           : Promise.resolve(null),
         isFundingAdmin
-          ? getMarketingService().listFundingBalances(ctx.user, branchId).catch(() => null)
+          ? getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds).catch(() => null)
           : Promise.resolve(null),
         showFundingBalance
-          ? getMarketingService().getFundingBalance(ctx.user.id, branchId)
+          ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
         ctx.currentBranchId
           ? listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>)
@@ -1731,16 +1752,19 @@ export const marketingRouter = router({
         getMarketingService().fundingStatusCounts(
           { receiverId: ctx.user.id, ...dateRange },
           branchId,
+          ctx.effectiveBranchIds,
         ),
         getMarketingService().fundingRequestStatusCounts(
           { requesterId: ctx.user.id, ...dateRange },
           ctx.user,
           branchId,
+          ctx.effectiveBranchIds,
         ),
         canDistribute
           ? getMarketingService().fundingStatusCounts(
               { senderId: ctx.user.id, ...dateRange },
               branchId,
+              ctx.effectiveBranchIds,
             )
           : Promise.resolve(null),
         canDistribute
@@ -1748,19 +1772,20 @@ export const marketingRouter = router({
               { excludeSelfAsRequester: true, ...dateRange },
               ctx.user,
               branchId,
+              ctx.effectiveBranchIds,
             )
           : Promise.resolve(null),
         receivedTransferInput
-          ? getMarketingService().listFunding(receivedTransferInput, branchId)
+          ? getMarketingService().listFunding(receivedTransferInput, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
         receivedRequestInput
-          ? getMarketingService().listFundingRequests(receivedRequestInput, branchId)
+          ? getMarketingService().listFundingRequests(receivedRequestInput, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
         distributingTransferInput
-          ? getMarketingService().listFunding(distributingTransferInput, branchId)
+          ? getMarketingService().listFunding(distributingTransferInput, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
         distributingRequestInput
-          ? getMarketingService().listFundingRequests(distributingRequestInput, branchId)
+          ? getMarketingService().listFundingRequests(distributingRequestInput, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
       ]);
 

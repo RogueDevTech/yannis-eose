@@ -719,7 +719,7 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
       if (ctx.user.role === 'SUPER_ADMIN') {
-        return getOrdersService().scheduleCalendarHeat(input, branchId);
+        return getOrdersService().scheduleCalendarHeat(input, branchId, ctx.effectiveBranchIds);
       }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
@@ -744,7 +744,7 @@ export const ordersRouter = router({
         });
       }
       if (hasOrgWideScope) {
-        return getOrdersService().scheduleCalendarHeat(input, branchId);
+        return getOrdersService().scheduleCalendarHeat(input, branchId, ctx.effectiveBranchIds);
       }
       let effectiveInput = input;
       if (ctx.user.role === 'MEDIA_BUYER') {
@@ -754,7 +754,7 @@ export const ordersRouter = router({
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
       effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
-      return getOrdersService().scheduleCalendarHeat(effectiveInput, branchId);
+      return getOrdersService().scheduleCalendarHeat(effectiveInput, branchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -1130,7 +1130,7 @@ export const ordersRouter = router({
    * Restricted to Head of CS and SuperAdmin.
    */
   csWorkloads: permissionProcedure('orders.csWorkloads').query(async ({ ctx }) => {
-    return getOrdersService().getCSCloserWorkloads(ctx.currentBranchId);
+    return getOrdersService().getCSCloserWorkloads(ctx.currentBranchId, ctx.effectiveBranchIds);
   }),
 
   /**
@@ -1139,7 +1139,7 @@ export const ordersRouter = router({
   closerWorkloadOrders: permissionProcedure('orders.csWorkloads')
     .input(z.object({ agentId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getCloserWorkloadOrdersWithItems(input.agentId, ctx.currentBranchId);
+      return getOrdersService().getCloserWorkloadOrdersWithItems(input.agentId, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -1171,7 +1171,7 @@ export const ordersRouter = router({
   inactiveAgents: permissionProcedure('orders.inactiveAgents')
     .input(z.object({ thresholdMinutes: z.number().min(1).default(10) }).optional())
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getInactiveAgents(input?.thresholdMinutes ?? 10, ctx.currentBranchId);
+      return getOrdersService().getInactiveAgents(input?.thresholdMinutes ?? 10, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -1193,6 +1193,7 @@ export const ordersRouter = router({
         input.startDate,
         input.endDate,
         ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       ),
     ),
 
@@ -1334,7 +1335,7 @@ export const ordersRouter = router({
         // agent roster.
         input.showCSCloserColumn &&
         (ctx.user.permissions ?? []).includes('orders.csWorkloads')
-          ? getOrdersService().getCSCloserWorkloads(branchId)
+          ? getOrdersService().getCSCloserWorkloads(branchId, ctx.effectiveBranchIds)
           : Promise.resolve([]),
         input.showCSCloserColumn
           ? getLogisticsService().listLocationOptions({ status: 'ACTIVE', providerKind: 'THIRD_PARTY' })
@@ -1349,6 +1350,7 @@ export const ordersRouter = router({
         getCartService().countAbandoned({
           mediaBuyerId: scope.mediaBuyerId,
           branchId: aggregateBranchId,
+          effectiveBranchIds: ctx.effectiveBranchIds,
           startDate: scope.startDate,
           endDate: scope.endDate,
         }),
@@ -1426,16 +1428,18 @@ export const ordersRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
+      const eIds = ctx.effectiveBranchIds;
       const [team, workloads, leaderboard, inactiveAgents, supplementary] = await Promise.all([
-        getUsersService().listCSTeam(branchId),
-        getOrdersService().getCSCloserWorkloads(branchId),
+        getUsersService().listCSTeam(branchId, eIds),
+        getOrdersService().getCSCloserWorkloads(branchId, eIds),
         getOrdersService().getCSCloserLeaderboard(
           input.period,
           input.startDate,
           input.endDate,
           branchId,
+          eIds,
         ),
-        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId),
+        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId, eIds),
         getOrdersService().getSupplementaryCounts(
           undefined,
           input.startDate,
@@ -1758,7 +1762,7 @@ export const ordersRouter = router({
    * Get all scheduled callbacks (including future).
    */
   scheduledCallbacks: permissionProcedure('orders.scheduledCallbacks').query(async ({ ctx }) => {
-    return getOrdersService().getScheduledCallbacks(ctx.currentBranchId);
+    return getOrdersService().getScheduledCallbacks(ctx.currentBranchId, ctx.effectiveBranchIds);
   }),
 
   // ── Duplicate Order Management ────────────────────────────
@@ -1767,7 +1771,7 @@ export const ordersRouter = router({
    * Get flagged duplicate orders for review.
    */
   flaggedDuplicates: permissionProcedure('orders.flaggedDuplicates').query(async ({ ctx }) => {
-    return getOrdersService().getFlaggedDuplicates(ctx.currentBranchId);
+    return getOrdersService().getFlaggedDuplicates(ctx.currentBranchId, ctx.effectiveBranchIds);
   }),
 
   /** Raw phones for a duplicate pair — used by the comparison modal on the order detail page. */
@@ -2009,7 +2013,7 @@ export const ordersRouter = router({
    */
   claimQueue: permissionProcedure('orders.read')
     .query(async ({ ctx }) => {
-      return getOrdersService().getClaimQueue(ctx.currentBranchId);
+      return getOrdersService().getClaimQueue(ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -2337,6 +2341,7 @@ export const ordersRouter = router({
       return getFollowUpConfigService().listFollowUpBranches({
         ...input,
         branchId: input.branchId ?? ctx.currentBranchId ?? undefined,
+        effectiveBranchIds: ctx.effectiveBranchIds,
       });
     }),
 
@@ -2345,7 +2350,7 @@ export const ordersRouter = router({
   followUpOrdersList: permissionProcedure('orders.followUp')
     .input(listFollowUpOrdersSchema)
     .query(async ({ input, ctx }) => {
-      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId);
+      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   followUpOrdersStatusCounts: permissionProcedure('orders.followUp')
@@ -2357,7 +2362,7 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const assignedCsId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
       const branchId = input.branchId ?? ctx.currentBranchId ?? undefined;
-      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate);
+      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds);
     }),
 
   /** Lightweight follow-up counts for dashboard stat strips (assigned + delivered). */
@@ -2369,6 +2374,7 @@ export const ordersRouter = router({
       return getFollowUpConfigService().getFollowUpDashboardCounts({
         assignedCsId: isCloser ? ctx.user.id : undefined,
         branchId: ctx.currentBranchId ?? undefined,
+        effectiveBranchIds: ctx.effectiveBranchIds,
         startDate: input?.startDate,
         endDate: input?.endDate,
       });

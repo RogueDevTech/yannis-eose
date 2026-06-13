@@ -11,6 +11,7 @@ import type {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { CacheService } from '../common/cache/cache.service';
 import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -31,271 +32,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    // Seed default rules + default group on first deploy (idempotent).
-    await this.seedDefaultRules();
-    await this.seedDefaultGroup();
-
-    // Ensure all CS closers are in all active branches.
-    await this.syncCloserBranchMemberships();
-
-    // One-time fix: sync servicingBranchId for assigned follow-up orders
-    // to match the closer's branch (pre-fix orders had stale round-robin branches).
-    await this.syncAssignedOrderBranches();
-
     // Delay 45s after boot, then run sync (includes cart pull via CART_ABANDONMENT rules).
     setTimeout(() => {
       this.runSync('cron').catch((err) =>
         this.logger.error(`Boot sync failed: ${err instanceof Error ? err.message : err}`),
       );
     }, 45_000);
-  }
-
-  /**
-   * CEO directive: auto-create default follow-up rules on deploy.
-   * Idempotent — checks by name, only inserts rules that don't already exist.
-   */
-  private async seedDefaultRules() {
-    const defaults = [
-      {
-        name: 'Unconfirmed orders older than 3 days',
-        sourceStatus: 'CS_ENGAGED',
-        ageThresholdDays: 3,
-        maxAgeDays: null as number | null,
-        priority: 10,
-      },
-      {
-        name: 'Confirmed undelivered older than 7 days',
-        sourceStatus: 'CONFIRMED',
-        ageThresholdDays: 7,
-        maxAgeDays: null as number | null,
-        priority: 5,
-      },
-      {
-        name: 'Cart abandonments older than 2 hours',
-        sourceStatus: 'CART_ABANDONMENT',
-        ageThresholdDays: 1,
-        ageThresholdHours: 2,
-        maxAgeDays: null as number | null,
-        priority: 15,
-      },
-    ];
-
-    const existing = await this.db
-      .select({ name: schema.followUpRules.name })
-      .from(schema.followUpRules);
-    const existingNames = new Set(existing.map((r) => r.name));
-
-    let seeded = 0;
-    for (const rule of defaults) {
-      if (existingNames.has(rule.name)) continue;
-      try {
-        await this.db.insert(schema.followUpRules).values({
-          name: rule.name,
-          sourceStatus: rule.sourceStatus,
-          ageThresholdDays: rule.ageThresholdDays,
-          ageThresholdHours: ('ageThresholdHours' in rule ? rule.ageThresholdHours : null) as number | null,
-          maxAgeDays: rule.maxAgeDays,
-          sourceBranchId: null,
-          targetBranchId: null,
-          targetGroupId: null,
-          priority: rule.priority,
-          enabled: true,
-        });
-        seeded++;
-      } catch (err) {
-        // Skip duplicate / constraint violations (e.g. overlap index)
-        this.logger.warn(`Skipped seeding rule "${rule.name}": ${err instanceof Error ? err.message : err}`);
-      }
-    }
-
-    if (seeded > 0) this.logger.log(`Seeded ${seeded} default follow-up rule(s)`);
-
-    // One-time fix: rules created before "All branches" support had targetBranchId
-    // set to the first branch. Clear it on ALL rules that pull from all branches
-    // (sourceBranchId = NULL) so they default to round-robin.
-    await this.db
-      .update(schema.followUpRules)
-      .set({ targetBranchId: null, targetGroupId: null })
-      .where(
-        and(
-          isNull(schema.followUpRules.sourceBranchId),
-          sql`${schema.followUpRules.targetBranchId} IS NOT NULL`,
-          sql`${schema.followUpRules.targetGroupId} IS NULL`,
-        ),
-      );
-  }
-
-  /**
-   * Seed a default "All CS Closers" follow-up group containing every CS_CLOSER user.
-   * Idempotent — skips if a group with that name already exists.
-   * On subsequent boots, syncs membership (adds new closers, removes departed ones).
-   */
-  private async seedDefaultGroup() {
-    const DEFAULT_GROUP_NAME = 'All CS Closers';
-
-    // Get all active CS closers
-    const closers = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
-    if (closers.length === 0) return;
-
-    const [existing] = await this.db
-      .select({ id: schema.followUpGroups.id })
-      .from(schema.followUpGroups)
-      .where(eq(schema.followUpGroups.name, DEFAULT_GROUP_NAME))
-      .limit(1);
-
-    if (existing) {
-      // Sync membership — add new closers, remove departed ones
-      const currentMembers = await this.db
-        .select({ userId: schema.followUpGroupMembers.userId })
-        .from(schema.followUpGroupMembers)
-        .where(eq(schema.followUpGroupMembers.groupId, existing.id));
-      const currentIds = new Set(currentMembers.map((m) => m.userId));
-      const targetIds = new Set(closers.map((c) => c.id));
-
-      const toAdd = closers.filter((c) => !currentIds.has(c.id));
-      const toRemove = currentMembers.filter((m) => !targetIds.has(m.userId));
-
-      if (toAdd.length > 0) {
-        await this.db.insert(schema.followUpGroupMembers).values(
-          toAdd.map((c) => ({ groupId: existing.id, userId: c.id })),
-        );
-      }
-      if (toRemove.length > 0) {
-        await this.db
-          .delete(schema.followUpGroupMembers)
-          .where(and(
-            eq(schema.followUpGroupMembers.groupId, existing.id),
-            inArray(schema.followUpGroupMembers.userId, toRemove.map((m) => m.userId)),
-          ));
-      }
-      if (toAdd.length > 0 || toRemove.length > 0) {
-        this.logger.log(`Synced default group "${DEFAULT_GROUP_NAME}": +${toAdd.length} -${toRemove.length}`);
-      }
-      return;
-    }
-
-    // Create the group — need a creator ID (first SuperAdmin)
-    const [sa] = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.role, 'SUPER_ADMIN'))
-      .limit(1);
-    if (!sa) return;
-
-    const [group] = await this.db.insert(schema.followUpGroups).values({
-      name: DEFAULT_GROUP_NAME,
-      createdById: sa.id,
-    }).returning({ id: schema.followUpGroups.id });
-
-    if (group && closers.length > 0) {
-      await this.db.insert(schema.followUpGroupMembers).values(
-        closers.map((c) => ({ groupId: group.id, userId: c.id })),
-      );
-    }
-    this.logger.log(`Seeded default group "${DEFAULT_GROUP_NAME}" with ${closers.length} members`);
-  }
-
-  /**
-   * Ensure all active CS_CLOSERs are members of every active branch.
-   * Idempotent — only inserts missing memberships (unique index prevents dupes).
-   * Runs on boot so newly created closers or branches are auto-linked.
-   */
-  private async syncCloserBranchMemberships() {
-    try {
-      const [closers, activeBranches, existingMemberships] = await Promise.all([
-        this.db
-          .select({ id: schema.users.id })
-          .from(schema.users)
-          .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE'))),
-        this.db
-          .select({ id: schema.branches.id })
-          .from(schema.branches)
-          .where(eq(schema.branches.status, 'ACTIVE')),
-        this.db
-          .select({ userId: schema.userBranches.userId, branchId: schema.userBranches.branchId })
-          .from(schema.userBranches),
-      ]);
-      if (closers.length === 0 || activeBranches.length === 0) return;
-
-      const existingSet = new Set(existingMemberships.map((m) => `${m.userId}:${m.branchId}`));
-      const toInsert: Array<{ userId: string; branchId: string; isPrimary: boolean }> = [];
-
-      for (const closer of closers) {
-        for (const branch of activeBranches) {
-          if (!existingSet.has(`${closer.id}:${branch.id}`)) {
-            // First branch becomes primary if the closer has no existing memberships
-            const hasPrimary = existingMemberships.some((m) => m.userId === closer.id);
-            toInsert.push({
-              userId: closer.id,
-              branchId: branch.id,
-              isPrimary: !hasPrimary && toInsert.filter((r) => r.userId === closer.id).length === 0,
-            });
-          }
-        }
-      }
-
-      if (toInsert.length > 0) {
-        // Insert in batches to avoid hitting query limits
-        const BATCH = 500;
-        for (let i = 0; i < toInsert.length; i += BATCH) {
-          await this.db.insert(schema.userBranches).values(toInsert.slice(i, i + BATCH)).onConflictDoNothing();
-        }
-        this.logger.log(`Synced closer branch memberships: ${toInsert.length} new assignments across ${activeBranches.length} branches`);
-      }
-    } catch (err) {
-      this.logger.warn(`syncCloserBranchMemberships failed: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  /**
-   * One-time fix: for follow-up orders that were assigned to a closer before
-   * the branch-sync fix, update servicingBranchId to match the closer's branch.
-   */
-  private async syncAssignedOrderBranches() {
-    try {
-      // Find assigned follow-up orders and their closer's branch
-      const assigned = await this.db
-        .select({
-          orderId: schema.followUpOrders.id,
-          assignedCsId: schema.followUpOrders.assignedCsId,
-          currentBranch: schema.followUpOrders.servicingBranchId,
-          closerBranch: schema.userBranches.branchId,
-        })
-        .from(schema.followUpOrders)
-        .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.followUpOrders.assignedCsId))
-        .where(and(
-          isNull(schema.followUpOrders.deletedAt),
-          sql`${schema.followUpOrders.assignedCsId} IS NOT NULL`,
-        ));
-      if (assigned.length === 0) return;
-
-      // Only fix orders where branch doesn't match
-      const mismatched = assigned.filter((r) => r.currentBranch !== r.closerBranch);
-      if (mismatched.length === 0) return;
-
-      // Group by target branch for batch updates
-      const byBranch = new Map<string, string[]>();
-      for (const r of mismatched) {
-        if (!r.closerBranch) continue;
-        const list = byBranch.get(r.closerBranch) ?? [];
-        list.push(r.orderId);
-        byBranch.set(r.closerBranch, list);
-      }
-
-      for (const [branchId, orderIds] of byBranch) {
-        await this.db
-          .update(schema.followUpOrders)
-          .set({ servicingBranchId: branchId, updatedAt: new Date() })
-          .where(inArray(schema.followUpOrders.id, orderIds));
-      }
-
-      this.logger.log(`Synced servicingBranchId for ${mismatched.length} assigned follow-up order(s)`);
-    } catch (err) {
-      this.logger.warn(`syncAssignedOrderBranches failed: ${err instanceof Error ? err.message : err}`);
-    }
   }
 
   // ── Cron ───────────────────────────────────────────────────────────
@@ -322,6 +64,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         eq(schema.branchDepartments.department, 'CS'),
         eq(schema.branchDepartments.status, 'ACTIVE'),
         eq(schema.branches.status, 'ACTIVE'),
+        sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
       ));
   }
 
@@ -335,6 +78,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         eq(schema.branchDepartments.department, 'CS'),
         eq(schema.branchDepartments.status, 'ACTIVE'),
         eq(schema.branches.status, 'ACTIVE'),
+        sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
       ));
     return rows.map((r) => r.branchId);
   }
@@ -385,6 +129,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           ageThresholdDays: input.ageThresholdDays,
           ageThresholdHours: input.ageThresholdHours ?? null,
           maxAgeDays: input.maxAgeDays ?? null,
+          ageRelativeTo: input.ageRelativeTo ?? 'STATUS_TIMESTAMP',
           sourceBranchId: input.sourceBranchId ?? null,
           targetBranchId: input.targetBranchId ?? null,
           targetGroupId: input.targetGroupId ?? null,
@@ -411,6 +156,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (input.ageThresholdDays !== undefined) set.ageThresholdDays = input.ageThresholdDays;
       if (input.ageThresholdHours !== undefined) set.ageThresholdHours = input.ageThresholdHours;
       if (input.maxAgeDays !== undefined) set.maxAgeDays = input.maxAgeDays;
+      if (input.ageRelativeTo !== undefined) set.ageRelativeTo = input.ageRelativeTo;
       if (input.sourceBranchId !== undefined) set.sourceBranchId = input.sourceBranchId;
       if (input.targetBranchId !== undefined) set.targetBranchId = input.targetBranchId;
       if (input.targetGroupId !== undefined) set.targetGroupId = input.targetGroupId;
@@ -611,13 +357,24 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   private async pullOrdersForRule(rule: typeof schema.followUpRules.$inferSelect, _actorId?: string): Promise<number> {
     const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
 
-    // Use status-specific timestamp when available (e.g. confirmedAt for CONFIRMED),
-    // so "5 days" means 5 days since entering that status, not since order creation.
-    // COALESCE handles old orders where the status timestamp wasn't populated.
-    const statusTsCol = FollowUpConfigService.statusTimestampCol(rule.sourceStatus);
-    const ageExpr = statusTsCol
-      ? sql`COALESCE(${statusTsCol}, ${schema.orders.createdAt})`
-      : schema.orders.createdAt;
+    // Determine which timestamp to measure age from, based on rule.ageRelativeTo:
+    //   STATUS_TIMESTAMP (default) — confirmedAt/allocatedAt/etc, fallback to createdAt
+    //   CREATED_AT — always order creation date
+    //   PREFERRED_DELIVERY_DATE — scheduled delivery date (text → timestamptz cast)
+    const relativeTo = rule.ageRelativeTo ?? 'STATUS_TIMESTAMP';
+    let ageExpr: ReturnType<typeof sql>;
+    if (relativeTo === 'PREFERRED_DELIVERY_DATE') {
+      // preferred_delivery_date is a text column — cast to date, fallback to createdAt
+      ageExpr = sql`COALESCE(${schema.orders.preferredDeliveryDate}::date, ${schema.orders.createdAt}::date)`;
+    } else if (relativeTo === 'CREATED_AT') {
+      ageExpr = sql`${schema.orders.createdAt}`;
+    } else {
+      // STATUS_TIMESTAMP — use the status-specific column, fallback to createdAt
+      const statusTsCol = FollowUpConfigService.statusTimestampCol(rule.sourceStatus);
+      ageExpr = statusTsCol
+        ? sql`COALESCE(${statusTsCol}, ${schema.orders.createdAt})`
+        : sql`${schema.orders.createdAt}`;
+    }
 
     // Find matching orders not yet pulled
     const conditions = [
@@ -1030,9 +787,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
    * Aggregate follow-up orders by servicingBranchId for the branch/group
    * overview page.  Returns one row per branch with funnel stats.
    */
-  async listFollowUpBranches(input: { startDate?: string; endDate?: string; branchId?: string }) {
+  async listFollowUpBranches(input: { startDate?: string; endDate?: string; branchId?: string; effectiveBranchIds?: string[] | null }) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
-    if (input.branchId) conditions.push(eq(schema.followUpOrders.servicingBranchId, input.branchId));
+    {
+      const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, input.branchId, input.effectiveBranchIds);
+      if (bCond) conditions.push(bCond);
+    }
     if (input.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(input.startDate)));
     if (input.endDate) {
       const end = new Date(input.endDate);
@@ -1084,7 +844,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   // ── Follow-Up Order Lifecycle ──────────────────────────────────────
 
-  async listFollowUpOrders(input: ListFollowUpOrdersInput, branchId?: string | null) {
+  async listFollowUpOrders(input: ListFollowUpOrdersInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const conditions: Parameters<typeof and>[0][] = input.showDeleted
       ? [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`]
       : [isNull(schema.followUpOrders.deletedAt)];
@@ -1099,10 +859,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (input.search) {
       conditions.push(sql`${schema.followUpOrders.customerName} ILIKE ${'%' + input.search + '%'}`);
     }
-    if (branchId) {
-      conditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
-    } else if (input.branchId) {
-      conditions.push(eq(schema.followUpOrders.servicingBranchId, input.branchId));
+    {
+      const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId ?? input.branchId, effectiveBranchIds);
+      if (bCond) conditions.push(bCond);
     }
     if (input.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(input.startDate)));
     if (input.endDate) {
@@ -1214,10 +973,14 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     };
   }
 
-  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string) {
+  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
-    if (branchId) conditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
+    if (branchId) {
+      conditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
+    } else if (effectiveBranchIds?.length) {
+      conditions.push(inArray(schema.followUpOrders.servicingBranchId, effectiveBranchIds));
+    }
     if (startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
@@ -1239,7 +1002,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     // Separate deleted count (soft-deleted orders are excluded from the main query)
     const deletedConditions: Parameters<typeof and>[0][] = [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`];
-    if (branchId) deletedConditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
+    if (branchId) {
+      deletedConditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
+    } else if (effectiveBranchIds?.length) {
+      deletedConditions.push(inArray(schema.followUpOrders.servicingBranchId, effectiveBranchIds));
+    }
     if (assignedCsId) deletedConditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
     if (startDate) deletedConditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -1257,12 +1024,17 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   /** Lightweight per-status counts for dashboard stat strips. */
-  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; startDate?: string; endDate?: string }) {
-    const cacheKey = `cache:followup:dashboard_counts:${opts?.assignedCsId ?? 'all'}:${opts?.branchId ?? 'all'}:${opts?.startDate ?? ''}:${opts?.endDate ?? ''}`;
+  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string; endDate?: string }) {
+    const eIdsKey = opts?.effectiveBranchIds?.join(',') ?? '';
+    const cacheKey = `cache:followup:dashboard_counts:${opts?.assignedCsId ?? 'all'}:${opts?.branchId ?? 'all'}:${eIdsKey}:${opts?.startDate ?? ''}:${opts?.endDate ?? ''}`;
     return this.cache.getOrSet(cacheKey, 30, async () => {
       const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
       if (opts?.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, opts.assignedCsId));
-      if (opts?.branchId) conditions.push(eq(schema.followUpOrders.servicingBranchId, opts.branchId));
+      if (opts?.branchId) {
+        conditions.push(eq(schema.followUpOrders.servicingBranchId, opts.branchId));
+      } else if (opts?.effectiveBranchIds?.length) {
+        conditions.push(inArray(schema.followUpOrders.servicingBranchId, opts.effectiveBranchIds));
+      }
       if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(opts.startDate)));
       if (opts?.endDate) {
         const end = new Date(opts.endDate);
@@ -1767,7 +1539,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const targetBranches = (await this.db
       .select({ id: schema.branches.id })
       .from(schema.branches)
-      .where(eq(schema.branches.status, 'ACTIVE')))
+      .where(and(
+        eq(schema.branches.status, 'ACTIVE'),
+        sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
+      )))
       .map((r) => r.id)
       .filter((id) => id !== branchId && !excludedIds.has(id));
 

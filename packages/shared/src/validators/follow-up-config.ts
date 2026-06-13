@@ -16,6 +16,13 @@ export const followUpRuleSourceStatuses = [
   'REMITTED',
 ] as const;
 
+/** Which timestamp the age threshold is measured from. */
+export const ageRelativeToOptions = [
+  'STATUS_TIMESTAMP',
+  'CREATED_AT',
+  'PREFERRED_DELIVERY_DATE',
+] as const;
+
 export const createFollowUpRuleSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -23,6 +30,7 @@ export const createFollowUpRuleSchema = z
     ageThresholdDays: z.number().int().min(1).max(365),
     ageThresholdHours: z.number().int().min(1).max(8760).nullable().optional(),
     maxAgeDays: z.number().int().min(1).max(365).nullable().optional(),
+    ageRelativeTo: z.enum(ageRelativeToOptions).optional(),
     sourceBranchId: z.string().uuid().nullable().optional(),
     targetBranchId: z.string().uuid().nullable().optional(),
     targetGroupId: z.string().uuid().nullable().optional(),
@@ -44,6 +52,7 @@ export const updateFollowUpRuleSchema = z
     ageThresholdDays: z.number().int().min(1).max(365).optional(),
     ageThresholdHours: z.number().int().min(1).max(8760).nullable().optional(),
     maxAgeDays: z.number().int().min(1).max(365).nullable().optional(),
+    ageRelativeTo: z.enum(ageRelativeToOptions).optional(),
     sourceBranchId: z.string().uuid().nullable().optional(),
     targetBranchId: z.string().uuid().nullable().optional(),
     targetGroupId: z.string().uuid().nullable().optional(),

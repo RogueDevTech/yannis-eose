@@ -85,7 +85,7 @@ export const onboardingRouter = router({
   listStaffDocuments: authedProcedure
     .input(listStaffOnboardingDocumentsSchema)
     .query(async ({ input, ctx }) => {
-      return getService().listStaffDocuments(input, ctx.user, ctx.user.currentBranchId ?? null);
+      return getService().listStaffDocuments(input, ctx.user, ctx.user.currentBranchId ?? null, ctx.effectiveBranchIds);
     }),
 
   /** Status totals for the HR onboarding overview page top stat strip. */
@@ -99,6 +99,6 @@ export const onboardingRouter = router({
         .optional(),
     )
     .query(async ({ input, ctx }) => {
-      return getService().countStaffDocumentsByStatus(ctx.user, ctx.user.currentBranchId ?? null, input ?? {});
+      return getService().countStaffDocumentsByStatus(ctx.user, ctx.user.currentBranchId ?? null, input ?? {}, ctx.effectiveBranchIds);
     }),
 });

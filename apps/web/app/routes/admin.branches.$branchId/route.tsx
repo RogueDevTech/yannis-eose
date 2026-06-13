@@ -1,7 +1,7 @@
 import { defer, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 
-import { Link, useLoaderData, useFetcher, useRevalidator } from '@remix-run/react';
+import { Link, useLoaderData, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {
@@ -3279,6 +3279,9 @@ function BranchOverviewPage({
   dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
 }) {
   const { branch } = overview;
+  const [searchParams] = useSearchParams();
+  const backTo = searchParams.get('backTo') || '/admin/branches';
+  const backLabel = backTo.includes('branch-groups') ? 'Back to group' : 'All branches';
   const canManageBranchPage = overview.viewer?.canManageBranchPage ?? false;
 
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -3342,7 +3345,7 @@ function BranchOverviewPage({
           BranchSupervisorTeamsPanel content that follows. ── */}
       <div className="bg-app-elevated rounded-xl border border-app-border shadow-sm p-5">
         <Link
-          to="/admin/branches"
+          to={backTo}
           prefetch="intent"
           className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
         >
@@ -3355,7 +3358,7 @@ function BranchOverviewPage({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          All branches
+          {backLabel}
         </Link>
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">

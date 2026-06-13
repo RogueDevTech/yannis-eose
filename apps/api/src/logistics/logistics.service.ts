@@ -73,7 +73,7 @@ export class LogisticsService {
   // Providers
   // ============================================
 
-  async createProvider(input: CreateProviderInput, actorId: string) {
+  async createProvider(input: CreateProviderInput, actorId: string, groupId?: string | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .insert(schema.logisticsProviders)
@@ -82,6 +82,7 @@ export class LogisticsService {
           contactInfo: input.contactInfo,
           coverageArea: input.coverageArea,
           rateCard: input.rateCard ?? null,
+          groupId: groupId ?? null,
         })
         .returning();
 
@@ -135,7 +136,7 @@ export class LogisticsService {
     return { ...rows[0], locationCount: locationRows[0]?.count ?? 0 };
   }
 
-  async listProviders(input: ListProvidersInput) {
+  async listProviders(input: ListProvidersInput, groupId?: string | null) {
     const conditions = [];
     if (input.status) {
       conditions.push(eq(schema.logisticsProviders.status, input.status));
@@ -145,6 +146,9 @@ export class LogisticsService {
     }
     if (input.kind) {
       conditions.push(eq(schema.logisticsProviders.kind, input.kind));
+    }
+    if (groupId) {
+      conditions.push(eq(schema.logisticsProviders.groupId, groupId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -302,7 +306,7 @@ export class LogisticsService {
     });
   }
 
-  async listLocations(input: ListLocationsInput) {
+  async listLocations(input: ListLocationsInput, groupId?: string | null) {
     const conditions = [];
     if (input.providerId) {
       conditions.push(eq(schema.logisticsLocations.providerId, input.providerId));
@@ -312,6 +316,9 @@ export class LogisticsService {
     }
     if (input.providerKind) {
       conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
+    }
+    if (groupId) {
+      conditions.push(eq(schema.logisticsProviders.groupId, groupId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -377,10 +384,12 @@ export class LogisticsService {
   async listProviderOptions(input: {
     status?: 'ACTIVE' | 'INACTIVE';
     kind?: 'THIRD_PARTY' | 'WAREHOUSE';
+    groupId?: string | null;
   }): Promise<Array<{ id: string; name: string; kind: string; status: string }>> {
     const conditions = [];
     if (input.status) conditions.push(eq(schema.logisticsProviders.status, input.status));
     if (input.kind) conditions.push(eq(schema.logisticsProviders.kind, input.kind));
+    if (input.groupId) conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     return this.db
@@ -402,6 +411,7 @@ export class LogisticsService {
   async listLocationOptions(input: {
     status?: 'ACTIVE' | 'INACTIVE';
     providerKind?: 'THIRD_PARTY' | 'WAREHOUSE';
+    groupId?: string | null;
   }): Promise<
     Array<{
       id: string;
@@ -415,6 +425,7 @@ export class LogisticsService {
     const conditions = [];
     if (input.status) conditions.push(eq(schema.logisticsLocations.status, input.status));
     if (input.providerKind) conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
+    if (input.groupId) conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const rows = await this.db
@@ -572,6 +583,7 @@ export class LogisticsService {
     sortOrder?: 'asc' | 'desc';
     page: number;
     limit: number;
+    groupId?: string | null;
   }) {
     const conditions: SQL[] = [];
     if (input.listScope === 'our') {
@@ -582,6 +594,9 @@ export class LogisticsService {
     }
     if (input.search) {
       conditions.push(ilike(schema.logisticsLocations.name, `%${input.search}%`));
+    }
+    if (input.groupId) {
+      conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -687,10 +702,13 @@ export class LogisticsService {
     };
   }
 
-  async getWarehousesOverview(input?: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' }) {
+  async getWarehousesOverview(input?: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'; groupId?: string | null }) {
     const conditions: SQL[] = [eq(schema.logisticsProviders.kind, 'WAREHOUSE')];
     if (input?.status) {
       conditions.push(eq(schema.logisticsLocations.status, input.status));
+    }
+    if (input?.groupId) {
+      conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
     }
     const whereClause = and(...conditions);
 
@@ -1447,7 +1465,7 @@ export class LogisticsService {
   /**
    * List delivery remittances. TPL_MANAGER sees own location's; Finance and HoL see all.
    */
-  async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser) {
+  async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser, groupId?: string | null) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
     const canListGlobal =
@@ -1478,6 +1496,16 @@ export class LogisticsService {
     }
     if (input.endDate) {
       conditions.push(lte(schema.deliveryRemittances.sentAt, new Date(input.endDate + 'T23:59:59')));
+    }
+    // Company-group isolation: only remittances from locations in this group's providers
+    if (groupId) {
+      conditions.push(
+        sql`${schema.deliveryRemittances.logisticsLocationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1567,7 +1595,17 @@ export class LogisticsService {
 
     // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page).
     // Keep location/date/role scoping but intentionally ignore status filter so all buckets are visible.
-    const summaryConditions = [];
+    const summaryConditions: SQL[] = [];
+    // Company-group isolation on summary — must match the list filter
+    if (groupId) {
+      summaryConditions.push(
+        sql`${schema.deliveryRemittances.logisticsLocationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     if (isTplCaller && !canListGlobal) {
       summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {
@@ -1622,6 +1660,16 @@ export class LogisticsService {
           .where(eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id)),
       ),
     ];
+    // Company-group isolation on awaiting orders — scope via logistics location's provider group
+    if (groupId) {
+      awaitingConditions.push(
+        sql`${schema.orders.logisticsLocationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     if (isTplCaller && !canListGlobal) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {
@@ -1973,6 +2021,7 @@ export class LogisticsService {
   async listDeliveryRemittanceEligibleOrders(
     input: ListDeliveryRemittanceEligibleOrdersInput,
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     // Phase 18 — accountant view of "delivered orders not yet on a remittance".
     // TPL_MANAGER keeps their own-location-only behavior for the legacy 3PL
@@ -2007,6 +2056,10 @@ export class LogisticsService {
     }
     if (input.endDate) {
       conditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+    }
+    // Company-group isolation via order's servicing branch
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
 
     // Anti-join: skip orders already on any remittance. Cleaner than fetch-all

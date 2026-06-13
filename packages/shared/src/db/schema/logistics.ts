@@ -3,6 +3,7 @@ import { recordStatusEnum, reconciliationStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
+import { branchGroups } from './branch-groups';
 
 // Table 4: logistics_providers
 export const logisticsProviders = pgTable('logistics_providers', {
@@ -17,6 +18,8 @@ export const logisticsProviders = pgTable('logistics_providers', {
    * Migration 0114 adds the column with a CHECK constraint enforcing these two values.
    */
   kind: text('kind').default('THIRD_PARTY').notNull(),
+  /** Company-group isolation. NULL = legacy/global (backfilled to default group). */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

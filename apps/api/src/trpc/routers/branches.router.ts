@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, inArray, count, asc, sql } from 'drizzle-orm';
+import { eq, and, or, inArray, isNull, count, asc, sql } from 'drizzle-orm';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -119,6 +119,7 @@ async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
 export async function listBranchesForUser(user: {
   id: string;
   role: string;
+  activeGroupId?: string | null;
 }): Promise<Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>> {
   const db = getDb();
   // Org-wide roles see every branch even without explicit branch memberships:
@@ -147,11 +148,20 @@ export async function listBranchesForUser(user: {
     status: schema.branches.status,
     groupId: schema.branches.groupId,
   };
+  // Group isolation: when a specific group is selected, show only that group's branches.
+  // Otherwise, exclude branches whose company group is INACTIVE.
+  const activeGroupCondition = user.activeGroupId
+    ? eq(schema.branches.groupId, user.activeGroupId)
+    : or(
+        isNull(schema.branches.groupId),
+        sql`${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE')`,
+      );
+
   const fetchRows = async (): Promise<
     Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>
   > => {
     if (seesAll) {
-      return db.select(branchCols).from(schema.branches);
+      return db.select(branchCols).from(schema.branches).where(activeGroupCondition);
     }
     const branchIds =
       user.role === 'MEDIA_BUYER'
@@ -167,16 +177,19 @@ export async function listBranchesForUser(user: {
       .select(branchCols)
       .from(schema.branches)
       .where(
-        branchIds.length === 1
-          ? eq(schema.branches.id, branchIds[0]!)
-          : inArray(schema.branches.id, branchIds),
+        and(
+          branchIds.length === 1
+            ? eq(schema.branches.id, branchIds[0]!)
+            : inArray(schema.branches.id, branchIds),
+          activeGroupCondition,
+        ),
       );
   };
 
   if (!branchesCacheService) return fetchRows();
   // Cache key includes `seesAll` (was `isAdmin`) so an HR Manager and a
   // Media Buyer can't share a cache entry — they get different rowsets.
-  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, seesAll });
+  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, seesAll, groupId: user.activeGroupId ?? null });
   return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, fetchRows);
 }
 
@@ -312,7 +325,19 @@ export const branchesRouter = router({
    * out of the branch picker on `/hr/users/new` even though they're an
    * org-wide role (CEO directive 2026-05-10).
    */
+  /**
+   * Default branch list — scoped to the active company group.
+   * Most pages use this. The header switcher uses `listAll` instead.
+   */
   list: authedProcedure.query(async ({ ctx }) => {
+    return listBranchesForUser({ id: ctx.user.id, role: ctx.user.role, activeGroupId: ctx.activeGroupId });
+  }),
+
+  /**
+   * Unscoped branch list — for the header branch switcher which must
+   * show ALL groups/branches for navigation between companies.
+   */
+  listAll: authedProcedure.query(async ({ ctx }) => {
     return listBranchesForUser({ id: ctx.user.id, role: ctx.user.role });
   }),
 
@@ -676,6 +701,25 @@ export const branchesRouter = router({
     .mutation(async ({ input }) => {
       const db = getDb();
       const branchTeams = getBranchTeamsService();
+
+      // Uniqueness check — name and code must be unique org-wide
+      const [existingName] = await db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(sql`LOWER(${schema.branches.name}) = LOWER(${input.name})`)
+        .limit(1);
+      if (existingName) {
+        throw new TRPCError({ code: 'CONFLICT', message: `A branch named "${input.name}" already exists` });
+      }
+      const [existingCode] = await db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(sql`LOWER(${schema.branches.code}) = LOWER(${input.code})`)
+        .limit(1);
+      if (existingCode) {
+        throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists` });
+      }
+
       const rows = await db.transaction(async (tx) => {
         const inserted = await tx
           .insert(schema.branches)
@@ -719,6 +763,25 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
+
+      // Uniqueness checks — name and code must be unique org-wide (excluding self)
+      if (input.name) {
+        const [dup] = await db
+          .select({ id: schema.branches.id })
+          .from(schema.branches)
+          .where(and(sql`LOWER(${schema.branches.name}) = LOWER(${input.name})`, sql`${schema.branches.id} != ${input.branchId}`))
+          .limit(1);
+        if (dup) throw new TRPCError({ code: 'CONFLICT', message: `A branch named "${input.name}" already exists` });
+      }
+      if (input.code) {
+        const [dup] = await db
+          .select({ id: schema.branches.id })
+          .from(schema.branches)
+          .where(and(sql`LOWER(${schema.branches.code}) = LOWER(${input.code})`, sql`${schema.branches.id} != ${input.branchId}`))
+          .limit(1);
+        if (dup) throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists` });
+      }
+
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.name) updateFields.name = input.name;
       if (input.code) updateFields.code = input.code;
@@ -1483,6 +1546,7 @@ export const branchesRouter = router({
         .select({
           id: schema.branchGroups.id,
           name: schema.branchGroups.name,
+          status: schema.branchGroups.status,
           createdAt: schema.branchGroups.createdAt,
         })
         .from(schema.branchGroups)
@@ -1645,6 +1709,27 @@ export const branchesRouter = router({
         .where(eq(schema.branchGroups.id, input.groupId))
         .returning();
       if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
+      await invalidateBranchesListCache();
+      return updated;
+    }),
+
+  /** Toggle a branch group's active status. SuperAdmin only. */
+  toggleGroupStatus: permissionProcedure('branches.manage')
+    .input(z.object({ groupId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const [group] = await db
+        .select({ id: schema.branchGroups.id, status: schema.branchGroups.status })
+        .from(schema.branchGroups)
+        .where(eq(schema.branchGroups.id, input.groupId))
+        .limit(1);
+      if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
+      const newStatus = group.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+      const [updated] = await db
+        .update(schema.branchGroups)
+        .set({ status: newStatus, updatedAt: new Date() })
+        .where(eq(schema.branchGroups.id, input.groupId))
+        .returning();
       await invalidateBranchesListCache();
       return updated;
     }),

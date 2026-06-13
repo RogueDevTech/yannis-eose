@@ -6,6 +6,8 @@ import { branchGroups } from './branch-groups';
 // Product categories — brand info for invoices, SMS, WhatsApp
 export const productCategories = pgTable('product_categories', {
   id: uuidv7Pk(),
+  /** Company-group isolation. NULL = legacy/global (backfilled to default group). */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   name: text('name').notNull().unique(),
   brandName: text('brand_name').notNull(),
   brandPhone: text('brand_phone'),

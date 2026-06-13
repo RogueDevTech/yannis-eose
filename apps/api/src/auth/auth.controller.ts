@@ -486,6 +486,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async me(
     @CurrentUser() user: SessionUser,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const bundle = await this.userBundleCache.getOrLoad(user.id);
@@ -507,6 +508,39 @@ export class AuthController {
     };
 
     merged = await this.branchTeams.attachTeamSupervisorSessionFlags(merged);
+
+    // Backfill activeGroupId + selectedBranchIds for stale sessions.
+    // Case 1: no activeGroupId at all — resolve from memberships or branch_groups.
+    if (!merged.activeGroupId) {
+      let groupId: string | null = null;
+      if (merged.branchIds?.length) {
+        groupId = await this.authService.resolveGroupFromBranches(merged.branchIds);
+      }
+      // Global users with no memberships: pick first active group
+      if (!groupId && (merged.scopeGlobal || merged.role === 'SUPER_ADMIN' || merged.role === 'ADMIN')) {
+        groupId = await this.authService.getFirstActiveGroupId();
+      }
+      if (groupId) {
+        merged.activeGroupId = groupId;
+        const groupBranchIds = await this.authService.getGroupBranchIds(groupId);
+        if (groupBranchIds.length > 0) merged.selectedBranchIds = groupBranchIds;
+        const sessionToken = this.extractSessionToken(req);
+        if (sessionToken) {
+          void this.authService.patchSessionGroupScope(sessionToken, groupId, merged.selectedBranchIds ?? null).catch(() => {});
+        }
+      }
+    }
+    // Case 2: activeGroupId is set but selectedBranchIds is missing (stale session).
+    if (merged.activeGroupId && (!merged.selectedBranchIds || merged.selectedBranchIds.length === 0)) {
+      const groupBranchIds = await this.authService.getGroupBranchIds(merged.activeGroupId);
+      if (groupBranchIds.length > 0) {
+        merged.selectedBranchIds = groupBranchIds;
+        const sessionToken = this.extractSessionToken(req);
+        if (sessionToken) {
+          void this.authService.patchSessionGroupScope(sessionToken, merged.activeGroupId, groupBranchIds).catch(() => {});
+        }
+      }
+    }
 
     // Re-issue the lazy bundle cookie so subsequent Remix loaders can decode
     // locally without another `/auth/me` round-trip until BUNDLE_TTL_SECONDS.

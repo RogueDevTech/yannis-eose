@@ -3855,6 +3855,7 @@ export function OrderDetailPage({
                           fallbackValue={0}
                           useGrouping
                           value={item.unitPrice}
+                          disabled={offerLocked}
                           onValueChange={(v) =>
                             setEditedItems((prev) =>
                               prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
@@ -3866,9 +3867,8 @@ export function OrderDetailPage({
                     </div>
                     {offerLocked ? (
                       <p className="text-xs text-app-fg-muted">
-                        Quantity is locked to the selected offer. Lower the unit price to apply a
-                        discount, or choose <span className="font-medium">Custom</span> to change the
-                        quantity too.
+                        Price and quantity are locked to the selected offer.
+                        Choose <span className="font-medium">Custom</span> to override.
                       </p>
                     ) : null}
                     <p className="text-xs text-app-fg-muted">

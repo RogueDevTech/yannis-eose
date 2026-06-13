@@ -31,6 +31,11 @@ export const followUpRules = pgTable('follow_up_rules', {
   targetBranchId: uuid('target_branch_id').references(() => branches.id),
   /** Target: push to this follow-up group. XOR with targetBranchId. */
   targetGroupId: uuid('target_group_id').references(() => followUpGroups.id),
+  /** Which timestamp the age threshold is measured from.
+   *  STATUS_TIMESTAMP = confirmedAt/allocatedAt/etc (default).
+   *  CREATED_AT = order creation date.
+   *  PREFERRED_DELIVERY_DATE = scheduled delivery date. */
+  ageRelativeTo: text('age_relative_to').notNull().default('STATUS_TIMESTAMP'),
   /** Higher priority = evaluated first. */
   priority: integer('priority').notNull().default(0),
   /** Disabled rules are skipped during sync. */

@@ -159,10 +159,12 @@ export class ShipmentsService {
   private async resolveBranchFilter(
     actor: SessionUser,
     currentBranchId: string | null,
-  ): Promise<string | null> {
-    if (isAdminLevel(actor)) return null;
-    if (!currentBranchId) return null;
-    return currentBranchId;
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{ branchId: string | null; effectiveBranchIds: string[] | null }> {
+    if (isAdminLevel(actor)) return { branchId: null, effectiveBranchIds: null };
+    if (currentBranchId) return { branchId: currentBranchId, effectiveBranchIds: null };
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) return { branchId: null, effectiveBranchIds };
+    return { branchId: null, effectiveBranchIds: null };
   }
 
   /**
@@ -202,6 +204,8 @@ export class ShipmentsService {
     input: ListShipmentsInput,
     actor: SessionUser,
     currentBranchId: string | null,
+    effectiveBranchIds?: string[] | null,
+    groupId?: string | null,
   ) {
     const baseConditions = [];
     if (input.destinationLocationId)
@@ -223,15 +227,37 @@ export class ShipmentsService {
       baseConditions.push(lte(schema.shipments.createdAt, nigeriaDayEnd(input.toDate)));
     }
 
-    const branchFilter = await this.resolveBranchFilter(actor, currentBranchId);
-    if (branchFilter) {
+    // Company-group isolation: scope through provider's group_id
+    if (groupId) {
       baseConditions.push(
         sql<boolean>`EXISTS (
           SELECT 1 FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
           WHERE ll.id = ${schema.shipments.destinationLocationId}
-            AND ll.branch_id = ${branchFilter}
+            AND lp.group_id = ${groupId}
         )`,
       );
+    } else {
+      // Legacy branch-level scoping for non-group setups
+      const branchScope = await this.resolveBranchFilter(actor, currentBranchId, effectiveBranchIds);
+      if (branchScope.branchId) {
+        baseConditions.push(
+          sql<boolean>`EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.shipments.destinationLocationId}
+              AND ll.branch_id = ${branchScope.branchId}
+          )`,
+        );
+      } else if (branchScope.effectiveBranchIds && branchScope.effectiveBranchIds.length > 0) {
+        const ids = branchScope.effectiveBranchIds;
+        baseConditions.push(
+          sql<boolean>`EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.shipments.destinationLocationId}
+              AND ll.branch_id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})
+          )`,
+        );
+      }
     }
 
     const conditions = [...baseConditions];
@@ -336,7 +362,7 @@ export class ShipmentsService {
     };
   }
 
-  async getShipment(shipmentId: string, actor: SessionUser, currentBranchId: string | null) {
+  async getShipment(shipmentId: string, actor: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null) {
     const [row] = await this.db
       .select({
         id: schema.shipments.id,
@@ -378,9 +404,11 @@ export class ShipmentsService {
 
     if (
       !isAdminLevel(actor) &&
-      currentBranchId &&
       row.destinationBranchId &&
-      row.destinationBranchId !== currentBranchId
+      (
+        (currentBranchId && row.destinationBranchId !== currentBranchId) ||
+        (!currentBranchId && effectiveBranchIds && effectiveBranchIds.length > 0 && !effectiveBranchIds.includes(row.destinationBranchId))
+      )
     ) {
       throw new TRPCError({
         code: 'FORBIDDEN',

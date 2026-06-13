@@ -79,11 +79,9 @@ export const DEFAULT_DELIVERY_STATE_OPTIONS: string[] = [
 ];
 
 export const DEFAULT_PREFERRED_DELIVERY_DATE_OPTIONS: string[] = [
-  'As soon as possible',
-  'Within 1-2 days',
-  'Within 3-5 days',
-  'Next week',
-  'Specific date (mention in notes)',
+  'Today',
+  'Tomorrow',
+  'Within 3 days',
 ];
 
 export const DEFAULT_GENDER_OPTIONS: string[] = ['Male', 'Female'];

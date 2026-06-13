@@ -82,6 +82,7 @@ export const auditRouter = router({
         role: u.role,
         permissions: u.permissions,
         currentBranchId: u.currentBranchId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
       });
     }),
 

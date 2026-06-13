@@ -29,6 +29,7 @@ interface Rule {
   ageThresholdDays: number;
   ageThresholdHours: number | null;
   maxAgeDays: number | null;
+  ageRelativeTo: string;
   sourceBranchId: string | null;
   sourceBranchName: string | null;
   targetBranchId: string | null;
@@ -84,6 +85,14 @@ const AGE_OPTIONS = [
   { value: '45', label: '45 days' }, { value: '60', label: '60 days' }, { value: '90', label: '90 days' },
   { value: '120', label: '120 days' }, { value: '180', label: '180 days' }, { value: '365', label: '365 days' },
 ];
+
+const AGE_RELATIVE_TO_OPTIONS = [
+  { value: 'STATUS_TIMESTAMP', label: 'Status date (e.g. confirmed date)' },
+  { value: 'CREATED_AT', label: 'Order creation date' },
+  { value: 'PREFERRED_DELIVERY_DATE', label: 'Scheduled delivery date' },
+];
+
+const AGE_RELATIVE_TO_LABEL: Record<string, string> = Object.fromEntries(AGE_RELATIVE_TO_OPTIONS.map((o) => [o.value, o.label]));
 
 /** Encode rule age into the combo value used by the age dropdown. */
 function ageToValue(r: { ageThresholdHours?: number | null; ageThresholdDays: number }): string {
@@ -179,6 +188,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const [sourceStatus, setSourceStatus] = useState('CONFIRMED');
   const [ageValue, setAgeValue] = useState('7');
   const [maxAgeDays, setMaxAgeDays] = useState<number | null>(null);
+  const [ageRelativeTo, setAgeRelativeTo] = useState('STATUS_TIMESTAMP');
   const [sourceBranchId, setSourceBranchId] = useState<string | null>(null);
   const [targetType, setTargetType] = useState<'all' | 'branch' | 'group'>('all');
   const [targetBranchId, setTargetBranchId] = useState<string | null>(null);
@@ -204,12 +214,13 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
 
   const openCreate = () => {
     setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeValue('7'); setMaxAgeDays(null);
-    setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
+    setAgeRelativeTo('STATUS_TIMESTAMP'); setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
     setEnabled(true); setModalOpen(true);
   };
   const openEdit = (rule: Rule) => {
     setEditRule(rule); setName(rule.name); setSourceStatus(rule.sourceStatus);
-    setAgeValue(ageToValue(rule)); setMaxAgeDays(rule.maxAgeDays ?? null); setSourceBranchId(rule.sourceBranchId);
+    setAgeValue(ageToValue(rule)); setMaxAgeDays(rule.maxAgeDays ?? null); setAgeRelativeTo(rule.ageRelativeTo ?? 'STATUS_TIMESTAMP');
+    setSourceBranchId(rule.sourceBranchId);
     setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
     setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
     setEnabled(rule.enabled); setModalOpen(true);
@@ -217,7 +228,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const handleSave = () => {
     const parsed = parseAgeValue(ageValue);
     const payload: Record<string, unknown> = {
-      name, sourceStatus, ageThresholdDays: parsed.ageThresholdDays, ageThresholdHours: parsed.ageThresholdHours, maxAgeDays: maxAgeDays || null, sourceBranchId: sourceBranchId || null,
+      name, sourceStatus, ageThresholdDays: parsed.ageThresholdDays, ageThresholdHours: parsed.ageThresholdHours, maxAgeDays: maxAgeDays || null, ageRelativeTo, sourceBranchId: sourceBranchId || null,
       targetBranchId: targetType === 'branch' ? targetBranchId : null,
       targetGroupId: targetType === 'group' ? targetGroupId : null,
       targetAll: targetType === 'all',
@@ -652,6 +663,18 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           </div>
 
+          {sourceStatus !== 'CART_ABANDONMENT' && (
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Measure age from</label>
+              <FormSelect id="fu-age-relative" value={ageRelativeTo} onChange={(e) => setAgeRelativeTo(e.target.value)} options={AGE_RELATIVE_TO_OPTIONS} />
+              <p className="text-[11px] text-app-fg-muted mt-1">
+                {ageRelativeTo === 'STATUS_TIMESTAMP' && 'Age counts from when the order entered the selected status.'}
+                {ageRelativeTo === 'CREATED_AT' && 'Age counts from when the order was first created.'}
+                {ageRelativeTo === 'PREFERRED_DELIVERY_DATE' && 'Age counts from the customer\'s scheduled delivery date.'}
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
             <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={[{ value: '', label: 'All branches' }, ...branchOptions]} placeholder="All branches" searchPlaceholder="Search..." />
@@ -752,6 +775,9 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             <ViewRow label="Age Threshold" value={viewRule.ageThresholdHours ? `${viewRule.ageThresholdHours} hour${viewRule.ageThresholdHours !== 1 ? 's' : ''}` : `${viewRule.ageThresholdDays} day${viewRule.ageThresholdDays !== 1 ? 's' : ''}`} />
             {viewRule.maxAgeDays != null && (
               <ViewRow label="Max Age" value={`${viewRule.maxAgeDays} day${viewRule.maxAgeDays !== 1 ? 's' : ''}`} />
+            )}
+            {viewRule.sourceStatus !== 'CART_ABANDONMENT' && (
+              <ViewRow label="Measure From" value={AGE_RELATIVE_TO_LABEL[viewRule.ageRelativeTo] ?? viewRule.ageRelativeTo} />
             )}
             <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
             <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />

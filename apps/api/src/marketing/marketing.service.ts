@@ -113,8 +113,15 @@ export class MarketingService {
     };
   }
 
-  private async getBranchUserIds(branchId?: string | null): Promise<string[] | null> {
-    if (!branchId) return null;
+  private async getBranchUserIds(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<string[] | null> {
+    // When a specific branch is selected, scope to that single branch.
+    // When no branch is selected but effectiveBranchIds is present (company group
+    // isolation), scope to the union of those branches. When neither is set, the
+    // caller is truly global — return null (no filter).
+    const branchIds: string[] | null = branchId
+      ? [branchId]
+      : (effectiveBranchIds && effectiveBranchIds.length > 0 ? effectiveBranchIds : null);
+    if (!branchIds) return null;
     // Include users from both the junction table (userBranches) AND those whose
     // primaryBranchId matches. Some users may have a primaryBranchId set without
     // a corresponding userBranches row — querying both sources prevents them from
@@ -123,11 +130,19 @@ export class MarketingService {
       this.db
         .select({ userId: schema.userBranches.userId })
         .from(schema.userBranches)
-        .where(eq(schema.userBranches.branchId, branchId)),
+        .where(
+          branchIds.length === 1
+            ? eq(schema.userBranches.branchId, branchIds[0]!)
+            : inArray(schema.userBranches.branchId, branchIds),
+        ),
       this.db
         .select({ userId: schema.users.id })
         .from(schema.users)
-        .where(eq(schema.users.primaryBranchId, branchId)),
+        .where(
+          branchIds.length === 1
+            ? eq(schema.users.primaryBranchId, branchIds[0]!)
+            : inArray(schema.users.primaryBranchId, branchIds),
+        ),
     ]);
     const ids = new Set(junctionRows.map((r) => r.userId));
     for (const r of primaryRows) ids.add(r.userId);
@@ -190,12 +205,19 @@ export class MarketingService {
     }
   }
 
-  private async getBranchCampaignIds(branchId?: string | null): Promise<string[] | null> {
-    if (!branchId) return null;
+  private async getBranchCampaignIds(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<string[] | null> {
+    const branchIds: string[] | null = branchId
+      ? [branchId]
+      : (effectiveBranchIds && effectiveBranchIds.length > 0 ? effectiveBranchIds : null);
+    if (!branchIds) return null;
     const rows = await this.db
       .select({ id: schema.campaigns.id })
       .from(schema.campaigns)
-      .where(eq(schema.campaigns.branchId, branchId));
+      .where(
+        branchIds.length === 1
+          ? eq(schema.campaigns.branchId, branchIds[0]!)
+          : inArray(schema.campaigns.branchId, branchIds),
+      );
     return rows.map((row) => row.id);
   }
 
@@ -991,7 +1013,7 @@ export class MarketingService {
     return updated[0];
   }
 
-  async listFunding(input: ListFundingInput, branchId?: string | null) {
+  async listFunding(input: ListFundingInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const fundingSender = alias(schema.users, 'funding_sender');
     const fundingReceiver = alias(schema.users, 'funding_receiver');
 
@@ -1023,7 +1045,7 @@ export class MarketingService {
     }
     // Branch-scope: restrict to transfers where at least one party (sender or receiver)
     // is a member of the active branch. This prevents HoM from seeing cross-branch funding.
-    const branchUserIdsForFunding = await this.getBranchUserIds(branchId);
+    const branchUserIdsForFunding = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIdsForFunding && branchUserIdsForFunding.length === 0) {
       return {
         records: [],
@@ -1090,7 +1112,7 @@ export class MarketingService {
     };
   }
 
-  async fundingStatusCounts(input: FundingStatusCountsInput, branchId?: string | null) {
+  async fundingStatusCounts(input: FundingStatusCountsInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const fundingSender = alias(schema.users, 'funding_status_sender');
     const fundingReceiver = alias(schema.users, 'funding_status_receiver');
 
@@ -1110,7 +1132,7 @@ export class MarketingService {
       conditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
     // Branch-scope: restrict to transfers where at least one party is a branch member.
-    const branchUserIdsForCounts = await this.getBranchUserIds(branchId);
+    const branchUserIdsForCounts = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIdsForCounts && branchUserIdsForCounts.length === 0) {
       return { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
     }
@@ -1166,6 +1188,7 @@ export class MarketingService {
       isMarketingTeamSupervisorOnActiveBranch?: boolean;
     },
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const conditions: SQL[] = [];
 
@@ -1227,7 +1250,7 @@ export class MarketingService {
       conditions.push(lte(schema.marketingFundingRequests.createdAt, nigeriaDayEnd(input.endDate)));
     }
     // Branch-scope: restrict to requests from branch members.
-    const branchUserIds = await this.getBranchUserIds(branchId);
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIds && branchUserIds.length === 0) {
       return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     }
@@ -1259,12 +1282,13 @@ export class MarketingService {
   async getFundingSummary(
     branchId?: string | null,
     opts?: { restrictToReceiverIds?: string[]; restrictToReceiverRole?: string; startDate?: string; endDate?: string },
+    effectiveBranchIds?: string[] | null,
   ) {
     const emptyFundingSummary = {
       totalSent: '0', totalCompleted: '0', totalDisputed: '0',
       sentCount: 0, completedCount: 0, disputedCount: 0,
     };
-    const branchUserIds = await this.getBranchUserIds(branchId);
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIds && branchUserIds.length === 0) {
       return emptyFundingSummary;
     }
@@ -1341,6 +1365,7 @@ export class MarketingService {
   async fundingByDirectionSummary(
     actorId: string,
     input: { startDate?: string; endDate?: string },
+    effectiveBranchIds?: string[] | null,
   ) {
     const dateConditions: SQL[] = [];
     if (input.startDate) {
@@ -1350,9 +1375,21 @@ export class MarketingService {
       dateConditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
 
+    // Company-group isolation: when effectiveBranchIds is set, only count funding
+    // where the receiver belongs to one of the selected branches.
+    const branchFilter: SQL[] = [];
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      branchFilter.push(
+        sql`${schema.marketingFunding.receiverId} IN (
+          SELECT DISTINCT user_id FROM user_branches
+          WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
+        )`,
+      );
+    }
+
     // Total received (any status) — gives the headline number HoMs/MBs see.
-    const incomingWhere = and(eq(schema.marketingFunding.receiverId, actorId), ...dateConditions);
-    const outgoingWhere = and(eq(schema.marketingFunding.senderId, actorId), ...dateConditions);
+    const incomingWhere = and(eq(schema.marketingFunding.receiverId, actorId), ...dateConditions, ...branchFilter);
+    const outgoingWhere = and(eq(schema.marketingFunding.senderId, actorId), ...dateConditions, ...branchFilter);
 
     const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] =
       await Promise.all([
@@ -1413,8 +1450,9 @@ export class MarketingService {
   async getFundingBalance(
     userId: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> {
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return { totalReceived: '0', totalDistributed: '0', totalSpend: '0', balance: '0' };
     }
@@ -1478,6 +1516,7 @@ export class MarketingService {
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
     opts?: { activeOnly?: boolean },
+    effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
       userId: string;
@@ -1545,7 +1584,7 @@ export class MarketingService {
       }
     }
 
-    const branchUserIds = await this.getBranchUserIds(branchId);
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIds) {
       const allowed = new Set(branchUserIds);
       const filtered = recipientUserIds.filter((id) => allowed.has(id));
@@ -1662,6 +1701,7 @@ export class MarketingService {
     userId: string,
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> {
     const [target] = await this.db
       .select({ role: schema.users.role })
@@ -1683,7 +1723,7 @@ export class MarketingService {
     }
 
     if (caller.id === userId) {
-      return this.getFundingBalance(userId, branchId);
+      return this.getFundingBalance(userId, branchId, effectiveBranchIds);
     }
     const balancePerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasBalancePerm = (code: string) =>
@@ -1695,7 +1735,7 @@ export class MarketingService {
       hasBalancePerm('marketing.scope.global') ||
       hasBalancePerm('users.read')
     ) {
-      return this.getFundingBalance(userId, branchId);
+      return this.getFundingBalance(userId, branchId, effectiveBranchIds);
     }
 
     throw new TRPCError({
@@ -2004,6 +2044,7 @@ export class MarketingService {
       limit: number;
     },
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const conditions = [];
     if (input.requesterId) {
@@ -2054,7 +2095,7 @@ export class MarketingService {
     }
     // Branch-scope: restrict to requests from branch members so HoM only sees
     // their own branch's MBs, not the whole org.
-    const branchUserIds = await this.getBranchUserIds(branchId);
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIds && branchUserIds.length === 0) {
       return { records: [], pagination: { page: input.page, limit: input.limit, total: 0, totalPages: 0 } };
     }
@@ -3107,11 +3148,12 @@ export class MarketingService {
     spendDate: string,
     mediaBuyerId: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{
     orderCount: number;
     existingRecord: { id: string; spendAmount: string; status: string; orderCountSnapshot: number | null } | null;
   }> {
-    const orderCount = await this.getOrderCountForDate(mediaBuyerId, spendDate, branchId);
+    const orderCount = await this.getOrderCountForDate(mediaBuyerId, spendDate, branchId, effectiveBranchIds);
     const dayStart = nigeriaDayStart(spendDate);
     const dayEnd = nigeriaDayEnd(spendDate);
     const [existing] = await this.db
@@ -3293,6 +3335,7 @@ export class MarketingService {
     input: PreviewAdSpendIntervalInput,
     mediaBuyerId: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     if (branchId) {
       const [campaign] = await this.db
@@ -3310,7 +3353,7 @@ export class MarketingService {
       }
     }
 
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return {
         orderCount: 0,
@@ -3343,6 +3386,7 @@ export class MarketingService {
     input: CampaignOrderTotalForBatchInput,
     mediaBuyerId: string,
     branchId?: string | null,
+    _effectiveBranchIds?: string[] | null,
   ) {
     if (branchId) {
       const [campaign] = await this.db
@@ -3373,9 +3417,9 @@ export class MarketingService {
    * scoped to a branch's campaigns (+ daily-flow NULL-campaign rows).
    * Used to backfill the filter dropdown with MBs no longer in the branch.
    */
-  async distinctAdSpendMediaBuyerIds(branchId?: string | null): Promise<string[]> {
+  async distinctAdSpendMediaBuyerIds(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<string[]> {
     const conditions: SQL[] = [];
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) return [];
     if (branchCampaignIds) {
       const branchOrDaily = or(
@@ -3391,7 +3435,7 @@ export class MarketingService {
     return rows.map((r) => r.mediaBuyerId);
   }
 
-  async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {
+  async listAdSpend(input: ListAdSpendInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const buyer = alias(schema.users, 'ad_spend_list_buyer');
     const prod = alias(schema.products, 'ad_spend_list_product');
     const camp = alias(schema.campaigns, 'ad_spend_list_campaign');
@@ -3430,8 +3474,8 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    const branchUserIdsForSpend = await this.getBranchUserIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+    const branchUserIdsForSpend = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIdsForSpend && branchUserIdsForSpend.length === 0) {
       return {
         records: [],
@@ -3558,7 +3602,7 @@ export class MarketingService {
    *  - 'MIXED'    if both APPROVED and REJECTED appear and no PENDING
    *  - 'PENDING'  if any line is PENDING
    */
-  async listAdSpendGrouped(input: ListAdSpendGroupedInput, branchId?: string | null) {
+  async listAdSpendGrouped(input: ListAdSpendGroupedInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const page = Math.max(1, input.page ?? 1);
     const limit = Math.min(50, Math.max(1, input.limit ?? 20));
 
@@ -3599,8 +3643,8 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    const branchUserIdsForGrouped = await this.getBranchUserIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+    const branchUserIdsForGrouped = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIdsForGrouped && branchUserIdsForGrouped.length === 0) {
       return {
         groups: [],
@@ -3873,7 +3917,7 @@ export class MarketingService {
     };
   }
 
-  async adSpendStatusCounts(input: AdSpendStatusCountsInput, branchId?: string | null) {
+  async adSpendStatusCounts(input: AdSpendStatusCountsInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const buyer = alias(schema.users, 'ad_spend_cnt_buyer');
     const prod = alias(schema.products, 'ad_spend_cnt_product');
     const camp = alias(schema.campaigns, 'ad_spend_cnt_campaign');
@@ -3905,8 +3949,8 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
-    const branchUserIdsForCounts = await this.getBranchUserIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+    const branchUserIdsForCounts = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIdsForCounts && branchUserIdsForCounts.length === 0) {
       return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     }
@@ -3990,7 +4034,7 @@ export class MarketingService {
       eq(schema.adSpendLogs.status, 'PENDING'),
       eq(schema.adSpendLogs.category, 'AD_SPEND'),
     ];
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return {
         totalSpend: 0,
@@ -4234,6 +4278,7 @@ export class MarketingService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>> {
     if (buyerIds.length === 0) return new Map();
 
@@ -4248,7 +4293,7 @@ export class MarketingService {
 
     // If the branch has no campaigns, no buyer can have spend on branch campaigns —
     // mirror the early-return semantics of the single-buyer version.
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       const zero = this.deriveBuyerMetrics({
         totalSpend: 0,
@@ -4331,7 +4376,7 @@ export class MarketingService {
             inArray(schema.orders.mediaBuyerId, buyerIds),
             sql`${schema.orders.status} != 'DELETED'`,
             eq(schema.orders.isFollowUp, false),
-            branchId ? eq(schema.orders.branchId, branchId) : undefined,
+            branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
           ),
         )
         .groupBy(schema.orders.mediaBuyerId),
@@ -4372,6 +4417,7 @@ export class MarketingService {
     endDate?: string,
     branchId?: string | null,
     restrictToMediaBuyerIds?: string[],
+    effectiveBranchIds?: string[] | null,
   ) {
     // Include ALL active media buyers so the leaderboard is always populated,
     // not just those who have approved ad spend in the period.
@@ -4380,7 +4426,7 @@ export class MarketingService {
       .from(schema.users)
       .where(and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE')));
 
-    const branchUserIds = await this.getBranchUserIds(branchId);
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     let eligibleBuyers = branchUserIds
       ? allBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
       : allBuyers;
@@ -4399,6 +4445,7 @@ export class MarketingService {
         startDate,
         endDate,
         branchId,
+        effectiveBranchIds,
       ),
     ]);
 
@@ -4450,12 +4497,14 @@ export class MarketingService {
     return leaderboard;
   }
 
-  async checkHighCpaAlerts(cpaThreshold: number, branchId?: string | null) {
+  async checkHighCpaAlerts(cpaThreshold: number, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const leaderboard = await this.getMediaBuyerLeaderboard(
       'this_month',
       undefined,
       undefined,
       branchId,
+      undefined,
+      effectiveBranchIds,
     );
     const alerts = leaderboard.filter((buyer) => buyer.cpa > cpaThreshold && buyer.totalOrders > 0);
 
@@ -4948,13 +4997,16 @@ export class MarketingService {
     return rows[0];
   }
 
-  async listOfferTemplates(input: ListOfferTemplatesInput) {
+  async listOfferTemplates(input: ListOfferTemplatesInput, groupId?: string | null) {
     const conditions = [];
     if (input.productId) {
       conditions.push(eq(schema.offerTemplates.productId, input.productId));
     }
     if (input.status) {
       conditions.push(eq(schema.offerTemplates.status, input.status));
+    }
+    if (groupId) {
+      conditions.push(eq(schema.products.groupId, groupId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -5221,9 +5273,19 @@ export class MarketingService {
     return { group, items };
   }
 
-  async listOfferGroups(input: ListOfferGroupsInput) {
-    const conditions = [];
+  async listOfferGroups(input: ListOfferGroupsInput, groupId?: string | null) {
+    const conditions: SQL[] = [];
     if (input.status) conditions.push(eq(schema.offerGroups.status, input.status));
+    // Company-group scoping: only return offer groups whose products belong to the active group.
+    if (groupId) {
+      conditions.push(
+        sql`${schema.offerGroups.id} IN (
+          SELECT ogi.offer_group_id FROM offer_group_items ogi
+          INNER JOIN products p ON p.id = ogi.product_id
+          WHERE p.group_id = ${groupId}
+        )`,
+      );
+    }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -5781,6 +5843,7 @@ export class MarketingService {
     if (input.status) {
       conditions.push(eq(schema.campaigns.status, input.status));
     }
+    const eIds = opts?.effectiveBranchIds;
     if (branchId) {
       // A branch's form list shows forms attributed to it, PLUS "parked" forms
       // (migration 0150): when a media buyer is moved to this branch, their
@@ -5809,6 +5872,13 @@ export class MarketingService {
         branchOr.push(eq(schema.campaigns.mediaBuyerId, opts.callerId));
       }
       conditions.push(or(...branchOr)!);
+    } else if (eIds && eIds.length > 0) {
+      // No specific branch selected but company-group isolation is active.
+      // Restrict to campaigns belonging to the group's branches.
+      const bCond = eIds.length === 1
+        ? eq(schema.campaigns.branchId, eIds[0]!)
+        : inArray(schema.campaigns.branchId, eIds);
+      conditions.push(bCond);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -5888,7 +5958,7 @@ export class MarketingService {
 
   // ── Funding Ledger ─────────────────────────────────────────
 
-  async getFundingLedger(input: FundingLedgerInput, branchId?: string | null) {
+  async getFundingLedger(input: FundingLedgerInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const { userId, startDate, endDate, entryType, page, limit } = input;
 
     // Date bounds
@@ -5915,7 +5985,7 @@ export class MarketingService {
     if (dEnd) transferOutConds.push(lte(schema.marketingFunding.sentAt, dEnd));
 
     // ── 3) Expenses ──
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     const expenseConds: SQL[] = [
       eq(schema.adSpendLogs.mediaBuyerId, userId),
       ne(schema.adSpendLogs.status, 'REJECTED'),

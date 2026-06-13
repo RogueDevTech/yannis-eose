@@ -84,7 +84,7 @@ export const hrRouter = router({
   listPlans: authedProcedure
     .input(listCommissionPlansSchema)
     .query(async ({ input, ctx }) => {
-      return getHrService().listCommissionPlans(input, ctx.user);
+      return getHrService().listCommissionPlans(input, ctx.user, ctx.activeGroupId);
     }),
 
   // Payouts

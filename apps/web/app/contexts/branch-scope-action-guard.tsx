@@ -164,6 +164,8 @@ export function BranchScopeGuardProvider({
       const action = form.getAttribute('action') ?? '';
       if (action.includes('/admin/branches/switch')) return;
       if (action.includes('/auth/mirror/stop')) return;
+      // Follow-up assignments auto-resolve the branch from the closer — no branch picker needed.
+      if (action.includes('/admin/cs/follow-up') || location.pathname.includes('/admin/cs/follow-up')) return;
 
       const formData = new FormData(form);
       const intent = (formData.get('intent') || '').toString().trim();
