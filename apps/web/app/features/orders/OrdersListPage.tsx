@@ -988,11 +988,12 @@ function OrdersListPageImpl({
     }
   };
 
-  // Eligibility: initial queue assign — unprocessed orders or abandoned carts.
+  // Eligibility: initial queue assign — unprocessed orders only.
+  // Cart orders are handled exclusively via Follow-Up — not assignable from the orders page.
   const canBulkAssignToCS =
     selectedOrders.length > 0 &&
     (csClosersForFilter?.length ?? 0) > 0 &&
-    selectedOrders.every((o) => o.status === 'UNPROCESSED' || o.status === 'CART');
+    selectedOrders.every((o) => o.status === 'UNPROCESSED');
 
   // Eligibility: Hot-swap style reassignment — orders already with a closer (same bulk API + random split).
   const canBulkReassignToCS =

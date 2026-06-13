@@ -957,6 +957,8 @@ export class CartService {
           AND oi.product_id = ${schema.cartAbandonments.productId}
           AND o.created_at >= ${schema.cartAbandonments.createdAt}
       )`,
+      // Exclude carts already pulled into Follow-Up — they're handled there, not here.
+      sql`NOT EXISTS (SELECT 1 FROM follow_up_orders fu WHERE fu.cart_id = ${schema.cartAbandonments.id})`,
     ];
     if (opts.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
