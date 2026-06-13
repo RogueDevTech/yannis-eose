@@ -658,10 +658,25 @@ function buildUnauthorizedRedirect(
 export async function requireRole(request: Request, allowedRoles: string[]) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
+  if (sessionBypassesPermissions(user)) return user;
   if (!allowedRoles.includes(user.role)) {
     throw redirect(buildUnauthorizedRedirect(request, [], { roles: allowedRoles }));
   }
   return user;
+}
+
+/**
+ * Check if this session should bypass permission checks. True when:
+ * - The user's own role is SUPER_ADMIN or SUPPORT, OR
+ * - The session is in Mirror Mode and the original actor is SUPER_ADMIN or SUPPORT.
+ *
+ * This ensures that a SuperAdmin mirroring a lower-privileged user can still
+ * navigate all pages (read-only — mutations are blocked by the tRPC mirror guard).
+ */
+function sessionBypassesPermissions(user: { role: string; mirroredBy?: { role: string } | null }): boolean {
+  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return true;
+  if (user.mirroredBy?.role === 'SUPER_ADMIN' || user.mirroredBy?.role === 'SUPPORT') return true;
+  return false;
 }
 
 /**
@@ -692,7 +707,7 @@ export async function requirePermission(
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return user;
+  if (sessionBypassesPermissions(user)) return user;
   const codes = (Array.isArray(permissionCode) ? permissionCode : [permissionCode]).map((c) =>
     canonicalPermissionCode(c),
   );
@@ -757,7 +772,7 @@ export async function requirePermissionOrRoles(
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return user;
+  if (sessionBypassesPermissions(user)) return user;
   if (options.roles.includes(user.role)) return user;
   const codes = (Array.isArray(options.permission) ? options.permission : [options.permission]).map((c) =>
     canonicalPermissionCode(c),
@@ -800,7 +815,7 @@ export async function requireStaffAccountsAccess(
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN') return user;
+  if (sessionBypassesPermissions(user)) return user;
   if (isAdminLevel(user)) return user;
   if ((STAFF_ACCOUNTS_ROLES as readonly string[]).includes(user.role)) {
     return user;

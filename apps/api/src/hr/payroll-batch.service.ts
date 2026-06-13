@@ -878,7 +878,8 @@ export class PayrollBatchService {
       (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[]).forEach((d) => departments.add(d));
       const allBranches = await this.db
         .select({ id: schema.branches.id, name: schema.branches.name })
-        .from(schema.branches);
+        .from(schema.branches)
+        .where(sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`);
       return { allowed: true, departments: [...departments], branches: allBranches };
     }
 
@@ -904,7 +905,8 @@ export class PayrollBatchService {
     if (isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null) {
       const allBranches = await this.db
         .select({ id: schema.branches.id, name: schema.branches.name })
-        .from(schema.branches);
+        .from(schema.branches)
+        .where(sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`);
       return {
         allowed: departments.size > 0 && allBranches.length > 0,
         departments: [...departments],

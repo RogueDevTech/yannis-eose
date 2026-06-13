@@ -649,7 +649,17 @@ export class UsersService {
     // see existing holders and confirm intent — see UserCreatePage / users.router.
     const [existingRows, phoneRows, activeBranchRows] = await Promise.all([
       this.db
-        .select({ id: schema.users.id, status: schema.users.status })
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          email: schema.users.email,
+          role: schema.users.role,
+          status: schema.users.status,
+          capacity: schema.users.capacity,
+          logisticsLocationId: schema.users.logisticsLocationId,
+          phone: schema.users.phone,
+          createdAt: schema.users.createdAt,
+        })
         .from(schema.users)
         .where(eq(schema.users.email, input.email.toLowerCase()))
         .limit(1),
@@ -666,13 +676,112 @@ export class UsersService {
               and(
                 inArray(schema.branches.id, requestedBranchIds),
                 eq(schema.branches.status, 'ACTIVE'),
+                sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
               ),
             )
         : Promise.resolve([] as Array<{ id: string }>),
     ]);
 
+    // ── Cross-group invite: email exists but target group differs ──
+    // Instead of blocking, add the existing user to the new company group's
+    // branches. The creator sees it like a normal staff creation; the existing
+    // user gains access to the new company seamlessly (notification + header
+    // branch switcher). No new user record, no duplicate data.
     if (existingRows[0]) {
-      throw this.emailTakenError(existingRows[0].status);
+      const existingUser = existingRows[0];
+      if (existingUser.status !== 'ACTIVE' && existingUser.status !== 'PENDING') {
+        throw this.emailTakenError(existingUser.status);
+      }
+
+      // Resolve the target company group from the requested branches (branch-
+      // eligible roles) or from the actor's active group context (org-wide roles
+      // like FINANCE_OFFICER that don't have branch assignments).
+      let targetGroupId: string | null = null;
+      if (requestedBranchIds.length > 0) {
+        const [bRow] = await this.db
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, requestedBranchIds[0]!))
+          .limit(1);
+        targetGroupId = bRow?.groupId ?? null;
+      } else if (actor.activeGroupId) {
+        targetGroupId = actor.activeGroupId;
+      }
+
+      // Resolve groups the existing user already belongs to
+      const existingMemberships = await this.db
+        .select({
+          branchId: schema.userBranches.branchId,
+          groupId: schema.branches.groupId,
+        })
+        .from(schema.userBranches)
+        .innerJoin(schema.branches, eq(schema.userBranches.branchId, schema.branches.id))
+        .where(eq(schema.userBranches.userId, existingUser.id));
+
+      const existingGroupIds = new Set(
+        existingMemberships.map((m) => m.groupId).filter(Boolean) as string[],
+      );
+      const currentBranchSet = new Set(existingMemberships.map((m) => m.branchId));
+
+      // Different company group → invite path
+      const isCrossGroupInvite = targetGroupId && !existingGroupIds.has(targetGroupId);
+
+      if (isCrossGroupInvite && requestedBranchIds.length > 0) {
+        // Validate requested branches
+        if (activeBranchRows.length !== requestedBranchIds.length) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'One or more selected branches are missing or inactive',
+          });
+        }
+
+        const newBranchIds = requestedBranchIds.filter((id) => !currentBranchSet.has(id));
+        if (newBranchIds.length === 0) {
+          throw this.emailTakenError(existingUser.status);
+        }
+
+        await withActor(this.db, actor, async (tx) => {
+          await tx.insert(schema.userBranches).values(
+            newBranchIds.map((branchId) => ({
+              userId: existingUser.id,
+              branchId,
+              isPrimary: false,
+              roleInBranch: null,
+            })),
+          );
+        });
+
+        void this.userBundleCache.invalidate(existingUser.id);
+        this.invalidateBranchesListCache();
+
+        this.notificationsService.enqueueCreate({
+          userId: existingUser.id,
+          type: 'account:updated',
+          title: 'You have been added to a new company',
+          body: `You now have access to ${newBranchIds.length} additional branch(es). Switch branches in the header to view them.`,
+          data: { addedBranchIds: newBranchIds },
+        });
+
+        return {
+          ...existingUser,
+          phone: existingUser.phone,
+          invited: true as const,
+        };
+      }
+
+      if (isCrossGroupInvite && requestedBranchIds.length === 0) {
+        // Org-wide role (no branch assignment) being invited to a different group.
+        // The user already exists globally — just return success. They'll see the
+        // new group's data when they switch context in the header.
+        return {
+          ...existingUser,
+          phone: existingUser.phone,
+          invited: true as const,
+        };
+      }
+
+      // Same group or no group context → true duplicate
+      throw this.emailTakenError(existingUser.status);
     }
 
     this.throwIfStaffPhoneConflictRows(phoneRows);
@@ -1004,6 +1113,7 @@ export class UsersService {
       | null,
     currentBranchId: string | null,
     mode: 'list' | 'rosterBreakdown',
+    effectiveBranchIds?: string[] | null,
   ): SQL[] {
     const conditions: SQL[] = [];
 
@@ -1053,6 +1163,11 @@ export class UsersService {
       (input.userIds && input.userIds.length > 0) ||
       (input.allBranches === true && canViewAllBranches) ||
       (input.companyWideUserList === true && this.actorMayListCompanyWideUserRoster(actor, currentBranchId));
+    // Even when branch scope is skipped (company-wide list), still apply group
+    // isolation via effectiveBranchIds — "company-wide" means within the active
+    // company group, not across all groups. CEO directive 2026-06-10.
+    const skipBranchScopeButGroupScoped =
+      skipBranchScope && !input.branchId && effectiveBranchIds && effectiveBranchIds.length > 0;
     const branchFilter = skipBranchScope
       ? input.branchId
       : (input.branchId ?? currentBranchId ?? undefined);
@@ -1072,6 +1187,17 @@ export class UsersService {
           WHERE ub.user_id = ${schema.users.id}
         )`,
       );
+    } else if (skipBranchScopeButGroupScoped) {
+      // Company-wide list but group-scoped: show users in the active group's branches
+      conditions.push(
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
+        ),
+      );
     } else if (branchFilter) {
       conditions.push(
         sql<boolean>`EXISTS (
@@ -1080,6 +1206,23 @@ export class UsersService {
           WHERE ub.user_id = ${schema.users.id}
             AND ub.branch_id = ${branchFilter}
         )`,
+      );
+    } else if (
+      !skipBranchScope &&
+      !currentBranchId &&
+      effectiveBranchIds &&
+      effectiveBranchIds.length > 0
+    ) {
+      // Company-group isolation: user has no specific branch selected but is
+      // scoped to a set of branches via effectiveBranchIds.
+      conditions.push(
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
       );
     } else if (
       !skipBranchScope &&
@@ -1142,8 +1285,9 @@ export class UsersService {
     input: ListUsersInput,
     actor: { id: string; role: string; permissions?: string[] } | null = null,
     currentBranchId: string | null = null,
+    effectiveBranchIds?: string[] | null,
   ) {
-    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'list');
+    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'list', effectiveBranchIds);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const orderByColumn = {
@@ -1241,13 +1385,14 @@ export class UsersService {
     input: ListUsersRosterSummaryInput,
     actor: { id: string; role: string; permissions?: string[] } | null = null,
     currentBranchId: string | null = null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{
     active: number;
     pending: number;
     inactiveArchived: number;
     distinctRoles: number;
   }> {
-    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'rosterBreakdown');
+    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'rosterBreakdown', effectiveBranchIds);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [statusRows, roleRows] = await Promise.all([
@@ -1319,7 +1464,7 @@ export class UsersService {
    * List Sales team members (HEAD_OF_CS + CS_CLOSER) for Team page.
    * Gated by cs.teamOverview; does not require users.read.
    */
-  async listCSTeam(branchId?: string | null): Promise<Array<{
+  async listCSTeam(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<Array<{
     id: string;
     name: string;
     role: string;
@@ -1331,62 +1476,73 @@ export class UsersService {
       roleInBranch: string | null;
     }>;
   }>> {
-    const rows = await (branchId
-      ? this.db
-          .select({
-            id: schema.users.id,
-            name: schema.users.name,
-            role: schema.users.role,
-          })
-          .from(schema.users)
-          .innerJoin(
-            schema.userBranches,
-            and(
-              eq(schema.userBranches.userId, schema.users.id),
-              eq(schema.userBranches.branchId, branchId),
-            ),
-          )
-          .where(
-            and(
-              eq(schema.users.status, 'ACTIVE'),
-              or(
-                eq(schema.users.role, 'CS_CLOSER'),
-                eq(schema.users.role, 'HEAD_OF_CS'),
-                sql<boolean>`EXISTS (
-                  SELECT 1
-                  FROM branch_team_members btm
-                  INNER JOIN branch_teams bt ON bt.id = btm.team_id
-                  WHERE btm.user_id = ${schema.users.id}
-                    AND bt.department = 'CS'
-                )`,
-              ),
-            ),
-          )
-          .orderBy(asc(schema.users.name))
-      : this.db
-          .select({
-            id: schema.users.id,
-            name: schema.users.name,
-            role: schema.users.role,
-          })
-          .from(schema.users)
-          .where(
-            and(
-              eq(schema.users.status, 'ACTIVE'),
-              or(
-                eq(schema.users.role, 'CS_CLOSER'),
-                eq(schema.users.role, 'HEAD_OF_CS'),
-                sql<boolean>`EXISTS (
-                  SELECT 1
-                  FROM branch_team_members btm
-                  INNER JOIN branch_teams bt ON bt.id = btm.team_id
-                  WHERE btm.user_id = ${schema.users.id}
-                    AND bt.department = 'CS'
-                )`,
-              ),
-            ),
-          )
-          .orderBy(asc(schema.users.name)));
+    const csRoleCondition = and(
+      eq(schema.users.status, 'ACTIVE'),
+      or(
+        eq(schema.users.role, 'CS_CLOSER'),
+        eq(schema.users.role, 'HEAD_OF_CS'),
+        sql<boolean>`EXISTS (
+          SELECT 1
+          FROM branch_team_members btm
+          INNER JOIN branch_teams bt ON bt.id = btm.team_id
+          WHERE btm.user_id = ${schema.users.id}
+            AND bt.department = 'CS'
+        )`,
+      ),
+    );
+    let rows: Array<{ id: string; name: string; role: string }>;
+    if (branchId) {
+      rows = await this.db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          role: schema.users.role,
+        })
+        .from(schema.users)
+        .innerJoin(
+          schema.userBranches,
+          and(
+            eq(schema.userBranches.userId, schema.users.id),
+            eq(schema.userBranches.branchId, branchId),
+          ),
+        )
+        .where(csRoleCondition)
+        .orderBy(asc(schema.users.name));
+    } else if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      rows = await this.db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          role: schema.users.role,
+        })
+        .from(schema.users)
+        .innerJoin(
+          schema.userBranches,
+          and(
+            eq(schema.userBranches.userId, schema.users.id),
+            inArray(schema.userBranches.branchId, effectiveBranchIds),
+          ),
+        )
+        .where(csRoleCondition)
+        .orderBy(asc(schema.users.name));
+      // Deduplicate users who may appear in multiple branches
+      const seen = new Set<string>();
+      rows = rows.filter((r) => {
+        if (seen.has(r.id)) return false;
+        seen.add(r.id);
+        return true;
+      });
+    } else {
+      rows = await this.db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          role: schema.users.role,
+        })
+        .from(schema.users)
+        .where(csRoleCondition)
+        .orderBy(asc(schema.users.name));
+    }
 
     const membershipsByUser = await this.getUserBranchMemberships(rows.map((r) => r.id));
     return rows.map((r) => ({
@@ -1522,6 +1678,7 @@ export class UsersService {
           and(
             inArray(schema.branches.id, nextBranchIds),
             eq(schema.branches.status, 'ACTIVE'),
+            sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
           ),
         );
       if (activeBranchRows.length !== nextBranchIds.length) {

@@ -78,8 +78,8 @@ export const logisticsRouter = router({
   // Providers
   listProviders: authedProcedure
     .input(listProvidersSchema)
-    .query(async ({ input }) => {
-      return getLogisticsService().listProviders(input);
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().listProviders(input, ctx.activeGroupId);
     }),
 
   /**
@@ -100,20 +100,22 @@ export const logisticsRouter = router({
         kind: input?.kind,
       } as const;
 
+      const withGroup = { ...effective, groupId: ctx.activeGroupId };
       if (!logisticsCacheService) {
-        return getLogisticsService().listProviderOptions(effective);
+        return getLogisticsService().listProviderOptions(withGroup);
       }
 
       const key =
         'cache:logistics:options:providers:' +
         CacheService.hashInput({
           branchId: ctx.currentBranchId ?? null,
+          groupId: ctx.activeGroupId ?? null,
           role: ctx.user.role,
           status: effective.status,
           kind: effective.kind ?? null,
         });
       return logisticsCacheService.getOrSet(key, LOGISTICS_OPTIONS_TTL_SECONDS, () =>
-        getLogisticsService().listProviderOptions(effective),
+        getLogisticsService().listProviderOptions(withGroup),
       );
     }),
 
@@ -126,7 +128,7 @@ export const logisticsRouter = router({
   createProvider: permissionProcedure('logistics.write')
     .input(createProviderSchema)
     .mutation(async ({ input, ctx }) => {
-      const res = await getLogisticsService().createProvider(input, ctx.user.id);
+      const res = await getLogisticsService().createProvider(input, ctx.user.id, ctx.activeGroupId);
       await invalidateLogisticsOptionsCache();
       return res;
     }),
@@ -142,8 +144,8 @@ export const logisticsRouter = router({
   // Locations
   listLocations: authedProcedure
     .input(listLocationsSchema)
-    .query(async ({ input }) => {
-      return getLogisticsService().listLocations(input);
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().listLocations(input, ctx.activeGroupId);
     }),
 
   /**
@@ -164,20 +166,22 @@ export const logisticsRouter = router({
         providerKind: input?.providerKind,
       } as const;
 
+      const withGroup = { ...effective, groupId: ctx.activeGroupId };
       if (!logisticsCacheService) {
-        return getLogisticsService().listLocationOptions(effective);
+        return getLogisticsService().listLocationOptions(withGroup);
       }
 
       const key =
         'cache:logistics:options:locations:' +
         CacheService.hashInput({
           branchId: ctx.currentBranchId ?? null,
+          groupId: ctx.activeGroupId ?? null,
           role: ctx.user.role,
           status: effective.status,
           providerKind: effective.providerKind ?? null,
         });
       return logisticsCacheService.getOrSet(key, LOGISTICS_OPTIONS_TTL_SECONDS, () =>
-        getLogisticsService().listLocationOptions(effective),
+        getLogisticsService().listLocationOptions(withGroup),
       );
     }),
 
@@ -278,7 +282,7 @@ export const logisticsRouter = router({
   listDeliveryRemittances: authedProcedure
     .input(listDeliveryRemittancesSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryRemittances(input, ctx.user);
+      return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId);
     }),
 
   listDeliveryRemittanceEligibleOrders: authedProcedure
@@ -287,6 +291,7 @@ export const logisticsRouter = router({
       return getLogisticsService().listDeliveryRemittanceEligibleOrders(
         input ?? { page: 1, limit: 100 },
         ctx.user,
+        ctx.effectiveBranchIds,
       );
     }),
 

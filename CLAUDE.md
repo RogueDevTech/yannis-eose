@@ -43,6 +43,16 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - Marketing surfaces scope by `branch_id`. CS/Sales/Logistics/Finance scope by `servicing_branch_id`.
 - `withActorAndBranch(this.db, actor, ...)` for branch-scoped writes.
 
+## Branch Groups (Multi-Company)
+- `branch_groups` table = company boundary. `branches.group_id` FK → `branch_groups.id`.
+- Products, system settings, commissions get `group_id`. No cross-group sharing.
+- SuperAdmin sees group-level switcher in header; everyone else sees branches as today.
+- **Data isolation via `effectiveBranchIds`**: every list/aggregate query MUST pass `ctx.effectiveBranchIds` alongside `branchId`. When a group is selected, `effectiveBranchIds` = all branch IDs in that group.
+- `getUsersService().list(input, actor, branchId, effectiveBranchIds)` — always pass 4th arg.
+- `getOrdersService().list(input, branchId, { ...opts, effectiveBranchIds })` — in options.
+- Cart, marketing, finance services all accept `effectiveBranchIds` — never omit it.
+- Common bug: page bundles calling service methods without `effectiveBranchIds` → shows data from all groups.
+
 ## UI Rules
 - Shared components in `apps/web/app/components/ui/`. If used 2+ places, extract.
 - Key components: `<PageHeader backTo>`, `<CompactTable>`, `<Modal>`, `<StatusBadge>`, `<RoleBadge>`, `<TableActionButton>`, `<EmptyState>`, `<Pagination>`, `<SearchInput>`, `<FormSelect>`, `<SearchableSelect>`, `<FileUpload>`, `<DateFilterBar chrome="pill">`, `<PageHeaderMobileTools>`, `<ToolbarFiltersCollapsible>`, `<OverviewStatStrip>`.

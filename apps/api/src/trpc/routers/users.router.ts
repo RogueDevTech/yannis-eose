@@ -84,14 +84,14 @@ export const usersRouter = router({
   list: permissionProcedure('users.read')
     .input(listUsersSchema)
     .query(async ({ input, ctx }) => {
-      return getUsersService().list(input, ctx.user, ctx.currentBranchId);
+      return getUsersService().list(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /** HR Users page KPI strip — full-roster status/role aggregates matching list filters (minus status equality). */
   rosterSummary: permissionProcedure('users.read')
     .input(usersRosterSummarySchema)
     .query(async ({ input, ctx }) => {
-      return getUsersService().rosterSummary(input, ctx.user, ctx.currentBranchId);
+      return getUsersService().rosterSummary(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -109,7 +109,7 @@ export const usersRouter = router({
    * List Sales team (HEAD_OF_CS + CS_CLOSER) for Team page. Gated by cs.teamOverview.
    */
   listCSTeam: permissionProcedure('cs.teamOverview').query(async ({ ctx }) => {
-    return getUsersService().listCSTeam(ctx.currentBranchId);
+    return getUsersService().listCSTeam(ctx.currentBranchId, ctx.effectiveBranchIds);
   }),
 
   /**

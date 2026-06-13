@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, desc, count, inArray, or, gte, lte, lt } from 'drizzle-orm';
+import { eq, and, desc, count, inArray, or, gte, lte, lt, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import sgMail from '@sendgrid/mail';
 import { db as schema } from '@yannis/shared';
@@ -545,8 +545,9 @@ export class NotificationsService {
     return `cache:notif:${userId}:p${input.page}:l${input.limit}:u${input.unreadOnly ? '1' : '0'}`;
   }
 
-  async list(userId: string, input: ListNotificationsInput) {
-    const cacheKey = this.notifListCacheKey(userId, input);
+  async list(userId: string, input: ListNotificationsInput, effectiveBranchIds?: string[] | null) {
+    const eKey = effectiveBranchIds?.length ? effectiveBranchIds.sort().join(',') : null;
+    const cacheKey = this.notifListCacheKey(userId, input) + (eKey ? `:g:${eKey}` : '');
     const TTL = 15; // seconds
 
     return this.cache.getOrSet(cacheKey, TTL, async () => {
@@ -554,6 +555,15 @@ export class NotificationsService {
 
       if (input.unreadOnly) {
         conditions.push(eq(schema.notifications.read, false));
+      }
+
+      // Company-group isolation: only show notifications whose data->branchId
+      // is in the active group's branches (or notifications without branchId).
+      if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+        const inList = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
+        conditions.push(
+          sql`(${schema.notifications.data}->>'branchId' IS NULL OR ${schema.notifications.data}->>'branchId' IN (${inList}))`,
+        );
       }
 
       const whereClause = and(...conditions);
@@ -1160,10 +1170,20 @@ export class NotificationsService {
    * Cached (5 min): read-mostly admin config; invalidated on every automation
    * rule mutation via `invalidateAutomationRulesCache`.
    */
-  async getAutomationRules(branchId: string | null) {
-    const cacheKey = `cache:notif:automationRules:${branchId ?? 'global'}`;
+  async getAutomationRules(branchId: string | null, effectiveBranchIds?: string[] | null) {
+    const eKey = effectiveBranchIds?.length ? effectiveBranchIds.sort().join(',') : null;
+    const cacheKey = `cache:notif:automationRules:${eKey ?? branchId ?? 'global'}`;
     const TTL = 300; // seconds
     return this.cache.getOrSet(cacheKey, TTL, async () => {
+      // Company-group isolation: when effectiveBranchIds is set, scope to those branches
+      if (!branchId && effectiveBranchIds && effectiveBranchIds.length > 0) {
+        return this.db
+          .select()
+          .from(schema.pushAutomationRules)
+          .where(inArray(schema.pushAutomationRules.branchId, effectiveBranchIds))
+          .orderBy(desc(schema.pushAutomationRules.validFrom));
+      }
+
       if (branchId === null) {
         return this.db
           .select()

@@ -71,7 +71,7 @@ interface DashboardLayoutProps {
   /** Available branches for the branch switcher. Only shown when length > 1. */
   branches?: Array<{ id: string; name: string; code: string; groupId?: string | null }>;
   /** Branch groups for SuperAdmin header group switcher. */
-  branchGroups?: Array<{ id: string; name: string }>;
+  branchGroups?: Array<{ id: string; name: string; status?: string }>;
   /**
    * False while `/admin` layout is still streaming `branches.list` — branch switcher shows a
    * skeleton and org-wide branch guard does not attach submit interception yet.

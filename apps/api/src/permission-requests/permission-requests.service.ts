@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, desc, count, and, or, inArray, type SQL } from 'drizzle-orm';
+import { eq, desc, count, and, or, inArray, sql, type SQL } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -232,18 +232,26 @@ export class PermissionRequestsService {
   }
 
   /** Per-status totals for tab badges — scoped identically to {@link list}. */
-  async statusCounts(viewer: SessionUser): Promise<{
+  async statusCounts(viewer: SessionUser, effectiveBranchIds?: string[] | null): Promise<{
     pending: number;
     approved: number;
     rejected: number;
     all: number;
   }> {
     const scope = this.viewerScopeWhere(viewer);
+    // Company-group isolation for counts — must match list() filtering
+    const groupFilter = effectiveBranchIds && effectiveBranchIds.length > 0
+      ? sql`${schema.permissionRequests.requesterId} IN (
+          SELECT DISTINCT user_id FROM user_branches
+          WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
+        )`
+      : undefined;
 
     const countWhere = async (status: 'PENDING' | 'APPROVED' | 'REJECTED') => {
-      const cond = scope
-        ? and(eq(schema.permissionRequests.status, status), scope)
-        : eq(schema.permissionRequests.status, status);
+      const cond = and(
+        eq(schema.permissionRequests.status, status),
+        ...[scope, groupFilter].filter(Boolean) as SQL[],
+      );
       const [row] = await this.db
         .select({ c: count() })
         .from(schema.permissionRequests)
@@ -285,13 +293,22 @@ export class PermissionRequestsService {
       limit?: number;
     },
     viewer?: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     const statusFilter = options?.status ?? 'PENDING';
     const page = options?.page ?? 1;
     const limit = Math.min(Math.max(1, options?.limit ?? 20), 100);
     const offset = (page - 1) * limit;
 
-    const whereClause = this.buildListWhere(statusFilter, viewer);
+    let whereClause = this.buildListWhere(statusFilter, viewer);
+    // Company-group isolation: scope by requester's branch membership
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      const groupFilter = sql`${schema.permissionRequests.requesterId} IN (
+        SELECT DISTINCT user_id FROM user_branches
+        WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
+      )`;
+      whereClause = whereClause ? and(whereClause, groupFilter) : groupFilter;
+    }
 
     const [countRow] = await (whereClause
       ? this.db.select({ c: count() }).from(schema.permissionRequests).where(whereClause)

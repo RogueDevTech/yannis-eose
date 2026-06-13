@@ -7,7 +7,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { canMirror, canViewAllBranches } from '../common/authz';
-import { and, eq, isNull, sql, desc, asc } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql, desc, asc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -222,7 +222,10 @@ export class AuthService {
     const initialPermissions = await this.permissions.getEffectivePermissions(user.id);
 
     // Resolve activeGroupId from the branch the user lands on.
+    // Multi-group users MUST always land in a specific group — never "all groups".
+    // Cross-group data mixing is data corruption.
     let activeGroupId: string | null = null;
+    let selectedBranchIds: string[] | null = null;
     if (currentBranchId) {
       const [branchRow] = await this.db
         .select({ groupId: schema.branches.groupId })
@@ -230,6 +233,34 @@ export class AuthService {
         .where(eq(schema.branches.id, currentBranchId))
         .limit(1);
       activeGroupId = branchRow?.groupId ?? null;
+    } else if (memberships.length > 0) {
+      const memberBranchIds = memberships.map((m) => m.branchId as string);
+      const groupRows = await this.db
+        .selectDistinct({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, memberBranchIds));
+      const validGroups = groupRows.filter((g) => g.groupId != null);
+      if (validGroups.length > 0) {
+        activeGroupId = validGroups[0]!.groupId;
+      }
+    }
+    // Global users (SuperAdmin/Admin) with no memberships: resolve from branch_groups directly
+    if (!activeGroupId && canViewAllBranches(user)) {
+      const [firstGroup] = await this.db
+        .select({ id: schema.branchGroups.id })
+        .from(schema.branchGroups)
+        .where(eq(schema.branchGroups.status, 'ACTIVE'))
+        .orderBy(asc(schema.branchGroups.createdAt))
+        .limit(1);
+      if (firstGroup) activeGroupId = firstGroup.id;
+    }
+    // Resolve the group's branch IDs so effectiveBranchIds is correctly scoped on login
+    if (activeGroupId) {
+      const groupBranches = await this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(eq(schema.branches.groupId, activeGroupId));
+      selectedBranchIds = groupBranches.map((b) => b.id);
     }
 
     const sessionUser: SessionUser = {
@@ -245,6 +276,7 @@ export class AuthService {
       logisticsLocationId: user.logisticsLocationId,
       currentBranchId,
       activeGroupId,
+      selectedBranchIds,
       // Captured here so the tRPC branch-scope guard can fall back to the
       // sole branch for single-branch org-wide heads instead of throwing.
       branchIds: memberships.map((m) => m.branchId as string),
@@ -775,7 +807,8 @@ export class AuthService {
 
     // Resolve the active group from the branch. When branchId is set, look up
     // its group_id. When selectedBranchIds is set, derive from the first branch.
-    // When null (All Branches), activeGroupId is null (no group filter).
+    // When null (All Branches), resolve from the user's memberships — if all
+    // belong to one group, auto-set it (company-wide roles stay scoped).
     let activeGroupId: string | null = null;
     const groupLookupBranchId = branchId ?? resolvedSelectedIds?.[0] ?? null;
     if (groupLookupBranchId) {
@@ -785,17 +818,94 @@ export class AuthService {
         .where(eq(schema.branches.id, groupLookupBranchId))
         .limit(1);
       activeGroupId = row?.groupId ?? null;
+    } else if (user.branchIds?.length) {
+      const groupRows = await this.db
+        .selectDistinct({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, user.branchIds));
+      if (groupRows.length === 1 && groupRows[0]?.groupId) {
+        activeGroupId = groupRows[0].groupId;
+      }
+    }
+
+    // When a group is active and no explicit branch subset was selected,
+    // resolve the group's branch IDs so effectiveBranchIds is correctly scoped
+    // (user.branchIds may span multiple groups for SuperAdmin).
+    let groupBranchIds = resolvedSelectedIds;
+    if (!groupBranchIds && activeGroupId) {
+      const groupBranches = await this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(eq(schema.branches.groupId, activeGroupId));
+      groupBranchIds = groupBranches.map((b) => b.id);
     }
 
     const updated: SessionUser = {
       ...user,
       currentBranchId: branchId,
-      selectedBranchIds: resolvedSelectedIds,
+      selectedBranchIds: groupBranchIds,
       activeGroupId,
     };
     await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
 
     return updated;
+  }
+
+  /**
+   * Resolve activeGroupId from a set of branch IDs.
+   * Returns the group ID if all branches belong to one group, null otherwise.
+   */
+  async resolveGroupFromBranches(branchIds: string[]): Promise<string | null> {
+    if (!branchIds.length) return null;
+    const rows = await this.db
+      .selectDistinct({ groupId: schema.branches.groupId })
+      .from(schema.branches)
+      .where(inArray(schema.branches.id, branchIds));
+    return rows.length === 1 && rows[0]?.groupId ? rows[0].groupId : null;
+  }
+
+  /**
+   * Get all branch IDs belonging to a group.
+   */
+  async getGroupBranchIds(groupId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: schema.branches.id })
+      .from(schema.branches)
+      .where(eq(schema.branches.groupId, groupId));
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Get the first active branch group ID (for global users with no memberships).
+   */
+  async getFirstActiveGroupId(): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups)
+      .where(eq(schema.branchGroups.status, 'ACTIVE'))
+      .orderBy(asc(schema.branchGroups.createdAt))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  /**
+   * Patch activeGroupId + selectedBranchIds on an existing session.
+   */
+  async patchSessionGroupScope(sessionToken: string, groupId: string, selectedBranchIds: string[] | null): Promise<void> {
+    const session = await this.sessionStore.getSession(sessionToken);
+    if (!session) return;
+    const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+    await this.sessionStore.updateSession(sessionToken, { ...session, activeGroupId: groupId, selectedBranchIds }, ttl);
+  }
+
+  /**
+   * Patch activeGroupId on an existing session (one-shot backfill for stale sessions).
+   */
+  async patchSessionActiveGroupId(sessionToken: string, groupId: string): Promise<void> {
+    const session = await this.sessionStore.getSession(sessionToken);
+    if (!session) return;
+    const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+    await this.sessionStore.updateSession(sessionToken, { ...session, activeGroupId: groupId }, ttl);
   }
 
   /**

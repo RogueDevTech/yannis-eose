@@ -375,7 +375,7 @@ export class CartService {
   /**
    * List PENDING carts for CS dashboard (cart abandonment). Returns customer name, product, campaign, masked phone.
    */
-  async listPending(limit = 50): Promise<
+  async listPending(limit = 50, branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<
     Array<{
       id: string;
       customerName: string;
@@ -390,6 +390,11 @@ export class CartService {
   > {
     // DISTINCT ON (customerPhoneHash) keeps only the latest cart per customer phone.
     // A customer changing product/offer selections creates multiple rows — we show only the most recent.
+    const branchClause = branchId
+      ? sql`AND c.branch_id = ${branchId}`
+      : (effectiveBranchIds && effectiveBranchIds.length > 0
+          ? sql`AND c.branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})`
+          : sql``);
     const rows = await this.db.execute<{
       id: string;
       customerName: string;
@@ -417,6 +422,7 @@ export class CartService {
       LEFT JOIN products p ON p.id = ca.product_id
       LEFT JOIN campaigns c ON c.id = ca.campaign_id
       WHERE ca.status = 'PENDING'
+        ${branchClause}
       ORDER BY ca.customer_phone_hash, ca.updated_at DESC
       LIMIT ${limit}
     `);
@@ -453,6 +459,8 @@ export class CartService {
     mediaBuyerId?: string | null;
     /** When set, only carts from this branch's campaigns are returned. */
     branchId?: string | null;
+    /** When set, scope to carts from campaigns in these branches (company group isolation). */
+    effectiveBranchIds?: string[] | null;
     /** Customer-name substring match (case-insensitive). Mirrors `orders.list` search. */
     search?: string;
     /** ISO date string — only carts updated on or after this date. */
@@ -701,7 +709,7 @@ export class CartService {
    * When no filter is passed (default), behavior is unchanged — caller has org-wide
    * visibility (CS dashboard / admin Marketing Overview for HoM/admin/global).
    */
-  async listActivity(opts: { limit?: number; mediaBuyerId?: string; branchId?: string } = {}): Promise<
+  async listActivity(opts: { limit?: number; mediaBuyerId?: string; branchId?: string; effectiveBranchIds?: string[] | null } = {}): Promise<
     Array<{
       id: string;
       customerName: string;
@@ -718,6 +726,13 @@ export class CartService {
     const limit = opts.limit ?? 60;
     const mediaBuyerId = opts.mediaBuyerId ?? null;
     const branchId = opts.branchId ?? null;
+    const eIds = opts.effectiveBranchIds ?? null;
+    const eIdClauseCampaign = eIds && eIds.length > 0
+      ? sql`AND c.branch_id IN (${sql.join(eIds.map(id => sql`${id}`), sql`, `)})`
+      : sql``;
+    const eIdClauseOrder = eIds && eIds.length > 0
+      ? sql`AND o.branch_id IN (${sql.join(eIds.map(id => sql`${id}`), sql`, `)})`
+      : sql``;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const sixHoursAgo = todayStart.toISOString();
@@ -766,6 +781,7 @@ export class CartService {
           AND ca.status IN ('PENDING', 'ABANDONED', 'CONVERTED')
           AND (${mediaBuyerId}::uuid IS NULL OR c.media_buyer_id = ${mediaBuyerId}::uuid)
           AND (${branchId}::uuid IS NULL OR c.branch_id = ${branchId}::uuid)
+          ${eIdClauseCampaign}
 
         UNION ALL
 
@@ -791,6 +807,7 @@ export class CartService {
           )
           AND (${mediaBuyerId}::uuid IS NULL OR o.media_buyer_id = ${mediaBuyerId}::uuid)
           AND (${branchId}::uuid IS NULL OR o.branch_id = ${branchId}::uuid)
+          ${eIdClauseOrder}
       ) combined
       ORDER BY phone_hash, "updatedAt" DESC
       LIMIT ${limit}
@@ -874,8 +891,13 @@ export class CartService {
     branchId?: string | null,
     startDate?: string | null,
     endDate?: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ pending: number; abandonedOpen: number }> {
-    const branchCond = branchId ? eq(schema.campaigns.branchId, branchId) : undefined;
+    const branchCond = branchId
+      ? eq(schema.campaigns.branchId, branchId)
+      : (effectiveBranchIds && effectiveBranchIds.length > 0
+          ? inArray(schema.campaigns.branchId, effectiveBranchIds)
+          : undefined);
     const dateConds: SQL[] = [];
     if (startDate) dateConds.push(gte(schema.cartAbandonments.updatedAt, new Date(`${startDate}T00:00:00`)));
     if (endDate) dateConds.push(lte(schema.cartAbandonments.updatedAt, new Date(`${endDate}T23:59:59`)));
@@ -890,7 +912,7 @@ export class CartService {
       .select({ count: count() })
       .from(schema.cartAbandonments)
       .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-      .where(and(...this.openCartConditions({ branchId, startDate, endDate })));
+      .where(and(...this.openCartConditions({ branchId, effectiveBranchIds, startDate, endDate })));
 
     return {
       pending: pendingRes[0]?.count ?? 0,
@@ -920,6 +942,7 @@ export class CartService {
   private openCartConditions(opts: {
     mediaBuyerId?: string | null;
     branchId?: string | null;
+    effectiveBranchIds?: string[] | null;
     startDate?: string | null;
     endDate?: string | null;
   }): SQL[] {
@@ -940,6 +963,8 @@ export class CartService {
     }
     if (opts.branchId) {
       conditions.push(eq(schema.campaigns.branchId, opts.branchId));
+    } else if (opts.effectiveBranchIds && opts.effectiveBranchIds.length > 0) {
+      conditions.push(inArray(schema.campaigns.branchId, opts.effectiveBranchIds));
     }
     if (opts.startDate) {
       conditions.push(gte(schema.cartAbandonments.updatedAt, new Date(`${opts.startDate}T00:00:00`)));
@@ -958,7 +983,7 @@ export class CartService {
    * number of rows the cart list shows.
    */
   async countAbandoned(
-    opts: { mediaBuyerId?: string | null; branchId?: string | null; startDate?: string | null; endDate?: string | null } = {},
+    opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
   ): Promise<number> {
     const res = await this.db
       .select({ count: count() })

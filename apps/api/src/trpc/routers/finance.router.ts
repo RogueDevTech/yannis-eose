@@ -130,13 +130,13 @@ export const financeRouter = router({
 
   listInvoices: authedProcedure
     .input(listInvoicesSchema)
-    .query(async ({ input }) => {
-      return getFinanceService().listInvoices(input);
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().listInvoices(input, ctx.effectiveBranchIds);
     }),
 
   invoiceSummary: permissionProcedure('finance.read')
-    .query(async () => {
-      return getFinanceService().getInvoiceSummary();
+    .query(async ({ ctx }) => {
+      return getFinanceService().getInvoiceSummary(ctx.effectiveBranchIds);
     }),
 
   // Profit reports
@@ -154,8 +154,8 @@ export const financeRouter = router({
     }),
 
   overview: permissionProcedure('finance.read')
-    .query(async () => {
-      return getFinanceService().getFinancialOverview();
+    .query(async ({ ctx }) => {
+      return getFinanceService().getFinancialOverview(ctx.effectiveBranchIds);
     }),
 
   // Approval Requests
@@ -264,7 +264,7 @@ export const financeRouter = router({
             limit: 1,
             ...(input.startDate && { startDate: input.startDate }),
             ...(input.endDate && { endDate: input.endDate }),
-          }, ctx.user)
+          }, ctx.user, ctx.activeGroupId)
           .catch(() => null),
         getPayrollBatchService()
           .listMonthlyPayrolls({ status: 'PENDING_FINANCE' as const }, ctx.user)
@@ -272,7 +272,7 @@ export const financeRouter = router({
         getFinanceService()
           .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 })
           .catch(() => null),
-        listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>),
+        listBranchesForUser({ ...ctx.user, activeGroupId: ctx.activeGroupId }).catch(() => [] as Array<{ id: string; name: string }>),
         getUsersService()
           .list(
             {
@@ -286,6 +286,7 @@ export const financeRouter = router({
             },
             ctx.user,
             ctx.currentBranchId,
+            ctx.effectiveBranchIds,
           )
           .catch(() => null),
         // Scope to HoM receivers only (Finance disburses to HoM, not MBs) and
@@ -295,7 +296,7 @@ export const financeRouter = router({
             restrictToReceiverRole: 'HEAD_OF_MARKETING',
             startDate: input.startDate,
             endDate: input.endDate,
-          })
+          }, ctx.effectiveBranchIds)
           .catch(() => ({ totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 })),
         getLogisticsService()
           .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)

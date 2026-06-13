@@ -5399,18 +5399,21 @@ export class OrdersService {
    */
   async getCSCloserWorkloads(
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
     opts?: { pendingCountsAcrossAllBranches?: boolean },
   ) {
     const pendingCountsAcrossAllBranches = opts?.pendingCountsAcrossAllBranches === true;
 
+    const agentCols = {
+      id: schema.users.id,
+      name: schema.users.name,
+      capacity: schema.users.capacity,
+      lastActionAt: schema.users.lastActionAt,
+    };
+
     const agentsPromise = branchId
       ? this.db
-          .select({
-            id: schema.users.id,
-            name: schema.users.name,
-            capacity: schema.users.capacity,
-            lastActionAt: schema.users.lastActionAt,
-          })
+          .select(agentCols)
           .from(schema.users)
           .innerJoin(
             schema.userBranches,
@@ -5420,15 +5423,25 @@ export class OrdersService {
             ),
           )
           .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')))
-      : this.db
-          .select({
-            id: schema.users.id,
-            name: schema.users.name,
-            capacity: schema.users.capacity,
-            lastActionAt: schema.users.lastActionAt,
-          })
-          .from(schema.users)
-          .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
+      : effectiveBranchIds?.length
+        ? this.db
+            .select(agentCols)
+            .from(schema.users)
+            .innerJoin(
+              schema.userBranches,
+              and(
+                eq(schema.userBranches.userId, schema.users.id),
+                inArray(schema.userBranches.branchId, effectiveBranchIds),
+              ),
+            )
+            .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')))
+            .groupBy(schema.users.id, schema.users.name, schema.users.capacity, schema.users.lastActionAt)
+        : this.db
+            .select(agentCols)
+            .from(schema.users)
+            .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
+
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
 
     const [agents, pendingByAgent, closesTodayMap] = await Promise.all([
       agentsPromise,
@@ -5442,7 +5455,7 @@ export class OrdersService {
           and(
             isNull(schema.orders.deletedAt),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
-            ...(branchId && !pendingCountsAcrossAllBranches ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+            ...(!pendingCountsAcrossAllBranches && bCond ? [bCond] : []),
           ),
         )
         .groupBy(schema.orders.assignedCsId),
@@ -5922,10 +5935,11 @@ export class OrdersService {
    *      CS statuses, restricted to the same agent set via `IN (...)`.
    * Constant 2 RTTs regardless of agent count.
    */
-  async getInactiveAgents(thresholdMinutes = 10, branchId?: string | null) {
+  async getInactiveAgents(thresholdMinutes = 10, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const threshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
 
-    const agents = await (branchId
+    const needsBranchJoin = branchId || (!branchId && effectiveBranchIds?.length);
+    const agents = await (needsBranchJoin
       ? this.db
           .select({
             id: schema.users.id,
@@ -5937,7 +5951,11 @@ export class OrdersService {
             schema.userBranches,
             and(
               eq(schema.userBranches.userId, schema.users.id),
-              eq(schema.userBranches.branchId, branchId),
+              ...(branchId
+                ? [eq(schema.userBranches.branchId, branchId)]
+                : effectiveBranchIds?.length
+                  ? [inArray(schema.userBranches.branchId, effectiveBranchIds)]
+                  : []),
             ),
           )
           .where(
@@ -6030,6 +6048,7 @@ export class OrdersService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
@@ -6039,7 +6058,8 @@ export class OrdersService {
         : null;
     const periodEnd: Date | null = useCustomRange ? nigeriaDayEnd(endDate) : null;
 
-    const agents = await (branchId
+    const needsBranchJoin = branchId || (!branchId && effectiveBranchIds?.length);
+    const agents = await (needsBranchJoin
       ? this.db
           .select({ id: schema.users.id, name: schema.users.name })
           .from(schema.users)
@@ -6047,7 +6067,11 @@ export class OrdersService {
             schema.userBranches,
             and(
               eq(schema.userBranches.userId, schema.users.id),
-              eq(schema.userBranches.branchId, branchId),
+              ...(branchId
+                ? [eq(schema.userBranches.branchId, branchId)]
+                : effectiveBranchIds?.length
+                  ? [inArray(schema.userBranches.branchId, effectiveBranchIds)]
+                  : []),
             ),
           )
           .where(
@@ -6303,7 +6327,7 @@ export class OrdersService {
     const servicingBranchId: string | null = routing
       ? routing.servicingBranchId
       : (branchId ?? null);
-    const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, {
+    const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, null, {
       pendingCountsAcrossAllBranches: routing?.crossBranchServicing === true,
     });
     let available = [...workloads];
@@ -6528,7 +6552,7 @@ export class OrdersService {
    * Get all UNPROCESSED orders available for claiming (claim mode only).
    * Sorted oldest-first so longer-waiting orders are visible first.
    */
-  async getClaimQueue(branchId?: string | null): Promise<Array<{
+  async getClaimQueue(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<Array<{
     id: string;
     customerName: string;
     createdAt: Date;
@@ -6536,6 +6560,7 @@ export class OrdersService {
     totalAmount: string | null;
     productSummary: string;
   }>> {
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const orders = await this.db
       .select({
         id: schema.orders.id,
@@ -6549,7 +6574,7 @@ export class OrdersService {
         and(
           eq(schema.orders.status, 'UNPROCESSED'),
           sql`(${schema.orders.lockedUntil} IS NULL OR ${schema.orders.lockedUntil} < NOW())`,
-          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+          ...(bCond ? [bCond] : []),
         ),
       )
       .orderBy(asc(schema.orders.createdAt))
@@ -7367,7 +7392,8 @@ export class OrdersService {
   /**
    * Get all orders with scheduled callbacks (including future ones).
    */
-  async getScheduledCallbacks(branchId?: string | null) {
+  async getScheduledCallbacks(branchId?: string | null, effectiveBranchIds?: string[] | null) {
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const orders = await this.db
       .select()
       .from(schema.orders)
@@ -7380,8 +7406,7 @@ export class OrdersService {
             eq(schema.orders.status, 'CS_ASSIGNED'),
             eq(schema.orders.status, 'CS_ENGAGED'),
           ),
-          // CS callback queue — scope by the servicing branch (migration 0150).
-          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+          ...(bCond ? [bCond] : []),
         ),
       )
       .orderBy(asc(schema.orders.callbackScheduledAt));
@@ -7535,14 +7560,15 @@ export class OrdersService {
     };
   }
 
-  async getFlaggedDuplicates(branchId?: string | null) {
+  async getFlaggedDuplicates(branchId?: string | null, effectiveBranchIds?: string[] | null) {
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const flagged = await this.db
       .select()
       .from(schema.orders)
       .where(
         and(
           inArray(schema.orders.isDuplicate, ['FLAGGED', 'POSSIBLY_DUPLICATE']),
-          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+          ...(bCond ? [bCond] : []),
         ),
       )
       .orderBy(desc(schema.orders.createdAt));
@@ -8261,6 +8287,7 @@ export class OrdersService {
     startDate?: string,
     endDate?: string,
     branchScope: 'marketing' | 'servicing' = 'marketing',
+    effectiveBranchIds?: string[] | null,
   ): Promise<Array<{
     branchId: string;
     branchName: string;
@@ -8272,10 +8299,15 @@ export class OrdersService {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt), eq(schema.orders.isFollowUp, false)];
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
-    const whereClause = and(...conditions);
 
     const branchJoinColumn =
       branchScope === 'servicing' ? schema.orders.servicingBranchId : schema.orders.branchId;
+
+    // Scope to the active branch group when set
+    const bCond = branchScopeCondition(branchJoinColumn, null, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+
+    const whereClause = and(...conditions);
 
     // Join orders with branches to get per-branch counts. Scope determines whether
     // we group by marketing branch (attribution) or servicing branch (CS work).

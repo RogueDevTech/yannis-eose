@@ -21,7 +21,7 @@ export class ProductCategoriesService {
    * Create a new product category.
    * Uses a transaction so set_config and insert run on the same connection (required for audit trigger).
    */
-  async create(input: CreateProductCategoryInput, actor: SessionUser) {
+  async create(input: CreateProductCategoryInput, actor: SessionUser, groupId?: string | null) {
     return await this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
 
@@ -47,6 +47,7 @@ export class ProductCategoriesService {
           brandEmail: input.brandEmail || null,
           brandWhatsapp: input.brandWhatsapp ?? null,
           smsSenderId: input.smsSenderId ?? null,
+          groupId: groupId ?? null,
           status: 'ACTIVE',
         })
         .returning();
@@ -80,11 +81,14 @@ export class ProductCategoriesService {
   /**
    * List categories with optional filtering and pagination.
    */
-  async list(input: ListProductCategoriesInput) {
+  async list(input: ListProductCategoriesInput, groupId?: string | null) {
     const conditions = [];
 
     if (input.status) {
       conditions.push(eq(schema.productCategories.status, input.status));
+    }
+    if (groupId) {
+      conditions.push(eq(schema.productCategories.groupId, groupId));
     }
     if (input.search) {
       conditions.push(

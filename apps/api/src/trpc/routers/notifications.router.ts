@@ -62,7 +62,7 @@ export const notificationsRouter = router({
   list: authedProcedure
     .input(listNotificationsSchema)
     .query(async ({ input, ctx }) => {
-      return getNotificationsService().list(ctx.user.id, input);
+      return getNotificationsService().list(ctx.user.id, input, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -205,7 +205,7 @@ export const notificationsRouter = router({
   getAutomationRules: authedProcedure.query(async ({ ctx }) => {
     const branchId =
       (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') ? null : (ctx.user.currentBranchId ?? null);
-    return getNotificationsService().getAutomationRules(branchId);
+    return getNotificationsService().getAutomationRules(branchId, ctx.effectiveBranchIds);
   }),
 
   /**

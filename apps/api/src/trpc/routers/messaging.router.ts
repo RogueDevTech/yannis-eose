@@ -14,7 +14,7 @@
 
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, or, isNull } from 'drizzle-orm';
+import { eq, and, desc, or, isNull, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
@@ -35,11 +35,12 @@ async function invalidateMessageTemplatesListCache(): Promise<void> {
 }
 
 function messageTemplatesListCacheKey(
-  ctx: { user: { role: string; currentBranchId?: string | null } },
+  ctx: { user: { role: string; currentBranchId?: string | null }; effectiveBranchIds?: string[] | null },
   input: { channel?: 'SMS' | 'WHATSAPP' | 'WHATSAPP_GROUP'; includeArchived?: boolean } | undefined,
 ): string {
   const adminClass = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
-  const scope = adminClass ? 'admin' : `branch:${ctx.user.currentBranchId ?? 'none'}`;
+  const eIds = ctx.effectiveBranchIds;
+  const scope = eIds?.length ? `group:${eIds.sort().join(',')}` : adminClass ? 'admin' : `branch:${ctx.user.currentBranchId ?? 'none'}`;
   const hash = CacheService.hashInput({
     scope,
     channel: input?.channel ?? null,
@@ -177,8 +178,17 @@ export const messagingRouter = router({
 
         // Branch scoping: non-admin viewers see their own branch's templates plus
         // org-wide defaults (`branch_id IS NULL`, seeded by MessageTemplateSeedService).
-        // Admin-class sees everything.
-        if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.currentBranchId) {
+        // Admin-class with effectiveBranchIds sees that group's templates + globals.
+        const eIds = ctx.effectiveBranchIds;
+        if (eIds && eIds.length > 0) {
+          // Company-group isolation: show templates belonging to selected branches + globals
+          conditions.push(
+            or(
+              inArray(schema.messageTemplates.branchId, eIds),
+              isNull(schema.messageTemplates.branchId),
+            )!,
+          );
+        } else if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.currentBranchId) {
           const branchOrGlobal = or(
             eq(schema.messageTemplates.branchId, ctx.user.currentBranchId),
             isNull(schema.messageTemplates.branchId),

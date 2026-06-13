@@ -401,9 +401,20 @@ export class AuditService {
 
       const scopeToBranch = shouldScopeGlobalAuditToBranch(viewer);
       const branchId = viewer.currentBranchId ?? null;
+      // Company-group isolation: even admin-class users should be scoped when
+      // effectiveBranchIds is set (group selected in header).
+      const eIds = viewer.effectiveBranchIds;
+      const scopeToGroup = !scopeToBranch && eIds && eIds.length > 0;
 
       if (scopeToBranch && branchId) {
         // Branch viewers: no org-wide catalog/settings history; no mirror_sessions (org-wide).
+        tables = tables.filter((t) => {
+          if (t === 'mirror_sessions') return false;
+          if (t === 'users') return true;
+          return HISTORY_TABLES_WITH_BRANCH_ID.has(t);
+        });
+      } else if (scopeToGroup) {
+        // Group isolation: only tables with branch_id or user-linked tables.
         tables = tables.filter((t) => {
           if (t === 'mirror_sessions') return false;
           if (t === 'users') return true;
@@ -482,6 +493,16 @@ export class AuditService {
             conditions.push(`primary_branch_id = $${branchIdx}::uuid`);
           } else if (HISTORY_TABLES_WITH_BRANCH_ID.has(table)) {
             conditions.push(`branch_id = $${branchIdx}::uuid`);
+          }
+        }
+        // Company-group isolation: filter by multiple branch IDs
+        if (scopeToGroup && eIds!.length > 0) {
+          // Build a safe IN clause — UUIDs are validated by the session layer.
+          const inList = eIds!.map((id) => `'${id}'::uuid`).join(',');
+          if (table === 'users') {
+            conditions.push(`primary_branch_id IN (${inList})`);
+          } else if (HISTORY_TABLES_WITH_BRANCH_ID.has(table)) {
+            conditions.push(`branch_id IN (${inList})`);
           }
         }
 

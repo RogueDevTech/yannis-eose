@@ -3,6 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remi
 import { Link, useLoaderData, useFetcher } from '@remix-run/react';
 import { useCallback, useMemo, useState } from 'react';
 import { requirePermission, apiRequest, getSessionCookie, safeStatus } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -11,7 +12,7 @@ import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
-import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -19,8 +20,8 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: `${data?.group?.name ?? 'Company Group'} — Yannis EOSE` },
+export const meta: MetaFunction = () => [
+  { title: 'Company Group — Yannis EOSE' },
 ];
 
 interface GroupBranch {
@@ -35,6 +36,7 @@ interface GroupBranch {
 interface GroupDetail {
   id: string;
   name: string;
+  status: string;
   createdAt: string;
   updatedAt: string | null;
   branches: GroupBranch[];
@@ -52,24 +54,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const groupId = params.groupId!;
 
-  const res = await apiRequest<{ result?: { data?: GroupDetail } }>(
-    `/trpc/branches.getGroupDetail?input=${encodeURIComponent(JSON.stringify({ groupId }))}`,
-    { method: 'GET', cookie },
-  );
+  const [res, groupsRes] = await Promise.all([
+    apiRequest<{ result?: { data?: GroupDetail } }>(
+      `/trpc/branches.getGroupDetail?input=${encodeURIComponent(JSON.stringify({ groupId }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>(
+      '/trpc/branches.listGroups',
+      { method: 'GET', cookie },
+    ),
+  ]);
 
   if (!res.ok) throw json({ error: 'Company group not found' }, { status: 404 });
   const group = res.data?.result?.data;
   if (!group) throw json({ error: 'Company group not found' }, { status: 404 });
 
-  // Load all groups for the create-branch modal group selector
-  const groupsRes = await apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>(
-    '/trpc/branches.listGroups',
-    { method: 'GET', cookie },
-  );
   const allGroups = groupsRes.ok ? groupsRes.data?.result?.data ?? [] : [];
-
   return { group, allGroups };
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request, params }: ActionFunctionArgs) {
   await requirePermission(request, 'branches.manage');
@@ -115,16 +120,74 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'toggleStatus') {
+    const res = await apiRequest('/trpc/branches.toggleGroupStatus', {
+      method: 'POST',
+      cookie,
+      body: { groupId },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to toggle status') }, { status: 400 });
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-export default function CompanyGroupDetailRoute() {
-  const { group, allGroups } = useLoaderData<typeof loader>();
+// ── Loading shell ───────────────────────────────────────────────────
+function GroupDetailLoadingShell() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title={<span className="inline-block h-6 w-36 rounded bg-app-hover animate-pulse align-middle" />}
+        backTo="/admin/settings/branch-groups"
+        mobileInlineActions
+        description={<span className="inline-block h-3.5 w-44 rounded bg-app-hover animate-pulse align-middle" />}
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Group tools"
+            triggerAriaLabel="Group toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button variant="secondary" size="sm" disabled className="opacity-60">Edit</Button>
+                <Button variant="primary" size="sm" disabled className="opacity-60">+ New Branch</Button>
+              </>
+            }
+          />
+        }
+      />
+      <OverviewStatStripSkeleton
+        count={3}
+        labels={['Branches', 'Members', 'Products']}
+      />
+      {/* Table skeleton matching branch rows */}
+      <div className="card !p-0 overflow-hidden">
+        <div className="divide-y divide-app-border">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="flex items-center gap-4 px-4 py-3">
+              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="h-4 w-14 rounded bg-app-hover animate-pulse" />
+              <div className="h-4 w-10 rounded bg-app-hover animate-pulse ml-auto" />
+              <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Page component ──────────────────────────────────────────────────
+function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id: string; name: string }> }) {
   const [editOpen, setEditOpen] = useState(false);
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
+  const [toggleConfirmOpen, setToggleConfirmOpen] = useState(false);
+  const [branchCode, setBranchCode] = useState('');
+  const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
 
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const branchFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const toggleFetcher = useFetcher<{ success?: boolean; error?: string }>();
 
   const editSurface = useFetcherActionSurface(editFetcher);
   const branchSurface = useFetcherActionSurface(branchFetcher);
@@ -137,9 +200,13 @@ export default function CompanyGroupDetailRoute() {
     successMessage: 'Branch created',
     skipErrorToast: createBranchOpen,
   });
+  useFetcherToast(toggleFetcher.data, {
+    successMessage: group.status === 'ACTIVE' ? 'Group deactivated' : 'Group activated',
+  });
+  useCloseOnFetcherSuccess(toggleFetcher, useCallback(() => setToggleConfirmOpen(false), []));
 
   useCloseOnFetcherSuccess(editFetcher, useCallback(() => setEditOpen(false), []));
-  useCloseOnFetcherSuccess(branchFetcher, useCallback(() => setCreateBranchOpen(false), []));
+  useCloseOnFetcherSuccess(branchFetcher, useCallback(() => { setCreateBranchOpen(false); setBranchCode(''); setCodeManuallyEdited(false); }, []));
 
   const isEditSubmitting = editFetcher.state !== 'idle';
   const isBranchSubmitting = branchFetcher.state !== 'idle';
@@ -148,8 +215,6 @@ export default function CompanyGroupDetailRoute() {
     { label: 'Branches', value: group.totals.branches },
     { label: 'Members', value: group.totals.members },
     { label: 'Products', value: group.totals.products },
-    { label: 'Commission Plans', value: group.totals.commissionPlans },
-    { label: 'Settlement Configs', value: group.totals.settlementConfigs },
   ];
 
   const branchColumns: CompactTableColumn<GroupBranch>[] = useMemo(() => [
@@ -157,7 +222,7 @@ export default function CompanyGroupDetailRoute() {
       key: 'name',
       header: 'Branch',
       render: (b) => (
-        <Link to={`/admin/branches/${b.id}`} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline">
+        <Link to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline">
           {b.name}
         </Link>
       ),
@@ -194,7 +259,7 @@ export default function CompanyGroupDetailRoute() {
       header: '',
       align: 'right',
       render: (b) => (
-        <TableActionButton to={`/admin/branches/${b.id}`} variant="primary">
+        <TableActionButton to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`} variant="primary">
           View
         </TableActionButton>
       ),
@@ -204,7 +269,7 @@ export default function CompanyGroupDetailRoute() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={group.name}
+        title={<span className="inline-flex items-center gap-2">{group.name} <StatusBadge status={group.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE'} /></span>}
         backTo="/admin/settings/branch-groups"
         mobileInlineActions
         description={`Created ${new Date(group.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`}
@@ -216,6 +281,14 @@ export default function CompanyGroupDetailRoute() {
             desktop={
               <>
                 <PageRefreshButton />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className={group.status === 'ACTIVE' ? '!text-danger-600 !border-danger-300 hover:!bg-danger-50 dark:!text-danger-400 dark:!border-danger-700 dark:hover:!bg-danger-900/20' : ''}
+                  onClick={() => setToggleConfirmOpen(true)}
+                >
+                  {group.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                </Button>
                 <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
                   Edit
                 </Button>
@@ -226,6 +299,14 @@ export default function CompanyGroupDetailRoute() {
             }
             sheet={({ closeSheet }) => (
               <div className="space-y-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className={`w-full justify-center ${group.status === 'ACTIVE' ? '!text-danger-600 !border-danger-300 hover:!bg-danger-50 dark:!text-danger-400 dark:!border-danger-700 dark:hover:!bg-danger-900/20' : ''}`}
+                  onClick={() => { closeSheet(); setToggleConfirmOpen(true); }}
+                >
+                  {group.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -248,10 +329,8 @@ export default function CompanyGroupDetailRoute() {
         }
       />
 
-      {/* Overview stats */}
       <OverviewStatStrip items={stats} mobileGrid />
 
-      {/* Branches table */}
       {group.branches.length === 0 ? (
         <EmptyState
           title="No branches yet"
@@ -264,7 +343,7 @@ export default function CompanyGroupDetailRoute() {
           rowKey={(b) => b.id}
           renderMobileCard={(b) => (
             <Link
-              to={`/admin/branches/${b.id}`}
+              to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`}
               className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
             >
               <div className="flex items-center justify-between gap-2">
@@ -381,6 +460,13 @@ export default function CompanyGroupDetailRoute() {
               minLength={2}
               maxLength={100}
               placeholder="e.g. Lagos Branch"
+              onChange={(e) => {
+                if (!codeManuallyEdited) {
+                  const words = e.target.value.trim().split(/\s+/).filter(Boolean);
+                  const auto = words.map((w) => w.slice(0, 2).toUpperCase()).join('').slice(0, 6);
+                  setBranchCode(auto);
+                }
+              }}
             />
             <TextInput
               label="Code (unique identifier)"
@@ -392,6 +478,11 @@ export default function CompanyGroupDetailRoute() {
               maxLength={20}
               className="uppercase"
               placeholder="e.g. LGS"
+              value={branchCode}
+              onChange={(e) => {
+                setCodeManuallyEdited(true);
+                setBranchCode(e.target.value.toUpperCase());
+              }}
             />
             <ModalFetcherInlineError message={branchSurface.errorMatchingIntent('createBranch')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
@@ -405,6 +496,47 @@ export default function CompanyGroupDetailRoute() {
           </branchFetcher.Form>
         </Modal>
       )}
+
+      {/* Activate / Deactivate Confirmation Modal */}
+      {toggleConfirmOpen && (
+        <Modal
+          open
+          onClose={() => setToggleConfirmOpen(false)}
+          maxWidth="max-w-sm"
+          role="alertdialog"
+          contentClassName="p-6 space-y-4"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">
+            {group.status === 'ACTIVE' ? 'Deactivate company group?' : 'Activate company group?'}
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            {group.status === 'ACTIVE'
+              ? `"${group.name}" and its ${group.totals.branches} branch${group.totals.branches !== 1 ? 'es' : ''} will be hidden from the branch filter. Existing data is preserved.`
+              : `"${group.name}" will be visible in the branch filter again.`}
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setToggleConfirmOpen(false)} disabled={toggleFetcher.state !== 'idle'}>
+              Cancel
+            </Button>
+            <Button
+              variant={group.status === 'ACTIVE' ? 'danger' : 'primary'}
+              size="sm"
+              disabled={toggleFetcher.state !== 'idle'}
+              loading={toggleFetcher.state !== 'idle'}
+              loadingText={group.status === 'ACTIVE' ? 'Deactivating...' : 'Activating...'}
+              onClick={() => toggleFetcher.submit({ intent: 'toggleStatus' }, { method: 'post' })}
+            >
+              {group.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
+}
+
+// ── Route export ────────────────────────────────────────────────────
+export default function CompanyGroupDetailRoute() {
+  const { group, allGroups } = useLoaderData<typeof loader>();
+  return <GroupDetailPage group={group} allGroups={allGroups} />;
 }

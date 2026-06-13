@@ -14,5 +14,6 @@ import { uuidv7Pk, timestampColumns } from './helpers';
 export const branchGroups = pgTable('branch_groups', {
   id: uuidv7Pk(),
   name: text('name').notNull(),
+  status: text('status').notNull().default('ACTIVE'),
   ...timestampColumns,
 });

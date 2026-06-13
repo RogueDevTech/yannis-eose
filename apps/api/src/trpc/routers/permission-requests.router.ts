@@ -47,11 +47,12 @@ export const permissionRequestsRouter = router({
           limit: input?.limit,
         },
         ctx.user,
+        ctx.effectiveBranchIds,
       );
     }),
 
   statusCounts: authedProcedure.query(async ({ ctx }) => {
-    return getService().statusCounts(ctx.user);
+    return getService().statusCounts(ctx.user, ctx.effectiveBranchIds);
   }),
 
   approve: authedProcedure

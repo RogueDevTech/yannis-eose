@@ -451,7 +451,13 @@ export class HrService {
     };
   }
 
-  async getPayoutSummary() {
+  async getPayoutSummary(effectiveBranchIds?: string[] | null) {
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (effectiveBranchIds?.length) {
+      conditions.push(
+        sql`${schema.payoutRecords.staffId} IN (SELECT user_id FROM user_branches WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)}))`,
+      );
+    }
     const results = await this.db
       .select({
         status: schema.payoutRecords.status,
@@ -459,6 +465,7 @@ export class HrService {
         total: sum(schema.payoutRecords.totalPayout),
       })
       .from(schema.payoutRecords)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .groupBy(schema.payoutRecords.status);
 
     const summary: Record<string, { count: number; total: string }> = {};
@@ -469,7 +476,18 @@ export class HrService {
   }
 
   /** Count of users with status='ACTIVE' (all roles). CEO dashboard widget. */
-  async countActiveStaff(): Promise<number> {
+  async countActiveStaff(effectiveBranchIds?: string[] | null): Promise<number> {
+    if (effectiveBranchIds?.length) {
+      const [row] = await this.db
+        .select({ count: sql<number>`COUNT(DISTINCT ${schema.userBranches.userId})` })
+        .from(schema.userBranches)
+        .innerJoin(schema.users, eq(schema.users.id, schema.userBranches.userId))
+        .where(and(
+          eq(schema.users.status, 'ACTIVE'),
+          inArray(schema.userBranches.branchId, effectiveBranchIds),
+        ));
+      return Number(row?.count ?? 0);
+    }
     const [row] = await this.db
       .select({ count: count() })
       .from(schema.users)

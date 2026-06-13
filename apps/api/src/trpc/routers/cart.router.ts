@@ -44,8 +44,8 @@ export const cartRouter = router({
    */
   listPending: permissionProcedure('cart.read')
     .input(z.object({ limit: z.number().int().min(1).max(100).default(50) }).optional())
-    .query(async ({ input }) => {
-      return getCartService().listPending(input?.limit ?? 50);
+    .query(async ({ input, ctx }) => {
+      return getCartService().listPending(input?.limit ?? 50, ctx.currentBranchId ?? null, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -96,6 +96,7 @@ export const cartRouter = router({
         includeRawPhone: canReveal,
         mediaBuyerId,
         branchId,
+        effectiveBranchIds: !branchId ? ctx.effectiveBranchIds : null,
         search: input?.search,
         startDate: input?.startDate,
         endDate: input?.endDate,
@@ -123,11 +124,12 @@ export const cartRouter = router({
         })
         .optional(),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return getCartService().listActivity({
         limit: input?.limit ?? 60,
         mediaBuyerId: input?.mediaBuyerId,
         branchId: input?.branchId,
+        effectiveBranchIds: !input?.branchId ? ctx.effectiveBranchIds : null,
       });
     }),
 
@@ -137,7 +139,7 @@ export const cartRouter = router({
    * (`currentBranchId` null).
    */
   getStats: permissionProcedure('cart.read').query(async ({ ctx }) => {
-    return getCartService().getStats(ctx.currentBranchId);
+    return getCartService().getStats(ctx.currentBranchId, undefined, undefined, ctx.effectiveBranchIds);
   }),
 
   /**
@@ -178,7 +180,7 @@ export const cartRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const mediaBuyerId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input?.mediaBuyerId;
-      return { count: await getCartService().countAbandoned({ mediaBuyerId, branchId: input?.branchId }) };
+      return { count: await getCartService().countAbandoned({ mediaBuyerId, branchId: input?.branchId, effectiveBranchIds: !input?.branchId ? ctx.effectiveBranchIds : null }) };
     }),
 
   /**
