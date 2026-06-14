@@ -8363,6 +8363,14 @@ export class OrdersService {
   ) {
     const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
 
+    // Resolve target branch name for timeline descriptions
+    const [targetBranch] = await this.db
+      .select({ name: schema.branches.name })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, targetBranchId))
+      .limit(1);
+    const targetBranchName = targetBranch?.name ?? 'unknown branch';
+
     for (const orderId of orderIds) {
       try {
         const [order] = await this.db
@@ -8412,11 +8420,12 @@ export class OrdersService {
         );
 
         const eventType = opts?.clearMediaBuyer ? 'FOLLOW_UP_REASSIGNED' : 'BRANCH_MOVED';
+        const actorDisplay = actor.name ?? 'unknown';
         const description = opts?.clearMediaBuyer
-          ? `Order reassigned for follow-up. Previous status: ${order.status}.`
+          ? `Order reassigned for follow-up by ${actorDisplay}. Previous status: ${order.status}.`
           : isPreConfirm
-            ? `Order moved to a different branch. Previous status: ${order.status}. Status reset to Unprocessed.`
-            : `Order moved to a different branch. Status preserved: ${order.status}.`;
+            ? `Transferred to ${targetBranchName} by ${actorDisplay}. Status reset to Unprocessed.`
+            : `Transferred to ${targetBranchName} by ${actorDisplay}. Status preserved: ${order.status}.`;
 
         await this.writeTimelineEvent({
           orderId,
