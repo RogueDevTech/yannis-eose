@@ -217,6 +217,8 @@ export interface OrderDetailStreamData {
   callablePhone?: { phone: string; isDialable: boolean } | null;
   /** True when this is a follow-up order (lives in follow_up_orders, not orders). */
   isFollowUpOrder?: boolean;
+  /** True when this is a cart order (lives in cart_orders, not orders). */
+  isCartOrder?: boolean;
 }
 
 /** Passed from route when user has view-only access (e.g. Media Buyer) */

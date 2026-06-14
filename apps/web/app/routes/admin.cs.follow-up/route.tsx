@@ -41,8 +41,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const isCloser = user?.role === 'CS_CLOSER';
   const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT';
   const isHoCS = user?.role === 'HEAD_OF_CS';
-  // Admins + HoCS see branch summary so they can drill into a specific branch. Closers go straight to orders.
-  const view = url.searchParams.get('view') || (isAdmin || isHoCS ? 'batches' : 'orders');
+  // Everyone lands on the orders list — same pattern as Order Funnel and Cart Orders.
+  const view = url.searchParams.get('view') || 'orders';
 
   // ── Follow-Up Orders view ────────────────────────────────────
   if (view === 'orders') {
@@ -84,7 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // branches.list is also used for the "move to branch" picker, so one call serves both.
     const pageData = (async () => {
       try {
-      const [ordersRes, countsRes, closersRes, branchesRes, workloadRes] = await Promise.all([
+      const [ordersRes, countsRes, closersRes, branchesRes] = await Promise.all([
         apiRequest<unknown>(`/trpc/orders.followUpOrdersList?input=${listInputStr}`, deferredOpt),
         apiRequest<unknown>(`/trpc/orders.followUpOrdersStatusCounts?input=${encodeURIComponent(JSON.stringify({
           ...(branchId ? { branchId } : {}),
@@ -93,9 +93,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }))}`, deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null })),
         apiRequest<unknown>('/trpc/orders.listCSClosersWithBranches?input=%7B%7D', deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null })),
         apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>('/trpc/branches.list', { method: 'GET', cookie }).catch(() => ({ ok: false as const, status: 500, data: null })),
-        isCloser
-          ? apiRequest<unknown>('/trpc/orders.myCSWorkload', deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null }))
-          : Promise.resolve(null),
       ]);
       const ordersRaw = (ordersRes.ok ? (ordersRes.data as { result?: { data?: unknown } })?.result?.data : null) as { orders: unknown[]; pagination: { total: number } } | null;
       const countsData = (countsRes.ok ? (countsRes.data as { result?: { data?: unknown } })?.result?.data : null) as Record<string, number> | null;
@@ -103,10 +100,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const closersData = (closersRes.ok ? (closersRes.data as { result?: { data?: CloserItem[] } })?.result?.data : null) ?? [];
       type BranchItem = { id: string; name: string };
       const branchesData: BranchItem[] = (branchesRes.ok ? (branchesRes.data as { result?: { data?: BranchItem[] } })?.result?.data : null) ?? [];
-      type WorkloadData = { agentId: string; agentName: string; capacity: number; pendingCount: number; todayClosesCount?: number; lastActionAt: string | null };
-      const workloadData: WorkloadData | null = workloadRes && (workloadRes as { ok: boolean }).ok
-        ? ((workloadRes as { data?: { result?: { data?: WorkloadData } } }).data?.result?.data ?? null)
-        : null;
 
       // Resolve branch name from the already-fetched branches list (no extra call).
       const branchName = branchId
@@ -145,11 +138,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statusCounts: countsData ?? {},
         csClosersForFilter: closersData,
         branchesForMove: branchesData,
-        myWorkload: workloadData,
         branchName,
       };
       } catch {
-        return { orders: [] as Order[], total: 0, totalPages: 1, statusCounts: {} as Record<string, number>, csClosersForFilter: [] as Array<{ agentId: string; agentName: string }>, branchesForMove: [] as Array<{ id: string; name: string }>, myWorkload: null, branchName: '' };
+        return { orders: [] as Order[], total: 0, totalPages: 1, statusCounts: {} as Record<string, number>, csClosersForFilter: [] as Array<{ agentId: string; agentName: string }>, branchesForMove: [] as Array<{ id: string; name: string }>, branchName: '' };
       }
     })();
 
@@ -754,7 +746,6 @@ export default function FollowUpRoute() {
       statusCounts: Record<string, number>;
       csClosersForFilter: Array<{ agentId: string; agentName: string }>;
       branchesForMove: Array<{ id: string; name: string }>;
-      myWorkload: { agentId: string; agentName: string; capacity: number; pendingCount: number; todayClosesCount?: number; lastActionAt: string | null } | null;
       branchName: string;
     };
     const baseShellProps = {
@@ -771,7 +762,7 @@ export default function FollowUpRoute() {
       canBulkPick: !shell?.isCloser,
       canAssignDirectly: !shell?.isCloser,
       orderDetailFrom: 'followup' as const,
-      backTo: shell?.backTo || (shell?.isCloser ? undefined : '/admin/cs/follow-up'),
+      backTo: shell?.backTo || undefined,
       detailBasePath: '/admin/orders',
       hideOfflineAndCartStats: true,
       filters: {
@@ -805,7 +796,7 @@ export default function FollowUpRoute() {
             statusCounts={data.statusCounts ?? {}}
             csClosersForFilter={data.csClosersForFilter ?? []}
             branchesForMove={data.branchesForMove ?? []}
-            myWorkload={data.myWorkload ?? null}
+            myWorkload={null}
             excludeStatuses={['REMITTED']}
             pageTitle={pageTitle}
             pageDescription={pageDescription}

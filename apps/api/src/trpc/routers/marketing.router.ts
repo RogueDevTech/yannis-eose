@@ -848,7 +848,7 @@ export const marketingRouter = router({
         getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds),
         getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
-        getCartService().countAbandoned({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined, effectiveBranchIds: eIds, startDate: input.startDate, endDate: input.endDate }),
+        getCartService().countAllCarts({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined, effectiveBranchIds: eIds, startDate: input.startDate, endDate: input.endDate }),
       ]);
 
       return {
@@ -1167,9 +1167,8 @@ export const marketingRouter = router({
           null, // Forms are global — never branch-scoped (but company-group-scoped via effectiveBranchIds)
           { enrichProductIds: false, effectiveBranchIds: ctx.effectiveBranchIds }, // Orders page only needs id+name for the filter dropdown
         ),
-        // Open abandoned-cart count for the overview strip — scoped to the same
-        // media buyer / branch / date range the rest of the bundle uses.
-        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId, effectiveBranchIds: ctx.effectiveBranchIds, startDate, endDate }),
+        // Total cart count for marketing record — all captured carts (not just open ones).
+        getCartService().countAllCarts({ mediaBuyerId: metricsBuyerId, branchId, effectiveBranchIds: ctx.effectiveBranchIds, startDate, endDate }),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
           ordersScope.mediaBuyerId,

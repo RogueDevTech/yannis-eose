@@ -7,7 +7,6 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatNaira } from '~/lib/format-amount';
-import { DashboardFollowUpSection } from './dashboard-secondary-context';
 import type { CEODashboardData } from '~/features/ceo/types';
 
 function fmt(n: number): string {
@@ -115,9 +114,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             }`}>
               {marketingSafe.roas.toFixed(2)}x
             </p>
-            <p className="text-sm text-app-fg-muted mt-1">
-              Delivered Revenue / Ad Spend = <span className="font-semibold text-success-600 dark:text-success-400">{fmt(marketingSafe.deliveredRevenue)}</span> / <span className="font-semibold text-danger-600 dark:text-danger-400">{fmt(marketingSafe.totalSpend)}</span>
-            </p>
+            <div className="text-sm text-app-fg-muted mt-1 flex flex-col md:flex-row md:gap-3">
+              <p>Delivered Revenue: <span className="font-semibold text-success-600 dark:text-success-400">{fmt(marketingSafe.deliveredRevenue)}</span></p>
+              <p>Ad Spend: <span className="font-semibold text-danger-600 dark:text-danger-400">{fmt(marketingSafe.totalSpend)}</span></p>
+            </div>
             <Link
               to="/admin/ceo"
               className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-500 hover:text-brand-600"
@@ -167,14 +167,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 {
                   label: 'Offline',
                   value: offlineCount,
-                  valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+                  valueClassName: 'text-purple-600 dark:text-purple-400',
                   title: 'Orders created manually via offline order',
                   to: salesLink({ orderSource: 'offline' }),
                 },
                 {
                   label: 'Unassigned',
                   value: unassigned,
-                  valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                  valueClassName: 'text-warning-600 dark:text-warning-400',
                   to: salesLink({ status: 'UNPROCESSED' }),
                 },
                 {
@@ -216,7 +216,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 {
                   label: 'Deleted',
                   value: deleted,
-                  valueClassName: deleted > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
+                  valueClassName: 'text-danger-600 dark:text-danger-400',
                   to: salesLink({ status: 'DELETED' }),
                 },
               ]}
@@ -226,79 +226,164 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       })()}
 
       {/* ── Follow-Up Orders ── */}
-      <DashboardFollowUpSection fallback={<OverviewStatStripSkeleton count={6} />}>
-        {(sc) => {
-          const unassigned = sc['UNPROCESSED'] ?? 0;
-          const assigned = sc['CS_ASSIGNED'] ?? 0;
-          const engaged = sc['CS_ENGAGED'] ?? 0;
-          const confirmed =
-            (sc['CONFIRMED'] ?? 0) +
-            (sc['AGENT_ASSIGNED'] ?? 0) +
-            (sc['DISPATCHED'] ?? 0) +
-            (sc['IN_TRANSIT'] ?? 0);
-          const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
-          const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
-          return (
-            <div>
-              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-                Follow-Up Orders
-              </h2>
-              <OverviewStatStrip
-                mobileGrid
-                tileClassName="!py-2.5"
-                items={[
-                  {
-                    label: 'Total',
-                    value: total,
-                    valueClassName: 'text-app-fg',
-                    to: '/admin/cs/follow-up?view=orders',
-                  },
-                  {
-                    label: 'Unassigned',
-                    value: unassigned,
-                    valueClassName: 'text-warning-600 dark:text-warning-400',
-                    to: '/admin/cs/follow-up?view=orders&status=UNPROCESSED',
-                  },
-                  {
-                    label: 'Assigned',
-                    value: assigned,
-                    valueClassName: 'text-info-600 dark:text-info-400',
-                    to: '/admin/cs/follow-up?view=orders&status=CS_ASSIGNED',
-                  },
-                  {
-                    label: 'Engaged',
-                    value: engaged,
-                    valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                    to: '/admin/cs/follow-up?view=orders&status=CS_ENGAGED',
-                  },
-                  {
-                    label: 'Confirmed',
-                    value: confirmed,
-                    valueClassName: 'text-brand-600 dark:text-brand-400',
-                    to: '/admin/cs/follow-up?view=orders&status=CONFIRMED',
-                  },
-                  {
-                    label: 'Delivered',
-                    value: delivered,
-                    valueClassName: 'text-success-600 dark:text-success-400',
-                    to: '/admin/cs/follow-up?view=orders&status=DELIVERED',
-                  },
-                  {
-                    label: 'CR',
-                    value: pct(total > 0 ? (confirmed + delivered) / total * 100 : 0),
-                    valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
-                  },
-                  {
-                    label: 'DR',
-                    value: pct(total > 0 ? delivered / total * 100 : 0),
-                    valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
-                  },
-                ]}
-              />
-            </div>
-          );
-        }}
-      </DashboardFollowUpSection>
+      {(() => {
+        const sc = data?.followUpCounts ?? {};
+        const unassigned = sc['UNPROCESSED'] ?? 0;
+        const assigned = sc['CS_ASSIGNED'] ?? 0;
+        const engaged = sc['CS_ENGAGED'] ?? 0;
+        const confirmed =
+          (sc['CONFIRMED'] ?? 0) +
+          (sc['AGENT_ASSIGNED'] ?? 0) +
+          (sc['DISPATCHED'] ?? 0) +
+          (sc['IN_TRANSIT'] ?? 0);
+        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Follow-Up Orders
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="!py-2.5"
+              items={[
+                {
+                  label: 'Total',
+                  value: total,
+                  valueClassName: 'text-app-fg',
+                  to: '/admin/cs/follow-up?view=orders',
+                },
+                {
+                  label: 'Unassigned',
+                  value: unassigned,
+                  valueClassName: 'text-warning-600 dark:text-warning-400',
+                  to: '/admin/cs/follow-up?view=orders&status=UNPROCESSED',
+                },
+                {
+                  label: 'Assigned',
+                  value: assigned,
+                  valueClassName: 'text-info-600 dark:text-info-400',
+                  to: '/admin/cs/follow-up?view=orders&status=CS_ASSIGNED',
+                },
+                {
+                  label: 'Engaged',
+                  value: engaged,
+                  valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                  to: '/admin/cs/follow-up?view=orders&status=CS_ENGAGED',
+                },
+                {
+                  label: 'Confirmed',
+                  value: confirmed,
+                  valueClassName: 'text-brand-600 dark:text-brand-400',
+                  to: '/admin/cs/follow-up?view=orders&status=CONFIRMED',
+                },
+                {
+                  label: 'Delivered',
+                  value: delivered,
+                  valueClassName: 'text-success-600 dark:text-success-400',
+                  to: '/admin/cs/follow-up?view=orders&status=DELIVERED',
+                },
+                {
+                  label: 'CR',
+                  value: pct(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                  valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                },
+                {
+                  label: 'DR',
+                  value: pct(total > 0 ? delivered / total * 100 : 0),
+                  valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
+                },
+                {
+                  label: 'Deleted',
+                  value: sc['DELETED'] ?? 0,
+                  valueClassName: 'text-danger-600 dark:text-danger-400',
+                  to: '/admin/cs/follow-up?view=orders&status=DELETED',
+                },
+              ]}
+            />
+          </div>
+        );
+      })()}
+
+      {/* ── Cart Orders ── */}
+      {(() => {
+        const sc = data?.cartOrdersCounts ?? {};
+        const unassigned = sc['UNPROCESSED'] ?? 0;
+        const assigned = sc['CS_ASSIGNED'] ?? 0;
+        const engaged = sc['CS_ENGAGED'] ?? 0;
+        const confirmed =
+          (sc['CONFIRMED'] ?? 0) +
+          (sc['AGENT_ASSIGNED'] ?? 0) +
+          (sc['DISPATCHED'] ?? 0) +
+          (sc['IN_TRANSIT'] ?? 0);
+        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Cart Orders
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="!py-2.5"
+              items={[
+                {
+                  label: 'Total',
+                  value: total,
+                  valueClassName: 'text-app-fg',
+                  to: '/admin/sales/cart-orders',
+                },
+                {
+                  label: 'Unassigned',
+                  value: unassigned,
+                  valueClassName: 'text-warning-600 dark:text-warning-400',
+                  to: '/admin/sales/cart-orders?status=UNPROCESSED',
+                },
+                {
+                  label: 'Assigned',
+                  value: assigned,
+                  valueClassName: 'text-info-600 dark:text-info-400',
+                  to: '/admin/sales/cart-orders?status=CS_ASSIGNED',
+                },
+                {
+                  label: 'Engaged',
+                  value: engaged,
+                  valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                  to: '/admin/sales/cart-orders?status=CS_ENGAGED',
+                },
+                {
+                  label: 'Confirmed',
+                  value: confirmed,
+                  valueClassName: 'text-brand-600 dark:text-brand-400',
+                  to: '/admin/sales/cart-orders?status=CONFIRMED',
+                },
+                {
+                  label: 'Delivered',
+                  value: delivered,
+                  valueClassName: 'text-success-600 dark:text-success-400',
+                  to: '/admin/sales/cart-orders?status=DELIVERED',
+                },
+                {
+                  label: 'CR',
+                  value: pct(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                  valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                },
+                {
+                  label: 'DR',
+                  value: pct(total > 0 ? delivered / total * 100 : 0),
+                  valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
+                },
+                {
+                  label: 'Deleted',
+                  value: sc['DELETED'] ?? 0,
+                  valueClassName: 'text-danger-600 dark:text-danger-400',
+                  to: '/admin/sales/cart-orders?status=DELETED',
+                },
+              ]}
+            />
+          </div>
+        );
+      })()}
 
       {/* ── Marketing Spend ── */}
       <div>
@@ -346,7 +431,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             {
               label: 'Revenue',
               value: fmt(revenue),
-              valueClassName: revenue > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              valueClassName: 'text-success-600 dark:text-success-400',
               title: 'Revenue from delivered orders in selected period',
             },
           ]}

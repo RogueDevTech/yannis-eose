@@ -1905,7 +1905,7 @@ function OrdersListPageImpl({
             ...PIPELINE_KEYS.map((s) => STATUS_LABELS[s] ?? formatStatus(s)),
             'CR', 'DR',
             ...(PIPELINE_KEYS.includes('DELETED') ? [] : ['Deleted']),
-            ...(hideOfflineAndCartStats ? [] : ['Cart Abandonment']),
+            ...(!hideOfflineAndCartStats && enableFromCartStatusOption ? ['Cart Abandonment'] : []),
           ]}
         />
       ) : (
@@ -1949,16 +1949,14 @@ function OrdersListPageImpl({
               title: 'Delivery Rate — delivered / total orders',
             },
             ...(deletedItem ? [deletedItem] : []),
-            ...(hideOfflineAndCartStats ? [] : [{
+            ...(!hideOfflineAndCartStats && enableFromCartStatusOption ? [{
               label: 'Cart Abandonment',
               value: cartAbandonmentCount ?? 0,
               valueClassName: (cartAbandonmentCount ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
               title: 'Captured carts not yet recovered — tap to view the cart backlog',
               active: selectedStatus === FROM_CART_STATUS_VALUE,
-              ...(enableFromCartStatusOption
-                ? { onClick: () => handleStatusSelect(FROM_CART_STATUS_VALUE) }
-                : {}),
-            }]),
+              onClick: () => handleStatusSelect(FROM_CART_STATUS_VALUE),
+            }] : []),
           ]}
         />
       )}

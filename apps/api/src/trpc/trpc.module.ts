@@ -88,6 +88,9 @@ import { OnboardingModule } from '../onboarding/onboarding.module';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import { setOnboardingService } from './routers/onboarding.router';
 import { setSettingsCacheService } from './routers/settings.router';
+import { CartOrdersModule } from '../cart-orders/cart-orders.module';
+import { CartOrdersService } from '../cart-orders/cart-orders.service';
+import { setCartOrdersService } from './routers/cart-orders.router';
 
 @Module({
   imports: [
@@ -101,6 +104,7 @@ import { setSettingsCacheService } from './routers/settings.router';
     CacheModule,
     ReportsModule,
     OnboardingModule,
+    CartOrdersModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -133,6 +137,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly branchTeamsService: BranchTeamsService,
     private readonly roleTemplatesService: RoleTemplatesService,
     private readonly onboardingService: OnboardingService,
+    private readonly cartOrdersService: CartOrdersService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -192,6 +197,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setPermissionsDb(this.db as Parameters<typeof setPermissionsDb>[0]);
     setPermissionsCacheService(this.cacheService);
     setOnboardingService(this.onboardingService);
+    setCartOrdersService(this.cartOrdersService);
   }
 
   configure(consumer: MiddlewareConsumer) {
