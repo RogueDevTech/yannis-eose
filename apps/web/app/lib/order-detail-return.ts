@@ -3,17 +3,18 @@
  * link uses `?from=` so SuperAdmin / HoCS / etc. return to the list they came from,
  * instead of inferring only from role (which defaulted CS for admins).
  */
-export type OrderDetailListFrom = 'logistics' | 'cs' | 'marketing' | 'followup';
+export type OrderDetailListFrom = 'logistics' | 'cs' | 'marketing' | 'followup' | 'cart-orders';
 
 const FROM_TO_PATH: Record<OrderDetailListFrom, string> = {
   logistics: '/admin/logistics/orders',
   cs: '/admin/sales/orders',
   marketing: '/admin/marketing/orders',
   followup: '/admin/cs/follow-up?view=orders',
+  'cart-orders': '/admin/sales/cart-orders',
 };
 
 export function ordersListPathForDetailFrom(from: string | null): string | null {
-  if (from === 'logistics' || from === 'cs' || from === 'marketing' || from === 'followup') {
+  if (from === 'logistics' || from === 'cs' || from === 'marketing' || from === 'followup' || from === 'cart-orders') {
     return FROM_TO_PATH[from];
   }
   return null;

@@ -80,6 +80,11 @@ export interface CEODashboardData {
   }>;
   activeStaffCount: number;
 
+  /** Follow-up order per-status counts for dashboard stat strip. */
+  followUpCounts?: Record<string, number>;
+  /** Cart order per-status counts for dashboard stat strip. */
+  cartOrdersCounts?: Record<string, number>;
+
   /** Daily buckets for Revenue & orders over time chart (Phase 2). */
   timeSeries?: { date: string; revenue: number; orderCount: number; createdCount?: number }[];
 

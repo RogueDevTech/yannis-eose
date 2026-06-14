@@ -525,6 +525,22 @@ export {
   toggleAutomationRuleSchema,
 } from './push';
 
+// Cart Orders validators
+export {
+  listCartOrdersSchema,
+  cartOrderDetailSchema,
+  assignCartOrderSchema,
+  bulkAssignCartOrdersSchema,
+  transitionCartOrderSchema,
+} from './cart-orders';
+
+export type {
+  ListCartOrdersInput,
+  AssignCartOrderInput,
+  BulkAssignCartOrdersInput,
+  TransitionCartOrderInput,
+} from './cart-orders';
+
 export type {
   SavePushSubscriptionInput,
   RemovePushSubscriptionInput,

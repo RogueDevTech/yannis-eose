@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 /** Valid source statuses for follow-up rules — only statuses where orders can go stale. */
 export const followUpRuleSourceStatuses = [
-  'CART_ABANDONMENT',
+  // CART_ABANDONMENT removed — cart orders now have a standalone pipeline (cart-orders module).
   'UNPROCESSED',
   'CS_ASSIGNED',
   'CS_ENGAGED',

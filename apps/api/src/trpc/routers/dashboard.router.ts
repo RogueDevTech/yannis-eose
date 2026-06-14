@@ -7,6 +7,8 @@ import type { HrService } from '../../hr/hr.service';
 import type { InventoryService } from '../../inventory/inventory.service';
 import { CacheService } from '../../common/cache/cache.service';
 import { nigeriaToday, nigeriaDayStart, nigeriaDayEnd } from '../../common/utils/date-range';
+import { getFollowUpConfigService } from './orders.router';
+import { getCartOrdersService } from './cart-orders.router';
 
 // Factory pattern: services injected from NestJS module
 let ordersService: OrdersService | null = null;
@@ -222,6 +224,8 @@ async function _ceoOverviewFetch(params: {
     deliveriesByProduct: deliveriesByProduct ?? [],
     stockPerProduct: stockPerProduct ?? [],
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
+    followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+    cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
   };
 }
 
@@ -439,10 +443,12 @@ export const dashboardRouter = router({
     const startIso = nigeriaDayStart(todayWat).toISOString();
     const endIso = nigeriaDayEnd(todayWat).toISOString();
 
-    const [todayCounts, supplementary, pendingApprovals] = await Promise.all([
+    const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({})),
       ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
+      getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, undefined, undefined, ctx.effectiveBranchIds).catch(() => ({})),
+      getCartOrdersService().getStatusCounts(ctx.currentBranchId, undefined, undefined, undefined, ctx.effectiveBranchIds).catch(() => ({})),
     ]);
 
     const today = (todayCounts ?? {}) as Record<string, number>;
@@ -472,6 +478,8 @@ export const dashboardRouter = router({
         delivered: (today['DELIVERED'] ?? 0) + (today['REMITTED'] ?? 0),
       },
       pendingApprovals,
+      followUpCounts: followUpCounts as Record<string, number>,
+      cartOrdersCounts: cartOrdersCounts as Record<string, number>,
     };
   }),
 });
