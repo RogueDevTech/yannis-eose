@@ -49,8 +49,15 @@ export function createContext(req: Request, res: Response): TrpcContext {
   // HR, etc.) must be scoped to that group's branches — they are
   // "company-wide", not "all-companies-wide".
   const effectiveBranchIds =
+    // Explicit multi-branch selection (header checkbox switcher)
     selectedSubset
       ? selectedSubset
+    // A specific branch is selected → scope to that single branch so that
+    // services using only effectiveBranchIds (aggregates, counts) don't
+    // leak data from the user's other assigned branches.
+      : currentBranchId
+        ? [currentBranchId]
+    // No specific branch → fall back to user's assigned branches / global
       : user?.scopeGlobal
         ? (activeGroupId && user?.branchIds?.length ? user.branchIds : null)
         : (user?.branchIds?.length ? user.branchIds : null);

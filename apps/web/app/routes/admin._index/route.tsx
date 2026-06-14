@@ -38,7 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let endDate = url.searchParams.get('endDate') ?? undefined;
 
   if (!periodAllTime && !startDate && !endDate) {
-    const useMonthDefault = role === 'CS_CLOSER' || role === 'HEAD_OF_LOGISTICS';
+    const useMonthDefault = role === 'CS_CLOSER' || role === 'HEAD_OF_CS' || role === 'HEAD_OF_LOGISTICS';
     const range = useMonthDefault ? defaultThisMonthRange() : defaultTodayRange();
     startDate = range.startDate;
     endDate = range.endDate;

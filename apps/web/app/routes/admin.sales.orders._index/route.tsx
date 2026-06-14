@@ -466,8 +466,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // server-side authz/scope as the visible list applies.
     bulkSelectAllMatchingInput: JSON.stringify(listInput),
     deferredSecondary,
-    enableFromCartStatusOption: true,
-    isCartAbandonmentView: fromCart,
+    enableFromCartStatusOption: false,
+    isCartAbandonmentView: false,
   };
   })();
 

@@ -831,8 +831,11 @@ export class AuthService {
     // When a group is active and no explicit branch subset was selected,
     // resolve the group's branch IDs so effectiveBranchIds is correctly scoped
     // (user.branchIds may span multiple groups for SuperAdmin).
+    // BUT: only do this when the user is viewing the group level (branchId is
+    // null).  When a specific branch is selected, selectedBranchIds must stay
+    // null so that queries scope to currentBranchId alone.
     let groupBranchIds = resolvedSelectedIds;
-    if (!groupBranchIds && activeGroupId) {
+    if (!groupBranchIds && activeGroupId && !branchId) {
       const groupBranches = await this.db
         .select({ id: schema.branches.id })
         .from(schema.branches)

@@ -59,8 +59,92 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Order ID required', { status: 400 });
   }
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
+  const url = new URL(request.url);
+  const fromCartOrders = url.searchParams.get('from') === 'cart-orders';
 
   const orderDetailPromise = (async (): Promise<OrderDetailLoaderResult> => {
+    // When navigating from Cart Orders page, try cart_orders table first
+    // to avoid hitting the stale graduated copy in the orders table.
+    if (fromCartOrders) {
+      const coRes = await apiRequest<unknown>(
+        `/trpc/cartOrders.getById?input=${encodeURIComponent(JSON.stringify({ id: orderId }))}`,
+        deferredOpt,
+      ).catch(() => ({ ok: false as const, status: 500, data: null }));
+      if (coRes.ok) {
+        const coData = (coRes.data as { result?: { data?: Record<string, unknown> } })?.result?.data;
+        if (coData) {
+          const coItems = (coData.orderItems as Array<Record<string, unknown>> | undefined) ?? [];
+          const coTimeline = (coData.timeline as Array<Record<string, unknown>> | undefined) ?? [];
+          const order: OrderDetail = {
+            id: coData.id as string,
+            orderNumber: coData.orderNumber != null ? Number(coData.orderNumber) : null,
+            customerName: coData.customerName as string,
+            customerPhoneDisplay: (coData.customerPhone as string) ? `••••${(coData.customerPhone as string).slice(-4)}` : '••••••••',
+            customerAddress: (coData.customerAddress as string) ?? null,
+            deliveryAddress: (coData.deliveryAddress as string) ?? null,
+            deliveryNotes: (coData.deliveryNotes as string) ?? null,
+            status: coData.status as string,
+            totalAmount: (coData.totalAmount as string) ?? null,
+            landedCost: (coData.landedCost as string) ?? null,
+            deliveryFee: (coData.deliveryFee as string) ?? null,
+            createdAt: coData.createdAt as string,
+            confirmedAt: (coData.confirmedAt as string) ?? null,
+            allocatedAt: (coData.allocatedAt as string) ?? null,
+            dispatchedAt: (coData.dispatchedAt as string) ?? null,
+            deliveredAt: (coData.deliveredAt as string) ?? null,
+            assignedCsId: (coData.assignedCsId as string) ?? null,
+            assignedCsName: (coData.assignedCsName as string) ?? null,
+            mediaBuyerId: (coData.mediaBuyerId as string) ?? null,
+            mediaBuyerName: (coData.mediaBuyerName as string) ?? null,
+            campaignId: (coData.campaignId as string) ?? null,
+            campaignName: (coData.campaignName as string) ?? null,
+            branchId: (coData.servicingBranchId as string) ?? (coData.branchId as string) ?? null,
+            paymentMethod: (coData.paymentMethod as string) ?? null,
+            paymentStatus: (coData.paymentStatus as string) ?? null,
+            customerEmail: (coData.customerEmail as string) ?? null,
+            customerGender: (coData.customerGender as string) ?? null,
+            deliveryState: (coData.deliveryState as string) ?? null,
+            preferredDeliveryDate: (coData.preferredDeliveryDate as string) ?? null,
+            frozenForFollowUp: false,
+            orderItems: coItems.map((it) => ({
+              id: it.id as string,
+              productId: it.productId as string,
+              productName: (it.productName as string) ?? null,
+              quantity: it.quantity as number,
+              unitPrice: it.unitPrice as string,
+              offerLabel: (it.offerLabel as string) ?? null,
+            })),
+            callLogs: [],
+            allowedTransitions: (() => {
+              const s = coData.status as string;
+              const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
+              if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
+              if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
+              if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
+              if (s === 'CONFIRMED') return elevated ? ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'] : ['DELIVERED', 'DELETED'];
+              if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
+              if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
+              if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
+              if (s === 'DELIVERED') return ['REMITTED'];
+              if (s === 'DELETED') return ['UNPROCESSED'];
+              return ['DELETED'];
+            })(),
+          };
+          const coPhone = (coData.customerPhone as string) ?? null;
+          return {
+            order,
+            voipEnabled: false,
+            voipProviderDisplayName: '',
+            latestCall: Promise.resolve(null),
+            itemOffers: [],
+            callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
+            isFollowUpOrder: false,
+            isCartOrder: true,
+          };
+        }
+      }
+    }
+
     const [orderRes, voipRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
@@ -126,13 +210,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 unitPrice: it.unitPrice as string,
                 offerLabel: (it.offerLabel as string) ?? null,
               })),
-              // Synthesise a MANUAL_CALL call log if timeline has a call event — gates the Confirm button.
-              callLogs: fuTimeline.some((t) =>
-                ['ORDER_MANUALLY_ASSIGNED', 'MANUAL_CALL'].includes((t.eventType as string) ?? '') ||
-                ((t.description as string) ?? '').toLowerCase().includes('call'),
-              )
-                ? [{ id: 'fu-call', callStatus: 'COMPLETED', durationSeconds: 60, startedAt: fuData.createdAt as string }]
-                : [],
+              callLogs: [],
               // Follow-up lifecycle: UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → DELIVERED
               // No skipping — must go through engagement before confirming.
               allowedTransitions: (() => {
@@ -158,6 +236,83 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               itemOffers: [],
               callablePhone: fuPhone ? { phone: fuPhone, isDialable: true } : null,
               isFollowUpOrder: true,
+            };
+          }
+        }
+        // Fallback 2: check cart_orders table — the ID may be a cart order
+        const coRes = await apiRequest<unknown>(
+          `/trpc/cartOrders.getById?input=${encodeURIComponent(JSON.stringify({ id: orderId }))}`,
+          deferredOpt,
+        ).catch(() => ({ ok: false as const, status: 500, data: null }));
+        if (coRes.ok) {
+          const coData = (coRes.data as { result?: { data?: Record<string, unknown> } })?.result?.data;
+          if (coData) {
+            const coItems = (coData.orderItems as Array<Record<string, unknown>> | undefined) ?? [];
+            const coTimeline = (coData.timeline as Array<Record<string, unknown>> | undefined) ?? [];
+            const order: OrderDetail = {
+              id: coData.id as string,
+              orderNumber: coData.orderNumber != null ? Number(coData.orderNumber) : null,
+              customerName: coData.customerName as string,
+              customerPhoneDisplay: (coData.customerPhone as string) ? `••••${(coData.customerPhone as string).slice(-4)}` : '••••••••',
+              customerAddress: (coData.customerAddress as string) ?? null,
+              deliveryAddress: (coData.deliveryAddress as string) ?? null,
+              deliveryNotes: (coData.deliveryNotes as string) ?? null,
+              status: coData.status as string,
+              totalAmount: (coData.totalAmount as string) ?? null,
+              landedCost: (coData.landedCost as string) ?? null,
+              deliveryFee: (coData.deliveryFee as string) ?? null,
+              createdAt: coData.createdAt as string,
+              confirmedAt: (coData.confirmedAt as string) ?? null,
+              allocatedAt: (coData.allocatedAt as string) ?? null,
+              dispatchedAt: (coData.dispatchedAt as string) ?? null,
+              deliveredAt: (coData.deliveredAt as string) ?? null,
+              assignedCsId: (coData.assignedCsId as string) ?? null,
+              assignedCsName: (coData.assignedCsName as string) ?? null,
+              mediaBuyerId: (coData.mediaBuyerId as string) ?? null,
+              mediaBuyerName: (coData.mediaBuyerName as string) ?? null,
+              campaignId: (coData.campaignId as string) ?? null,
+              campaignName: (coData.campaignName as string) ?? null,
+              branchId: (coData.servicingBranchId as string) ?? (coData.branchId as string) ?? null,
+              paymentMethod: (coData.paymentMethod as string) ?? null,
+              paymentStatus: (coData.paymentStatus as string) ?? null,
+              customerEmail: (coData.customerEmail as string) ?? null,
+              customerGender: (coData.customerGender as string) ?? null,
+              deliveryState: (coData.deliveryState as string) ?? null,
+              preferredDeliveryDate: (coData.preferredDeliveryDate as string) ?? null,
+              frozenForFollowUp: false,
+              orderItems: coItems.map((it) => ({
+                id: it.id as string,
+                productId: it.productId as string,
+                productName: (it.productName as string) ?? null,
+                quantity: it.quantity as number,
+                unitPrice: it.unitPrice as string,
+                offerLabel: (it.offerLabel as string) ?? null,
+              })),
+              callLogs: [],
+              allowedTransitions: (() => {
+                const s = coData.status as string;
+                const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
+                if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
+                if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
+                if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
+                if (s === 'CONFIRMED') return elevated ? ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'] : ['DELIVERED', 'DELETED'];
+                if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
+                if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
+                if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
+                if (s === 'DELIVERED') return ['REMITTED'];
+                return ['DELETED'];
+              })(),
+            };
+            const coPhone = (coData.customerPhone as string) ?? null;
+            return {
+              order,
+              voipEnabled: false,
+              voipProviderDisplayName: '',
+              latestCall: Promise.resolve(null),
+              itemOffers: [],
+              callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
+              isFollowUpOrder: false,
+              isCartOrder: true,
             };
           }
         }
@@ -488,10 +643,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const reason = formData.get('reason')?.toString().trim();
     const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    const isCartOrder = formData.get('isCartOrder') === 'true';
 
     if (isFollowUp) {
       // Follow-up orders live in a separate table — use the dedicated assignment endpoint.
       const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersAssign', {
+        method: 'POST',
+        cookie,
+        body: { orderId, closerId: toCsAgentId },
+      });
+      if (!res.ok) {
+        const err = extractApiErrorMessage(res.data, 'Assign failed');
+        return json({ error: err }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
+    if (isCartOrder) {
+      const res = await apiRequest<unknown>('/trpc/cartOrders.assignToCS', {
         method: 'POST',
         cookie,
         body: { orderId, closerId: toCsAgentId },
@@ -559,10 +728,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'initiateCall') {
     const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    const isCartOrder = formData.get('isCartOrder') === 'true';
 
     if (isFollowUp) {
       // Follow-up orders: transition to CS_ENGAGED (records timeline event) instead of main orders.initiateCall
       const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+        method: 'POST',
+        cookie,
+        body: { orderId, newStatus: 'CS_ENGAGED', note: 'Manual call recorded.' },
+        timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
+      });
+      if (!res.ok) {
+        return json({ error: extractApiErrorMessage(res.data, 'Failed to record call') }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true, callInitiated: true, callLog: null });
+    }
+
+    if (isCartOrder) {
+      const res = await apiRequest<unknown>('/trpc/cartOrders.transition', {
         method: 'POST',
         cookie,
         body: { orderId, newStatus: 'CS_ENGAGED', note: 'Manual call recorded.' },
@@ -1105,9 +1288,29 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // and timing out leaves the order in a half-confirmed state from the UI's
     // perspective even when the server transaction succeeds.
     const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    const isCartOrder = formData.get('isCartOrder') === 'true';
 
     if (isFollowUp) {
       const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+        method: 'POST',
+        cookie,
+        body: {
+          orderId,
+          newStatus,
+          note: reason,
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        },
+        timeoutMs: 20_000,
+      });
+      if (!res.ok) {
+        const message = extractApiErrorMessage(res.data, 'Transition failed');
+        return json({ error: message }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
+    if (isCartOrder) {
+      const res = await apiRequest<unknown>('/trpc/cartOrders.transition', {
         method: 'POST',
         cookie,
         body: {
@@ -1233,6 +1436,7 @@ export default function OrderDetailRoute() {
       itemOffers={(orderDetail as OrderDetailStreamData).itemOffers}
       callablePhone={(orderDetail as OrderDetailStreamData).callablePhone}
       isFollowUpOrder={(orderDetail as OrderDetailStreamData).isFollowUpOrder}
+      isCartOrder={(orderDetail as { isCartOrder?: boolean }).isCartOrder}
       canEditOrder={canEditOrder}
       userRole={userRole}
       userId={userId}

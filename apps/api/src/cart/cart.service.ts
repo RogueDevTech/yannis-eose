@@ -957,8 +957,9 @@ export class CartService {
           AND oi.product_id = ${schema.cartAbandonments.productId}
           AND o.created_at >= ${schema.cartAbandonments.createdAt}
       )`,
-      // Exclude carts already pulled into Follow-Up — they're handled there, not here.
+      // Exclude carts already pulled into Follow-Up or Cart Orders — they're handled there, not here.
       sql`NOT EXISTS (SELECT 1 FROM follow_up_orders fu WHERE fu.cart_id = ${schema.cartAbandonments.id})`,
+      sql`NOT EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})`,
     ];
     if (opts.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
@@ -995,6 +996,38 @@ export class CartService {
         eq(schema.cartAbandonments.campaignId, schema.campaigns.id),
       )
       .where(and(...this.openCartConditions(opts)));
+    return Number(res[0]?.count ?? 0);
+  }
+
+  /**
+   * Count ALL abandoned carts (regardless of recovery status) — for marketing
+   * record purposes. Shows total carts captured within the date/branch scope.
+   */
+  async countAllCarts(
+    opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
+  ): Promise<number> {
+    const conditions: SQL[] = [
+      inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED', 'CONVERTED']),
+    ];
+    if (opts.mediaBuyerId) {
+      conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+    }
+    if (opts.branchId) {
+      conditions.push(eq(schema.campaigns.branchId, opts.branchId));
+    } else if (opts.effectiveBranchIds && opts.effectiveBranchIds.length > 0) {
+      conditions.push(inArray(schema.campaigns.branchId, opts.effectiveBranchIds));
+    }
+    if (opts.startDate) {
+      conditions.push(gte(schema.cartAbandonments.updatedAt, new Date(`${opts.startDate}T00:00:00`)));
+    }
+    if (opts.endDate) {
+      conditions.push(lte(schema.cartAbandonments.updatedAt, new Date(`${opts.endDate}T23:59:59`)));
+    }
+    const res = await this.db
+      .select({ count: count() })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(and(...conditions));
     return Number(res[0]?.count ?? 0);
   }
 }

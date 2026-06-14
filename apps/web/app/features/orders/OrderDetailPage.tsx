@@ -881,6 +881,7 @@ export function OrderDetailPage({
   itemOffers = [],
   callablePhone,
   isFollowUpOrder = false,
+  isCartOrder = false,
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const recordCallFetcher = useFetcher();
@@ -2013,6 +2014,7 @@ export function OrderDetailPage({
                         <ensureInvoiceFetcher.Form method="post">
                           <input type="hidden" name="intent" value="ensureInvoice" />
                           {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
                           <Button
                             type="submit"
                             variant="primary"
@@ -2526,6 +2528,7 @@ export function OrderDetailPage({
                       <fetcher.Form method="post" className="space-y-2">
                         <input type="hidden" name="intent" value="assignToCS" />
                         {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
                         {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                         <input type="hidden" name="toCsAgentId" value={assignToId} />
                         <div className="flex items-stretch gap-2">
@@ -2747,6 +2750,7 @@ export function OrderDetailPage({
           <fetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="transition" />
                 {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
             <input type="hidden" name="newStatus" value="CONFIRMED" />
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
@@ -2926,6 +2930,7 @@ export function OrderDetailPage({
           <fetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="editOrderDetails" />
             {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <input type="hidden" name="customerName" value={order.customerName ?? ''} />
             <TextInput
@@ -2983,6 +2988,7 @@ export function OrderDetailPage({
           <csCommentFetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="addCsOrderComment" />
             {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <input type="hidden" name="comment" value={csCommentDraft} />
             <Textarea
@@ -3071,6 +3077,7 @@ export function OrderDetailPage({
               >
                 <input type="hidden" name="intent" value="transition" />
                 {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
                 <input type="hidden" name="newStatus" value="DELETED" />
                 {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                 <input type="hidden" name="reason" value={cancelReason} />
@@ -3107,6 +3114,7 @@ export function OrderDetailPage({
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
                 {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
               <input type="hidden" name="newStatus" value="UNPROCESSED" />
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               <Button
@@ -3173,6 +3181,7 @@ export function OrderDetailPage({
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                 {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
                     <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
@@ -3307,6 +3316,7 @@ export function OrderDetailPage({
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
                 {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
               <input type="hidden" name="newStatus" value="DELIVERED" />
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               {deliverLocationId && (
@@ -3481,6 +3491,7 @@ export function OrderDetailPage({
                               intent: 'initiateCall',
                               branchId: order.branchId || branchId,
                               ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
+                              ...(isCartOrder ? { isCartOrder: 'true' } : {}),
                             },
                             { method: 'post' },
                           ),
@@ -3562,6 +3573,7 @@ export function OrderDetailPage({
                   <recordCallFetcher.Form method="post">
                     <input type="hidden" name="intent" value="initiateCall" />
                     {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <Button
                       type="submit"
@@ -3587,6 +3599,7 @@ export function OrderDetailPage({
                   <recordCallFetcher.Form method="post">
                     <input type="hidden" name="intent" value="initiateCall" />
                     {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <Button
                       type="submit"
@@ -3629,6 +3642,7 @@ export function OrderDetailPage({
                               intent: 'initiateCall',
                               branchId: order.branchId || branchId,
                               ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
+                              ...(isCartOrder ? { isCartOrder: 'true' } : {}),
                             },
                             { method: 'post' },
                           ),
@@ -3652,6 +3666,7 @@ export function OrderDetailPage({
                               intent: 'initiateCall',
                               branchId: order.branchId || branchId,
                               ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
+                              ...(isCartOrder ? { isCartOrder: 'true' } : {}),
                             },
                             { method: 'post' },
                           ),
@@ -4114,6 +4129,7 @@ function EditOrderDetailsModal({
       <fetcher.Form method="post" className="space-y-4">
         <input type="hidden" name="intent" value="editOrderDetails" />
             {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
         {order.branchId && <input type="hidden" name="branchId" value={order.branchId} />}
 
         <TextInput

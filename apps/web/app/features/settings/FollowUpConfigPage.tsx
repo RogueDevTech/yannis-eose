@@ -65,7 +65,7 @@ interface Props {
 }
 
 const STATUS_OPTIONS = [
-  { value: 'CART_ABANDONMENT', label: 'Cart Abandonment' },
+  // CART_ABANDONMENT removed — cart orders now have a standalone page.
   { value: 'UNPROCESSED', label: 'Unassigned' },
   { value: 'CS_ASSIGNED', label: 'Assigned' },
   { value: 'CS_ENGAGED', label: 'Unconfirmed' },

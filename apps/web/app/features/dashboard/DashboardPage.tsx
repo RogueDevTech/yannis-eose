@@ -15,6 +15,7 @@ import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel } from '~/lib/rbac';
 import {
+  DashboardCartOrdersSection,
   DashboardFollowUpSection,
   DashboardHRSection,
   DashboardMetricsSection,
@@ -348,6 +349,7 @@ function CSDashboard({
         </DashboardMetricsSection>
 
         <FollowUpDashboardStrip showUnassigned={false} />
+        <CartOrdersDashboardStrip showUnassigned={false} />
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
           {(metrics) => (
@@ -408,6 +410,7 @@ function CSDashboard({
           on `/admin/sales/orders` via the status filter pills. */}
 
       <FollowUpDashboardStrip />
+      <CartOrdersDashboardStrip />
 
       {showsTeamManagementCard && (
         <div className="card">
@@ -1127,5 +1130,84 @@ function FollowUpDashboardStrip({ showUnassigned = true }: { showUnassigned?: bo
         );
       }}
     </DashboardFollowUpSection>
+  );
+}
+
+// ── Cart Orders stat strip ───────────────────────────────────
+function CartOrdersDashboardStrip({ showUnassigned = true }: { showUnassigned?: boolean }) {
+  return (
+    <DashboardCartOrdersSection fallback={<OverviewStatStripSkeleton count={showUnassigned ? 6 : 5} />}>
+      {(sc) => {
+        const unassigned = sc['UNPROCESSED'] ?? 0;
+        const assigned = sc['CS_ASSIGNED'] ?? 0;
+        const engaged = sc['CS_ENGAGED'] ?? 0;
+        const confirmed =
+          (sc['CONFIRMED'] ?? 0) +
+          (sc['AGENT_ASSIGNED'] ?? 0) +
+          (sc['DISPATCHED'] ?? 0) +
+          (sc['IN_TRANSIT'] ?? 0);
+        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Cart Orders
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="!py-2.5"
+              items={[
+                {
+                  label: 'Total',
+                  value: total,
+                  valueClassName: 'text-app-fg',
+                  to: '/admin/sales/cart-orders',
+                },
+                ...(showUnassigned ? [{
+                  label: 'Unassigned',
+                  value: unassigned,
+                  valueClassName: 'text-warning-600 dark:text-warning-400',
+                  to: '/admin/sales/cart-orders?status=UNPROCESSED',
+                }] : []),
+                {
+                  label: 'Assigned',
+                  value: assigned,
+                  valueClassName: 'text-info-600 dark:text-info-400',
+                  to: '/admin/sales/cart-orders?status=CS_ASSIGNED',
+                },
+                {
+                  label: 'Engaged',
+                  value: engaged,
+                  valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                  to: '/admin/sales/cart-orders?status=CS_ENGAGED',
+                },
+                {
+                  label: 'Confirmed',
+                  value: confirmed,
+                  valueClassName: 'text-brand-600 dark:text-brand-400',
+                  to: '/admin/sales/cart-orders?status=CONFIRMED',
+                },
+                {
+                  label: 'Delivered',
+                  value: delivered,
+                  valueClassName: 'text-success-600 dark:text-success-400',
+                  to: '/admin/sales/cart-orders?status=DELIVERED',
+                },
+                {
+                  label: 'CR',
+                  value: `${total > 0 ? ((confirmed + delivered) / total * 100).toFixed(1) : '0.0'}%`,
+                  valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
+                },
+                {
+                  label: 'DR',
+                  value: `${total > 0 ? (delivered / total * 100).toFixed(1) : '0.0'}%`,
+                  valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
+                },
+              ]}
+            />
+          </div>
+        );
+      }}
+    </DashboardCartOrdersSection>
   );
 }

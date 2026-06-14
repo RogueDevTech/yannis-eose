@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, inArray, isNull, lte, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lte, ne, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type {
@@ -32,7 +32,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    // Delay 45s after boot, then run sync (includes cart pull via CART_ABANDONMENT rules).
+    // Delay 45s after boot, then run sync (CART_ABANDONMENT rules are skipped — see cart-orders module).
     setTimeout(() => {
       this.runSync('cron').catch((err) =>
         this.logger.error(`Boot sync failed: ${err instanceof Error ? err.message : err}`),
@@ -86,11 +86,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   // ── Rule CRUD ──────────────────────────────────────────────────────
 
   async listRules(enabledOnly?: boolean) {
-    const conditions = enabledOnly ? [eq(schema.followUpRules.enabled, true)] : [];
+    // Always exclude CART_ABANDONMENT rules — cart orders have their own pipeline.
+    const conditions = [ne(schema.followUpRules.sourceStatus, 'CART_ABANDONMENT')];
+    if (enabledOnly) conditions.push(eq(schema.followUpRules.enabled, true));
     const rules = await this.db
       .select()
       .from(schema.followUpRules)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(and(...conditions))
       .orderBy(desc(schema.followUpRules.priority), asc(schema.followUpRules.createdAt));
 
     // Enrich with target names
@@ -267,9 +269,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           ruleResults: ruleResults.map((r) => ({ ruleName: r.ruleName, pulled: r.pulled })),
         });
 
-        const pulled = rule.sourceStatus === 'CART_ABANDONMENT'
-          ? await this.pullAbandonedCarts(rule)
-          : await this.pullOrdersForRule(rule, actorId);
+        // CART_ABANDONMENT rules are no longer processed by follow-up sync.
+        // Cart orders now have their own standalone page + pipeline.
+        if (rule.sourceStatus === 'CART_ABANDONMENT') {
+          ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled: 0 });
+          continue;
+        }
+        const pulled = await this.pullOrdersForRule(rule, actorId);
         ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled });
         totalPulled += pulled;
 
@@ -598,20 +604,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const results: Array<{ ruleId: string; ruleName: string; eligible: number }> = [];
 
     for (const rule of rules) {
+      // CART_ABANDONMENT rules are no longer processed — cart orders have their own pipeline.
       if (rule.sourceStatus === 'CART_ABANDONMENT') {
-        const cutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
-        const [row] = await this.db
-          .select({ count: count() })
-          .from(schema.cartAbandonments)
-          .where(
-            and(
-              inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
-              lte(schema.cartAbandonments.createdAt, cutoff),
-              sql`${schema.cartAbandonments.id} NOT IN (SELECT cart_id FROM follow_up_orders WHERE cart_id IS NOT NULL)`,
-            ),
-          );
-        results.push({ ruleId: rule.id, ruleName: rule.name, eligible: Number(row?.count ?? 0) });
-      } else {
+        results.push({ ruleId: rule.id, ruleName: rule.name, eligible: 0 });
+        continue;
+      }
+      {
         const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
         const conditions = [
           sql`${schema.orders.status} = ${rule.sourceStatus}`,

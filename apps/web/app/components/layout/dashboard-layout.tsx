@@ -189,10 +189,23 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
-        label: 'Orders',
+        label: 'Order Funnel',
         href: '/admin/sales/orders',
         icon: SidebarIcons.orders,
         permission: 'orders.read',
+      },
+      {
+        label: 'Cart Orders',
+        href: '/admin/sales/cart-orders',
+        icon: SidebarIcons.orders,
+        permission: 'orders.read',
+      },
+      {
+        label: 'Follow Up Orders',
+        href: '/admin/cs/follow-up',
+        icon: SidebarIcons.orders,
+        permission: 'orders.followUp',
+        roles: ['CS_CLOSER'],
       },
       {
         label: 'Leaderboard',
@@ -207,13 +220,6 @@ const navStructure: NavGroupDef[] = [
         // Sales closers need to author + use templates; HoCS / Admins manage shared ones via
         // the same page (cs.teamOverview). Ownership-based edit gating is enforced server-side.
         permission: 'cs.teamOverview',
-        roles: ['CS_CLOSER'],
-      },
-      {
-        label: 'Follow Up',
-        href: '/admin/cs/follow-up',
-        icon: SidebarIcons.orders,
-        permission: 'orders.followUp',
         roles: ['CS_CLOSER'],
       },
     ],

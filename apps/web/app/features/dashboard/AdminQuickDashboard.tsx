@@ -43,6 +43,10 @@ export interface QuickOverviewData {
   };
   /** Finance approval requests in PENDING state. */
   pendingApprovals: number;
+  /** Follow-up order per-status counts. */
+  followUpCounts?: Record<string, number>;
+  /** Cart order per-status counts. */
+  cartOrdersCounts?: Record<string, number>;
 }
 
 export interface AdminQuickDashboardProps {
