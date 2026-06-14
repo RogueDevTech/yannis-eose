@@ -352,7 +352,7 @@ export class LogisticsService {
         .orderBy(desc(schema.logisticsLocations.createdAt))
         .limit(input.limit)
         .offset(offset),
-      input.providerKind
+      (input.providerKind || groupId)
         ? this.db
             .select({ count: count() })
             .from(schema.logisticsLocations)
