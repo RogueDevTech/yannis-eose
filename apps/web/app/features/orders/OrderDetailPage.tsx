@@ -2291,11 +2291,16 @@ export function OrderDetailPage({
                   )}
 
                   {/* CONFIRMED → Assign for delivery is the next step */}
-                  {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
+                  {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && (
                     <>
                       {hasPendingItemApproval && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
                           Item/price change pending approval — cannot move forward
+                        </p>
+                      )}
+                      {logisticsLocations.length === 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
+                          No logistics locations available — add one in Logistics settings first
                         </p>
                       )}
                       <Button
@@ -2303,7 +2308,7 @@ export function OrderDetailPage({
                         variant="primary"
                         className="w-full"
                         onClick={() => { setAllocateLocationId(''); setAllocateModalOpen(true); }}
-                        disabled={fetcher.state === 'submitting' || hasPendingItemApproval}
+                        disabled={fetcher.state === 'submitting' || hasPendingItemApproval || logisticsLocations.length === 0}
                       >
                         Assign for delivery
                       </Button>

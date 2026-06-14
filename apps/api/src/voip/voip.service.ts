@@ -7,6 +7,7 @@ import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { isReadThroughCacheEnabled } from '../common/cache/cache.service';
+import { isTransitionAllowed } from '../orders/order-state-machine';
 import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -205,11 +206,35 @@ export class VoipService {
       if (!foundOrder) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
       }
+
+      // Auto-transition pre-engagement statuses to CS_ENGAGED when the agent
+      // initiates a call.  This is the natural flow: clicking "Call customer"
+      // on an UNPROCESSED / CS_ASSIGNED order means engagement has started.
       if (foundOrder.status !== 'CS_ENGAGED') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot initiate call: order is in ${foundOrder.status} status, must be CS_ENGAGED`,
+        const currentStatus = foundOrder.status as import('@yannis/shared').OrderStatus;
+        if (!isTransitionAllowed(currentStatus, 'CS_ENGAGED')) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Cannot initiate call: order is in ${foundOrder.status} status`,
+          });
+        }
+        await tx
+          .update(schema.orders)
+          .set({
+            status: 'CS_ENGAGED',
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.orders.id, orderId));
+        await tx.insert(schema.orderTimelineEvents).values({
+          orderId,
+          eventType: 'CALL_INITIATED' as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+          actorId: actor.id,
+          actorName: actor.name ?? null,
+          description: `CS started customer engagement`,
+          metadata: { from: foundOrder.status, to: 'CS_ENGAGED', engagementMethod: 'phone_revealed' },
+          branchId: foundOrder.branchId ?? null,
         });
+        foundOrder.status = 'CS_ENGAGED';
       }
 
       const voipPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
