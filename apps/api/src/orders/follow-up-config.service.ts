@@ -1632,7 +1632,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         eventType: 'ORDER_MANUALLY_ASSIGNED',
         actorId: actor.id,
         actorName: actor.name,
-        description: `Transferred to ${branch.name}.`,
+        description: `Transferred to ${branch.name} by ${actor.name ?? 'unknown'}.`,
         metadata: { targetBranchId, targetBranchName: branch.name, previousBranchId: order.servicingBranchId },
         branchId: targetBranchId,
       });
@@ -1720,7 +1720,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
             eventType: 'ORDER_MANUALLY_ASSIGNED',
             actorId: actor.id,
             actorName: actor.name,
-            description: `Transferred to ${branch.name}.`,
+            description: `Transferred to ${branch.name} by ${actor.name ?? 'unknown'}.`,
             metadata: { targetBranchId, targetBranchName: branch.name, previousBranchId: order.servicingBranchId },
             branchId: targetBranchId,
           });
