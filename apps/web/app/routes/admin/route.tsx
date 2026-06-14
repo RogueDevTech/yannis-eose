@@ -173,7 +173,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // Exit Mirror Mode — restores the original admin session and bounces home.
   // The success path always redirects so the freshly-restored cookie is used on the next render.
   if (intent === 'exitMirror') {
-    const res = await apiRequest<unknown>('/auth/mirror/stop', {
+    const res = await apiRequest<{ user?: { role?: string } }>('/auth/mirror/stop', {
       method: 'POST', cookie, body: {},
     });
     if (!res.ok) {
@@ -184,7 +184,10 @@ export async function action({ request }: ActionFunctionArgs) {
     for (const c of res.setCookies) {
       headers.append('Set-Cookie', c);
     }
-    throw redirect('/admin?_reload=1', { headers });
+    // Redirect to the appropriate dashboard for the restored user's role
+    const role = res.data?.user?.role;
+    const landing = (role === 'SUPER_ADMIN' || role === 'ADMIN') ? '/admin/ceo' : '/admin';
+    throw redirect(`${landing}?_reload=1`, { headers });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });
