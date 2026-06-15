@@ -159,7 +159,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }),
     );
 
-    const [providerRes, locationsRes, teamRes, movementsRes, productBreakdownRes] = await Promise.all([
+    const locationBreakdownInput = productBreakdownInput; // same params
+
+    const [providerRes, locationsRes, teamRes, movementsRes, productBreakdownRes, locationBreakdownRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/logistics.getProvider?input=${providerInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(
@@ -172,6 +174,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ),
       apiRequest<unknown>(
         `/trpc/inventory.providerProductBreakdown?input=${productBreakdownInput}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/inventory.providerLocationBreakdown?input=${locationBreakdownInput}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -196,6 +202,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       : null;
     const productBreakdown = Array.isArray(pbRaw) ? pbRaw : [];
 
+    // Parse location breakdown
+    type LocBreakdown = { locationId: string; locationName: string; available: number; received: number; sold: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string };
+    const lbRaw = locationBreakdownRes.ok
+      ? ((locationBreakdownRes.data as Record<string, unknown>)?.result as { data?: LocBreakdown[] })?.data
+      : null;
+    const locationBreakdown = Array.isArray(lbRaw) ? lbRaw : [];
+
     return {
       provider,
       locations,
@@ -207,6 +220,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       productFilter: productFilter ?? null,
       locationFilter: locationFilter ?? null,
       productBreakdown,
+      locationBreakdown,
     };
   })();
 
@@ -239,6 +253,7 @@ export default function LogisticsProviderDetailRoute() {
             productFilter={data.productFilter}
             locationFilter={data.locationFilter}
             productBreakdown={data.productBreakdown}
+            locationBreakdown={data.locationBreakdown}
           />
         )}
       </CachedAwait>
