@@ -851,11 +851,36 @@ function applyOptimisticOrderPatch<T extends OrderDetail>(
   }
 
   if (intent === 'assignToCS') {
-    const newAssignee = fd.get('csCloserId');
+    const newAssignee = fd.get('toCsAgentId') ?? fd.get('csCloserId');
     if (typeof newAssignee !== 'string' || !newAssignee) return serverOrder;
     // Auto-bump UNPROCESSED → CS_ASSIGNED to mirror the server transition that fires alongside.
     const nextStatus = serverOrder.status === 'UNPROCESSED' ? 'CS_ASSIGNED' : serverOrder.status;
     return { ...serverOrder, assignedCsId: newAssignee, status: nextStatus };
+  }
+
+  // Call customer → optimistically flip to CS_ENGAGED (server does the same on initiateCall).
+  if (intent === 'initiateCall') {
+    const nextStatus =
+      serverOrder.status === 'UNPROCESSED' || serverOrder.status === 'CS_ASSIGNED'
+        ? 'CS_ENGAGED'
+        : serverOrder.status;
+    return { ...serverOrder, status: nextStatus };
+  }
+
+  // Edit order details — overlay customer fields immediately.
+  if (intent === 'editOrderDetails') {
+    const patch: Partial<T> = {};
+    const name = fd.get('customerName');
+    if (typeof name === 'string' && name) (patch as Record<string, unknown>).customerName = name;
+    const addr = fd.get('deliveryAddress');
+    if (typeof addr === 'string') (patch as Record<string, unknown>).deliveryAddress = addr;
+    const state = fd.get('deliveryState');
+    if (typeof state === 'string') (patch as Record<string, unknown>).deliveryState = state;
+    const notes = fd.get('deliveryNotes');
+    if (typeof notes === 'string') (patch as Record<string, unknown>).deliveryNotes = notes;
+    const dd = fd.get('preferredDeliveryDate');
+    if (typeof dd === 'string') (patch as Record<string, unknown>).preferredDeliveryDate = dd;
+    return { ...serverOrder, ...patch };
   }
 
   return serverOrder;
@@ -907,6 +932,16 @@ export function OrderDetailPage({
       }
     }
   }, [fetcher.state, fetcher.formData]);
+  // initiateCall via recordCallFetcher → hold CS_ENGAGED through the revalidation gap.
+  useEffect(() => {
+    if (recordCallFetcher.state === 'submitting' && recordCallFetcher.formData) {
+      if (recordCallFetcher.formData.get('intent') === 'initiateCall') {
+        if (serverOrder.status === 'UNPROCESSED' || serverOrder.status === 'CS_ASSIGNED') {
+          setPendingTransitionStatus('CS_ENGAGED');
+        }
+      }
+    }
+  }, [recordCallFetcher.state, recordCallFetcher.formData, serverOrder.status]);
   useEffect(() => {
     if (pendingTransitionStatus && serverOrder.status === pendingTransitionStatus) {
       setPendingTransitionStatus(null);
@@ -923,16 +958,18 @@ export function OrderDetailPage({
     }
   }, [fetcher.state, fetcher.data]);
 
-  // Optimistic order: overlay in-flight transition / assignment / callback patches on top of
-  // the server copy. Every downstream `order.status`, `order.assignedCsId`, etc. reads the
-  // patched value, so the UI flips on click and snaps back if the server rejects.
+  // Optimistic order: overlay in-flight transition / assignment / callback / call / edit
+  // patches on top of the server copy. Every downstream `order.status`, `order.assignedCsId`,
+  // etc. reads the patched value, so the UI flips on click and snaps back if the server rejects.
   const orderAfterFetcher = (() => {
-    const fromFetcher = applyOptimisticOrderPatch(serverOrder, fetcher);
+    let patched = applyOptimisticOrderPatch(serverOrder, fetcher);
+    // Layer recordCallFetcher (initiateCall → CS_ENGAGED) on top.
+    patched = applyOptimisticOrderPatch(patched, recordCallFetcher);
     // If the fetcher patch already overlays a status, keep it; otherwise hold the pending one.
-    if (pendingTransitionStatus && fromFetcher.status === serverOrder.status) {
-      return { ...fromFetcher, status: pendingTransitionStatus };
+    if (pendingTransitionStatus && patched.status === serverOrder.status) {
+      return { ...patched, status: pendingTransitionStatus };
     }
-    return fromFetcher;
+    return patched;
   })();
   const order: OrderDetail = (() => {
     if (scheduleFetcher.state !== 'idle' && scheduleFetcher.formData) {
@@ -1058,6 +1095,8 @@ export function OrderDetailPage({
   const [duplicateCompareOpen, setDuplicateCompareOpen] = useState(false);
   const [unfreezeModalOpen, setUnfreezeModalOpen] = useState(false);
   const [unfreezeReason, setUnfreezeReason] = useState('');
+  const [optimisticallyUnfrozen, setOptimisticallyUnfrozen] = useState(false);
+  const isFrozen = order.frozenForFollowUp && !optimisticallyUnfrozen;
   // Resolve the deferred allocatable-locations promise once into local state so
   // both the Assign modal AND the Mark Delivered dropdown can show per-product
   // stock counts. The sync `allocatableLocations` prop is currently empty in the
@@ -1473,6 +1512,7 @@ export function OrderDetailPage({
   useEffect(() => {
     if (recordCallData?.success && revalidator.state === 'idle' && !revalidatedForRecordCallRef.current) {
       revalidatedForRecordCallRef.current = true;
+      setCallCustomerModalOpen(false);
       revalidator.revalidate();
     }
   }, [recordCallData?.success, revalidator]);
@@ -1534,6 +1574,7 @@ export function OrderDetailPage({
     if (unfreezeModalOpen) {
       setUnfreezeModalOpen(false);
       setUnfreezeReason('');
+      setOptimisticallyUnfrozen(true);
     }
     // Chain assign → share: when the assignment succeeds AND a WhatsApp group
     // exists for some logistics location AND a dispatch template exists, pop
@@ -1686,7 +1727,7 @@ export function OrderDetailPage({
 
       {/* Frozen for follow-up — order was pulled by follow-up config rules.
           No further mutations allowed. */}
-      {order.frozenForFollowUp && (
+      {isFrozen && (
         <div className="rounded-lg border border-yellow-300 bg-yellow-50 dark:border-yellow-600/40 dark:bg-yellow-900/20 px-3 py-2.5">
           <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-300">
             Frozen for follow-up
@@ -2188,7 +2229,7 @@ export function OrderDetailPage({
                 Manual timeline comments stay available while the actor can act on the order,
                 including after line-item edits are closed (e.g. DELIVERED).
                 Read-only viewers keep this page for visibility only; they never see action controls. */}
-            {canEditOrder && isCSOrHoS && (orderAllowsLineItemEdits || canPerformCSActionsOnOrder || order.frozenForFollowUp) && (
+            {canEditOrder && isCSOrHoS && (orderAllowsLineItemEdits || canPerformCSActionsOnOrder || isFrozen) && (
               <div className="card order-[-2] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
@@ -2198,7 +2239,7 @@ export function OrderDetailPage({
                     Without this, an admin could engage / confirm an order directly and the
                     "Closer" column on `/admin/sales/orders` ends up blank because no CS_CLOSER
                     is on the row. */}
-                {order.frozenForFollowUp ? (
+                {isFrozen ? (
                   <div className="space-y-2">
                     {showCopyOrderSummary && (
                       <Button type="button" variant="secondary" className="w-full" onClick={() => void handleCopyOrderSummary()}>
@@ -3679,15 +3720,26 @@ export function OrderDetailPage({
                     Call on my phone
                   </Button>
                 </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setCallCustomerModalOpen(false)}
-                  >
-                    Close
-                  </Button>
-                </div>
+                {(isCartOrder || isFollowUpOrder) && (
+                  <div className="mt-4 pt-3 border-t border-app-border">
+                    <recordCallFetcher.Form method="post">
+                      <input type="hidden" name="intent" value="initiateCall" />
+                      {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                      {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
+                      {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                      <Button
+                        type="submit"
+                        variant="secondary"
+                        className="w-full"
+                        disabled={recordCallFetcher.state === 'submitting'}
+                        loading={recordCallFetcher.state === 'submitting'}
+                        loadingText="Recording..."
+                      >
+                        I&apos;ve called the customer
+                      </Button>
+                    </recordCallFetcher.Form>
+                  </div>
+                )}
               </>
             )}
         </Modal>

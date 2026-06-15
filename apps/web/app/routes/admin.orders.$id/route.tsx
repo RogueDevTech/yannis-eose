@@ -62,6 +62,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const fromCartOrders = url.searchParams.get('from') === 'cart-orders';
 
+  /** Synthesize call log entries from timeline events for follow-up/cart orders. */
+  const synthesizeCallLogs = (timeline: Array<Record<string, unknown>>): Array<{ id: string; callStatus: string; durationSeconds: number; startedAt: string }> =>
+    timeline
+      .filter((t) => {
+        const et = (t.eventType as string) ?? '';
+        const desc = ((t.description as string) ?? '').toLowerCase();
+        return et === 'MANUAL_CALL_LOGGED' || et === 'CALL_COMPLETED' || desc.includes('call recorded') || desc.includes('manual call');
+      })
+      .map((t, i) => ({
+        id: `synth-call-${i}`,
+        callStatus: 'COMPLETED',
+        durationSeconds: 60,
+        startedAt: (t.createdAt as string) ?? new Date().toISOString(),
+      }));
+
   const orderDetailPromise = (async (): Promise<OrderDetailLoaderResult> => {
     // When navigating from Cart Orders page, try cart_orders table first
     // to avoid hitting the stale graduated copy in the orders table.
@@ -114,7 +129,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               unitPrice: it.unitPrice as string,
               offerLabel: (it.offerLabel as string) ?? null,
             })),
-            callLogs: [],
+            callLogs: synthesizeCallLogs(coTimeline),
             allowedTransitions: (() => {
               const s = coData.status as string;
               const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
@@ -136,6 +151,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             voipEnabled: false,
             voipProviderDisplayName: '',
             latestCall: Promise.resolve(null),
+            timeline: Promise.resolve(coTimeline.map((t) => ({
+              id: t.id as string,
+              orderId: coData.id as string,
+              eventType: t.eventType as string,
+              actorId: (t.actorId as string) ?? null,
+              actorName: (t.actorName as string) ?? null,
+              description: t.description as string,
+              metadata: (t.metadata as Record<string, unknown>) ?? null,
+              createdAt: t.createdAt as string,
+            }))),
             itemOffers: [],
             callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
             isFollowUpOrder: false,
@@ -210,7 +235,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 unitPrice: it.unitPrice as string,
                 offerLabel: (it.offerLabel as string) ?? null,
               })),
-              callLogs: [],
+              callLogs: synthesizeCallLogs(fuTimeline),
               // Follow-up lifecycle: UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → DELIVERED
               // No skipping — must go through engagement before confirming.
               allowedTransitions: (() => {
@@ -288,7 +313,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 unitPrice: it.unitPrice as string,
                 offerLabel: (it.offerLabel as string) ?? null,
               })),
-              callLogs: [],
+              callLogs: synthesizeCallLogs(coTimeline),
               allowedTransitions: (() => {
                 const s = coData.status as string;
                 const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
@@ -309,6 +334,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               voipEnabled: false,
               voipProviderDisplayName: '',
               latestCall: Promise.resolve(null),
+              timeline: Promise.resolve(coTimeline.map((t) => ({
+                id: t.id as string,
+                orderId: coData.id as string,
+                eventType: t.eventType as string,
+                actorId: (t.actorId as string) ?? null,
+                actorName: (t.actorName as string) ?? null,
+                description: t.description as string,
+                metadata: (t.metadata as Record<string, unknown>) ?? null,
+                createdAt: t.createdAt as string,
+              }))),
               itemOffers: [],
               callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
               isFollowUpOrder: false,
@@ -745,10 +780,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     if (isCartOrder) {
-      const res = await apiRequest<unknown>('/trpc/cartOrders.transition', {
+      const res = await apiRequest<unknown>('/trpc/cartOrders.initiateCall', {
         method: 'POST',
         cookie,
-        body: { orderId, newStatus: 'CS_ENGAGED', note: 'Manual call recorded.' },
+        body: { orderId },
         timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
       });
       if (!res.ok) {
