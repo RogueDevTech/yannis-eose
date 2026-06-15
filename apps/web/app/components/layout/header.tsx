@@ -1033,12 +1033,15 @@ function HeaderBranchSwitcher({
     const visibleSet = new Set(visibleBranches.map((b) => b.id));
     return initialSelectedBranchIds.filter((id) => visibleSet.has(id));
   }, [initialSelectedBranchIds, visibleBranches]);
-  const isAllBranches = canSeeAllBranches && !currentBranchId && visibleSelectedIds.length === 0;
+  const allVisibleSelected = visibleSelectedIds.length > 0 && visibleSelectedIds.length === visibleBranches.length;
+  const isAllBranches = canSeeAllBranches && !currentBranchId && (visibleSelectedIds.length === 0 || allVisibleSelected);
   const isMultiBranch = visibleSelectedIds.length > 1;
   const currentBranch = visibleBranches.find((b) => b.id === currentBranchId) ?? null;
-  // When all branches of a single group are selected, show the group name
+  // When all branches of a single group are selected, show the group name —
+  // but only when multiple groups exist (multi-company). Single-group setups
+  // show "All Branches" since the group name adds no context.
   const selectedGroupLabel = useMemo(() => {
-    if (!isMultiBranch || !activeGroups?.length || !visibleSelectedIds.length) return null;
+    if (!isMultiBranch || !hasMultipleGroups || !activeGroups?.length || !visibleSelectedIds.length) return null;
     for (const group of activeGroups) {
       const groupBranches = visibleBranches.filter((b) => b.groupId === group.id);
       if (groupBranches.length > 0 && groupBranches.length === visibleSelectedIds.length &&
@@ -1047,7 +1050,7 @@ function HeaderBranchSwitcher({
       }
     }
     return null;
-  }, [isMultiBranch, activeGroups, visibleBranches, visibleSelectedIds]);
+  }, [isMultiBranch, hasMultipleGroups, activeGroups, visibleBranches, visibleSelectedIds]);
   const triggerLabel = isAllBranches
     ? 'All Branches'
     : isMultiBranch
