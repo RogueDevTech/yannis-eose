@@ -450,6 +450,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.reconciliations',
     'inventory.warehouses.write',
     'logistics.read',
+    'logistics.teamOverview',
     'transfers.read',
     'returns.read',
     'orders.read',

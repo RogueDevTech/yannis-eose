@@ -532,6 +532,7 @@ export {
   assignCartOrderSchema,
   bulkAssignCartOrdersSchema,
   transitionCartOrderSchema,
+  updateCartOrderSchema,
 } from './cart-orders';
 
 export type {
@@ -539,6 +540,7 @@ export type {
   AssignCartOrderInput,
   BulkAssignCartOrdersInput,
   TransitionCartOrderInput,
+  UpdateCartOrderInput,
 } from './cart-orders';
 
 export type {

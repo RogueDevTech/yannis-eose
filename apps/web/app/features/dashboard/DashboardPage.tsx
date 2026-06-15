@@ -96,7 +96,7 @@ export function DashboardPage({
       {/* Role-specific dashboard */}
       {role && isAdminLevel({ role }) && <SuperAdminDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_CS' || role === 'CS_CLOSER') && (
-        <CSDashboard data={data} role={role} isCsTeamSupervisor={isCsTeamSupervisor} />
+        <CSDashboard data={data} role={role} isCsTeamSupervisor={isCsTeamSupervisor} filters={dateFilters} />
       )}
       {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && (
         <MarketingDashboard
@@ -290,6 +290,7 @@ function CSDashboard({
   data,
   role,
   isCsTeamSupervisor = false,
+  filters: dateFilters,
 }: {
   data: DashboardPageData;
   role: string;
@@ -299,6 +300,7 @@ function CSDashboard({
    *  tiles already reflect team-aggregated scope (the API auto-applies
    *  supervisorScope via the orders.ts helper). */
   isCsTeamSupervisor?: boolean;
+  filters: { startDate: string; endDate: string; periodAllTime?: boolean };
 }) {
   const showsTeamManagementCard = role === 'HEAD_OF_CS' || isCsTeamSupervisor;
   const counts = data.orderCounts as Record<string, number>;

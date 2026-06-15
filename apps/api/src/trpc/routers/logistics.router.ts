@@ -65,6 +65,7 @@ const logisticsTeamOverviewGate = middleware(async ({ ctx, next }) => {
   const user = ctx.user!;
   if (isAdminLevel(user)) return next();
   if (user.role === 'HEAD_OF_LOGISTICS') return next();
+  if (user.role === 'STOCK_MANAGER') return next();
   const required = canonicalPermissionCode('logistics.teamOverview');
   const perms = new Set((user.permissions ?? []).map((c) => canonicalPermissionCode(c)));
   if (perms.has(required)) return next();

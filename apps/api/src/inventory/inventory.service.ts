@@ -1896,6 +1896,7 @@ export class InventoryService {
       total: number;
       inQty: number;
       outQty: number;
+      deliveredQty: number;
     }>(sql`
       SELECT
         COUNT(*)::int AS total,
@@ -1912,7 +1913,10 @@ export class InventoryService {
             WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity)
             ELSE 0
           END
-        ), 0)::int AS "outQty"
+        ), 0)::int AS "outQty",
+        COALESCE(SUM(
+          CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END
+        ), 0)::int AS "deliveredQty"
       FROM stock_movements sm
       LEFT JOIN orders o ON o.id = sm.reference_id
       WHERE sm.product_id = ${productId}
@@ -1924,7 +1928,7 @@ export class InventoryService {
         AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
         AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
     `);
-    const aggregate = aggregateRows[0] ?? { total: 0, inQty: 0, outQty: 0 };
+    const aggregate = aggregateRows[0] ?? { total: 0, inQty: 0, outQty: 0, deliveredQty: 0 };
     const total = aggregate.total;
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -1939,6 +1943,7 @@ export class InventoryService {
       toLocationName: string | null;
       referenceId: string | null;
       orderShortId: string | null;
+      orderNumber: number | null;
       reason: string | null;
       actorId: string | null;
       actorName: string | null;
@@ -1956,6 +1961,7 @@ export class InventoryService {
         to_loc.name          AS "toLocationName",
         sm.reference_id      AS "referenceId",
         CASE WHEN o.id IS NOT NULL THEN o.id ELSE NULL END AS "orderShortId",
+        o.order_number       AS "orderNumber",
         sm.reason,
         sm.actor_id          AS "actorId",
         u.name               AS "actorName",
@@ -1988,6 +1994,193 @@ export class InventoryService {
       totalPages,
       inQty: aggregate.inQty,
       outQty: aggregate.outQty,
+      deliveredQty: aggregate.deliveredQty,
+    };
+  }
+
+  /**
+   * Stock movements across ALL locations belonging to a logistics provider.
+   * Powers the provider detail page "Stock Activity" tab — same column layout
+   * as the per-location inventory detail page, plus a `productName` column.
+   */
+  async getProviderMovements(opts: {
+    providerId: string;
+    productId?: string;
+    locationId?: string;
+    page?: number;
+    limit?: number;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    const limit = Math.max(1, Math.min(opts.limit ?? 40, 200));
+    const page = Math.max(1, opts.page ?? 1);
+    const offset = (page - 1) * limit;
+    const startDate = opts.startDate?.trim() || null;
+    const endDate = opts.endDate?.trim() || null;
+    const productId = opts.productId?.trim() || null;
+    const locationId = opts.locationId?.trim() || null;
+
+    // Resolve location IDs for this provider
+    const locRows = await this.db
+      .select({ id: schema.logisticsLocations.id })
+      .from(schema.logisticsLocations)
+      .where(eq(schema.logisticsLocations.providerId, opts.providerId));
+    let locationIds = locRows.map((r) => r.id);
+
+    // If a specific location is selected, scope to just that one
+    if (locationId && locationIds.includes(locationId)) {
+      locationIds = [locationId];
+    }
+
+    if (locationIds.length === 0) {
+      return {
+        movements: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 1,
+        inQty: 0,
+        outQty: 0,
+        deliveredQty: 0,
+        products: [],
+      };
+    }
+
+    // Build location scope clause (reused in aggregate + rows queries)
+    const locationList = sql.join(locationIds.map((id) => sql`${id}::uuid`), sql`,`);
+
+    // Product filter (optional)
+    const productClause = productId
+      ? sql`AND sm.product_id = ${productId}::uuid`
+      : sql``;
+
+    // ── Aggregate ──
+    const aggregateRows = await this.db.execute<{
+      total: number;
+      inQty: number;
+      outQty: number;
+      deliveredQty: number;
+    }>(sql`
+      SELECT
+        COUNT(*)::int AS total,
+        COALESCE(SUM(
+          CASE
+            WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity)
+            WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity > 0 THEN sm.quantity
+            ELSE 0
+          END
+        ), 0)::int AS "inQty",
+        COALESCE(SUM(
+          CASE
+            WHEN sm.movement_type IN ('DELIVERY','TRANSFER_OUT','WRITE_OFF','RETURN','DISPATCH') THEN ABS(sm.quantity)
+            WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity)
+            ELSE 0
+          END
+        ), 0)::int AS "outQty",
+        COALESCE(SUM(
+          CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END
+        ), 0)::int AS "deliveredQty"
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      WHERE (
+        sm.from_location_id IN (${locationList})
+        OR sm.to_location_id IN (${locationList})
+        OR o.logistics_location_id IN (${locationList})
+      )
+      ${productClause}
+      AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+      AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
+    `);
+    const aggregate = aggregateRows[0] ?? { total: 0, inQty: 0, outQty: 0, deliveredQty: 0 };
+    const total = aggregate.total;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    // ── Movement rows ──
+    const movements = await this.db.execute<{
+      id: string;
+      productId: string;
+      productName: string | null;
+      movementType: string;
+      quantity: number;
+      fromLocationId: string | null;
+      fromLocationName: string | null;
+      toLocationId: string | null;
+      toLocationName: string | null;
+      referenceId: string | null;
+      orderShortId: string | null;
+      orderNumber: number | null;
+      reason: string | null;
+      actorId: string | null;
+      actorName: string | null;
+      actorRole: string | null;
+      createdAt: Date;
+    }>(sql`
+      SELECT
+        sm.id,
+        sm.product_id        AS "productId",
+        p.name               AS "productName",
+        sm.movement_type     AS "movementType",
+        sm.quantity,
+        sm.from_location_id  AS "fromLocationId",
+        from_loc.name        AS "fromLocationName",
+        sm.to_location_id    AS "toLocationId",
+        to_loc.name          AS "toLocationName",
+        sm.reference_id      AS "referenceId",
+        CASE WHEN o.id IS NOT NULL THEN o.id ELSE NULL END AS "orderShortId",
+        o.order_number       AS "orderNumber",
+        sm.reason,
+        sm.actor_id          AS "actorId",
+        u.name               AS "actorName",
+        u.role::text         AS "actorRole",
+        sm.created_at        AS "createdAt"
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      LEFT JOIN users u ON u.id = sm.actor_id
+      LEFT JOIN logistics_locations from_loc ON from_loc.id = sm.from_location_id
+      LEFT JOIN logistics_locations to_loc ON to_loc.id = sm.to_location_id
+      LEFT JOIN products p ON p.id = sm.product_id
+      WHERE (
+        sm.from_location_id IN (${locationList})
+        OR sm.to_location_id IN (${locationList})
+        OR o.logistics_location_id IN (${locationList})
+      )
+      ${productClause}
+      AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+      AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
+      ORDER BY sm.created_at DESC
+      LIMIT ${limit}
+      OFFSET ${offset}
+    `);
+
+    // ── Distinct products for filter dropdown ──
+    const productRows = await this.db.execute<{
+      id: string;
+      name: string;
+    }>(sql`
+      SELECT DISTINCT p.id, p.name
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      INNER JOIN products p ON p.id = sm.product_id
+      WHERE (
+        sm.from_location_id IN (${locationList})
+        OR sm.to_location_id IN (${locationList})
+        OR o.logistics_location_id IN (${locationList})
+      )
+      AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+      AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
+      ORDER BY p.name
+    `);
+
+    return {
+      movements,
+      total,
+      page,
+      limit,
+      totalPages,
+      inQty: aggregate.inQty,
+      outQty: aggregate.outQty,
+      deliveredQty: aggregate.deliveredQty,
+      products: productRows,
     };
   }
 

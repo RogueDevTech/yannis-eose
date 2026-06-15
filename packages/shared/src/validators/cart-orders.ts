@@ -49,3 +49,17 @@ export type ListCartOrdersInput = z.infer<typeof listCartOrdersSchema>;
 export type AssignCartOrderInput = z.infer<typeof assignCartOrderSchema>;
 export type BulkAssignCartOrdersInput = z.infer<typeof bulkAssignCartOrdersSchema>;
 export type TransitionCartOrderInput = z.infer<typeof transitionCartOrderSchema>;
+
+// ── Cart Order Update ───────────────────────────────────────────────
+
+export const updateCartOrderSchema = z.object({
+  orderId: z.string().uuid(),
+  customerName: z.string().min(1).max(255).optional(),
+  deliveryAddress: z.string().optional().nullable(),
+  deliveryState: z.string().max(100).optional().nullable(),
+  deliveryNotes: z.string().optional().nullable(),
+  customerEmail: z.string().email().max(255).optional().nullable(),
+  preferredDeliveryDate: z.string().max(100).optional().nullable(),
+});
+
+export type UpdateCartOrderInput = z.infer<typeof updateCartOrderSchema>;

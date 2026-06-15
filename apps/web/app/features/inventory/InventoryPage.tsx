@@ -1554,6 +1554,7 @@ export function InventoryPage(props: InventoryStreamData) {
           columns={levelColumns}
           rows={levels}
           rowKey={(r) => r.id}
+          rowHref={(level) => isOptimisticId(level.id) || isEmptyLocationRow(level.id) ? undefined : `/admin/inventory/${level.id}`}
           rowClassName={(level) => (isOptimisticId(level.id) ? 'opacity-60' : '')}
           loading={isLoadingLevels}
           loadingVariant="overlay"

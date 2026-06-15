@@ -30,7 +30,7 @@ function parseProvidersList(res: { ok: boolean; status: number; data: unknown })
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'],
     permission: 'logistics.teamOverview',
   });
   const cookie = getSessionCookie(request);
@@ -61,6 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       'name',
       'assigned',
       'delivered',
+      'unitsDelivered',
       'deliveryRate',
       'delinquencyRate',
       'returned',
@@ -97,6 +98,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
             return p.totalAssigned;
           case 'delivered':
             return p.delivered;
+          case 'unitsDelivered':
+            return p.unitsDelivered;
           case 'deliveryRate':
             return p.deliveryRate;
           case 'delinquencyRate':

@@ -1,17 +1,15 @@
 import { useMemo, useState } from 'react';
 import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Await, Link, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Link, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
-import { StatusBadge } from '~/components/ui/status-badge';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { Tabs } from '~/components/ui/tabs';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -19,6 +17,7 @@ import { Modal } from '~/components/ui/modal';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { DescriptionList } from '~/components/ui/description-list';
 import { Button } from '~/components/ui/button';
+import { formatOrderNumber } from '@yannis/shared';
 import type { StockMovement } from '~/features/inventory/types';
 import { MOVEMENT_COLORS, formatMovementReasonForDisplay, formatMovementType } from '~/features/inventory/types';
 import { InventoryLevelDetailLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
@@ -28,16 +27,6 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 export const meta: MetaFunction = () => [
   { title: 'Inventory — Level Detail — Yannis EOSE' },
 ];
-
-interface LevelBatch {
-  id: string;
-  factoryCost: string;
-  landingCost: string;
-  totalLandedCost: string;
-  quantity: number;
-  remainingQuantity: number;
-  receivedAt: string;
-}
 
 interface LevelHeader {
   id: string;
@@ -53,7 +42,6 @@ interface LevelHeader {
 
 interface LoaderData {
   level: LevelHeader | null;
-  batches: LevelBatch[];
   movements: StockMovement[];
   total: number;
   page: number;
@@ -61,11 +49,13 @@ interface LoaderData {
   totalPages: number;
   inQty: number;
   outQty: number;
+  deliveredQty: number;
+  periodAllTime: boolean;
   startDate: string | null;
   endDate: string | null;
 }
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 50;
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
@@ -78,13 +68,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
-  const startDate = url.searchParams.get('startDate')?.trim() || undefined;
-  const endDate = url.searchParams.get('endDate')?.trim() || undefined;
+  const perPage = Math.min(Math.max(parseInt(url.searchParams.get('perPage') || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE, 10), 1000);
+  const period = url.searchParams.get('period') ?? undefined;
+  const periodAllTime = period === 'all_time';
+
+  // Default to this month when no date params and not explicitly all_time
+  const now = new Date();
+  const defaultStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const defaultEnd = now.toISOString().slice(0, 10);
+
+  const startDate = periodAllTime ? undefined : (url.searchParams.get('startDate')?.trim() || defaultStart);
+  const endDate = periodAllTime ? undefined : (url.searchParams.get('endDate')?.trim() || defaultEnd);
 
   const cookie = getSessionCookie(request);
 
   const pageData = (async (): Promise<LoaderData> => {
-    const input: Record<string, unknown> = { id, page, limit: PAGE_SIZE };
+    const input: Record<string, unknown> = { id, page, limit: perPage };
     if (startDate) input['startDate'] = startDate;
     if (endDate) input['endDate'] = endDate;
     const res = await apiRequest<unknown>(
@@ -95,14 +94,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!res.ok) {
       return {
         level: null,
-        batches: [],
         movements: [],
         total: 0,
         page: 1,
-        limit: PAGE_SIZE,
+        limit: perPage,
         totalPages: 1,
         inQty: 0,
         outQty: 0,
+        deliveredQty: 0,
+        periodAllTime,
         startDate: startDate ?? null,
         endDate: endDate ?? null,
       };
@@ -112,7 +112,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       result?: {
         data?: {
           level: LevelHeader;
-          batches: LevelBatch[];
           movements: StockMovement[];
           total: number;
           page: number;
@@ -120,20 +119,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           totalPages: number;
           inQty: number;
           outQty: number;
+          deliveredQty: number;
         };
       };
     })?.result?.data;
 
     return {
       level: data?.level ?? null,
-      batches: data?.batches ?? [],
       movements: data?.movements ?? [],
       total: data?.total ?? 0,
       page: data?.page ?? page,
-      limit: data?.limit ?? PAGE_SIZE,
+      limit: data?.limit ?? DEFAULT_PAGE_SIZE,
       totalPages: data?.totalPages ?? 1,
       inQty: data?.inQty ?? 0,
       outQty: data?.outQty ?? 0,
+      deliveredQty: data?.deliveredQty ?? 0,
+      periodAllTime,
       startDate: startDate ?? null,
       endDate: endDate ?? null,
     };
@@ -232,7 +233,7 @@ function auditTrailColumns(
       cellClassName: 'text-app-fg-muted',
       render: (m) => {
         if (m.orderShortId) {
-          return <OrderIdBadge id={m.orderShortId} linkTo={`/admin/orders/${m.orderShortId}`} />;
+          return <OrderIdBadge id={m.orderShortId} orderNumber={m.orderNumber} linkTo={`/admin/orders/${m.orderShortId}`} />;
         }
         const cp = counterpartLabel(m);
         if (cp) return <span>{cp}</span>;
@@ -244,10 +245,19 @@ function auditTrailColumns(
       header: 'Reason',
       cellClassName: 'text-app-fg-muted italic truncate max-w-xs',
       cellTitle: (m) => {
-        const r = formatMovementReasonForDisplay(m.reason);
+        let r = formatMovementReasonForDisplay(m.reason);
+        if (r && m.orderShortId && m.orderNumber != null) {
+          r = r.replace(m.orderShortId, formatOrderNumber(m.orderNumber));
+        }
         return r || undefined;
       },
-      render: (m) => formatMovementReasonForDisplay(m.reason) || '—',
+      render: (m) => {
+        let r = formatMovementReasonForDisplay(m.reason);
+        if (r && m.orderShortId && m.orderNumber != null) {
+          r = r.replace(m.orderShortId, formatOrderNumber(m.orderNumber));
+        }
+        return r || '—';
+      },
     },
     {
       key: 'action',
@@ -261,34 +271,27 @@ function auditTrailColumns(
   ];
 }
 
-type TabId = 'batches' | 'audit';
-
 function InventoryLevelDetailRouteInner({
   level,
-  batches,
   movements,
   total,
   page,
+  limit,
   totalPages,
   inQty,
   outQty,
+  deliveredQty,
+  periodAllTime,
   startDate,
   endDate,
 }: LoaderData) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  // URL-driven tab state (so back/forward + deep links work).
-  // Default is Movement history (audit) per ops workflow.
-  const activeTab: TabId = searchParams.get('tab') === 'batches' ? 'batches' : 'audit';
   const [direction, setDirection] = useState<DirectionFilter>('all');
   const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
-  const [selectedBatch, setSelectedBatch] = useState<LevelBatch | null>(null);
 
   const filteredMovements = useMemo(() => {
     if (direction === 'all') return movements;
     return movements.filter((m) => classifyMovement(m) === direction);
   }, [movements, direction]);
-
-  const periodAllTime = !startDate && !endDate;
 
   if (!level) {
     return (
@@ -374,173 +377,45 @@ function InventoryLevelDetailRouteInner({
             valueClassName: 'text-warning-600 dark:text-warning-400',
           },
           {
-            label: 'Available',
-            value: available,
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Status',
-            value: <StatusBadge status={level.status} />,
-            plainValue: true,
-          },
-          {
-            label: periodAllTime ? 'In (all time)' : 'In (period)',
-            value: `+${inQty}`,
-            valueClassName: 'text-success-600 dark:text-success-400',
-            title: 'Total units received in the selected date range',
-          },
-          {
-            label: periodAllTime ? 'Out (all time)' : 'Out (period)',
-            value: `−${outQty}`,
-            valueClassName: 'text-danger-600 dark:text-danger-400',
-            title: 'Total units delivered, transferred out, or written off in the selected date range',
-          },
-          {
-            label: 'Net',
-            value: `${inQty - outQty >= 0 ? '+' : ''}${inQty - outQty}`,
-            valueClassName:
-              inQty - outQty >= 0
-                ? 'text-success-600 dark:text-success-400'
-                : 'text-danger-600 dark:text-danger-400',
-          },
-          {
-            label: 'Events',
-            value: total,
-            valueClassName: 'text-app-fg',
+            label: periodAllTime ? 'Sold (all time)' : 'Sold (period)',
+            value: deliveredQty,
+            valueClassName: 'text-brand-600 dark:text-brand-400',
+            title: 'Units delivered/sold in the selected date range',
           },
         ]}
       />
 
-      {/* Tabs: received stock / costing vs movement log */}
-      <Tabs
-        value={activeTab}
-        onChange={(v) => {
-          const next = new URLSearchParams(searchParams);
-          next.set('tab', v === 'batches' ? 'batches' : 'audit');
-          // Tab switches should not affect pagination, but if we ever add
-          // tab-specific paging, resetting to page=1 is the safer default.
-          next.delete('page');
-          setSearchParams(next, { replace: true });
-        }}
-        tabs={[
-          {
-            value: 'batches',
-            label: `Received stock · ${locationLabel}`,
-          },
-          { value: 'audit', label: `Movement history (${total})` },
-        ]}
-      />
-
-      {activeTab === 'batches' && (
-        <CompactTable<LevelBatch>
-          rows={batches}
-          rowKey={(b) => b.id}
-          rowClassName={(b) => (b.remainingQuantity === 0 ? 'opacity-60' : '')}
-          emptyTitle="No receipts at this location yet"
-          emptyDescription="Each intake you record here becomes a cost layer (used for profit and FIFO costing)."
-          columns={[
-            {
-              key: 'received',
-              header: 'Received',
-              cellClassName: 'text-app-fg-muted',
-              render: (b) =>
-                new Date(b.receivedAt).toLocaleDateString('en-NG', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                }),
-            },
-            {
-              key: 'quantity',
-              header: 'Intake qty',
-              align: 'right',
-              cellClassName: 'font-medium text-app-fg',
-              render: (b) => b.quantity,
-            },
-            {
-              key: 'remaining',
-              header: 'Remaining',
-              align: 'right',
-              cellClassName: (b) =>
-                `font-medium ${b.remainingQuantity === 0 ? 'text-app-fg-muted' : 'text-success-600 dark:text-success-400'}`,
-              render: (b) => b.remainingQuantity,
-            },
-            {
-              key: 'factoryCost',
-              header: 'Factory ₦',
-              align: 'right',
-              cellClassName: 'text-app-fg-muted',
-              render: (b) => Number(b.factoryCost).toLocaleString(),
-            },
-            {
-              key: 'landingCost',
-              header: 'Landing ₦',
-              align: 'right',
-              cellClassName: 'text-app-fg-muted',
-              render: (b) => Number(b.landingCost).toLocaleString(),
-            },
-            {
-              key: 'totalLanded',
-              header: 'Landed ₦',
-              align: 'right',
-              cellClassName: 'font-medium text-app-fg',
-              render: (b) => Number(b.totalLandedCost).toLocaleString(),
-            },
-            {
-              key: 'action',
-              header: 'Action',
-              align: 'right',
-              tight: true,
-              render: (b) => (
-                <CompactTableActionButton onClick={() => setSelectedBatch(b)}>
-                  View
-                </CompactTableActionButton>
-              ),
-            },
-          ]}
-        />
-      )}
-
-      {activeTab === 'audit' && (
-        <>
-          {total > 0 && (
-            <div>
-              <FilterPills
-                value={direction}
-                onChange={(v) => setDirection(v as DirectionFilter)}
-                options={[
-                  { value: 'all', label: `All (${total})` },
-                  { value: 'in', label: 'Stock in' },
-                  { value: 'out', label: 'Stock out' },
-                ]}
-              />
-            </div>
-          )}
-
-          <CompactTable<StockMovement>
-            rows={filteredMovements}
-            rowKey={(m) => m.id}
-            pagination={{ page, totalPages }}
-            emptyTitle={total === 0 ? 'No movements in this range' : 'No matching movements'}
-            emptyDescription={
-              total === 0
-                ? 'Adjust the date filter or wait for stock activity.'
-                : 'Switch the filter to see other stock events.'
-            }
-            columns={auditTrailColumns(setSelectedMovement)}
+      {total > 0 && (
+        <div>
+          <FilterPills
+            value={direction}
+            onChange={(v) => setDirection(v as DirectionFilter)}
+            options={[
+              { value: 'all', label: `All (${total})` },
+              { value: 'in', label: 'Stock in' },
+              { value: 'out', label: 'Stock out' },
+            ]}
           />
-        </>
+        </div>
       )}
+
+      <CompactTable<StockMovement>
+        rows={filteredMovements}
+        rowKey={(m) => m.id}
+        pagination={{ page, totalPages, pageSize: limit, showWhenSinglePage: true }}
+        emptyTitle={total === 0 ? 'No movements in this range' : 'No matching movements'}
+        emptyDescription={
+          total === 0
+            ? 'Adjust the date filter or wait for stock activity.'
+            : 'Switch the filter to see other stock events.'
+        }
+        columns={auditTrailColumns(setSelectedMovement)}
+      />
 
       <AuditMovementDetailModal
         movement={selectedMovement}
         locationLabel={locationLabel}
         onClose={() => setSelectedMovement(null)}
-      />
-      <BatchDetailModal
-        batch={selectedBatch}
-        locationLabel={locationLabel}
-        onClose={() => setSelectedBatch(null)}
       />
     </div>
   );
@@ -570,7 +445,10 @@ function AuditMovementDetailModal({
   onClose: () => void;
 }) {
   if (!movement) return null;
-  const reasonDisplay = formatMovementReasonForDisplay(movement.reason);
+  let reasonDisplay = formatMovementReasonForDisplay(movement.reason);
+  if (reasonDisplay && movement.orderShortId && movement.orderNumber != null) {
+    reasonDisplay = reasonDisplay.replace(movement.orderShortId, formatOrderNumber(movement.orderNumber));
+  }
   const dir = classifyMovement(movement);
   const qtyColor =
     dir === 'in'
@@ -646,7 +524,7 @@ function AuditMovementDetailModal({
                   {
                     label: 'Order',
                     value: (
-                      <OrderIdBadge id={movement.orderShortId} linkTo={`/admin/orders/${movement.orderShortId}`} />
+                      <OrderIdBadge id={movement.orderShortId} orderNumber={movement.orderNumber} linkTo={`/admin/orders/${movement.orderShortId}`} />
                     ),
                   },
                 ]
@@ -678,111 +556,3 @@ function AuditMovementDetailModal({
   );
 }
 
-function BatchDetailModal({
-  batch,
-  locationLabel,
-  onClose,
-}: {
-  batch: LevelBatch | null;
-  locationLabel: string;
-  onClose: () => void;
-}) {
-  if (!batch) return null;
-  const used = batch.quantity - batch.remainingQuantity;
-  const depleted = batch.remainingQuantity === 0;
-  const remainingColor = depleted
-    ? 'text-app-fg-muted'
-    : 'text-success-600 dark:text-success-400';
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      maxWidth="max-w-md"
-      backdropBlur
-      aria-labelledby="batch-detail-title"
-    >
-      <div className="space-y-5 px-5 pt-5 md:px-6 md:pt-6 pb-2">
-        <div>
-          <h2 id="batch-detail-title" className="text-base font-semibold text-app-fg">
-            Stock receipt
-          </h2>
-          <p className="text-xs text-app-fg-muted mt-0.5">Cost layer at {locationLabel} (FIFO)</p>
-        </div>
-
-        <div className="rounded-lg border border-app-border bg-app-canvas px-4 py-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Remaining</span>
-            <span className={`text-2xl font-semibold ${remainingColor}`}>
-              {batch.remainingQuantity}
-              <span className="text-sm font-normal text-app-fg-muted ml-1">/ {batch.quantity}</span>
-            </span>
-          </div>
-          <div className="mt-2 h-1.5 rounded-full bg-app-hover overflow-hidden">
-            <div
-              className={depleted ? 'h-full bg-app-border' : 'h-full bg-success-500'}
-              style={{
-                width: batch.quantity > 0
-                  ? `${Math.max(0, Math.min(100, (batch.remainingQuantity / batch.quantity) * 100))}%`
-                  : '0%',
-              }}
-            />
-          </div>
-        </div>
-
-        <DescriptionList
-          layout="horizontal"
-          divided
-          items={[
-            {
-              label: 'Received',
-              value: new Date(batch.receivedAt).toLocaleString('en-NG', {
-                weekday: 'short',
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
-            },
-            {
-              label: 'Intake qty',
-              value: <span className="font-medium text-app-fg">{batch.quantity}</span>,
-            },
-            {
-              label: 'Used',
-              value: <span className="font-medium text-app-fg">{used}</span>,
-            },
-            {
-              label: 'Factory cost',
-              value: <span className="text-app-fg">₦{Number(batch.factoryCost).toLocaleString()}</span>,
-            },
-            {
-              label: 'Landing cost',
-              value: <span className="text-app-fg">₦{Number(batch.landingCost).toLocaleString()}</span>,
-            },
-            {
-              label: 'Total landed',
-              value: (
-                <span className="font-semibold text-app-fg">
-                  ₦{Number(batch.totalLandedCost).toLocaleString()}
-                </span>
-              ),
-            },
-            {
-              label: 'Batch ID',
-              value: <span className="font-mono text-xs break-all">{batch.id}</span>,
-              fullWidth: true,
-            },
-          ]}
-        />
-
-        <div className="flex justify-end pt-1">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}

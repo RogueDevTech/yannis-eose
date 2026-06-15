@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Link, useFetcher, useNavigate, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
@@ -834,51 +835,63 @@ function VoipCallPanelWithPolling({
  * hook is for list rows (keyed by id). Here the unit is a single page-level record;
  * a derived overlay computed inline is simpler and has zero dependencies.
  */
-function applyOptimisticOrderPatch<T extends OrderDetail>(
+/**
+ * Build a confirmed-optimistic patch from fetcher data AFTER the server has
+ * responded successfully (`fetcher.state === 'idle'` + `success` in data).
+ * The patch holds the expected new state until the loader revalidation lands
+ * fresh data, preventing any stale-cache flash.
+ */
+function applyConfirmedOptimisticPatch<T extends OrderDetail>(
   serverOrder: T,
   fetcher: ReturnType<typeof useFetcher>,
+  /** The formData snapshot captured while the fetcher was submitting. */
+  lastFormData: FormData | null,
 ): T {
-  if (fetcher.state === 'idle') return serverOrder;
-  const fd = fetcher.formData;
-  if (!fd) return serverOrder;
-  const intent = fd.get('intent');
+  // Only patch when the server confirmed success but the loader hasn't
+  // caught up yet (the fresh revalidation is in flight).
+  const data = fetcher.data as Record<string, unknown> | undefined;
+  if (!data || !('success' in data)) return serverOrder;
+  if (!lastFormData) return serverOrder;
+
+  const intent = lastFormData.get('intent');
   if (typeof intent !== 'string') return serverOrder;
 
   if (intent === 'transition') {
-    const newStatus = fd.get('newStatus');
+    const newStatus = lastFormData.get('newStatus');
     if (typeof newStatus !== 'string' || !newStatus) return serverOrder;
+    // Only hold if the server hasn't caught up yet.
+    if (serverOrder.status === newStatus) return serverOrder;
     return { ...serverOrder, status: newStatus };
   }
 
   if (intent === 'assignToCS') {
-    const newAssignee = fd.get('toCsAgentId') ?? fd.get('csCloserId');
+    const newAssignee = lastFormData.get('toCsAgentId') ?? lastFormData.get('csCloserId');
     if (typeof newAssignee !== 'string' || !newAssignee) return serverOrder;
-    // Auto-bump UNPROCESSED → CS_ASSIGNED to mirror the server transition that fires alongside.
+    if (serverOrder.assignedCsId === newAssignee) return serverOrder;
     const nextStatus = serverOrder.status === 'UNPROCESSED' ? 'CS_ASSIGNED' : serverOrder.status;
     return { ...serverOrder, assignedCsId: newAssignee, status: nextStatus };
   }
 
-  // Call customer → optimistically flip to CS_ENGAGED (server does the same on initiateCall).
   if (intent === 'initiateCall') {
     const nextStatus =
       serverOrder.status === 'UNPROCESSED' || serverOrder.status === 'CS_ASSIGNED'
         ? 'CS_ENGAGED'
         : serverOrder.status;
+    if (serverOrder.status === nextStatus) return serverOrder;
     return { ...serverOrder, status: nextStatus };
   }
 
-  // Edit order details — overlay customer fields immediately.
   if (intent === 'editOrderDetails') {
     const patch: Partial<T> = {};
-    const name = fd.get('customerName');
+    const name = lastFormData.get('customerName');
     if (typeof name === 'string' && name) (patch as Record<string, unknown>).customerName = name;
-    const addr = fd.get('deliveryAddress');
+    const addr = lastFormData.get('deliveryAddress');
     if (typeof addr === 'string') (patch as Record<string, unknown>).deliveryAddress = addr;
-    const state = fd.get('deliveryState');
+    const state = lastFormData.get('deliveryState');
     if (typeof state === 'string') (patch as Record<string, unknown>).deliveryState = state;
-    const notes = fd.get('deliveryNotes');
+    const notes = lastFormData.get('deliveryNotes');
     if (typeof notes === 'string') (patch as Record<string, unknown>).deliveryNotes = notes;
-    const dd = fd.get('preferredDeliveryDate');
+    const dd = lastFormData.get('preferredDeliveryDate');
     if (typeof dd === 'string') (patch as Record<string, unknown>).preferredDeliveryDate = dd;
     return { ...serverOrder, ...patch };
   }
@@ -920,70 +933,62 @@ export function OrderDetailPage({
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
-  // Hold the in-flight transition target through the submit→loading→idle gap so the
-  // progress strip doesn't flicker back to the old status while the route loader
-  // revalidation lands. Cleared once serverOrder catches up, or on a server error.
-  const [pendingTransitionStatus, setPendingTransitionStatus] = useState<string | null>(null);
+  // Invalidate the clientLoader cache whenever a fetcher starts submitting so
+  // the post-action revalidation hits the server instead of serving stale cache.
+  useEffect(() => {
+    if (fetcher.state === 'submitting' || recordCallFetcher.state === 'submitting' ||
+        scheduleFetcher.state === 'submitting' || adjustItemsFetcher.state === 'submitting' ||
+        priceRequestFetcher.state === 'submitting' || csCommentFetcher.state === 'submitting') {
+      invalidateCachedLoader(window.location.pathname);
+    }
+  }, [fetcher.state, recordCallFetcher.state, scheduleFetcher.state, adjustItemsFetcher.state, priceRequestFetcher.state, csCommentFetcher.state]);
+
+  // Snapshot formData when each fetcher starts submitting so we can reference
+  // it after the server responds (fetcher.formData is cleared when idle).
+  const lastFetcherFD = useRef<FormData | null>(null);
+  const lastRecordCallFD = useRef<FormData | null>(null);
+  const lastScheduleFD = useRef<FormData | null>(null);
   useEffect(() => {
     if (fetcher.state === 'submitting' && fetcher.formData) {
-      if (fetcher.formData.get('intent') === 'transition') {
-        const ns = fetcher.formData.get('newStatus');
-        if (typeof ns === 'string' && ns) setPendingTransitionStatus(ns);
-      }
+      lastFetcherFD.current = fetcher.formData;
     }
   }, [fetcher.state, fetcher.formData]);
-  // initiateCall via recordCallFetcher → hold CS_ENGAGED through the revalidation gap.
   useEffect(() => {
     if (recordCallFetcher.state === 'submitting' && recordCallFetcher.formData) {
-      if (recordCallFetcher.formData.get('intent') === 'initiateCall') {
-        if (serverOrder.status === 'UNPROCESSED' || serverOrder.status === 'CS_ASSIGNED') {
-          setPendingTransitionStatus('CS_ENGAGED');
-        }
-      }
+      lastRecordCallFD.current = recordCallFetcher.formData;
     }
-  }, [recordCallFetcher.state, recordCallFetcher.formData, serverOrder.status]);
+  }, [recordCallFetcher.state, recordCallFetcher.formData]);
   useEffect(() => {
-    if (pendingTransitionStatus && serverOrder.status === pendingTransitionStatus) {
-      setPendingTransitionStatus(null);
+    if (scheduleFetcher.state === 'submitting' && scheduleFetcher.formData) {
+      lastScheduleFD.current = scheduleFetcher.formData;
     }
-  }, [pendingTransitionStatus, serverOrder.status]);
-  useEffect(() => {
-    if (
-      fetcher.state === 'idle' &&
-      fetcher.data &&
-      typeof fetcher.data === 'object' &&
-      'error' in fetcher.data
-    ) {
-      setPendingTransitionStatus(null);
-    }
-  }, [fetcher.state, fetcher.data]);
+  }, [scheduleFetcher.state, scheduleFetcher.formData]);
 
-  // Optimistic order: overlay in-flight transition / assignment / callback / call / edit
-  // patches on top of the server copy. Every downstream `order.status`, `order.assignedCsId`,
-  // etc. reads the patched value, so the UI flips on click and snaps back if the server rejects.
-  const orderAfterFetcher = (() => {
-    let patched = applyOptimisticOrderPatch(serverOrder, fetcher);
-    // Layer recordCallFetcher (initiateCall → CS_ENGAGED) on top.
-    patched = applyOptimisticOrderPatch(patched, recordCallFetcher);
-    // If the fetcher patch already overlays a status, keep it; otherwise hold the pending one.
-    if (pendingTransitionStatus && patched.status === serverOrder.status) {
-      return { ...patched, status: pendingTransitionStatus };
-    }
-    return patched;
-  })();
+  // Confirmed-optimistic order: patches are applied only AFTER the server
+  // responds with success, holding the expected state until the loader
+  // revalidation lands fresh data. No premature UI flip on submit.
   const order: OrderDetail = (() => {
-    if (scheduleFetcher.state !== 'idle' && scheduleFetcher.formData) {
-      const fd = scheduleFetcher.formData;
-      if (fd.get('intent') === 'scheduleCallback') {
-        const delayMinRaw = fd.get('delayMinutes');
-        const delayMin = typeof delayMinRaw === 'string' ? parseInt(delayMinRaw, 10) : NaN;
-        if (Number.isFinite(delayMin) && delayMin > 0) {
-          const callbackAt = new Date(Date.now() + delayMin * 60_000).toISOString();
-          return { ...orderAfterFetcher, callbackScheduledAt: callbackAt };
+    let patched = serverOrder;
+    patched = applyConfirmedOptimisticPatch(patched, fetcher, lastFetcherFD.current);
+    patched = applyConfirmedOptimisticPatch(patched, recordCallFetcher, lastRecordCallFD.current);
+
+    // Schedule callback — hold the optimistic callbackAt after server confirms.
+    if (scheduleFetcher.state === 'idle' && lastScheduleFD.current) {
+      const sData = scheduleFetcher.data as Record<string, unknown> | undefined;
+      if (sData && 'success' in sData) {
+        const fd = lastScheduleFD.current;
+        if (fd.get('intent') === 'scheduleCallback') {
+          const delayMinRaw = fd.get('delayMinutes');
+          const delayMin = typeof delayMinRaw === 'string' ? parseInt(delayMinRaw, 10) : NaN;
+          if (Number.isFinite(delayMin) && delayMin > 0 && !patched.callbackScheduledAt) {
+            const callbackAt = new Date(Date.now() + delayMin * 60_000).toISOString();
+            patched = { ...patched, callbackScheduledAt: callbackAt };
+          }
         }
       }
     }
-    return orderAfterFetcher;
+
+    return patched;
   })();
 
   const [searchParams] = useSearchParams();
@@ -3822,6 +3827,7 @@ export function OrderDetailPage({
           fetcher={fetcher}
           onClose={() => setEditDetailsModalOpen(false)}
           isFollowUpOrder={isFollowUpOrder}
+          isCartOrder={isCartOrder}
         />
       )}
 
@@ -4148,11 +4154,13 @@ function EditOrderDetailsModal({
   fetcher,
   onClose,
   isFollowUpOrder = false,
+  isCartOrder = false,
 }: {
   order: OrderDetail;
   fetcher: ReturnType<typeof useFetcher>;
   onClose: () => void;
   isFollowUpOrder?: boolean;
+  isCartOrder?: boolean;
 }) {
   const [customerName, setCustomerName] = useState(order.customerName ?? '');
   const [deliveryAddress, setDeliveryAddress] = useState(order.deliveryAddress ?? '');

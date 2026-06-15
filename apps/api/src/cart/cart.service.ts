@@ -523,6 +523,8 @@ export class CartService {
       paymentMethod: string | null;
       quantity: number | null;
       customFieldValues: Record<string, unknown> | null;
+      /** True when this cart has been pulled into the Cart Orders pipeline. */
+      recovered: boolean;
     }>;
     total: number;
     page: number;
@@ -531,14 +533,13 @@ export class CartService {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     let page = Math.max(1, Math.floor(opts.page ?? 1));
 
-    // Media Buyers / branch-scoped marketing viewers only ever see carts from
-    // their own campaigns. Uses the exact same WHERE clause as `countAbandoned`
-    // (see `openCartConditions`) so the list and the "Open carts" KPI agree.
+    // All ABANDONED carts (including recovered) — marketers see the full
+    // abandonment volume so they can track recovery progress over time.
     const trimmedSearch = opts.search?.trim();
     const searchClause = trimmedSearch
       ? ilike(schema.cartAbandonments.customerName, `%${trimmedSearch}%`)
       : undefined;
-    const abandonedWhere = and(...this.openCartConditions(opts), searchClause);
+    const abandonedWhere = and(...this.abandonedCartConditions(opts), searchClause);
     const totalRows = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
@@ -575,6 +576,8 @@ export class CartService {
         paymentMethod: schema.cartAbandonments.paymentMethod,
         quantity: schema.cartAbandonments.quantity,
         customFieldValues: schema.cartAbandonments.customFieldValues,
+        // Whether this cart has been pulled into the Cart Orders pipeline.
+        recovered: sql<boolean>`EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})`,
       })
       .from(schema.cartAbandonments)
       .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
@@ -615,6 +618,7 @@ export class CartService {
         paymentMethod: r.paymentMethod ?? null,
         quantity: r.quantity ?? null,
         customFieldValues: (r.customFieldValues as Record<string, unknown> | null) ?? null,
+        recovered: r.recovered === true,
       })),
       total,
       page,
@@ -967,7 +971,11 @@ export class CartService {
    *
    * PENDING carts (customer still typing) and CONVERTED carts are not "open".
    */
-  private openCartConditions(opts: {
+  /**
+   * Base conditions for abandoned-cart queries: ABANDONED status + branch/MB/date
+   * scoping. Shared by the count and list so they always agree.
+   */
+  private abandonedCartConditions(opts: {
     mediaBuyerId?: string | null;
     branchId?: string | null;
     effectiveBranchIds?: string[] | null;
@@ -976,18 +984,6 @@ export class CartService {
   }): SQL[] {
     const conditions: SQL[] = [
       eq(schema.cartAbandonments.status, 'ABANDONED'),
-      sql`NOT EXISTS (SELECT 1 FROM orders o WHERE o.cart_id = ${schema.cartAbandonments.id})`,
-      sql`NOT EXISTS (
-        SELECT 1 FROM orders o
-        JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.campaign_id = ${schema.cartAbandonments.campaignId}
-          AND o.customer_phone_hash = ${schema.cartAbandonments.customerPhoneHash}
-          AND oi.product_id = ${schema.cartAbandonments.productId}
-          AND o.created_at >= ${schema.cartAbandonments.createdAt}
-      )`,
-      // Exclude carts already pulled into Follow-Up or Cart Orders — they're handled there, not here.
-      sql`NOT EXISTS (SELECT 1 FROM follow_up_orders fu WHERE fu.cart_id = ${schema.cartAbandonments.id})`,
-      sql`NOT EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})`,
     ];
     if (opts.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
@@ -1004,6 +1000,34 @@ export class CartService {
       conditions.push(lte(schema.cartAbandonments.updatedAt, new Date(`${opts.endDate}T23:59:59`)));
     }
     return conditions;
+  }
+
+  /**
+   * Stricter conditions for genuinely "open" carts — excludes carts that have
+   * been recovered into orders, follow-ups, or cart orders. Used by
+   * `countAbandoned` (the open-cart KPI on the Cart Orders page).
+   */
+  private openCartConditions(opts: {
+    mediaBuyerId?: string | null;
+    branchId?: string | null;
+    effectiveBranchIds?: string[] | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  }): SQL[] {
+    return [
+      ...this.abandonedCartConditions(opts),
+      sql`NOT EXISTS (SELECT 1 FROM orders o WHERE o.cart_id = ${schema.cartAbandonments.id})`,
+      sql`NOT EXISTS (
+        SELECT 1 FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.campaign_id = ${schema.cartAbandonments.campaignId}
+          AND o.customer_phone_hash = ${schema.cartAbandonments.customerPhoneHash}
+          AND oi.product_id = ${schema.cartAbandonments.productId}
+          AND o.created_at >= ${schema.cartAbandonments.createdAt}
+      )`,
+      sql`NOT EXISTS (SELECT 1 FROM follow_up_orders fu WHERE fu.cart_id = ${schema.cartAbandonments.id})`,
+      sql`NOT EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})`,
+    ];
   }
 
   /**
@@ -1028,14 +1052,16 @@ export class CartService {
   }
 
   /**
-   * Count ALL abandoned carts (regardless of recovery status) — for marketing
-   * record purposes. Shows total carts captured within the date/branch scope.
+   * Count ALL abandoned carts (regardless of recovery status) — for the
+   * Marketing Orders "Cart Abandonment" stat strip. Includes carts already
+   * pulled into Cart Orders so marketers see the full abandonment volume.
+   * Excludes PENDING (still typing) and CONVERTED (completed the form).
    */
   async countAllCarts(
     opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
   ): Promise<number> {
     const conditions: SQL[] = [
-      inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED', 'CONVERTED']),
+      eq(schema.cartAbandonments.status, 'ABANDONED'),
     ];
     if (opts.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
