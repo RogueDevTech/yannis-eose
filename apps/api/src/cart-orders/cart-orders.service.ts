@@ -728,8 +728,10 @@ export class CartOrdersService {
             await tx.insert(schema.cartOrderTimelineEvents).values({
               cartOrderId: co.id,
               eventType: 'ORDER_RECEIVED',
-              actorId: actor.id,
-              actorName: actor.name,
+              // System actor may not exist in users table — skip FK to avoid
+              // blocking the entire pull. Human-initiated pulls pass a real user.
+              actorId: actor.id === SYSTEM_ACTOR_ID ? null : actor.id,
+              actorName: actor.name ?? 'System',
               description: 'Cart order created from abandoned cart.',
               metadata: { sourceCartId: cart.id },
               branchId: resolvedBranchId,
