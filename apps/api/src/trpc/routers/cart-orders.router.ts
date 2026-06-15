@@ -75,6 +75,12 @@ export const cartOrdersRouter = router({
       );
     }),
 
+  initiateCall: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().initiateCall(input.orderId, ctx.user);
+    }),
+
   pullFromCarts: permissionProcedure('orders.write')
     .input(
       listCartOrdersSchema.pick({}).extend({
