@@ -19,6 +19,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { canViewAllBranches } from '../common/authz';
 import { encodePermissionsToBitmask } from '@yannis/shared';
 import {
   BUNDLE_COOKIE_NAME,
@@ -526,7 +527,15 @@ export class AuthController {
         // selected — mirrors the Case 2 guard below.
         if (!merged.currentBranchId) {
           const groupBranchIds = await this.authService.getGroupBranchIds(groupId);
-          if (groupBranchIds.length > 0) merged.selectedBranchIds = groupBranchIds;
+          if (groupBranchIds.length > 0) {
+            // Scope to user's assigned branches within the group (see Case 2).
+            const scoped = canViewAllBranches(merged)
+              ? groupBranchIds
+              : merged.branchIds?.length
+                ? groupBranchIds.filter((id) => merged.branchIds!.includes(id))
+                : groupBranchIds;
+            merged.selectedBranchIds = scoped.length > 0 ? scoped : groupBranchIds;
+          }
         }
         const sessionToken = this.extractSessionToken(req);
         if (sessionToken) {
@@ -542,10 +551,18 @@ export class AuthController {
     if (merged.activeGroupId && !merged.currentBranchId && (!merged.selectedBranchIds || merged.selectedBranchIds.length === 0)) {
       const groupBranchIds = await this.authService.getGroupBranchIds(merged.activeGroupId);
       if (groupBranchIds.length > 0) {
-        merged.selectedBranchIds = groupBranchIds;
+        // Global users (SuperAdmin, Finance, etc.) see all group branches;
+        // branch-scoped users only see branches they're assigned to within
+        // the group — prevents a HoM with 2 branches from seeing all 4.
+        const scoped = canViewAllBranches(merged)
+          ? groupBranchIds
+          : merged.branchIds?.length
+            ? groupBranchIds.filter((id) => merged.branchIds!.includes(id))
+            : groupBranchIds;
+        merged.selectedBranchIds = scoped.length > 0 ? scoped : groupBranchIds;
         const sessionToken = this.extractSessionToken(req);
         if (sessionToken) {
-          void this.authService.patchSessionGroupScope(sessionToken, merged.activeGroupId, groupBranchIds).catch(() => {});
+          void this.authService.patchSessionGroupScope(sessionToken, merged.activeGroupId, merged.selectedBranchIds).catch(() => {});
         }
       }
     }

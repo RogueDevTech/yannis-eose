@@ -50,12 +50,12 @@ function logisticsTeamShellColumns(): CompactTableColumn<{ id: string }>[] {
   return [
     { key: 'provider', header: 'Provider', render: () => <TableCellTextPulse className="w-[12rem]" /> },
     {
-      key: 'locations',
-      header: 'Locations',
+      key: 'availableStock',
+      header: 'Available stock',
       align: 'right',
       render: () => (
         <span className="inline-flex w-full justify-end">
-          <TableCellTextPulse className="w-[2rem]" />
+          <TableCellTextPulse className="w-[3rem]" />
         </span>
       ),
     },
@@ -118,12 +118,6 @@ function logisticsTeamShellColumns(): CompactTableColumn<{ id: string }>[] {
           <TableCellTextPulse className="w-[2.5rem]" />
         </span>
       ),
-    },
-    {
-      key: 'statusMix',
-      header: 'Order status split',
-      minWidth: 'min-w-[180px]',
-      render: () => <TableCellTextPulse className="w-[10rem]" />,
     },
     {
       key: 'actions',

@@ -821,8 +821,10 @@ export function MarketingOrdersPage({
             // per-status click-through counts (Unassigned, Assigned, etc.).
             const defaultMetrics: MarketingMetrics = { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 };
             const m = activeSecondary.metrics ?? defaultMetrics;
-            // statusCounts always from team bundle — drives status dropdown + per-status pills
-            const statusCounts = ins.statusCounts;
+            // statusCounts from the active bundle so My/Team stat strips match
+            // the respective scope. The status dropdown options still use team
+            // counts so all filter options are reachable.
+            const statusCounts = activeSecondary.statusCounts ?? ins.statusCounts;
             const statusTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
