@@ -151,7 +151,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }),
     );
 
-    const [providerRes, locationsRes, teamRes, movementsRes] = await Promise.all([
+    const productBreakdownInput = encodeURIComponent(
+      JSON.stringify({
+        providerId,
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      }),
+    );
+
+    const [providerRes, locationsRes, teamRes, movementsRes, productBreakdownRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/logistics.getProvider?input=${providerInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(
@@ -160,6 +168,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ),
       apiRequest<unknown>(
         `/trpc/inventory.providerMovements?input=${movementsInput}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/inventory.providerProductBreakdown?input=${productBreakdownInput}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -178,6 +190,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const movementsData = parseProviderMovements(movementsRes);
 
+    // Parse product breakdown
+    const pbRaw = productBreakdownRes.ok
+      ? ((productBreakdownRes.data as Record<string, unknown>)?.result as { data?: { productId: string; productName: string; received: number; sold: number; available: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[] })?.data
+      : null;
+    const productBreakdown = Array.isArray(pbRaw) ? pbRaw : [];
+
     return {
       provider,
       locations,
@@ -188,6 +206,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       movementsData,
       productFilter: productFilter ?? null,
       locationFilter: locationFilter ?? null,
+      productBreakdown,
     };
   })();
 
@@ -219,6 +238,7 @@ export default function LogisticsProviderDetailRoute() {
             movementsData={data.movementsData}
             productFilter={data.productFilter}
             locationFilter={data.locationFilter}
+            productBreakdown={data.productBreakdown}
           />
         )}
       </CachedAwait>

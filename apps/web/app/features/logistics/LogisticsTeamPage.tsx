@@ -179,13 +179,17 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
   return (
     <div className="card p-4">
       <div className="min-w-0 mb-3">
-        <div className="font-medium text-app-fg truncate">{row.providerName}</div>
-        <div className="text-xs text-app-fg-muted">
-          {row.locationCount} location{row.locationCount === 1 ? '' : 's'}
+        <div className="font-medium text-app-fg truncate">
+          {row.providerName}
+          <span className="text-xs text-app-fg-muted ml-1.5">({row.locationCount})</span>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+        <div>
+          <div className="text-app-fg-muted">Available stock</div>
+          <div className={`font-semibold tabular-nums ${row.availableStock === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{row.availableStock.toLocaleString()}</div>
+        </div>
         <div>
           <div className="text-app-fg-muted">Assigned</div>
           <div className="font-semibold tabular-nums">{row.totalAssigned}</div>
@@ -238,11 +242,6 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
             {row.totalAssigned > 0 ? `${Math.round(row.delinquencyRate)}%` : '—'}
           </div>
         </div>
-      </div>
-
-      <div className="space-y-1" title={STATUS_SPLIT_HELP}>
-        <div className="text-xs text-app-fg-muted">Order status split</div>
-        <StatusMixBar breakdown={row.statusBreakdown} totalAssigned={row.totalAssigned} />
       </div>
 
       <div className="mt-4 pt-3 border-t border-app-border flex justify-end">
@@ -333,16 +332,19 @@ export function LogisticsTeamPage({
         key: 'provider',
         header: 'Provider',
         render: (p) => (
-          <div className="font-medium text-app-fg truncate min-w-0">{p.providerName}</div>
+          <div className="min-w-0">
+            <span className="font-medium text-app-fg truncate">{p.providerName}</span>
+            <span className="text-xs text-app-fg-muted ml-1.5">({p.locationCount})</span>
+          </div>
         ),
       },
       {
-        key: 'locations',
-        header: 'Locations',
+        key: 'availableStock',
+        header: 'Available stock',
         align: 'right',
         nowrap: true,
-        cellClassName: 'tabular-nums text-app-fg-muted',
-        render: (p) => p.locationCount,
+        cellClassName: (p) => `tabular-nums font-medium ${p.availableStock === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`,
+        render: (p) => p.availableStock.toLocaleString(),
       },
       {
         key: 'assigned',
@@ -359,38 +361,6 @@ export function LogisticsTeamPage({
         nowrap: true,
         cellClassName: 'tabular-nums text-app-fg',
         render: (p) => p.delivered,
-      },
-      {
-        key: 'unitsDelivered',
-        header: 'Units delivered',
-        align: 'right',
-        nowrap: true,
-        cellClassName: 'tabular-nums text-app-fg',
-        render: (p) => p.unitsDelivered.toLocaleString(),
-      },
-      {
-        key: 'deliveryRate',
-        header: 'Delivery rate',
-        align: 'right',
-        nowrap: true,
-        cellClassName: (p) => `tabular-nums ${deliveryRateColorClass(p.deliveryRate)}`,
-        render: (p) => (p.totalAssigned > 0 ? `${Math.round(p.deliveryRate)}%` : '—'),
-      },
-      {
-        key: 'delinquencyRate',
-        header: 'Delinquency rate',
-        align: 'right',
-        nowrap: true,
-        cellClassName: (p) => `tabular-nums ${delinquencyRateColorClass(p.delinquencyRate)}`,
-        render: (p) => (p.totalAssigned > 0 ? `${Math.round(p.delinquencyRate)}%` : '—'),
-      },
-      {
-        key: 'returned',
-        header: 'Returned',
-        align: 'right',
-        nowrap: true,
-        cellClassName: 'tabular-nums text-app-fg-muted',
-        render: (p) => p.returned,
       },
       {
         key: 'remitted',
@@ -430,14 +400,36 @@ export function LogisticsTeamPage({
         },
       },
       {
-        key: 'statusMix',
-        header: (
-          <span title={STATUS_SPLIT_HELP} className="cursor-help border-b border-dotted border-app-fg-muted/60">
-            Order status split
-          </span>
-        ),
-        minWidth: 'min-w-[180px]',
-        render: (p) => <StatusMixBar breakdown={p.statusBreakdown} totalAssigned={p.totalAssigned} />,
+        key: 'unitsDelivered',
+        header: 'Units delivered',
+        align: 'right',
+        nowrap: true,
+        cellClassName: 'tabular-nums text-app-fg',
+        render: (p) => p.unitsDelivered.toLocaleString(),
+      },
+      {
+        key: 'deliveryRate',
+        header: 'Delivery rate',
+        align: 'right',
+        nowrap: true,
+        cellClassName: (p) => `tabular-nums ${deliveryRateColorClass(p.deliveryRate)}`,
+        render: (p) => (p.totalAssigned > 0 ? `${Math.round(p.deliveryRate)}%` : '—'),
+      },
+      {
+        key: 'delinquencyRate',
+        header: 'Delinquency rate',
+        align: 'right',
+        nowrap: true,
+        cellClassName: (p) => `tabular-nums ${delinquencyRateColorClass(p.delinquencyRate)}`,
+        render: (p) => (p.totalAssigned > 0 ? `${Math.round(p.delinquencyRate)}%` : '—'),
+      },
+      {
+        key: 'returned',
+        header: 'Returned',
+        align: 'right',
+        nowrap: true,
+        cellClassName: 'tabular-nums text-app-fg-muted',
+        render: (p) => p.returned,
       },
       {
         key: 'actions',
@@ -723,10 +715,6 @@ export function LogisticsTeamPage({
                     )}
                   </div>
                 )}
-              </div>
-              <div>
-                <div className="text-xs text-app-fg-muted mb-1">Order status split</div>
-                <StatusMixBar breakdown={p.statusBreakdown} totalAssigned={p.totalAssigned} />
               </div>
               <div className="pt-1 border-t border-app-border">
                 <Link

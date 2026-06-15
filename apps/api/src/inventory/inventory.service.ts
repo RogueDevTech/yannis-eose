@@ -1999,6 +1999,120 @@ export class InventoryService {
   }
 
   /**
+   * Per-product stock + sold breakdown for a logistics provider.
+   * Returns current available stock and units sold (DELIVERY movements) in the date range.
+   */
+  async getProviderProductBreakdown(opts: {
+    providerId: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    const startDate = opts.startDate?.trim() || null;
+    const endDate = opts.endDate?.trim() || null;
+
+    // Resolve location IDs for this provider
+    const locRows = await this.db
+      .select({ id: schema.logisticsLocations.id })
+      .from(schema.logisticsLocations)
+      .where(eq(schema.logisticsLocations.providerId, opts.providerId));
+    const locationIds = locRows.map((r) => r.id);
+
+    if (locationIds.length === 0) return [];
+
+    const locationList = sql.join(locationIds.map((id) => sql`${id}::uuid`), sql`,`);
+
+    // Current stock per product across provider locations
+    const stockRows = await this.db.execute<{
+      productId: string;
+      productName: string | null;
+      available: number;
+    }>(sql`
+      SELECT
+        il.product_id AS "productId",
+        p.name AS "productName",
+        COALESCE(SUM(il.stock_count - il.reserved_count), 0)::int AS "available"
+      FROM inventory_levels il
+      INNER JOIN products p ON p.id = il.product_id
+      WHERE il.location_id IN (${locationList})
+      GROUP BY il.product_id, p.name
+    `);
+
+    // Per-product movement aggregates: received (INTAKE/TRANSFER_IN) + sold (DELIVERY)
+    const movementRows = await this.db.execute<{
+      productId: string;
+      received: number;
+      sold: number;
+    }>(sql`
+      SELECT
+        sm.product_id AS "productId",
+        COALESCE(SUM(CASE WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "received",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "sold"
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      WHERE (
+          sm.from_location_id IN (${locationList})
+          OR sm.to_location_id IN (${locationList})
+          OR o.logistics_location_id IN (${locationList})
+        )
+        AND sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY')
+        AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+        AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
+      GROUP BY sm.product_id
+    `);
+
+    const movementMap = new Map<string, { received: number; sold: number }>();
+    for (const r of movementRows) {
+      movementMap.set(r.productId, { received: r.received, sold: r.sold });
+    }
+
+    // Per-product remittance: qty remitted for, qty pending, amounts
+    const revenueRows = await this.db.execute<{
+      productId: string;
+      qtyRemitted: number;
+      qtyPending: number;
+      amountRemitted: string;
+      amountPending: string;
+    }>(sql`
+      SELECT
+        oi.product_id AS "productId",
+        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyRemitted",
+        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyPending",
+        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountRemitted",
+        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountPending"
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      LEFT JOIN delivery_remittance_orders dro ON dro.order_id = o.id
+      LEFT JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
+      WHERE o.logistics_location_id IN (${locationList})
+        AND o.status IN ('DELIVERED', 'REMITTED')
+        AND (${startDate}::date IS NULL OR o.allocated_at >= ${startDate}::date)
+        AND (${endDate}::date IS NULL OR o.allocated_at < (${endDate}::date + INTERVAL '1 day'))
+      GROUP BY oi.product_id
+    `);
+
+    const revenueMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }>();
+    for (const r of revenueRows) {
+      revenueMap.set(r.productId, r);
+    }
+
+    return stockRows.map((r) => {
+      const mv = movementMap.get(r.productId);
+      const rv = revenueMap.get(r.productId);
+      return {
+        productId: r.productId,
+        productName: r.productName ?? 'Unknown',
+        received: mv?.received ?? 0,
+        sold: mv?.sold ?? 0,
+        available: r.available,
+        qtyRemitted: rv?.qtyRemitted ?? 0,
+        qtyPending: rv?.qtyPending ?? 0,
+        amountRemitted: rv?.amountRemitted ?? '0',
+        amountPending: rv?.amountPending ?? '0',
+      };
+    });
+  }
+
+  /**
    * Stock movements across ALL locations belonging to a logistics provider.
    * Powers the provider detail page "Stock Activity" tab — same column layout
    * as the per-location inventory detail page, plus a `productName` column.

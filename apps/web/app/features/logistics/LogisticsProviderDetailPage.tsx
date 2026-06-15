@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
+import { formatOrderNumber } from '@yannis/shared';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Button } from '~/components/ui/button';
@@ -9,7 +10,6 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { DescriptionList } from '~/components/ui/description-list';
-import { EmptyState } from '~/components/ui/empty-state';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
@@ -23,7 +23,6 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { Tabs } from '~/components/ui/tabs';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import {
   deliveryRateColorClass,
@@ -143,7 +142,7 @@ function movementColumns(
       cellClassName: 'text-app-fg-muted',
       render: (m) => {
         if (m.orderShortId) {
-          return <OrderIdBadge id={m.orderShortId} linkTo={`/admin/orders/${m.orderShortId}`} />;
+          return <OrderIdBadge id={m.orderShortId} orderNumber={m.orderNumber} linkTo={`/admin/orders/${m.orderShortId}`} />;
         }
         const cp = counterpartLabel(m);
         if (cp) return <span>{cp}</span>;
@@ -155,10 +154,19 @@ function movementColumns(
       header: 'Reason',
       cellClassName: 'text-app-fg-muted italic truncate max-w-xs',
       cellTitle: (m) => {
-        const r = formatMovementReasonForDisplay(m.reason);
+        let r = formatMovementReasonForDisplay(m.reason);
+        if (r && m.orderShortId && m.orderNumber != null) {
+          r = r.replace(m.orderShortId, formatOrderNumber(m.orderNumber));
+        }
         return r || undefined;
       },
-      render: (m) => formatMovementReasonForDisplay(m.reason) || '—',
+      render: (m) => {
+        let r = formatMovementReasonForDisplay(m.reason);
+        if (r && m.orderShortId && m.orderNumber != null) {
+          r = r.replace(m.orderShortId, formatOrderNumber(m.orderNumber));
+        }
+        return r || '—';
+      },
     },
     {
       key: 'action',
@@ -182,7 +190,10 @@ function MovementDetailModal({
   onClose: () => void;
 }) {
   if (!movement) return null;
-  const reasonDisplay = formatMovementReasonForDisplay(movement.reason);
+  let reasonDisplay = formatMovementReasonForDisplay(movement.reason);
+  if (reasonDisplay && movement.orderShortId && movement.orderNumber != null) {
+    reasonDisplay = reasonDisplay.replace(movement.orderShortId, formatOrderNumber(movement.orderNumber));
+  }
   const dir = classifyMovement(movement);
   const qtyColor =
     dir === 'in'
@@ -226,6 +237,7 @@ function MovementDetailModal({
                   value: (
                     <OrderIdBadge
                       id={movement.orderShortId}
+                      orderNumber={movement.orderNumber}
                       linkTo={`/admin/orders/${movement.orderShortId}`}
                     />
                   ),
@@ -270,6 +282,7 @@ export interface LogisticsProviderDetailPageProps {
   movementsData: MovementsData;
   productFilter: string | null;
   locationFilter: string | null;
+  productBreakdown: { productId: string; productName: string; received: number; sold: number; available: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -284,27 +297,12 @@ export function LogisticsProviderDetailPage({
   movementsData,
   productFilter,
   locationFilter,
+  productBreakdown,
 }: LogisticsProviderDetailPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') === 'activity' ? 'activity' : 'overview';
   const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true }).busy;
   const [selectedMovement, setSelectedMovement] = useState<MovementWithProduct | null>(null);
   const [direction, setDirection] = useState<DirectionFilter>('all');
-
-  const setTab = useCallback(
-    (value: string) => {
-      const next = new URLSearchParams(searchParams);
-      if (value === 'overview') {
-        next.delete('tab');
-      } else {
-        next.set('tab', 'activity');
-      }
-      // Reset movements pagination when switching tabs
-      next.delete('movementsPage');
-      setSearchParams(next, { replace: true });
-    },
-    [searchParams, setSearchParams],
-  );
 
   const handleProductFilter = useCallback(
     (productId: string) => {
@@ -340,33 +338,6 @@ export function LogisticsProviderDetailPage({
   }, [movementsData.movements, direction]);
 
   const isAllTime = periodAllTime || dateFilters.periodAllTime;
-
-  const locationColumns: CompactTableColumn<Location>[] = [
-    {
-      key: 'name',
-      header: 'Location',
-      minWidth: 'min-w-[8rem]',
-      render: (loc) => <span className="font-medium text-app-fg">{loc.name}</span>,
-    },
-    {
-      key: 'address',
-      header: 'Address',
-      minWidth: 'min-w-[12rem]',
-      render: (loc) => <span className="text-sm text-app-fg line-clamp-2">{loc.address}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      tight: true,
-      render: (loc) => <StatusBadge status={loc.status} />,
-    },
-    {
-      key: 'dispatch',
-      header: 'Dispatch',
-      tight: true,
-      render: (loc) => (loc.dispatchLocked ? <span className="text-warning-600 text-xs">Locked</span> : '—'),
-    },
-  ];
 
   const rateCardJson =
     provider.rateCard != null && typeof provider.rateCard === 'object'
@@ -418,226 +389,193 @@ export function LogisticsProviderDetailPage({
         periodAllTime={periodAllTime}
       />
 
-      <Tabs
-        value={activeTab}
-        onChange={setTab}
-        tabs={[
-          { value: 'overview', label: 'Overview' },
-          {
-            value: 'activity',
-            label: 'Stock activity',
-            badge:
-              movementsData.total > 0 ? (
-                <span className="rounded-full bg-app-hover px-1.5 py-0.5 text-micro font-semibold text-app-fg-muted tabular-nums">
-                  {movementsData.total}
-                </span>
-              ) : undefined,
-          },
-        ]}
-      />
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Company</h2>
+        <OverviewStatStrip
+          mobileGrid
+          wrap
+          tileClassName="!py-2.5"
+          items={[
+            { label: 'Contact', value: provider.contactInfo?.trim() || '—', valueClassName: 'text-app-fg' },
+            { label: 'Coverage', value: provider.coverageArea?.trim() || '—', valueClassName: 'text-app-fg' },
+            ...locations.map((l) => ({
+              label: l.name,
+              value: (l.totalStock ?? 0).toLocaleString(),
+              valueClassName: (l.totalStock ?? 0) === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400',
+              title: `Available stock at ${l.name}`,
+            })),
+            { label: isAllTime ? 'Sold (all time)' : 'Sold (period)', value: movementsData.deliveredQty.toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
+          ]}
+        />
+      </div>
+
+      {performance ? (
+        <div>
+          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
+          <OverviewStatStrip
+            mobileGrid
+            wrap
+            tileClassName="!py-2.5"
+            items={[
+              { label: 'Assigned', value: performance.totalAssigned.toLocaleString(), valueClassName: 'text-app-fg' },
+              { label: 'Delivered', value: performance.delivered.toLocaleString(), valueClassName: 'text-success-600 dark:text-success-400' },
+              { label: 'Remitted', value: formatNaira(performance.remittedAmount), valueClassName: 'text-success-600 dark:text-success-400' },
+              { label: 'Units delivered', value: performance.unitsDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
+              { label: 'Delivery rate', value: performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '—', valueClassName: deliveryRateColorClass(performance.deliveryRate) },
+              { label: 'Delinquency', value: performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '—', valueClassName: delinquencyRateColorClass(performance.delinquencyRate) },
+              { label: 'Returned', value: performance.returned.toLocaleString(), valueClassName: 'text-app-fg-muted' },
+              { label: 'Pending', value: formatNaira(performance.pendingRemittanceAmount), valueClassName: 'text-warning-600 dark:text-warning-400' },
+              { label: 'Disputed', value: formatNaira(performance.disputedRemittanceAmount), valueClassName: 'text-danger-600 dark:text-danger-400' },
+            ]}
+          />
+        </div>
+      ) : null}
+
+      {productBreakdown.length > 0 && (
+        <div>
+          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Product Analysis</h2>
+          <OverviewStatStrip
+            mobileGrid
+            wrap
+            tileClassName="!py-3.5 !px-4 min-w-[9rem]"
+            items={productBreakdown.map((p) => ({
+              label: p.productName,
+              value: (
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
+                    <span className="text-app-fg-muted text-micro font-normal">Received <span className="font-semibold text-app-fg">{p.received.toLocaleString()}</span></span>
+                    <span className="text-app-fg-muted text-micro font-normal">Sold <span className="font-semibold text-brand-600 dark:text-brand-400">{p.sold.toLocaleString()}</span></span>
+                    <span className="text-app-fg-muted text-micro font-normal">Left <span className={`font-semibold ${p.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{p.available.toLocaleString()}</span></span>
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
+                    <span className="text-app-fg-muted text-micro font-normal">Remitted <span className="font-semibold text-success-600 dark:text-success-400">{p.qtyRemitted.toLocaleString()}</span> <span className="text-success-600 dark:text-success-400">({formatNaira(p.amountRemitted)})</span></span>
+                    {(p.qtyPending > 0 || Number(p.amountPending) > 0) && (
+                      <span className="text-app-fg-muted text-micro font-normal">Pending <span className="font-semibold text-warning-600 dark:text-warning-400">{p.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(p.amountPending)})</span></span>
+                    )}
+                  </div>
+                </div>
+              ),
+              plainValue: true,
+            }))}
+          />
+        </div>
+      )}
+
+      {rateCardJson ? (
+        <div>
+          <p className="text-xs font-medium text-app-fg-muted mb-2">Rate card (reference)</p>
+          <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-x-auto max-h-48 text-app-fg">
+            {rateCardJson}
+          </pre>
+        </div>
+      ) : null}
 
       <TableLoadingOverlay show={loaderRefetchBusy} minHeightClassName="min-h-[16rem]">
-        {activeTab === 'overview' ? (
-          <>
-          <div>
-            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Company</h2>
-            <OverviewStatStrip
-              mobileGrid
-              tileClassName="!py-2.5"
-              items={[
-                { label: 'Contact', value: provider.contactInfo?.trim() || '—', valueClassName: 'text-app-fg' },
-                { label: 'Coverage', value: provider.coverageArea?.trim() || '—', valueClassName: 'text-app-fg' },
-                { label: 'Created', value: formatDate(provider.createdAt), valueClassName: 'text-app-fg' },
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <FilterPills
+              value={direction}
+              onChange={(v) => setDirection(v as DirectionFilter)}
+              options={[
+                { value: 'all', label: `All (${movementsData.total})` },
+                { value: 'in', label: 'Stock in' },
+                { value: 'out', label: 'Stock out' },
               ]}
             />
-          </div>
 
-          {performance ? (
-            <div>
-              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
-              <OverviewStatStrip
-                mobileGrid
-                tileClassName="!py-2.5"
-                items={[
-                { label: 'Assigned', value: performance.totalAssigned, valueClassName: 'text-app-fg' },
-                { label: 'Delivered', value: performance.delivered, valueClassName: 'text-success-600 dark:text-success-400' },
-                { label: 'Units delivered', value: performance.unitsDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
-                { label: 'Delivery rate', value: performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '—', valueClassName: deliveryRateColorClass(performance.deliveryRate) },
-                { label: 'Delinquency', value: performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '—', valueClassName: delinquencyRateColorClass(performance.delinquencyRate) },
-                { label: 'Returned', value: performance.returned, valueClassName: 'text-app-fg-muted' },
-                { label: 'Remitted', value: formatNaira(performance.remittedAmount), valueClassName: 'text-success-600 dark:text-success-400' },
-                { label: 'Pending', value: formatNaira(performance.pendingRemittanceAmount), valueClassName: 'text-warning-600 dark:text-warning-400' },
-                { label: 'Disputed', value: formatNaira(performance.disputedRemittanceAmount), valueClassName: 'text-danger-600 dark:text-danger-400' },
-              ]}
-              />
-            </div>
-          ) : null}
-
-          {rateCardJson ? (
-            <div>
-              <p className="text-xs font-medium text-app-fg-muted mb-2">Rate card (reference)</p>
-              <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-x-auto max-h-48 text-app-fg">
-                {rateCardJson}
-              </pre>
-            </div>
-          ) : null}
-
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Locations</h2>
-              <Link
-                to="/admin/logistics/partners"
-                className="text-xs font-medium text-brand-500 hover:text-brand-600"
+            {movementsData.products.length > 1 && (
+              <FormSelect
+                value={productFilter ?? ''}
+                onChange={(e) => handleProductFilter(e.target.value)}
+                className="w-full sm:w-56"
               >
-                Manage
-              </Link>
-            </div>
-            {locations.length === 0 ? (
-              <p className="text-sm text-app-fg-muted">No locations recorded for this company yet.</p>
-            ) : (
-              <CompactTable<Location>
-                columns={locationColumns}
-                rows={locations}
-                rowKey={(loc) => loc.id}
-                emptyTitle="No locations"
-                emptyDescription="Add a warehouse or hub from the Partners page."
-              />
+                <option value="">All products</option>
+                {movementsData.products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </FormSelect>
+            )}
+
+            {locations.length > 1 && (
+              <FormSelect
+                value={locationFilter ?? ''}
+                onChange={(e) => handleLocationFilter(e.target.value)}
+                className="w-full sm:w-56"
+              >
+                <option value="">All locations</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </FormSelect>
             )}
           </div>
-          </>
-        ) : (
-          /* ── Stock Activity tab ─────────────────────────────────────────── */
-          <div className="space-y-4">
-            <OverviewStatStrip
-              mobileGrid
-              tileClassName="min-w-[7rem]"
-              items={[
-                {
-                  label: isAllTime ? 'Sold (all time)' : 'Sold (period)',
-                  value: movementsData.deliveredQty,
-                  valueClassName: 'text-brand-600 dark:text-brand-400',
-                  title: 'Units delivered/sold in the selected date range',
-                },
-                {
-                  label: isAllTime ? 'In (all time)' : 'In (period)',
-                  value: `+${movementsData.inQty}`,
-                  valueClassName: 'text-success-600 dark:text-success-400',
-                  title: 'Total units received in the selected date range',
-                },
-                {
-                  label: isAllTime ? 'Out (all time)' : 'Out (period)',
-                  value: `−${movementsData.outQty}`,
-                  valueClassName: 'text-danger-600 dark:text-danger-400',
-                  title: 'Total units delivered, transferred out, or written off in the selected date range',
-                },
-              ]}
-            />
 
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <FilterPills
-                value={direction}
-                onChange={(v) => setDirection(v as DirectionFilter)}
-                options={[
-                  { value: 'all', label: `All (${movementsData.total})` },
-                  { value: 'in', label: 'Stock in' },
-                  { value: 'out', label: 'Stock out' },
-                ]}
+          <CompactTable<MovementWithProduct>
+            rows={filteredMovements}
+            rowKey={(m) => m.id}
+            emptyTitle={movementsData.total === 0 ? 'No stock activity in this range' : 'No matching movements'}
+            emptyDescription={
+              movementsData.total === 0
+                ? 'Adjust the date filter or wait for stock activity.'
+                : 'Switch the filter to see other stock events.'
+            }
+            columns={cols}
+            renderMobileCard={(m) => {
+              const dir = classifyMovement(m);
+              const qtyColor =
+                dir === 'in'
+                  ? 'text-success-600 dark:text-success-400'
+                  : dir === 'out'
+                    ? 'text-danger-600 dark:text-danger-400'
+                    : 'text-app-fg-muted';
+              const qtyPrefix = dir === 'in' ? '+' : dir === 'out' ? '−' : '→';
+              return (
+                <button
+                  type="button"
+                  onClick={() => setSelectedMovement(m)}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
+                      {formatMovementType(m.movementType)}
+                    </span>
+                    <span className={`text-sm font-bold tabular-nums ${qtyColor}`}>
+                      {qtyPrefix}{Math.abs(m.quantity)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-app-fg-muted">
+                    <span className="font-medium text-app-fg">{m.productName ?? '—'}</span>
+                    <span>·</span>
+                    <span>{formatDateTime(m.createdAt)}</span>
+                  </div>
+                  {m.actorName && (
+                    <p className="text-xs text-app-fg-muted truncate">by {m.actorName}</p>
+                  )}
+                </button>
+              );
+            }}
+          />
+
+          {movementsData.totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-app-fg-muted">
+                Showing {(movementsData.page - 1) * movementsData.limit + 1}–
+                {Math.min(movementsData.page * movementsData.limit, movementsData.total)} of{' '}
+                {movementsData.total} movements
+              </p>
+              <Pagination
+                page={movementsData.page}
+                totalPages={movementsData.totalPages}
+                pageParam="movementsPage"
+                pageSize={movementsData.limit}
               />
-
-              {movementsData.products.length > 1 && (
-                <FormSelect
-                  value={productFilter ?? ''}
-                  onChange={(e) => handleProductFilter(e.target.value)}
-                  className="w-full sm:w-56"
-                >
-                  <option value="">All products</option>
-                  {movementsData.products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </FormSelect>
-              )}
-
-              {locations.length > 1 && (
-                <FormSelect
-                  value={locationFilter ?? ''}
-                  onChange={(e) => handleLocationFilter(e.target.value)}
-                  className="w-full sm:w-56"
-                >
-                  <option value="">All locations</option>
-                  {locations.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </FormSelect>
-              )}
             </div>
-
-            <CompactTable<MovementWithProduct>
-              rows={filteredMovements}
-              rowKey={(m) => m.id}
-              emptyTitle={movementsData.total === 0 ? 'No stock activity in this range' : 'No matching movements'}
-              emptyDescription={
-                movementsData.total === 0
-                  ? 'Adjust the date filter or wait for stock activity.'
-                  : 'Switch the filter to see other stock events.'
-              }
-              columns={cols}
-              renderMobileCard={(m) => {
-                const dir = classifyMovement(m);
-                const qtyColor =
-                  dir === 'in'
-                    ? 'text-success-600 dark:text-success-400'
-                    : dir === 'out'
-                      ? 'text-danger-600 dark:text-danger-400'
-                      : 'text-app-fg-muted';
-                const qtyPrefix = dir === 'in' ? '+' : dir === 'out' ? '−' : '→';
-                return (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedMovement(m)}
-                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-                        {formatMovementType(m.movementType)}
-                      </span>
-                      <span className={`text-sm font-bold tabular-nums ${qtyColor}`}>
-                        {qtyPrefix}{Math.abs(m.quantity)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-app-fg-muted">
-                      <span className="font-medium text-app-fg">{m.productName ?? '—'}</span>
-                      <span>·</span>
-                      <span>{formatDateTime(m.createdAt)}</span>
-                    </div>
-                    {m.actorName && (
-                      <p className="text-xs text-app-fg-muted truncate">by {m.actorName}</p>
-                    )}
-                  </button>
-                );
-              }}
-            />
-
-            {movementsData.totalPages > 1 && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                <p className="text-sm text-app-fg-muted">
-                  Showing {(movementsData.page - 1) * movementsData.limit + 1}–
-                  {Math.min(movementsData.page * movementsData.limit, movementsData.total)} of{' '}
-                  {movementsData.total} movements
-                </p>
-                <Pagination
-                  page={movementsData.page}
-                  totalPages={movementsData.totalPages}
-                  pageParam="movementsPage"
-                  pageSize={movementsData.limit}
-                />
-              </div>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </TableLoadingOverlay>
 
       <MovementDetailModal

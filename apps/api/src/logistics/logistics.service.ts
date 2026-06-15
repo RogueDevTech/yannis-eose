@@ -2686,6 +2686,8 @@ export class LogisticsService {
       disputedRemittanceAmount: string;
       /** Total units (bottles) delivered — SUM(order_items.quantity) for DELIVERED/REMITTED orders. */
       unitsDelivered: number;
+      /** Available stock across all locations for this provider. */
+      availableStock: number;
     }>
   > {
     // Default to month-to-date when no range supplied — matches marketing page UX.
@@ -2831,6 +2833,24 @@ export class LogisticsService {
       if (row.providerId) unitsByProvider.set(row.providerId, Number(row.totalUnits) || 0);
     }
 
+    // ── Pass 6: available stock per provider ──────────────────────────────
+    const stockRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        availableStock: sql<string>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::text`,
+      })
+      .from(schema.inventoryLevels)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.inventoryLevels.locationId),
+      )
+      .groupBy(schema.logisticsLocations.providerId);
+
+    const stockByProvider = new Map<string, number>();
+    for (const row of stockRows) {
+      if (row.providerId) stockByProvider.set(row.providerId, Number(row.availableStock) || 0);
+    }
+
     // ── Build rollup ───────────────────────────────────────────────────────
     const result = providers.map((p) => {
       const counts = statusCountsByProvider.get(p.id) ?? new Map<string, number>();
@@ -2915,6 +2935,7 @@ export class LogisticsService {
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
         unitsDelivered: unitsByProvider.get(p.id) ?? 0,
+        availableStock: stockByProvider.get(p.id) ?? 0,
       };
     });
 
