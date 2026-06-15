@@ -43,7 +43,7 @@ import { formatOrderTimestamp } from '~/lib/format-date';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';
 
-const LOGISTICS_STATUS_OPTIONS = ['ALL', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED'] as const;
+const LOGISTICS_STATUS_OPTIONS = ['ALL', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED'] as const;
 
 export interface LogisticsOrderRow extends Order {
   logisticsLocationId?: string | null;
@@ -344,7 +344,7 @@ function LogisticsOrdersPageImpl({
   const allocatedCount = statusCounts['AGENT_ASSIGNED'] ?? 0;
   const dispatchedCount = statusCounts['DISPATCHED'] ?? 0;
   const inTransitCount = statusCounts['IN_TRANSIT'] ?? 0;
-  const deliveredCount = statusCounts['DELIVERED'] ?? 0;
+  const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
   const remittedCount = statusCounts['REMITTED'] ?? 0;
   const overdueCount = statusCounts['__OVERDUE'] ?? 0;
   const totalOrdersCount = Object.entries(statusCounts)
@@ -729,12 +729,11 @@ function LogisticsOrdersPageImpl({
           mobileGrid
           items={[
             { label: 'Total', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-            { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Agent Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Agent Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Remitted', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Overdue', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Remitted', value: <StatValuePulse className="min-w-[2rem]" /> },
           ]}
         />
       ) : (
@@ -742,12 +741,11 @@ function LogisticsOrdersPageImpl({
           mobileGrid
           items={[
             { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL'), active: selectedStatus === 'ALL' },
-            { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED'), active: selectedStatus === 'CONFIRMED' },
+            { label: 'Agent Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED'), active: selectedStatus === 'CONFIRMED' },
             { label: 'Agent Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED'), active: selectedStatus === 'AGENT_ASSIGNED' },
-            { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('IN_TRANSIT'), active: selectedStatus === 'IN_TRANSIT' },
             { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED'), active: selectedStatus === 'DELIVERED' },
-            { label: 'Remitted', value: remittedCount, valueClassName: 'text-purple-600 dark:text-purple-400', to: buildStatusQuery('REMITTED'), active: selectedStatus === 'REMITTED' },
             { label: 'Overdue', value: overdueCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('OVERDUE'), active: selectedStatus === 'OVERDUE' },
+            { label: 'Remitted', value: remittedCount, valueClassName: 'text-purple-600 dark:text-purple-400', to: buildStatusQuery('REMITTED'), active: selectedStatus === 'REMITTED' },
           ]}
         />
       )}

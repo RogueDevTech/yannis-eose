@@ -511,7 +511,7 @@ export class CartOrdersService {
         .select()
         .from(schema.cartOrderTimelineEvents)
         .where(eq(schema.cartOrderTimelineEvents.cartOrderId, id))
-        .orderBy(desc(schema.cartOrderTimelineEvents.createdAt)),
+        .orderBy(asc(schema.cartOrderTimelineEvents.createdAt)),
       Promise.resolve([order.assignedCsId, order.mediaBuyerId].filter(Boolean) as string[]),
     ]);
 
@@ -532,6 +532,40 @@ export class CartOrdersService {
       orderItems: items,
       timeline,
     };
+  }
+
+  // ── Initiate Call ─────────────────────────────────────────────────────
+  // Mirrors orders.initiateCall: transitions to CS_ENGAGED + records MANUAL_CALL.
+
+  async initiateCall(orderId: string, actor: SessionUser) {
+    const [order] = await this.db
+      .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, servicingBranchId: schema.cartOrders.servicingBranchId })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+
+    // Transition to CS_ENGAGED if not already past it
+    if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
+      await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.cartOrders)
+          .set({ status: 'CS_ENGAGED', updatedAt: new Date() })
+          .where(eq(schema.cartOrders.id, orderId));
+
+        await tx.insert(schema.cartOrderTimelineEvents).values({
+          cartOrderId: orderId,
+          eventType: 'MANUAL_CALL_LOGGED',
+          actorId: actor.id,
+          actorName: actor.name,
+          description: 'Manual call recorded.',
+          metadata: { previousStatus: order.status, newStatus: 'CS_ENGAGED' },
+          branchId: order.servicingBranchId,
+        });
+      });
+    }
+
+    return { success: true, callInitiated: true, callLog: null };
   }
 
   // ── Pull Abandoned Carts into Cart Orders ────────────────────────────

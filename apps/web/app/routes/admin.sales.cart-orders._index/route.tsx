@@ -10,6 +10,7 @@ import {
   requirePermission,
   DEFERRED_LOADER_TIMEOUT_MS,
   safeStatus,
+  defaultThisMonthRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
@@ -32,9 +33,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const csCloserId = url.searchParams.get('csCloserId') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
-  const startDate = url.searchParams.get('startDate') || undefined;
-  const endDate = url.searchParams.get('endDate') || undefined;
   const branchId = url.searchParams.get('branchId') || undefined;
+
+  let startDate = url.searchParams.get('startDate') ?? undefined;
+  let endDate = url.searchParams.get('endDate') ?? undefined;
+  const period = url.searchParams.get('period') ?? undefined;
+  const periodAllTime = period === 'all_time';
+  if (!periodAllTime && !startDate && !endDate) {
+    const def = defaultThisMonthRange();
+    startDate = def.startDate;
+    endDate = def.endDate;
+  }
+  if (periodAllTime) {
+    startDate = undefined;
+    endDate = undefined;
+  }
 
   const isCSCloser = user.role === 'CS_CLOSER';
   const isAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
@@ -78,6 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     branchId: branchId ?? '',
     startDate: startDate ?? '',
     endDate: endDate ?? '',
+    periodAllTime,
     canBulkPick,
     bulkSelectAllMatchingInput: JSON.stringify(listInput),
   };
@@ -292,7 +306,7 @@ export default function CartOrdersRoute() {
     filters: {
       startDate: shell?.startDate ?? '',
       endDate: shell?.endDate ?? '',
-      periodAllTime: false,
+      periodAllTime: shell?.periodAllTime ?? false,
     },
   };
 

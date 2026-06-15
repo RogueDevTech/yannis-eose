@@ -2562,17 +2562,35 @@ export class OrdersService {
         .where(and(eq(schema.followUpOrders.id, orderId), isNull(schema.followUpOrders.deletedAt)))
         .limit(1);
       if (!fuRow) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+        // Fallback: cart order
+        const [coRow] = await this.db
+          .select({ id: schema.cartOrders.id })
+          .from(schema.cartOrders)
+          .where(and(eq(schema.cartOrders.id, orderId), isNull(schema.cartOrders.deletedAt)))
+          .limit(1);
+        if (!coRow) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+        }
+        orderItems = await this.db
+          .select({
+            productId: schema.cartOrderItems.productId,
+            quantity: schema.cartOrderItems.quantity,
+            productName: schema.products.name,
+          })
+          .from(schema.cartOrderItems)
+          .leftJoin(schema.products, eq(schema.cartOrderItems.productId, schema.products.id))
+          .where(eq(schema.cartOrderItems.cartOrderId, orderId));
+      } else {
+        orderItems = await this.db
+          .select({
+            productId: schema.followUpOrderItems.productId,
+            quantity: schema.followUpOrderItems.quantity,
+            productName: schema.products.name,
+          })
+          .from(schema.followUpOrderItems)
+          .leftJoin(schema.products, eq(schema.followUpOrderItems.productId, schema.products.id))
+          .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
       }
-      orderItems = await this.db
-        .select({
-          productId: schema.followUpOrderItems.productId,
-          quantity: schema.followUpOrderItems.quantity,
-          productName: schema.products.name,
-        })
-        .from(schema.followUpOrderItems)
-        .leftJoin(schema.products, eq(schema.followUpOrderItems.productId, schema.products.id))
-        .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
     }
 
     if (orderItems.length === 0) {
