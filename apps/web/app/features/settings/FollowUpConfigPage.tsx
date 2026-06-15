@@ -277,6 +277,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const isSyncing = syncFetcher.state !== 'idle';
   const safeRules = rules ?? [];
   const ruleTargetMap = new Map(safeRules.map((r) => [r.id, r.targetBranchName ?? r.targetGroupName ?? 'All branches']));
+  const knownRuleIds = new Set(safeRules.map((r) => r.id));
   const [historyFilter, setHistoryFilter] = useState<'all' | 'with_data' | 'empty'>('all');
   const allLogs = syncLogs ?? [];
   const visibleLogs = historyFilter === 'all'
@@ -465,7 +466,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
               {/* Per-rule breakdown (live) */}
               {syncProgress.ruleResults.length > 0 && (
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-app-fg-muted">
-                  {syncProgress.ruleResults.map((r) => (
+                  {syncProgress.ruleResults.filter((r: { ruleName: string }) => !r.ruleName.toLowerCase().includes('cart')).map((r) => (
                     <span key={r.ruleName}>
                       {r.ruleName}: <span className="font-semibold text-app-fg">{r.pulled}</span>
                     </span>
@@ -875,7 +876,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-app-border">
-            {(breakdownLog.ruleResults ?? []).map((r) => (
+            {(breakdownLog.ruleResults ?? []).filter((r) => knownRuleIds.has(r.ruleId)).map((r) => (
               <div key={r.ruleId} className="px-4 py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-app-fg truncate">{r.ruleName}</p>
