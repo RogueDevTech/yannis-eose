@@ -283,6 +283,7 @@ export interface LogisticsProviderDetailPageProps {
   productFilter: string | null;
   locationFilter: string | null;
   productBreakdown: { productId: string; productName: string; received: number; sold: number; available: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
+  locationBreakdown: { locationId: string; locationName: string; available: number; received: number; sold: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -298,6 +299,7 @@ export function LogisticsProviderDetailPage({
   productFilter,
   locationFilter,
   productBreakdown,
+  locationBreakdown,
 }: LogisticsProviderDetailPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true }).busy;
@@ -361,9 +363,15 @@ export function LogisticsProviderDetailPage({
         backTo="/admin/logistics/partners"
         mobileInlineActions
         description={
-          <span className="inline-flex flex-wrap items-center gap-2">
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             <StatusBadge status={provider.status} />
             <span className="text-app-fg-muted">{provider.locationCount} location{provider.locationCount === 1 ? '' : 's'}</span>
+            {provider.contactInfo?.trim() && (
+              <span className="text-app-fg-muted">Contact <span className="font-medium text-app-fg">{provider.contactInfo.trim()}</span></span>
+            )}
+            {provider.coverageArea?.trim() && (
+              <span className="text-app-fg-muted">Coverage <span className="font-medium text-app-fg">{provider.coverageArea.trim()}</span></span>
+            )}
           </span>
         }
         actions={
@@ -389,47 +397,98 @@ export function LogisticsProviderDetailPage({
         periodAllTime={periodAllTime}
       />
 
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Company</h2>
-        <OverviewStatStrip
-          mobileGrid
-          wrap
-          tileClassName="!py-2.5"
-          items={[
-            { label: 'Contact', value: provider.contactInfo?.trim() || '—', valueClassName: 'text-app-fg' },
-            { label: 'Coverage', value: provider.coverageArea?.trim() || '—', valueClassName: 'text-app-fg' },
-            ...locations.map((l) => ({
-              label: l.name,
-              value: (l.totalStock ?? 0).toLocaleString(),
-              valueClassName: (l.totalStock ?? 0) === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400',
-              title: `Available stock at ${l.name}`,
-            })),
-            { label: isAllTime ? 'Sold (all time)' : 'Sold (period)', value: movementsData.deliveredQty.toLocaleString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
-          ]}
-        />
-      </div>
-
       {performance ? (
         <div>
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
           <OverviewStatStrip
             mobileGrid
             wrap
-            tileClassName="!py-2.5"
+            tileClassName="!py-3.5 !px-4 min-w-[9rem]"
             items={[
-              { label: 'Assigned', value: performance.totalAssigned.toLocaleString(), valueClassName: 'text-app-fg' },
-              { label: 'Delivered', value: performance.delivered.toLocaleString(), valueClassName: 'text-success-600 dark:text-success-400' },
-              { label: 'Remitted', value: formatNaira(performance.remittedAmount), valueClassName: 'text-success-600 dark:text-success-400' },
-              { label: 'Units delivered', value: performance.unitsDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
-              { label: 'Delivery rate', value: performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '—', valueClassName: deliveryRateColorClass(performance.deliveryRate) },
-              { label: 'Delinquency', value: performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '—', valueClassName: delinquencyRateColorClass(performance.delinquencyRate) },
-              { label: 'Returned', value: performance.returned.toLocaleString(), valueClassName: 'text-app-fg-muted' },
-              { label: 'Pending', value: formatNaira(performance.pendingRemittanceAmount), valueClassName: 'text-warning-600 dark:text-warning-400' },
-              { label: 'Disputed', value: formatNaira(performance.disputedRemittanceAmount), valueClassName: 'text-danger-600 dark:text-danger-400' },
+              {
+                label: 'Assigned',
+                value: (<span className="font-semibold text-app-fg tabular-nums">{performance.totalAssigned.toLocaleString()}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Delivered',
+                value: (<span className="font-semibold text-success-600 dark:text-success-400 tabular-nums">{performance.delivered.toLocaleString()}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Units delivered',
+                value: (<span className="font-semibold text-app-fg tabular-nums">{performance.unitsDelivered.toLocaleString()}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Returned',
+                value: (<span className="font-semibold text-app-fg-muted tabular-nums">{performance.returned.toLocaleString()}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Delivery rate',
+                value: (<span className={`font-semibold tabular-nums ${deliveryRateColorClass(performance.deliveryRate)}`}>{performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '—'}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Delinquency',
+                value: (<span className={`font-semibold tabular-nums ${delinquencyRateColorClass(performance.delinquencyRate)}`}>{performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '—'}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Remitted',
+                value: (<span className="font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(performance.remittedAmount)}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Pending',
+                value: (<span className={`font-semibold tabular-nums ${Number(performance.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}`}>{formatNaira(performance.pendingRemittanceAmount)}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Disputed',
+                value: (<span className={`font-semibold tabular-nums ${Number(performance.disputedRemittanceAmount) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>{formatNaira(performance.disputedRemittanceAmount)}</span>),
+                plainValue: true,
+              },
             ]}
           />
         </div>
       ) : null}
+
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Locations</h2>
+        <OverviewStatStrip
+          mobileGrid
+          wrap
+          tileClassName="!py-3.5 !px-4 min-w-[9rem]"
+          items={[
+            ...locationBreakdown.map((l) => ({
+              label: l.locationName,
+              value: (
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
+                    <span className="text-app-fg-muted text-micro font-normal">Received <span className="font-semibold text-app-fg">{l.received.toLocaleString()}</span></span>
+                    <span className="text-app-fg-muted text-micro font-normal">Sold <span className="font-semibold text-brand-600 dark:text-brand-400">{l.sold.toLocaleString()}</span></span>
+                    <span className="text-app-fg-muted text-micro font-normal">Left <span className={`font-semibold ${l.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{l.available.toLocaleString()}</span></span>
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
+                    <span className="text-app-fg-muted text-micro font-normal">Remitted <span className="font-semibold text-success-600 dark:text-success-400">{l.qtyRemitted.toLocaleString()}</span> <span className="text-success-600 dark:text-success-400">({formatNaira(l.amountRemitted)})</span></span>
+                    <span className="text-app-fg-muted text-micro font-normal">Pending <span className={`font-semibold ${l.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}`}>{l.qtyPending.toLocaleString()}</span> <span className={l.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>({formatNaira(l.amountPending)})</span></span>
+                  </div>
+                </div>
+              ),
+              plainValue: true,
+            })),
+            {
+              label: isAllTime ? 'Sold (all time)' : 'Sold (period)',
+              value: (
+                <span className="font-semibold text-brand-600 dark:text-brand-400 tabular-nums">{movementsData.deliveredQty.toLocaleString()}</span>
+              ),
+              plainValue: true,
+            },
+          ]}
+        />
+      </div>
 
       {productBreakdown.length > 0 && (
         <div>
@@ -449,9 +508,7 @@ export function LogisticsProviderDetailPage({
                   </div>
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
                     <span className="text-app-fg-muted text-micro font-normal">Remitted <span className="font-semibold text-success-600 dark:text-success-400">{p.qtyRemitted.toLocaleString()}</span> <span className="text-success-600 dark:text-success-400">({formatNaira(p.amountRemitted)})</span></span>
-                    {(p.qtyPending > 0 || Number(p.amountPending) > 0) && (
-                      <span className="text-app-fg-muted text-micro font-normal">Pending <span className="font-semibold text-warning-600 dark:text-warning-400">{p.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(p.amountPending)})</span></span>
-                    )}
+                    <span className="text-app-fg-muted text-micro font-normal">Pending <span className={`font-semibold ${p.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}`}>{p.qtyPending.toLocaleString()}</span> <span className={p.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>({formatNaira(p.amountPending)})</span></span>
                   </div>
                 </div>
               ),
