@@ -1013,6 +1013,8 @@ export const ordersRouter = router({
           viewerRole: ctx.user.role,
           narrowed,
           isFollowUp,
+          branchScope,
+          effectiveBranchIds: ctx.effectiveBranchIds,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1111,6 +1113,8 @@ export const ordersRouter = router({
           viewerId: ctx.user.id,
           viewerRole: ctx.user.role,
           narrowed,
+          tsBranchScope,
+          effectiveBranchIds: ctx.effectiveBranchIds,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1405,6 +1409,7 @@ export const ordersRouter = router({
           showCSCloserColumn: input.showCSCloserColumn,
           canCreateOffline: input.canCreateOffline,
           includeCartAbandonment: input.includeCartAbandonment,
+          effectiveBranchIds: ctx.effectiveBranchIds,
         });
       return ordersCacheService.getOrSet(bundleCacheKey, ORDERS_AGG_TTL_SECONDS, fetchBundle);
     }),

@@ -36,6 +36,14 @@ const MAX_ENTRIES = 30;
 
 const cache = new Map<string, CacheEntry>();
 
+/**
+ * When non-zero, writes are suppressed. Set by `clearLoaderCache()` so that
+ * in-flight `<CachedAwait>` effects don't re-populate the cache with stale
+ * data between the clear and the redirect landing. The guard auto-expires
+ * after a short window (the redirect + loader round-trip is always < 5s).
+ */
+let writePausedUntil = 0;
+
 /** Read a fresh entry. Returns null if missing or expired. */
 export function getCachedLoaderEntry(key: string): CacheEntry | null {
   const entry = cache.get(key);
@@ -55,6 +63,7 @@ export function setCachedLoaderEntry(key: string, data: unknown): void {
   // Don't cache nullish / non-object data — usually means the loader hasn't
   // resolved yet or the route returned an error placeholder.
   if (data == null) return;
+  if (Date.now() < writePausedUntil) return;
 
   const existing = cache.get(key);
   if (existing && existing.data === data) {
@@ -92,6 +101,9 @@ export function clearLoaderCache(): void {
   cache.clear();
   fullCache.clear();
   inFlightRevalidations.clear();
+  // Suppress writes for 5s so in-flight CachedAwait effects don't
+  // re-populate the cache with stale data before the redirect lands.
+  writePausedUntil = Date.now() + 5_000;
 }
 
 /**
@@ -151,6 +163,7 @@ export function getFullLoaderEntry(key: string): unknown | null {
 
 export function setFullLoaderEntry(key: string, data: unknown): void {
   if (data == null) return;
+  if (Date.now() < writePausedUntil) return;
   const existing = fullCache.get(key);
   if (existing && existing.data === data) {
     existing.ts = Date.now();
