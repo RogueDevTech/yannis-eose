@@ -49,6 +49,36 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     return qs ? `/admin/sales/orders?${qs}` : '/admin/sales/orders';
   }
 
+  function followUpLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    params.set('view', 'orders');
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    return `/admin/cs/follow-up?${params.toString()}`;
+  }
+
+  function cartOrdersLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    const qs = params.toString();
+    return qs ? `/admin/sales/cart-orders?${qs}` : '/admin/sales/cart-orders';
+  }
+
   const revenue = data?.revenue ?? 0;
   const marketingSafe = {
     totalSpend: data?.marketing?.totalSpend ?? 0,
@@ -251,37 +281,37 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   label: 'Total',
                   value: total,
                   valueClassName: 'text-app-fg',
-                  to: '/admin/cs/follow-up?view=orders',
+                  to: followUpLink(),
                 },
                 {
                   label: 'Unassigned',
                   value: unassigned,
                   valueClassName: 'text-warning-600 dark:text-warning-400',
-                  to: '/admin/cs/follow-up?view=orders&status=UNPROCESSED',
+                  to: followUpLink({ status: 'UNPROCESSED' }),
                 },
                 {
                   label: 'Assigned',
                   value: assigned,
                   valueClassName: 'text-info-600 dark:text-info-400',
-                  to: '/admin/cs/follow-up?view=orders&status=CS_ASSIGNED',
+                  to: followUpLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
                   label: 'Engaged',
                   value: engaged,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                  to: '/admin/cs/follow-up?view=orders&status=CS_ENGAGED',
+                  to: followUpLink({ status: 'CS_ENGAGED' }),
                 },
                 {
                   label: 'Confirmed',
                   value: confirmed,
                   valueClassName: 'text-brand-600 dark:text-brand-400',
-                  to: '/admin/cs/follow-up?view=orders&status=CONFIRMED',
+                  to: followUpLink({ status: 'CONFIRMED' }),
                 },
                 {
                   label: 'Delivered',
                   value: delivered,
                   valueClassName: 'text-success-600 dark:text-success-400',
-                  to: '/admin/cs/follow-up?view=orders&status=DELIVERED',
+                  to: followUpLink({ status: 'DELIVERED' }),
                 },
                 {
                   label: 'CR',
@@ -297,7 +327,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   label: 'Deleted',
                   value: sc['DELETED'] ?? 0,
                   valueClassName: 'text-danger-600 dark:text-danger-400',
-                  to: '/admin/cs/follow-up?view=orders&status=DELETED',
+                  to: followUpLink({ status: 'DELETED' }),
                 },
               ]}
             />
@@ -331,37 +361,37 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   label: 'Total',
                   value: total,
                   valueClassName: 'text-app-fg',
-                  to: '/admin/sales/cart-orders',
+                  to: cartOrdersLink(),
                 },
                 {
                   label: 'Unassigned',
                   value: unassigned,
                   valueClassName: 'text-warning-600 dark:text-warning-400',
-                  to: '/admin/sales/cart-orders?status=UNPROCESSED',
+                  to: cartOrdersLink({ status: 'UNPROCESSED' }),
                 },
                 {
                   label: 'Assigned',
                   value: assigned,
                   valueClassName: 'text-info-600 dark:text-info-400',
-                  to: '/admin/sales/cart-orders?status=CS_ASSIGNED',
+                  to: cartOrdersLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
                   label: 'Engaged',
                   value: engaged,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                  to: '/admin/sales/cart-orders?status=CS_ENGAGED',
+                  to: cartOrdersLink({ status: 'CS_ENGAGED' }),
                 },
                 {
                   label: 'Confirmed',
                   value: confirmed,
                   valueClassName: 'text-brand-600 dark:text-brand-400',
-                  to: '/admin/sales/cart-orders?status=CONFIRMED',
+                  to: cartOrdersLink({ status: 'CONFIRMED' }),
                 },
                 {
                   label: 'Delivered',
                   value: delivered,
                   valueClassName: 'text-success-600 dark:text-success-400',
-                  to: '/admin/sales/cart-orders?status=DELIVERED',
+                  to: cartOrdersLink({ status: 'DELIVERED' }),
                 },
                 {
                   label: 'CR',
@@ -377,7 +407,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   label: 'Deleted',
                   value: sc['DELETED'] ?? 0,
                   valueClassName: 'text-danger-600 dark:text-danger-400',
-                  to: '/admin/sales/cart-orders?status=DELETED',
+                  to: cartOrdersLink({ status: 'DELETED' }),
                 },
               ]}
             />

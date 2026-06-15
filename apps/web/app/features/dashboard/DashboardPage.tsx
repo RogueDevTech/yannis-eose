@@ -140,6 +140,7 @@ function getRoleDescription(role: string | null) {
   if (!role) return 'Welcome. Please sign in again if you see this.';
   const descriptions: Record<string, string> = {
     SUPER_ADMIN: "Here's your full platform overview.",
+    ADMIN: "Here's an overview of your business.",
     HEAD_OF_CS: 'Your Sales team performance at a glance.',
     CS_CLOSER: 'Your personal queue and performance.',
     HEAD_OF_MARKETING: 'Marketing performance and team metrics.',
@@ -322,7 +323,7 @@ function CSDashboard({
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
           {(metrics) => (
             <div>
-            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders</h2>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders Funnel</h2>
             <OverviewStatStrip
               mobileGrid
               tileClassName="min-w-[6rem]"
@@ -348,8 +349,8 @@ function CSDashboard({
           )}
         </DashboardMetricsSection>
 
-        <FollowUpDashboardStrip showUnassigned={false} />
-        <CartOrdersDashboardStrip showUnassigned={false} />
+        <FollowUpDashboardStrip showUnassigned={false} filters={dateFilters} />
+        <CartOrdersDashboardStrip showUnassigned={false} filters={dateFilters} />
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
           {(metrics) => (
@@ -376,15 +377,16 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={6} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={9} />}>
         {(metrics) => (
           <div>
-          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders</h2>
+          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders Funnel</h2>
           <OverviewStatStrip
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
+              { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400' },
               // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live
@@ -392,6 +394,11 @@ function CSDashboard({
               // now — almost always 0 once they advance to AGENT_ASSIGNED → DELIVERED.
               { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
               { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+              {
+                label: 'CR',
+                value: `${metrics.confirmationRate.toFixed(1)}%`,
+                valueClassName: confirmationRateColorClass(metrics.confirmationRate),
+              },
               {
                 label: 'DR',
                 value: `${metrics.deliveryRate.toFixed(1)}%`,
@@ -409,8 +416,8 @@ function CSDashboard({
           the selected date range from `marketing.metrics`. Per-status counts remain
           on `/admin/sales/orders` via the status filter pills. */}
 
-      <FollowUpDashboardStrip />
-      <CartOrdersDashboardStrip />
+      <FollowUpDashboardStrip filters={dateFilters} />
+      <CartOrdersDashboardStrip filters={dateFilters} />
 
       {showsTeamManagementCard && (
         <div className="card">
@@ -1055,7 +1062,21 @@ function ActionIcon({ type }: { type: string }) {
 }
 
 // ── Follow-Up stat strip ────────────────────────────────────
-function FollowUpDashboardStrip({ showUnassigned = true }: { showUnassigned?: boolean }) {
+function FollowUpDashboardStrip({ showUnassigned = true, filters }: { showUnassigned?: boolean; filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
+  function followUpLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    params.set('view', 'orders');
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    return `/admin/cs/follow-up?${params.toString()}`;
+  }
   return (
     <DashboardFollowUpSection fallback={<OverviewStatStripSkeleton count={showUnassigned ? 6 : 5} />}>
       {(sc) => {
@@ -1082,37 +1103,37 @@ function FollowUpDashboardStrip({ showUnassigned = true }: { showUnassigned?: bo
                   label: 'Total',
                   value: total,
                   valueClassName: 'text-app-fg',
-                  to: '/admin/cs/follow-up?view=orders',
+                  to: followUpLink(),
                 },
                 ...(showUnassigned ? [{
                   label: 'Unassigned',
                   value: unassigned,
                   valueClassName: 'text-warning-600 dark:text-warning-400',
-                  to: '/admin/cs/follow-up?view=orders&status=UNPROCESSED',
+                  to: followUpLink({ status: 'UNPROCESSED' }),
                 }] : []),
                 {
                   label: 'Assigned',
                   value: assigned,
                   valueClassName: 'text-info-600 dark:text-info-400',
-                  to: '/admin/cs/follow-up?view=orders&status=CS_ASSIGNED',
+                  to: followUpLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
                   label: 'Engaged',
                   value: engaged,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                  to: '/admin/cs/follow-up?view=orders&status=CS_ENGAGED',
+                  to: followUpLink({ status: 'CS_ENGAGED' }),
                 },
                 {
                   label: 'Confirmed',
                   value: confirmed,
                   valueClassName: 'text-brand-600 dark:text-brand-400',
-                  to: '/admin/cs/follow-up?view=orders&status=CONFIRMED',
+                  to: followUpLink({ status: 'CONFIRMED' }),
                 },
                 {
                   label: 'Delivered',
                   value: delivered,
                   valueClassName: 'text-success-600 dark:text-success-400',
-                  to: '/admin/cs/follow-up?view=orders&status=DELIVERED',
+                  to: followUpLink({ status: 'DELIVERED' }),
                 },
                 {
                   label: 'CR',
@@ -1134,7 +1155,21 @@ function FollowUpDashboardStrip({ showUnassigned = true }: { showUnassigned?: bo
 }
 
 // ── Cart Orders stat strip ───────────────────────────────────
-function CartOrdersDashboardStrip({ showUnassigned = true }: { showUnassigned?: boolean }) {
+function CartOrdersDashboardStrip({ showUnassigned = true, filters }: { showUnassigned?: boolean; filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
+  function cartOrdersLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    const qs = params.toString();
+    return qs ? `/admin/sales/cart-orders?${qs}` : '/admin/sales/cart-orders';
+  }
   return (
     <DashboardCartOrdersSection fallback={<OverviewStatStripSkeleton count={showUnassigned ? 6 : 5} />}>
       {(sc) => {
@@ -1161,37 +1196,37 @@ function CartOrdersDashboardStrip({ showUnassigned = true }: { showUnassigned?: 
                   label: 'Total',
                   value: total,
                   valueClassName: 'text-app-fg',
-                  to: '/admin/sales/cart-orders',
+                  to: cartOrdersLink(),
                 },
                 ...(showUnassigned ? [{
                   label: 'Unassigned',
                   value: unassigned,
                   valueClassName: 'text-warning-600 dark:text-warning-400',
-                  to: '/admin/sales/cart-orders?status=UNPROCESSED',
+                  to: cartOrdersLink({ status: 'UNPROCESSED' }),
                 }] : []),
                 {
                   label: 'Assigned',
                   value: assigned,
                   valueClassName: 'text-info-600 dark:text-info-400',
-                  to: '/admin/sales/cart-orders?status=CS_ASSIGNED',
+                  to: cartOrdersLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
                   label: 'Engaged',
                   value: engaged,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                  to: '/admin/sales/cart-orders?status=CS_ENGAGED',
+                  to: cartOrdersLink({ status: 'CS_ENGAGED' }),
                 },
                 {
                   label: 'Confirmed',
                   value: confirmed,
                   valueClassName: 'text-brand-600 dark:text-brand-400',
-                  to: '/admin/sales/cart-orders?status=CONFIRMED',
+                  to: cartOrdersLink({ status: 'CONFIRMED' }),
                 },
                 {
                   label: 'Delivered',
                   value: delivered,
                   valueClassName: 'text-success-600 dark:text-success-400',
-                  to: '/admin/sales/cart-orders?status=DELIVERED',
+                  to: cartOrdersLink({ status: 'DELIVERED' }),
                 },
                 {
                   label: 'CR',

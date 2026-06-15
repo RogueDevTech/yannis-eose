@@ -25,6 +25,7 @@ import {
   useFetcherActionSurface,
 } from '~/hooks/use-fetcher-action-surface';
 import { humanizeZodIssuesString } from '~/lib/api-error';
+import { clearLoaderCache } from '~/lib/loader-cache';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestamp } from '~/lib/format-date';
 import type {
@@ -1063,7 +1064,7 @@ export function UserDetailPage({
                                   </Button>
                                 </span>
                               ) : (
-                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="">
+                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" onSubmit={() => clearLoaderCache()}>
                                   <input type="hidden" name="intent" value="mirror" />
                                   <Button
                                     type="submit"
@@ -1203,7 +1204,7 @@ export function UserDetailPage({
                                   Mirror user
                                 </Button>
                               ) : (
-                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" className="w-full">
+                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" className="w-full" onSubmit={() => clearLoaderCache()}>
                                   <input type="hidden" name="intent" value="mirror" />
                                   <Button
                                     type="submit"
@@ -1869,7 +1870,7 @@ export function UserDetailPage({
             mirrorSubmitDisabled ? (
               <Button type="button" variant="secondary" size="sm" disabled className="w-full justify-center opacity-70 cursor-not-allowed">Mirror user</Button>
             ) : (
-              <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" className="w-full">
+              <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" className="w-full" onSubmit={() => clearLoaderCache()}>
                 <input type="hidden" name="intent" value="mirror" />
                 <Button type="submit" variant="secondary" size="sm" className="w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600" loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'} loadingText="Entering...">Mirror user</Button>
               </Form>
