@@ -243,7 +243,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         id: c.id,
         customerName: c.customerName,
         customerPhoneDisplay: '',
-        status: 'CART',
+        status: c.recovered ? 'CART_RECOVERED' : 'CART',
         totalAmount: null,
         createdAt: c.updatedAt,
         assignedCsId: null,

@@ -476,33 +476,32 @@ export function InventoryOverviewLoadingShell() {
 /** Single inventory level — header + stat strip + tabs pulse. */
 export function InventoryLevelDetailLoadingShell() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <div className="h-8 w-64 max-w-full rounded bg-app-hover animate-pulse" aria-hidden />
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      {/* Breadcrumb placeholder */}
+      <div className="h-3.5 w-28 rounded bg-app-hover animate-pulse" aria-hidden />
+      {/* Title + description */}
+      <div className="space-y-1.5">
+        <div className="h-7 w-48 max-w-full rounded bg-app-hover animate-pulse" aria-hidden />
+        <div className="h-4 w-36 rounded bg-app-hover animate-pulse" aria-hidden />
+      </div>
       <OverviewStatStrip
         mobileGrid
         tileClassName="min-w-[7rem]"
         items={[
           { label: 'Stock', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Reserved', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Available', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Status', value: <StatValuePulse className="min-w-[4rem]" /> },
-          { label: 'In (period)', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Out (period)', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Net', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Events', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Sold (period)', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
-      <div className="h-10 w-full max-w-md rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
-      <Tabs
-        value="batches"
-        onChange={() => {}}
-        tabs={[
-          { value: 'batches', label: 'Received stock / costing' },
-          { value: 'audit', label: 'Movement log' },
-        ]}
-      />
+      {/* Filter pills placeholder */}
+      <div className="flex gap-2">
+        <div className="h-8 w-16 rounded-full bg-app-hover animate-pulse" aria-hidden />
+        <div className="h-8 w-16 rounded-full bg-app-hover animate-pulse" aria-hidden />
+        <div className="h-8 w-16 rounded-full bg-app-hover animate-pulse" aria-hidden />
+      </div>
+      {/* Table rows placeholder */}
       <div className="card p-4 space-y-3">
-        {[1, 2, 3, 4].map((i) => (
+        {[1, 2, 3, 4, 5].map((i) => (
           <div key={i} className="h-4 rounded bg-app-hover animate-pulse" aria-hidden />
         ))}
       </div>

@@ -30,6 +30,7 @@ export interface StockMovement {
   referenceId?: string | null;
   referenceCustomerName?: string | null;
   orderShortId?: string | null;
+  orderNumber?: number | null;
   reason: string | null;
   actorId: string | null;
   actorName?: string | null;

@@ -968,6 +968,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ success: true });
     }
 
+    const isCartOrder = formData.get('isCartOrder') === 'true';
+    if (isCartOrder) {
+      const body: Record<string, unknown> = { orderId };
+      if (customerName !== undefined && customerName !== '') body.customerName = customerName;
+      if (deliveryAddress !== undefined) body.deliveryAddress = deliveryAddress || null;
+      if (deliveryState !== undefined) body.deliveryState = deliveryState || null;
+      if (deliveryNotes !== undefined) body.deliveryNotes = deliveryNotes || null;
+      if (customerEmail !== undefined && customerEmail !== '') body.customerEmail = customerEmail || null;
+      if (preferredDeliveryDate !== undefined) body.preferredDeliveryDate = preferredDeliveryDate || null;
+      const res = await apiRequest<unknown>('/trpc/cartOrders.update', {
+        method: 'POST',
+        cookie,
+        body,
+      });
+      if (!res.ok) {
+        const err = extractApiErrorMessage(res.data, 'Failed to update order details');
+        return json({ error: err }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
     const body: Record<string, unknown> = { orderId, ...branchIdFromForm(formData) };
     if (customerName !== undefined && customerName !== '') body.customerName = customerName;
     if (deliveryAddress !== undefined) body.deliveryAddress = deliveryAddress;

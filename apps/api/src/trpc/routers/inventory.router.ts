@@ -115,6 +115,24 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Stock movements across all locations belonging to a logistics provider.
+   * Powers the provider detail "Stock Activity" tab.
+   */
+  providerMovements: authedProcedure
+    .input(z.object({
+      providerId: z.string().uuid(),
+      productId: z.string().uuid().optional(),
+      locationId: z.string().uuid().optional(),
+      page: z.number().int().min(1).default(1),
+      limit: z.number().int().min(1).max(200).default(40),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      return getInventoryService().getProviderMovements(input);
+    }),
+
+  /**
    * Single-inventory-row detail page loader — returns level + product/location names
    * + batches + movements in one round-trip.
    */
@@ -122,7 +140,7 @@ export const inventoryRouter = router({
     .input(z.object({
       id: z.string().uuid(),
       page: z.number().int().min(1).default(1),
-      limit: z.number().int().min(1).max(200).default(20),
+      limit: z.number().int().min(1).max(1000).default(50),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }))

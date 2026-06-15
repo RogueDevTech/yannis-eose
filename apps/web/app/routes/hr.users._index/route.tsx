@@ -160,16 +160,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const searchParam = searchRaw.length > 120 ? searchRaw.slice(0, 120) : searchRaw;
   const probationOnlyParam = url.searchParams.get('probationOnly') === '1';
   const supervisorOnlyParam = url.searchParams.get('supervisorOnly') === '1';
-  /**
-   * Branch picker (admin-class only). `branchId` is a UUID; the sentinel
-   * `__ORG_WIDE__` flips on `orgWideOnly`, which returns staff with no
-   * branch memberships (Heads / HR / Finance / Admin). Service silently
-   * ignores either flag for branch-scoped actors so a hand-crafted URL
-   * can't widen their view.
-   */
   const branchIdRaw = url.searchParams.get('branchId')?.trim() ?? '';
-  const branchParam = branchIdRaw === '__ORG_WIDE__' || branchIdRaw === '' ? undefined : branchIdRaw;
-  const orgWideOnlyParam = branchIdRaw === '__ORG_WIDE__';
+  const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
   const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
@@ -185,8 +177,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (searchParam.length > 0) input.search = searchParam;
   if (probationOnlyParam) input.probationOnly = true;
   if (supervisorOnlyParam) input.supervisorOnly = true;
-  if (orgWideOnlyParam) input.orgWideOnly = true;
-  else if (branchParam) input.branchId = branchParam;
+  // When searching, skip branch scoping so org-wide users (heads / finance /
+  // admin) are always discoverable regardless of which branch is selected.
+  if (searchParam.length === 0 && branchParam) input.branchId = branchParam;
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
 
@@ -196,8 +189,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (searchParam.length > 0) summaryPayload.search = searchParam;
   if (probationOnlyParam) summaryPayload.probationOnly = true;
   if (supervisorOnlyParam) summaryPayload.supervisorOnly = true;
-  if (orgWideOnlyParam) summaryPayload.orgWideOnly = true;
-  else if (branchParam) summaryPayload.branchId = branchParam;
+  if (searchParam.length === 0 && branchParam) summaryPayload.branchId = branchParam;
   const summaryEnc = encodeURIComponent(JSON.stringify(summaryPayload));
 
   type RosterSummary = {
@@ -272,7 +264,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusParam: statusParam ?? 'ALL',
       roleParam: roleParam ?? 'ALL',
       searchParam,
-      branchParam: orgWideOnlyParam ? '__ORG_WIDE__' : (branchParam ?? 'ALL'),
+      branchParam: branchParam ?? 'ALL',
       perPage,
       pageSizeOptions,
       canExport,

@@ -14,7 +14,7 @@ import { LogisticsProviderDetailPage } from '~/features/logistics/LogisticsProvi
 import { LogisticsProviderDetailLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { LogisticsProviderDetailRecord, LogisticsProviderRow } from '~/features/logistics/team-types';
 import type { Location } from '~/features/logistics/types';
-import type { HistoryEntry } from '~/features/orders/types';
+import type { StockMovement } from '~/features/inventory/types';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 
@@ -46,30 +46,39 @@ function parseLocations(res: { ok: boolean; data: unknown }): Location[] {
   return Array.isArray(data?.locations) ? data.locations : [];
 }
 
-function parseProviderRecordHistory(res: { ok: boolean; data: unknown }): {
-  rows: HistoryEntry[];
+interface ProviderMovementsData {
+  movements: (StockMovement & { productName?: string | null })[];
   total: number;
-} {
-  if (!res.ok) return { rows: [], total: 0 };
-  const raw = res.data as Record<string, unknown> | undefined;
-  if (!raw || typeof raw !== 'object' || 'error' in raw) return { rows: [], total: 0 };
-  const payload = (raw.result as { data?: { rows?: HistoryEntry[]; total?: number } } | undefined)?.data;
-  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-  const total = typeof payload?.total === 'number' ? payload.total : rows.length;
-  return { rows, total };
+  page: number;
+  limit: number;
+  totalPages: number;
+  inQty: number;
+  outQty: number;
+  deliveredQty: number;
+  products: { id: string; name: string }[];
 }
 
-function parseActorNameMap(res: { ok: boolean; data: unknown }): Record<string, string> {
-  if (!res.ok) return {};
+function parseProviderMovements(res: { ok: boolean; data: unknown }): ProviderMovementsData {
+  const empty: ProviderMovementsData = {
+    movements: [], total: 0, page: 1, limit: 40, totalPages: 1,
+    inQty: 0, outQty: 0, deliveredQty: 0, products: [],
+  };
+  if (!res.ok) return empty;
   const raw = res.data as Record<string, unknown> | undefined;
-  if (!raw || typeof raw !== 'object') return {};
-  const data = (raw.result as { data?: Record<string, { nameNow?: string }> } | undefined)?.data;
-  if (!data || typeof data !== 'object') return {};
-  const out: Record<string, string> = {};
-  for (const [id, rec] of Object.entries(data)) {
-    if (rec && typeof rec.nameNow === 'string') out[id] = rec.nameNow;
-  }
-  return out;
+  if (!raw || typeof raw !== 'object') return empty;
+  const data = (raw.result as { data?: ProviderMovementsData } | undefined)?.data;
+  if (!data) return empty;
+  return {
+    movements: Array.isArray(data.movements) ? data.movements : [],
+    total: typeof data.total === 'number' ? data.total : 0,
+    page: typeof data.page === 'number' ? data.page : 1,
+    limit: typeof data.limit === 'number' ? data.limit : 40,
+    totalPages: typeof data.totalPages === 'number' ? data.totalPages : 1,
+    inQty: typeof data.inQty === 'number' ? data.inQty : 0,
+    outQty: typeof data.outQty === 'number' ? data.outQty : 0,
+    deliveredQty: typeof data.deliveredQty === 'number' ? data.deliveredQty : 0,
+    products: Array.isArray(data.products) ? data.products : [],
+  };
 }
 
 function buildTeamListHref(url: URL): string {
@@ -98,7 +107,7 @@ export function shouldRevalidate({ currentUrl, nextUrl }: ShouldRevalidateFuncti
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'],
     permission: 'logistics.teamOverview',
   });
   const cookie = getSessionCookie(request);
@@ -121,21 +130,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ...(endDate ? { endDate } : {}),
     };
 
+    const movementsPage = Math.max(1, Number(url.searchParams.get('movementsPage') ?? '1') || 1);
+    const productFilter = url.searchParams.get('productId') ?? undefined;
+    const locationFilter = url.searchParams.get('locationId') ?? undefined;
+
     const providerInput = encodeURIComponent(JSON.stringify({ providerId }));
     const locationsInput = encodeURIComponent(
       JSON.stringify({ providerId, page: 1, limit: 100 }),
     );
     const teamInputEnc = encodeURIComponent(JSON.stringify(teamInput));
-    const recordHistoryInput = encodeURIComponent(
+    const movementsInput = encodeURIComponent(
       JSON.stringify({
-        tableName: 'logistics_providers',
-        recordId: providerId,
-        page: 1,
-        limit: 50,
+        providerId,
+        page: movementsPage,
+        limit: 40,
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+        ...(productFilter ? { productId: productFilter } : {}),
+        ...(locationFilter ? { locationId: locationFilter } : {}),
       }),
     );
 
-    const [providerRes, locationsRes, teamRes, historyRes] = await Promise.all([
+    const [providerRes, locationsRes, teamRes, movementsRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/logistics.getProvider?input=${providerInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(
@@ -143,7 +159,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>(
-        `/trpc/audit.recordHistory?input=${recordHistoryInput}`,
+        `/trpc/inventory.providerMovements?input=${movementsInput}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -160,16 +176,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const overviewRow =
       parseProvidersList(teamRes).find((p) => p.providerId === providerId) ?? null;
 
-    const { rows: providerActivity, total: providerActivityTotal } = parseProviderRecordHistory(historyRes);
-    const actorIds = [...new Set(providerActivity.map((r) => r.changedBy).filter(Boolean))] as string[];
-    let actorNamesById: Record<string, string> = {};
-    if (actorIds.length > 0) {
-      const namesRes = await apiRequest<unknown>(
-        `/trpc/audit.actorNames?input=${encodeURIComponent(JSON.stringify({ userIds: actorIds }))}`,
-        { method: 'GET', cookie },
-      );
-      actorNamesById = parseActorNameMap(namesRes);
-    }
+    const movementsData = parseProviderMovements(movementsRes);
 
     return {
       provider,
@@ -178,9 +185,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       dateFilters: filters,
       periodAllTime: url.searchParams.get('period') === 'all_time',
       backHref,
-      providerActivity,
-      providerActivityTotal,
-      actorNamesById,
+      movementsData,
+      productFilter: productFilter ?? null,
+      locationFilter: locationFilter ?? null,
     };
   })();
 
@@ -209,9 +216,9 @@ export default function LogisticsProviderDetailRoute() {
             dateFilters={data.dateFilters}
             periodAllTime={data.periodAllTime}
             backHref={data.backHref}
-            providerActivity={data.providerActivity}
-            providerActivityTotal={data.providerActivityTotal}
-            actorNamesById={data.actorNamesById}
+            movementsData={data.movementsData}
+            productFilter={data.productFilter}
+            locationFilter={data.locationFilter}
           />
         )}
       </CachedAwait>

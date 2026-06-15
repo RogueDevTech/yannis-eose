@@ -71,11 +71,7 @@ interface UsersListPageProps {
   roleParam?: string;
   /** Trimmed search string applied server-side (`users.list`), mirrored from the URL. */
   searchParam?: string;
-  /**
-   * Branch filter value from the URL. UUID for a specific branch, the literal
-   * `__ORG_WIDE__` for staff with no branch memberships (Heads / HR / Finance /
-   * Admin), or `ALL` (default).
-   */
+  /** Branch filter value from the URL. UUID for a specific branch or `ALL` (default). */
   branchParam?: string;
   /** Admin-class only — gates whether the branch picker renders at all. */
   canPickBranch?: boolean;
@@ -271,11 +267,7 @@ export function UsersListPage({
     );
   };
 
-  /**
-   * Branch picker (admin-class only). Sentinel `__ORG_WIDE__` filters to staff
-   * with no branch memberships (Heads / HR / Finance / Admin) — without it
-   * those rows would silently disappear once any specific branch is chosen.
-   */
+  /** Branch picker (admin-class only). Search ignores branch scope so org-wide users are always discoverable. */
   const branchesCatalog = useBranchesCatalog();
   const currentBranchParam = searchParams.has('branchId')
     ? searchParams.get('branchId') || 'ALL'
@@ -285,7 +277,6 @@ export function UsersListPage({
     () => [
       { value: 'ALL', label: 'All branches' },
       ...branchesCatalog.map((b) => ({ value: b.id, label: b.name })),
-      { value: '__ORG_WIDE__', label: 'Org-wide (heads / finance / admin)' },
     ],
     [branchesCatalog],
   );

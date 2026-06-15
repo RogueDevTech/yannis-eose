@@ -66,6 +66,14 @@ const SORT_MENU_OPTIONS = [
     defaultDir: 'desc' as const,
   },
   {
+    value: 'unitsDelivered',
+    label: 'Units delivered',
+    description: 'Total units (bottles) in delivered orders.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
     value: 'deliveryRate',
     label: 'Delivery rate',
     description: 'Delivered ÷ assigned, as a percentage.',
@@ -177,7 +185,7 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 text-xs mb-3">
+      <div className="grid grid-cols-2 gap-3 text-xs mb-3">
         <div>
           <div className="text-app-fg-muted">Assigned</div>
           <div className="font-semibold tabular-nums">{row.totalAssigned}</div>
@@ -185,6 +193,10 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
         <div>
           <div className="text-app-fg-muted">Delivered</div>
           <div className="font-semibold tabular-nums">{row.delivered}</div>
+        </div>
+        <div>
+          <div className="text-app-fg-muted">Units delivered</div>
+          <div className="font-semibold tabular-nums">{row.unitsDelivered.toLocaleString()}</div>
         </div>
         <div>
           <div className="text-app-fg-muted">Returned</div>
@@ -306,6 +318,7 @@ export function LogisticsTeamPage({
   const activeCount = providers.filter((p) => p.status === 'ACTIVE').length;
   const totalAssigned = providers.reduce((acc, p) => acc + p.totalAssigned, 0);
   const totalDelivered = providers.reduce((acc, p) => acc + p.delivered, 0);
+  const totalUnitsDelivered = providers.reduce((acc, p) => acc + p.unitsDelivered, 0);
   const totalDelinquent = providers.reduce(
     (acc, p) => acc + p.returned + p.partiallyDelivered + p.writtenOff,
     0,
@@ -346,6 +359,14 @@ export function LogisticsTeamPage({
         nowrap: true,
         cellClassName: 'tabular-nums text-app-fg',
         render: (p) => p.delivered,
+      },
+      {
+        key: 'unitsDelivered',
+        header: 'Units delivered',
+        align: 'right',
+        nowrap: true,
+        cellClassName: 'tabular-nums text-app-fg',
+        render: (p) => p.unitsDelivered.toLocaleString(),
       },
       {
         key: 'deliveryRate',
@@ -496,6 +517,11 @@ export function LogisticsTeamPage({
             valueClassName: 'text-success-600 dark:text-success-400',
           },
           {
+            label: 'Units delivered',
+            value: totalUnitsDelivered.toLocaleString(),
+            valueClassName: 'text-app-fg',
+          },
+          {
             label: 'Delivery rate',
             value: totalAssigned > 0 ? `${Math.round(overallDeliveryRate)}%` : '—',
             valueClassName: deliveryRateColorClass(overallDeliveryRate),
@@ -608,10 +634,11 @@ export function LogisticsTeamPage({
                       {p.totalAssigned > 0 ? `${Math.round(p.deliveryRate)}% DR` : '—'}
                     </span>
                   </div>
-                  {/* Row 2: assigned + delivered + locations */}
+                  {/* Row 2: assigned + delivered + units + locations */}
                   <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums">
                     <span>{p.totalAssigned} assigned</span>
                     <span>{p.delivered} delivered</span>
+                    <span>{p.unitsDelivered.toLocaleString()} units</span>
                     <span>{p.locationCount} loc.</span>
                   </div>
                 </button>
@@ -657,6 +684,10 @@ export function LogisticsTeamPage({
                 <div className="flex justify-between">
                   <span className="text-app-fg-muted">Delivered</span>
                   <span className="font-medium tabular-nums">{p.delivered}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Units delivered</span>
+                  <span className="font-medium tabular-nums">{p.unitsDelivered.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-app-fg-muted">Returned</span>

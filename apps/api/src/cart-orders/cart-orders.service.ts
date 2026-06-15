@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, inArray, isNull, lte, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
-import type { ListCartOrdersInput } from '@yannis/shared';
+import type { ListCartOrdersInput, UpdateCartOrderInput } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
@@ -532,6 +532,45 @@ export class CartOrdersService {
       orderItems: items,
       timeline,
     };
+  }
+
+  // ── Update Cart Order Details ────────────────────────────────────────
+
+  async update(input: UpdateCartOrderInput, actor: SessionUser) {
+    const [order] = await this.db
+      .select({ id: schema.cartOrders.id, servicingBranchId: schema.cartOrders.servicingBranchId })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, input.orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.customerName !== undefined) updates.customerName = input.customerName;
+    if (input.deliveryAddress !== undefined) updates.deliveryAddress = input.deliveryAddress;
+    if (input.deliveryState !== undefined) updates.deliveryState = input.deliveryState;
+    if (input.deliveryNotes !== undefined) updates.deliveryNotes = input.deliveryNotes;
+    if (input.customerEmail !== undefined) updates.customerEmail = input.customerEmail;
+    if (input.preferredDeliveryDate !== undefined) updates.preferredDeliveryDate = input.preferredDeliveryDate;
+
+    return withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.cartOrders)
+        .set(updates)
+        .where(eq(schema.cartOrders.id, input.orderId));
+
+      const changedFields = Object.keys(updates).filter((k) => k !== 'updatedAt');
+      await tx.insert(schema.cartOrderTimelineEvents).values({
+        cartOrderId: input.orderId,
+        eventType: 'ORDER_DETAILS_UPDATED',
+        actorId: actor.id,
+        actorName: actor.name,
+        description: `Order details updated (${changedFields.join(', ')}).`,
+        metadata: { changedFields },
+        branchId: order.servicingBranchId,
+      });
+
+      return { success: true };
+    });
   }
 
   // ── Initiate Call ─────────────────────────────────────────────────────

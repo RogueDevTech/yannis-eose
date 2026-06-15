@@ -29,6 +29,8 @@ export interface LogisticsProviderRow {
   pendingRemittanceAmount: string;
   /** Sum of order totals on this provider's DISPUTED batches in the period (₦). */
   disputedRemittanceAmount: string;
+  /** Total units (bottles) delivered — SUM(order_items.quantity) for DELIVERED/REMITTED orders. */
+  unitsDelivered: number;
 }
 
 /** Single logistics company from `logistics.getProvider` (loader detail page). */

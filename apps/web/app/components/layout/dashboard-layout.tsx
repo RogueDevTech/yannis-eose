@@ -251,7 +251,7 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/logistics/team',
         icon: SidebarIcons.leaderboards,
         permission: 'logistics.teamOverview',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'],
       },
     ],
   },
