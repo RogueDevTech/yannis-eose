@@ -1188,15 +1188,21 @@ export class UsersService {
         )`,
       );
     } else if (skipBranchScopeButGroupScoped) {
-      // Company-wide list but group-scoped: show users in the active group's branches
+      // Company-wide list but group-scoped: show users in the active group's
+      // branches PLUS org-wide users (no branch membership — heads/finance/admin).
       conditions.push(
-        inArray(
-          schema.users.id,
-          this.db
-            .select({ userId: schema.userBranches.userId })
-            .from(schema.userBranches)
-            .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
-        ),
+        or(
+          inArray(
+            schema.users.id,
+            this.db
+              .select({ userId: schema.userBranches.userId })
+              .from(schema.userBranches)
+              .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
+          ),
+          sql<boolean>`NOT EXISTS (
+            SELECT 1 FROM user_branches ub WHERE ub.user_id = ${schema.users.id}
+          )`,
+        )!,
       );
     } else if (branchFilter) {
       conditions.push(
@@ -1214,15 +1220,21 @@ export class UsersService {
       effectiveBranchIds.length > 0
     ) {
       // Company-group isolation: user has no specific branch selected but is
-      // scoped to a set of branches via effectiveBranchIds.
+      // scoped to a set of branches via effectiveBranchIds. Include org-wide
+      // users (no branch membership) so they remain discoverable.
       conditions.push(
-        inArray(
-          schema.users.id,
-          this.db
-            .select({ userId: schema.userBranches.userId })
-            .from(schema.userBranches)
-            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
-        ),
+        or(
+          inArray(
+            schema.users.id,
+            this.db
+              .select({ userId: schema.userBranches.userId })
+              .from(schema.userBranches)
+              .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+          ),
+          sql<boolean>`NOT EXISTS (
+            SELECT 1 FROM user_branches ub WHERE ub.user_id = ${schema.users.id}
+          )`,
+        )!,
       );
     } else if (
       !skipBranchScope &&
@@ -1233,15 +1245,20 @@ export class UsersService {
       // Org-wide department head on "All branches": limit the roster to the
       // union of branches they actually belong to — NOT the whole company. A
       // HoM/HoCS without an explicit `*.scope.global` permission only ever
-      // sees staff in their own branches.
+      // sees staff in their own branches. Include org-wide users too.
       conditions.push(
-        inArray(
-          schema.users.id,
-          this.db
-            .select({ userId: schema.userBranches.userId })
-            .from(schema.userBranches)
-            .where(inArray(schema.userBranches.branchId, actor.branchIds!)),
-        ),
+        or(
+          inArray(
+            schema.users.id,
+            this.db
+              .select({ userId: schema.userBranches.userId })
+              .from(schema.userBranches)
+              .where(inArray(schema.userBranches.branchId, actor.branchIds!)),
+          ),
+          sql<boolean>`NOT EXISTS (
+            SELECT 1 FROM user_branches ub WHERE ub.user_id = ${schema.users.id}
+          )`,
+        )!,
       );
     }
 
