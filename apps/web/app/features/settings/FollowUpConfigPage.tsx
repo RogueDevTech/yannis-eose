@@ -80,7 +80,7 @@ const STATUS_LABEL: Record<string, string> = Object.fromEntries(STATUS_OPTIONS.m
 const AGE_OPTIONS = [
   { value: 'h:1', label: '1 hour' }, { value: 'h:2', label: '2 hours' }, { value: 'h:4', label: '4 hours' },
   { value: 'h:6', label: '6 hours' }, { value: 'h:8', label: '8 hours' }, { value: 'h:12', label: '12 hours' },
-  { value: '1', label: '1 day' }, { value: '2', label: '2 days' }, { value: '3', label: '3 days' }, { value: '5', label: '5 days' }, { value: '7', label: '7 days' },
+  { value: '1', label: '1 day' }, { value: '2', label: '2 days' }, { value: '3', label: '3 days' }, { value: '5', label: '5 days' }, { value: '7', label: '7 days' }, { value: '10', label: '10 days' },
   { value: '14', label: '14 days' }, { value: '21', label: '21 days' }, { value: '30', label: '30 days' },
   { value: '45', label: '45 days' }, { value: '60', label: '60 days' }, { value: '90', label: '90 days' },
   { value: '120', label: '120 days' }, { value: '180', label: '180 days' }, { value: '365', label: '365 days' },
