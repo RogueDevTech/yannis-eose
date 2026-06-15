@@ -246,28 +246,29 @@ export function Header({
   const mobileAllChecked = mobileChecked.size === allMobileBranchIds.length && allMobileBranchIds.every((id) => mobileChecked.has(id));
   const mobileNoneChecked = mobileChecked.size === 0;
 
-  const handleMobileBranchApply = useCallback(() => {
+  const handleMobileBranchApply = useCallback(async () => {
     if (!branches || isMobileBranchSwitching) return;
     clearLoaderCache();
-    if (mobileAllChecked || mobileNoneChecked) {
-      submit(
-        { intent: 'switchBranch', branchId: '', selectedBranchIds: '' },
-        { method: 'post', action: '/admin/branches/switch' },
-      );
-    } else if (mobileChecked.size === 1) {
-      const singleId = [...mobileChecked][0]!;
-      submit(
-        { intent: 'switchBranch', branchId: singleId, selectedBranchIds: '' },
-        { method: 'post', action: '/admin/branches/switch' },
-      );
-    } else {
-      submit(
-        { intent: 'switchBranch', branchId: '', selectedBranchIds: [...mobileChecked].join(',') },
-        { method: 'post', action: '/admin/branches/switch' },
-      );
-    }
     setMobileUserMenuOpen(false);
-  }, [branches, isMobileBranchSwitching, mobileAllChecked, mobileNoneChecked, mobileChecked, submit]);
+
+    let branchId = '';
+    let selectedBranchIds = '';
+    if (mobileAllChecked || mobileNoneChecked) {
+      // All branches
+    } else if (mobileChecked.size === 1) {
+      branchId = [...mobileChecked][0]!;
+    } else {
+      selectedBranchIds = [...mobileChecked].join(',');
+    }
+
+    const body = new FormData();
+    body.set('intent', 'switchBranch');
+    body.set('branchId', branchId);
+    body.set('selectedBranchIds', selectedBranchIds);
+
+    await fetch('/admin/branches/switch', { method: 'POST', body });
+    window.location.reload();
+  }, [branches, isMobileBranchSwitching, mobileAllChecked, mobileNoneChecked, mobileChecked]);
 
   return (
     <header
@@ -980,29 +981,30 @@ function HeaderBranchSwitcher({
     }
   };
 
-  const handleApply = () => {
+  const handleApply = async () => {
     clearLoaderCache();
+    setOpen(false);
+
+    let branchId = '';
+    let selectedBranchIds = '';
     if (allChecked || noneChecked) {
       // All checked or none = "All Branches" (no filter)
-      submit(
-        { intent: 'switchBranch', branchId: '', selectedBranchIds: '' },
-        { method: 'post', action: '/admin/branches/switch' },
-      );
     } else if (checked.size === 1) {
-      // Single branch = exact match (legacy behaviour)
-      const singleId = [...checked][0]!;
-      submit(
-        { intent: 'switchBranch', branchId: singleId, selectedBranchIds: '' },
-        { method: 'post', action: '/admin/branches/switch' },
-      );
+      branchId = [...checked][0]!;
     } else {
-      // Multi-branch subset — null branchId + selectedBranchIds
-      submit(
-        { intent: 'switchBranch', branchId: '', selectedBranchIds: [...checked].join(',') },
-        { method: 'post', action: '/admin/branches/switch' },
-      );
+      selectedBranchIds = [...checked].join(',');
     }
-    setOpen(false);
+
+    const body = new FormData();
+    body.set('intent', 'switchBranch');
+    body.set('branchId', branchId);
+    body.set('selectedBranchIds', selectedBranchIds);
+
+    // POST via fetch (not Remix submit) so we can hard-reload after the
+    // session cookie is updated — guarantees every loader refetches with
+    // the new branch scope instead of reusing stale React state.
+    await fetch('/admin/branches/switch', { method: 'POST', body });
+    window.location.reload();
   };
 
   // Non-global, single-branch user — static pill, no switcher
@@ -1022,27 +1024,37 @@ function HeaderBranchSwitcher({
     );
   }
 
-  // Trigger label — reflects the current applied state, not the in-progress checkboxes
-  const isAllBranches = canSeeAllBranches && !currentBranchId && (!initialSelectedBranchIds || initialSelectedBranchIds.length === 0);
-  const isMultiBranch = (initialSelectedBranchIds?.length ?? 0) > 1;
+  // Trigger label — reflects the current applied state, not the in-progress checkboxes.
+  // Intersect session selectedBranchIds with visibleBranches so the count never
+  // exceeds what the user can actually see (the session may contain group-wide IDs
+  // that include branches the user isn't assigned to).
+  const visibleSelectedIds = useMemo(() => {
+    if (!initialSelectedBranchIds?.length) return [];
+    const visibleSet = new Set(visibleBranches.map((b) => b.id));
+    return initialSelectedBranchIds.filter((id) => visibleSet.has(id));
+  }, [initialSelectedBranchIds, visibleBranches]);
+  const isAllBranches = canSeeAllBranches && !currentBranchId && visibleSelectedIds.length === 0;
+  const isMultiBranch = visibleSelectedIds.length > 1;
   const currentBranch = visibleBranches.find((b) => b.id === currentBranchId) ?? null;
   // When all branches of a single group are selected, show the group name
   const selectedGroupLabel = useMemo(() => {
-    if (!isMultiBranch || !activeGroups?.length || !initialSelectedBranchIds?.length) return null;
+    if (!isMultiBranch || !activeGroups?.length || !visibleSelectedIds.length) return null;
     for (const group of activeGroups) {
       const groupBranches = visibleBranches.filter((b) => b.groupId === group.id);
-      if (groupBranches.length > 0 && groupBranches.length === initialSelectedBranchIds.length &&
-          groupBranches.every((b) => initialSelectedBranchIds.includes(b.id))) {
+      if (groupBranches.length > 0 && groupBranches.length === visibleSelectedIds.length &&
+          groupBranches.every((b) => visibleSelectedIds.includes(b.id))) {
         return group.name;
       }
     }
     return null;
-  }, [isMultiBranch, activeGroups, visibleBranches, initialSelectedBranchIds]);
+  }, [isMultiBranch, activeGroups, visibleBranches, visibleSelectedIds]);
   const triggerLabel = isAllBranches
     ? 'All Branches'
     : isMultiBranch
-      ? (selectedGroupLabel ?? `${initialSelectedBranchIds!.length} Branches`)
-      : (currentBranch?.name ?? 'Select Branch');
+      ? (selectedGroupLabel ?? `${visibleSelectedIds.length} Branches`)
+      : visibleSelectedIds.length === 1
+        ? (visibleBranches.find((b) => b.id === visibleSelectedIds[0])?.name ?? 'Select Branch')
+        : (currentBranch?.name ?? 'Select Branch');
 
   return (
     <div ref={ref} className="relative">

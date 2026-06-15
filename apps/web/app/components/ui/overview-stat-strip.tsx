@@ -109,6 +109,11 @@ type OverviewStatStripProps = {
    */
   mobileGrid?: boolean;
   /**
+   * Wrap tiles to new lines on desktop instead of scrolling horizontally.
+   * Useful for strips with many dynamic items (e.g. per-product breakdowns).
+   */
+  wrap?: boolean;
+  /**
    * Arms per-item change detection: while true, a tile whose value changes
    * between renders briefly shows an up-arrow indicator. Driven by the socket
    * `showGreen` state from `useLiveIndicator` so background filter changes
@@ -144,6 +149,7 @@ export function OverviewStatStrip({
   tileClassName = '',
   embedded = false,
   mobileGrid = false,
+  wrap = false,
   liveFlash = false,
 }: OverviewStatStripProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -324,8 +330,8 @@ export function OverviewStatStrip({
   ) : null;
 
   const stripContent = (
-    <div ref={scrollRef} className={`flex-1 min-w-0 overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem] ${mobileGrid ? 'hidden md:block' : ''}`}>
-      <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
+    <div ref={scrollRef} className={`flex-1 min-w-0 ${wrap ? '' : 'overflow-x-auto scrollbar-hide'} px-[0.9rem] py-[0.9rem] ${mobileGrid ? 'hidden md:block' : ''}`}>
+      <div className={`flex ${wrap ? 'flex-wrap' : 'w-max min-w-full flex-nowrap'} gap-2 pb-0.5`}>
         {items.map((item, i) => {
           const stamp = changedAt.get(i);
           const inner = (

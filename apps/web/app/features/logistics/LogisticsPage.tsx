@@ -523,6 +523,14 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         ),
       },
       {
+        key: 'provider',
+        header: 'Logistics company',
+        render: (l) => {
+          const provider = displayProviders.find((p: Provider) => p.id === l.providerId);
+          return <span className="text-app-fg-muted">{provider?.name ?? 'Unknown logistics company'}</span>;
+        },
+      },
+      {
         key: 'address',
         header: 'Address',
         hideOnMobile: true,
@@ -537,14 +545,6 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           return state
             ? <span className="text-app-fg-muted">{state}</span>
             : <span className="text-app-fg-muted">—</span>;
-        },
-      },
-      {
-        key: 'provider',
-        header: 'Logistics company',
-        render: (l) => {
-          const provider = displayProviders.find((p: Provider) => p.id === l.providerId);
-          return <span className="text-app-fg-muted">{provider?.name ?? 'Unknown logistics company'}</span>;
         },
       },
       {

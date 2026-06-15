@@ -31,6 +31,8 @@ export interface LogisticsProviderRow {
   disputedRemittanceAmount: string;
   /** Total units (bottles) delivered — SUM(order_items.quantity) for DELIVERED/REMITTED orders. */
   unitsDelivered: number;
+  /** Available stock across all locations for this provider. */
+  availableStock: number;
 }
 
 /** Single logistics company from `logistics.getProvider` (loader detail page). */

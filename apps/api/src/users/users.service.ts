@@ -1074,11 +1074,11 @@ export class UsersService {
    */
   private actorMayListCompanyWideUserRoster(
     actor: { id: string; role: string; permissions?: string[] } | null,
-    currentBranchId: string | null = null,
+    _currentBranchId: string | null = null,
   ): boolean {
     if (!actor) return false;
     if (actor.role === 'SUPER_ADMIN' || isAdminLevelRole(actor.role)) return true;
-    if (actor.role === 'HR_MANAGER') return currentBranchId === null;
+    if (actor.role === 'HR_MANAGER') return true;
     if (actor.role === 'FINANCE_OFFICER') return true;
     const perms = new Set((actor.permissions ?? []).map((p) => canonicalPermissionCode(p)));
     return (
