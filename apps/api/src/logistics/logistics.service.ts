@@ -2684,6 +2684,8 @@ export class LogisticsService {
       pendingRemittanceAmount: string;
       /** Sum of order totals on this provider's DISPUTED batches in the period. */
       disputedRemittanceAmount: string;
+      /** Total units (bottles) delivered — SUM(order_items.quantity) for DELIVERED/REMITTED orders. */
+      unitsDelivered: number;
     }>
   > {
     // Default to month-to-date when no range supplied — matches marketing page UX.
@@ -2798,6 +2800,37 @@ export class LogisticsService {
       }
     }
 
+    // ── Pass 5: units (bottles) delivered per provider ─────────────────────
+    // SUM(order_items.quantity) for DELIVERED + REMITTED orders, same period
+    // and branch scope as Pass 2. Gives the CEO a "bottles sold" metric.
+    const unitsConditions: SQL[] = [
+      isNotNull(schema.orders.logisticsLocationId),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+    ];
+    if (effectiveStart) unitsConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
+    if (effectiveEnd) unitsConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
+    const bCond3 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond3) unitsConditions.push(bCond3);
+
+    const unitsRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        totalUnits: sql<string>`COALESCE(SUM(${schema.orderItems.quantity}), 0)::text`,
+      })
+      .from(schema.orders)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.orders.logisticsLocationId),
+      )
+      .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+      .where(and(...unitsConditions))
+      .groupBy(schema.logisticsLocations.providerId);
+
+    const unitsByProvider = new Map<string, number>();
+    for (const row of unitsRows) {
+      if (row.providerId) unitsByProvider.set(row.providerId, Number(row.totalUnits) || 0);
+    }
+
     // ── Build rollup ───────────────────────────────────────────────────────
     const result = providers.map((p) => {
       const counts = statusCountsByProvider.get(p.id) ?? new Map<string, number>();
@@ -2881,6 +2914,7 @@ export class LogisticsService {
         remittedAmount: remit?.received ?? '0',
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
+        unitsDelivered: unitsByProvider.get(p.id) ?? 0,
       };
     });
 

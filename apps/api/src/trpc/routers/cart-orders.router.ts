@@ -6,6 +6,7 @@ import {
   assignCartOrderSchema,
   bulkAssignCartOrdersSchema,
   transitionCartOrderSchema,
+  updateCartOrderSchema,
 } from '@yannis/shared';
 import type { CartOrdersService } from '../../cart-orders/cart-orders.service';
 
@@ -49,6 +50,12 @@ export const cartOrdersRouter = router({
     .input(cartOrderDetailSchema)
     .query(async ({ input }) => {
       return getCartOrdersService().getById(input.id);
+    }),
+
+  update: authedProcedure
+    .input(updateCartOrderSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().update(input, ctx.user);
     }),
 
   assignToCS: permissionProcedure('orders.reassign')

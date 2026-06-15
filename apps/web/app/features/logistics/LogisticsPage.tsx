@@ -481,7 +481,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           const providerTotalStock = providerLocations.reduce((sum, l) => sum + (l.totalStock ?? 0), 0);
           return (
             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-              <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingProvider(p)}>
+              <CompactTableActionButton disabled={isOptimistic} to={`/admin/logistics/team/${p.id}`}>
                 View
               </CompactTableActionButton>
               <CompactTableActionButton
@@ -616,6 +616,12 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
               <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingLocation(l)}>
                 View
+              </CompactTableActionButton>
+              <CompactTableActionButton
+                disabled={isOptimistic}
+                to={`/admin/inventory?locationId=${l.id}`}
+              >
+                Stock
               </CompactTableActionButton>
               <CompactTableActionButton
                 className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
@@ -1387,13 +1393,13 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             );
             if (isOptimistic) return body;
             return (
-              <button
-                type="button"
-                onClick={() => setViewingProvider(p)}
+              <Link
+                to={`/admin/logistics/team/${p.id}`}
+                prefetch="intent"
                 className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
               >
                 {body}
-              </button>
+              </Link>
             );
           }}
         />

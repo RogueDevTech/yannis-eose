@@ -1167,9 +1167,9 @@ export const marketingRouter = router({
           null, // Forms are global — never branch-scoped (but company-group-scoped via effectiveBranchIds)
           { enrichProductIds: false, effectiveBranchIds: ctx.effectiveBranchIds }, // Orders page only needs id+name for the filter dropdown
         ),
-        // Open abandoned carts — must match the `cart.listAbandoned` query
-        // (openCartConditions) so the stat strip count equals the filtered list.
-        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId, effectiveBranchIds: ctx.effectiveBranchIds, startDate, endDate }),
+        // Total abandoned carts (regardless of recovery) — marketers track the
+        // full abandonment volume. Clicking through shows recovery status.
+        getCartService().countAllCarts({ mediaBuyerId: metricsBuyerId, branchId, effectiveBranchIds: ctx.effectiveBranchIds, startDate, endDate }),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
           ordersScope.mediaBuyerId,

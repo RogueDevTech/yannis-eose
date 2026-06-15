@@ -446,6 +446,10 @@ export function MarketingOrdersPage({
                 <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                   Cart
                 </span>
+              ) : order.status === 'CART_RECOVERED' ? (
+                <span className="inline-flex items-center rounded-full bg-success-100 px-2 py-0.5 text-xs font-semibold text-success-700 dark:bg-success-900/30 dark:text-success-400">
+                  Recovering
+                </span>
               ) : (
                 <OrderStatusBadge status={order.status} />
               ),
@@ -533,6 +537,10 @@ export function MarketingOrdersPage({
             {order.status === 'CART' ? (
               <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                 Cart
+              </span>
+            ) : order.status === 'CART_RECOVERED' ? (
+              <span className="inline-flex items-center rounded-full bg-success-100 px-2 py-0.5 text-xs font-semibold text-success-700 dark:bg-success-900/30 dark:text-success-400">
+                Recovering
               </span>
             ) : (
               <OrderStatusBadge status={order.status} />
@@ -917,7 +925,7 @@ export function MarketingOrdersPage({
                         activeSecondary.abandonedCartCount > 0
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-app-fg',
-                      title: 'Captured carts not yet recovered — tap to view the cart backlog',
+                      title: 'Total abandoned carts — tap to see recovery status',
                       active: selectedStatus === FROM_CART_STATUS_VALUE,
                       ...(enableFromCartStatusOption
                         ? { onClick: () => handleStatusChange(FROM_CART_STATUS_VALUE) }

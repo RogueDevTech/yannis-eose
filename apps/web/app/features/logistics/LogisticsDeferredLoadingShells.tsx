@@ -80,6 +80,16 @@ function logisticsTeamShellColumns(): CompactTableColumn<{ id: string }>[] {
       ),
     },
     {
+      key: 'unitsDelivered',
+      header: 'Units delivered',
+      align: 'right',
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[3rem]" />
+        </span>
+      ),
+    },
+    {
       key: 'deliveryRate',
       header: 'Delivery rate',
       align: 'right',
