@@ -22,6 +22,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { Modal } from '~/components/ui/modal';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { formatNaira } from '~/lib/format-amount';
 
 export interface LogisticsTeamPageProps {
   providers: LogisticsProviderRow[];
@@ -322,6 +323,8 @@ export function LogisticsTeamPage({
     (acc, p) => acc + p.returned + p.partiallyDelivered + p.writtenOff,
     0,
   );
+  const totalRemitted = providers.reduce((acc, p) => acc + (Number(p.remittedAmount) || 0), 0);
+  const totalPending = providers.reduce((acc, p) => acc + (Number(p.pendingRemittanceAmount) || 0), 0);
   const overallDeliveryRate = totalAssigned > 0 ? (totalDelivered / totalAssigned) * 100 : 0;
   const overallDelinquencyRate =
     totalAssigned > 0 ? (totalDelinquent / totalAssigned) * 100 : 0;
@@ -522,6 +525,16 @@ export function LogisticsTeamPage({
             label: 'Delinquency rate',
             value: totalAssigned > 0 ? `${Math.round(overallDelinquencyRate)}%` : '—',
             valueClassName: delinquencyRateColorClass(overallDelinquencyRate),
+          },
+          {
+            label: 'Remitted',
+            value: formatNaira(totalRemitted),
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Pending',
+            value: formatNaira(totalPending),
+            valueClassName: totalPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted',
           },
         ]}
       />

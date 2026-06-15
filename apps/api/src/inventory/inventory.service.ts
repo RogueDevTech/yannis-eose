@@ -1999,6 +1999,126 @@ export class InventoryService {
   }
 
   /**
+   * Per-location breakdown for a logistics provider.
+   * Returns stock available, received, sold, and remittance data per location.
+   */
+  async getProviderLocationBreakdown(opts: {
+    providerId: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    const startDate = opts.startDate?.trim() || null;
+    const endDate = opts.endDate?.trim() || null;
+
+    const locRows = await this.db
+      .select({
+        id: schema.logisticsLocations.id,
+        name: schema.logisticsLocations.name,
+      })
+      .from(schema.logisticsLocations)
+      .where(eq(schema.logisticsLocations.providerId, opts.providerId));
+
+    if (locRows.length === 0) return [];
+
+    // Stock per location
+    const stockRows = await this.db.execute<{
+      locationId: string;
+      available: number;
+    }>(sql`
+      SELECT
+        il.location_id AS "locationId",
+        COALESCE(SUM(il.stock_count - il.reserved_count), 0)::int AS "available"
+      FROM inventory_levels il
+      WHERE il.location_id IN (${sql.join(locRows.map((l) => sql`${l.id}::uuid`), sql`,`)})
+      GROUP BY il.location_id
+    `);
+    const stockMap = new Map<string, number>();
+    for (const r of stockRows) stockMap.set(r.locationId, r.available);
+
+    const locIdList = sql.join(locRows.map((l) => sql`${l.id}::uuid`), sql`,`);
+
+    // Received per location (all-time — total stock ever sent, not date-filtered)
+    const recvRows = await this.db.execute<{
+      locationId: string;
+      received: number;
+    }>(sql`
+      SELECT
+        sm.to_location_id AS "locationId",
+        COALESCE(SUM(ABS(sm.quantity)), 0)::int AS "received"
+      FROM stock_movements sm
+      WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK')
+        AND sm.to_location_id IN (${locIdList})
+      GROUP BY sm.to_location_id
+    `);
+    const recvMap = new Map<string, number>();
+    for (const r of recvRows) recvMap.set(r.locationId, r.received);
+
+    // Sold per location (date-filtered)
+    const soldRows = await this.db.execute<{
+      locationId: string;
+      sold: number;
+    }>(sql`
+      SELECT
+        COALESCE(sm.from_location_id, o.logistics_location_id) AS "locationId",
+        COALESCE(SUM(ABS(sm.quantity)), 0)::int AS "sold"
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      WHERE sm.movement_type = 'DELIVERY'
+        AND (
+          sm.from_location_id IN (${locIdList})
+          OR o.logistics_location_id IN (${locIdList})
+        )
+        AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+        AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
+      GROUP BY COALESCE(sm.from_location_id, o.logistics_location_id)
+    `);
+    const soldMap = new Map<string, number>();
+    for (const r of soldRows) soldMap.set(r.locationId, r.sold);
+
+    // Remittance per location
+    const remitRows = await this.db.execute<{
+      locationId: string;
+      qtyRemitted: number;
+      qtyPending: number;
+      amountRemitted: string;
+      amountPending: string;
+    }>(sql`
+      SELECT
+        o.logistics_location_id AS "locationId",
+        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyRemitted",
+        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyPending",
+        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountRemitted",
+        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountPending"
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      LEFT JOIN delivery_remittance_orders dro ON dro.order_id = o.id
+      LEFT JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
+      WHERE o.logistics_location_id IN (${sql.join(locRows.map((l) => sql`${l.id}::uuid`), sql`,`)})
+        AND o.status IN ('DELIVERED', 'REMITTED')
+        AND (${startDate}::date IS NULL OR o.allocated_at >= ${startDate}::date)
+        AND (${endDate}::date IS NULL OR o.allocated_at < (${endDate}::date + INTERVAL '1 day'))
+      GROUP BY o.logistics_location_id
+    `);
+    const remitMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }>();
+    for (const r of remitRows) remitMap.set(r.locationId, r);
+
+    return locRows.map((l) => {
+      const rm = remitMap.get(l.id);
+      return {
+        locationId: l.id,
+        locationName: l.name,
+        available: stockMap.get(l.id) ?? 0,
+        received: recvMap.get(l.id) ?? 0,
+        sold: soldMap.get(l.id) ?? 0,
+        qtyRemitted: rm?.qtyRemitted ?? 0,
+        qtyPending: rm?.qtyPending ?? 0,
+        amountRemitted: rm?.amountRemitted ?? '0',
+        amountPending: rm?.amountPending ?? '0',
+      };
+    });
+  }
+
+  /**
    * Per-product stock + sold breakdown for a logistics provider.
    * Returns current available stock and units sold (DELIVERY movements) in the date range.
    */
@@ -2037,33 +2157,44 @@ export class InventoryService {
       GROUP BY il.product_id, p.name
     `);
 
-    // Per-product movement aggregates: received (INTAKE/TRANSFER_IN) + sold (DELIVERY)
-    const movementRows = await this.db.execute<{
+    // Received (all-time — total stock ever sent to this provider, not date-filtered)
+    const receivedRows = await this.db.execute<{
       productId: string;
       received: number;
+    }>(sql`
+      SELECT
+        sm.product_id AS "productId",
+        COALESCE(SUM(ABS(sm.quantity)), 0)::int AS "received"
+      FROM stock_movements sm
+      WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK')
+        AND sm.to_location_id IN (${locationList})
+      GROUP BY sm.product_id
+    `);
+    const receivedMap = new Map<string, number>();
+    for (const r of receivedRows) receivedMap.set(r.productId, r.received);
+
+    // Sold (date-filtered — DELIVERY movements in the period)
+    const soldRows = await this.db.execute<{
+      productId: string;
       sold: number;
     }>(sql`
       SELECT
         sm.product_id AS "productId",
-        COALESCE(SUM(CASE WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "received",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "sold"
+        COALESCE(SUM(ABS(sm.quantity)), 0)::int AS "sold"
       FROM stock_movements sm
       LEFT JOIN orders o ON o.id = sm.reference_id
-      WHERE (
+      WHERE sm.movement_type = 'DELIVERY'
+        AND (
           sm.from_location_id IN (${locationList})
           OR sm.to_location_id IN (${locationList})
           OR o.logistics_location_id IN (${locationList})
         )
-        AND sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY')
         AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
         AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
       GROUP BY sm.product_id
     `);
-
-    const movementMap = new Map<string, { received: number; sold: number }>();
-    for (const r of movementRows) {
-      movementMap.set(r.productId, { received: r.received, sold: r.sold });
-    }
+    const soldMap = new Map<string, number>();
+    for (const r of soldRows) soldMap.set(r.productId, r.sold);
 
     // Per-product remittance: qty remitted for, qty pending, amounts
     const revenueRows = await this.db.execute<{
@@ -2096,13 +2227,12 @@ export class InventoryService {
     }
 
     return stockRows.map((r) => {
-      const mv = movementMap.get(r.productId);
       const rv = revenueMap.get(r.productId);
       return {
         productId: r.productId,
         productName: r.productName ?? 'Unknown',
-        received: mv?.received ?? 0,
-        sold: mv?.sold ?? 0,
+        received: receivedMap.get(r.productId) ?? 0,
+        sold: soldMap.get(r.productId) ?? 0,
         available: r.available,
         qtyRemitted: rv?.qtyRemitted ?? 0,
         qtyPending: rv?.qtyPending ?? 0,
