@@ -624,6 +624,13 @@ export class CartOrdersService {
     let succeeded = 0;
     for (const cart of carts) {
       try {
+        // As long as there's a phone, create the cart order — that's all CS
+        // needs to initiate a call. Product/price are nice-to-have extras.
+        if (!cart.customerPhone && !cart.customerPhoneHash) {
+          this.logger.warn(`Cart pull skipped cart ${cart.id}: no phone`);
+          continue;
+        }
+
         const product = productMap.get(cart.productId);
         const qty = cart.quantity ?? 1;
 
@@ -664,13 +671,20 @@ export class CartOrdersService {
             .returning({ id: schema.cartOrders.id });
 
           if (co) {
-            await tx.insert(schema.cartOrderItems).values({
-              cartOrderId: co.id,
-              productId: cart.productId,
-              quantity: qty,
-              unitPrice,
-              offerLabel: cart.offerLabel,
-            });
+            // Item insert is best-effort — the product FK could fail if the
+            // product was deleted. The cart order itself is what matters (CS
+            // needs the phone to call, not the line item to start recovery).
+            try {
+              await tx.insert(schema.cartOrderItems).values({
+                cartOrderId: co.id,
+                productId: cart.productId,
+                quantity: qty,
+                unitPrice,
+                offerLabel: cart.offerLabel,
+              });
+            } catch (itemErr) {
+              this.logger.warn(`Cart order ${co.id} created but item insert failed (product ${cart.productId}): ${itemErr instanceof Error ? itemErr.message : itemErr}`);
+            }
 
             await tx.insert(schema.cartOrderTimelineEvents).values({
               cartOrderId: co.id,
