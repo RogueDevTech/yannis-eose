@@ -599,6 +599,20 @@ export class CartOrdersService {
       .where(inArray(schema.products.id, productIds));
     const productMap = new Map(products.map((p) => [p.id, p]));
 
+    // Resolve campaign → branch mapping so each cart order inherits the
+    // campaign's branch when no explicit targetBranchId is provided.
+    const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
+    const campaignBranchMap = new Map<string, string>();
+    if (!targetBranchId && campaignIds.length > 0) {
+      const rows = await this.db
+        .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId })
+        .from(schema.campaigns)
+        .where(inArray(schema.campaigns.id, campaignIds));
+      for (const r of rows) {
+        if (r.branchId) campaignBranchMap.set(r.id, r.branchId);
+      }
+    }
+
     // Validate mediaBuyerIds
     const mbIds = [...new Set(carts.map((c) => c.mediaBuyerId).filter(Boolean))] as string[];
     const validMbIds = new Set(
@@ -621,6 +635,7 @@ export class CartOrdersService {
         }
 
         const safeMbId = cart.mediaBuyerId && validMbIds.has(cart.mediaBuyerId) ? cart.mediaBuyerId : null;
+        const resolvedBranchId = targetBranchId ?? (cart.campaignId ? campaignBranchMap.get(cart.campaignId) ?? null : null);
 
         await withActor(this.db, actor, async (tx) => {
           const [co] = await tx
@@ -644,7 +659,7 @@ export class CartOrdersService {
               customerEmail: cart.customerEmail,
               orderSource: 'online',
               customFields: cart.customFieldValues,
-              servicingBranchId: targetBranchId,
+              servicingBranchId: resolvedBranchId,
             })
             .returning({ id: schema.cartOrders.id });
 
@@ -664,7 +679,7 @@ export class CartOrdersService {
               actorName: actor.name,
               description: 'Cart order created from abandoned cart.',
               metadata: { sourceCartId: cart.id },
-              branchId: targetBranchId,
+              branchId: resolvedBranchId,
             });
           }
         });

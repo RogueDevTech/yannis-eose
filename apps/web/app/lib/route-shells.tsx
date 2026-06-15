@@ -599,6 +599,9 @@ const entries: ShellEntry[] = [
   },
 
   // ── Admin / Branches / Orders / Products / Settings / CEO / Index ───────────
+  // Action-only route — no UI, just POST+redirect. Must come before the catch-all
+  // `:id` pattern so we don't show the BranchDetail skeleton during branch switches.
+  { match: /^\/admin\/branches\/switch$/, render: () => null },
   { match: /^\/admin\/branches\/[^/]+$/, render: () => <BranchDetailLoadingShell /> },
   { match: /^\/admin\/branches$/, render: () => <BranchesListLoadingShell /> },
   { match: /^\/admin\/orders\/[^/]+$/, render: () => <OrderDetailSkeleton /> },

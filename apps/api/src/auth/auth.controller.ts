@@ -522,8 +522,12 @@ export class AuthController {
       }
       if (groupId) {
         merged.activeGroupId = groupId;
-        const groupBranchIds = await this.authService.getGroupBranchIds(groupId);
-        if (groupBranchIds.length > 0) merged.selectedBranchIds = groupBranchIds;
+        // Only backfill selectedBranchIds when no single branch is actively
+        // selected — mirrors the Case 2 guard below.
+        if (!merged.currentBranchId) {
+          const groupBranchIds = await this.authService.getGroupBranchIds(groupId);
+          if (groupBranchIds.length > 0) merged.selectedBranchIds = groupBranchIds;
+        }
         const sessionToken = this.extractSessionToken(req);
         if (sessionToken) {
           void this.authService.patchSessionGroupScope(sessionToken, groupId, merged.selectedBranchIds ?? null).catch(() => {});
@@ -531,7 +535,11 @@ export class AuthController {
       }
     }
     // Case 2: activeGroupId is set but selectedBranchIds is missing (stale session).
-    if (merged.activeGroupId && (!merged.selectedBranchIds || merged.selectedBranchIds.length === 0)) {
+    // Skip when a single branch is explicitly selected — selectedBranchIds is
+    // intentionally null so queries scope by currentBranchId alone. Without this
+    // guard, every /auth/me call after a single-branch switch would overwrite
+    // the user's selection with ALL group branches, resetting the filter UI.
+    if (merged.activeGroupId && !merged.currentBranchId && (!merged.selectedBranchIds || merged.selectedBranchIds.length === 0)) {
       const groupBranchIds = await this.authService.getGroupBranchIds(merged.activeGroupId);
       if (groupBranchIds.length > 0) {
         merged.selectedBranchIds = groupBranchIds;

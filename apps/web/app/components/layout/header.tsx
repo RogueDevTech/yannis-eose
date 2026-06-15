@@ -345,7 +345,7 @@ export function Header({
           // POSTs to the LAYOUT route (no `?index`) — the action handler that calls
           // `/auth/mirror/stop` lives in routes/admin/route.tsx. Adding `?index` would
           // route it to admin._index which has no action and 500s.
-          <Form method="post" action="/admin" className="inline-flex" data-mirror-allow="">
+          <Form method="post" action="/admin" className="inline-flex" data-mirror-allow="" onSubmit={() => clearLoaderCache()}>
             <input type="hidden" name="intent" value="exitMirror" />
             <button
               type="submit"
