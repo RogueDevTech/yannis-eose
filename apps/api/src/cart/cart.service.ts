@@ -7,6 +7,7 @@ import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActor } from '../common/db/with-actor';
+import { CartOrdersService } from '../cart-orders/cart-orders.service';
 
 type CartDbOrTx =
   | PostgresJsDatabase<typeof schema>
@@ -25,6 +26,7 @@ export class CartService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
+    private readonly cartOrdersService: CartOrdersService,
   ) {}
 
   private async getCampaignBranchId(campaignId: string): Promise<string | null> {
@@ -307,6 +309,32 @@ export class CartService {
     const merged = await this.mergeDuplicateAbandonedCarts(SYSTEM_ACTOR_ID);
     if (merged > 0) {
       console.log(`[Cart] Merged ${merged} duplicate cart(s)`);
+    }
+    // Auto-pull newly abandoned carts into the Cart Orders page.
+    // Only pull carts not already in cart_orders (the service checks this).
+    try {
+      const unpulledCarts = await this.db
+        .select({ id: schema.cartAbandonments.id })
+        .from(schema.cartAbandonments)
+        .where(
+          and(
+            eq(schema.cartAbandonments.status, 'ABANDONED'),
+            sql`${schema.cartAbandonments.id} NOT IN (SELECT source_cart_id FROM cart_orders)`,
+          ),
+        )
+        .limit(500);
+      if (unpulledCarts.length > 0) {
+        const result = await this.cartOrdersService.pullFromAbandonedCarts(
+          unpulledCarts.map((c) => c.id),
+          null, // round-robin or no branch — service resolves from campaign
+          { id: SYSTEM_ACTOR_ID } as Parameters<typeof this.cartOrdersService.pullFromAbandonedCarts>[2],
+        );
+        if (result.pulled > 0) {
+          console.log(`[Cart] Auto-pulled ${result.pulled} abandoned cart(s) into Cart Orders`);
+        }
+      }
+    } catch (err) {
+      console.error(`[Cart] Auto-pull to Cart Orders failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 
