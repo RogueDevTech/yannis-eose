@@ -270,13 +270,16 @@ export function MarketingFundingLoadingShell({
   }, [searchParams]);
 
   const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
+  const sectionParam = searchParams.get('section');
   const activeSection = isAdminViewer
     ? 'distributing'
     : !canDistribute
       ? 'received'
-      : searchParams.get('section') === 'received'
+      : sectionParam === 'received'
         ? 'received'
-        : 'distributing';
+        : sectionParam === 'balances'
+          ? 'balances'
+          : 'distributing';
 
   const entryType = searchParams.get('entryType') ?? 'all';
   const entryStatus = searchParams.get('entryStatus') ?? '';
@@ -399,6 +402,7 @@ export function MarketingFundingLoadingShell({
               tabs={[
                 { value: 'distributing', label: 'Funds Distributed' },
                 { value: 'received', label: receivedTitle },
+                ...(activeSection === 'balances' ? [{ value: 'balances' as const, label: 'Recipient balances' }] : []),
               ]}
             />
           </div>
@@ -412,104 +416,127 @@ export function MarketingFundingLoadingShell({
           </div>
         ) : null}
 
-        <ToolbarFiltersCollapsible
-          badgeCount={badgeCount}
-          searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                placeholder="Search ledger…"
-                value={searchQuery}
-                onChange={(val) => setSearchQuery(val)}
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-              />
-            </form>
-          }
-          desktopInlineFilters={
-            <>
-              <FormSelect
-                value={entryType}
-                onChange={(e) => setEntryType(e.target.value)}
-                options={FUNDING_ENTRY_TYPE_OPTIONS}
-                wrapperClassName="w-auto min-w-[10rem]"
-              />
-              <FormSelect
-                value={entryStatus}
-                onChange={(e) => setEntryStatus(e.target.value)}
-                options={FUNDING_ENTRY_STATUS_OPTIONS}
-                wrapperClassName="w-auto min-w-[11rem]"
-              />
-            </>
-          }
-          sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Entry type</span>
-                <FormSelect
-                  value={entryType}
-                  onChange={(e) => setEntryType(e.target.value)}
-                  options={FUNDING_ENTRY_TYPE_OPTIONS}
-                  wrapperClassName="w-full"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                <FormSelect
-                  value={entryStatus}
-                  onChange={(e) => setEntryStatus(e.target.value)}
-                  options={FUNDING_ENTRY_STATUS_OPTIONS}
-                  wrapperClassName="w-full"
-                />
-              </div>
-            </>
-          }
-        />
-
-        {/* Mobile skeleton cards */}
-        <div className="md:hidden space-y-2 px-3 py-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="rounded-lg border border-app-border px-3 py-2.5 space-y-1.5">
-              {/* Row 1: name + status */}
-              <div className="flex items-center justify-between gap-2">
-                <div className="h-4 w-24 rounded bg-app-hover animate-pulse" />
-                <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
-              </div>
-              {/* Row 2: type + amount */}
-              <div className="flex items-center justify-between gap-2">
-                <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
-                <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
-              </div>
-              {/* Row 3: date */}
-              <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+        {activeSection === 'balances' ? (
+          <>
+            {/* Balances skeleton — search + rows */}
+            <div className="p-3">
+              <div className="h-10 w-full rounded-md bg-app-hover animate-pulse" />
             </div>
-          ))}
-        </div>
-
-        {/* Desktop table */}
-        <div className="hidden md:block">
-          <CompactTable<{ id: string }>
-            withCard={false}
-            columns={ledgerColumns}
-            rows={FUNDING_LEDGER_SHELL_ROW_DATA}
-            rowKey={(row) => row.id}
-            emptyTitle="No entries match your filters"
-            emptyDescription="Try adjusting type or status"
-          />
-        </div>
-
-        <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
-            <span
-              className="inline-block h-4 w-48 max-w-[90vw] animate-pulse rounded-md bg-app-border/75 dark:bg-app-border/60 sm:w-64"
-              aria-hidden
+            <div className="space-y-0">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 border-b border-app-border px-4 py-3">
+                  <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
+                  <div className="flex gap-6">
+                    <div className="h-4 w-20 rounded bg-app-hover animate-pulse" />
+                    <div className="h-4 w-20 rounded bg-app-hover animate-pulse" />
+                    <div className="h-4 w-20 rounded bg-app-hover animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <ToolbarFiltersCollapsible
+              badgeCount={badgeCount}
+              searchRow={
+                <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+                  <SearchInput
+                    placeholder="Search ledger…"
+                    value={searchQuery}
+                    onChange={(val) => setSearchQuery(val)}
+                    withSubmitButton
+                    wrapperClassName="min-w-0 flex-1"
+                  />
+                </form>
+              }
+              desktopInlineFilters={
+                <>
+                  <FormSelect
+                    value={entryType}
+                    onChange={(e) => setEntryType(e.target.value)}
+                    options={FUNDING_ENTRY_TYPE_OPTIONS}
+                    wrapperClassName="w-auto min-w-[10rem]"
+                  />
+                  <FormSelect
+                    value={entryStatus}
+                    onChange={(e) => setEntryStatus(e.target.value)}
+                    options={FUNDING_ENTRY_STATUS_OPTIONS}
+                    wrapperClassName="w-auto min-w-[11rem]"
+                  />
+                </>
+              }
+              sheetFilterBody={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Entry type</span>
+                    <FormSelect
+                      value={entryType}
+                      onChange={(e) => setEntryType(e.target.value)}
+                      options={FUNDING_ENTRY_TYPE_OPTIONS}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                    <FormSelect
+                      value={entryStatus}
+                      onChange={(e) => setEntryStatus(e.target.value)}
+                      options={FUNDING_ENTRY_STATUS_OPTIONS}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                </>
+              }
             />
-          </p>
-          <div className="flex shrink-0 items-center gap-2" aria-hidden>
-            <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-            <span className="inline-block h-8 w-28 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-            <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
-          </div>
-        </div>
+
+            {/* Mobile skeleton cards */}
+            <div className="md:hidden space-y-2 px-3 py-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="rounded-lg border border-app-border px-3 py-2.5 space-y-1.5">
+                  {/* Row 1: name + status */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="h-4 w-24 rounded bg-app-hover animate-pulse" />
+                    <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
+                  </div>
+                  {/* Row 2: type + amount */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+                    <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+                  </div>
+                  {/* Row 3: date */}
+                  <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <CompactTable<{ id: string }>
+                withCard={false}
+                columns={ledgerColumns}
+                rows={FUNDING_LEDGER_SHELL_ROW_DATA}
+                rowKey={(row) => row.id}
+                emptyTitle="No entries match your filters"
+                emptyDescription="Try adjusting type or status"
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
+                <span
+                  className="inline-block h-4 w-48 max-w-[90vw] animate-pulse rounded-md bg-app-border/75 dark:bg-app-border/60 sm:w-64"
+                  aria-hidden
+                />
+              </p>
+              <div className="flex shrink-0 items-center gap-2" aria-hidden>
+                <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+                <span className="inline-block h-8 w-28 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+                <span className="inline-block h-8 w-[4.5rem] animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" />
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

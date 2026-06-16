@@ -2688,6 +2688,15 @@ export class LogisticsService {
       unitsDelivered: number;
       /** Available stock across all locations for this provider. */
       availableStock: number;
+      /** Reserved stock across all locations for this provider. */
+      reservedStock: number;
+      /** Stock reconciliation totals for consistency check. */
+      stockReceived: number;
+      stockSold: number;
+      stockTransferredOut: number;
+      stockAdjusted: number;
+      stockWrittenOff: number;
+      stockDispatched: number;
     }>
   > {
     // Default to month-to-date when no range supplied — matches marketing page UX.
@@ -2721,9 +2730,12 @@ export class LogisticsService {
     // Join orders → logistics_locations to resolve provider_id; the order itself
     // also carries `logistics_provider_id` but the location-derived link is the
     // canonical one (set during AGENT_ASSIGNED transition).
+    // Date filter: use COALESCE(allocated_at, delivered_at, created_at) so orders
+    // that skipped AGENT_ASSIGNED (e.g. follow-up/cart direct-deliver) are still counted.
+    const logisticsDateCol = sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt})`;
     const orderConditions: SQL[] = [isNotNull(schema.orders.logisticsLocationId)];
-    if (effectiveStart) orderConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
-    if (effectiveEnd) orderConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
+    if (effectiveStart) orderConditions.push(sql`${logisticsDateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) orderConditions.push(sql`${logisticsDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
     const bCond1 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond1) orderConditions.push(bCond1);
 
@@ -2762,12 +2774,13 @@ export class LogisticsService {
       .from(schema.logisticsProviders);
 
     // ── Pass 4: per-provider remittance amounts ────────────────────────────
-    // Same period filter as orders (allocated_at) so the cell aligns with the
+    // Same period filter as orders so the cell aligns with the
     // Assigned/Delivered columns: "of the orders this provider got in this
     // period, how much cash has come back through Finance".
+    const remitDateCol = sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt})`;
     const remittanceConditions: SQL[] = [];
-    if (effectiveStart) remittanceConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
-    if (effectiveEnd) remittanceConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
+    if (effectiveStart) remittanceConditions.push(sql`${remitDateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) remittanceConditions.push(sql`${remitDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
     const bCond2 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond2) remittanceConditions.push(bCond2);
 
@@ -2805,12 +2818,13 @@ export class LogisticsService {
     // ── Pass 5: units (bottles) delivered per provider ─────────────────────
     // SUM(order_items.quantity) for DELIVERED + REMITTED orders, same period
     // and branch scope as Pass 2. Gives the CEO a "bottles sold" metric.
+    const unitsDateCol = sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt})`;
     const unitsConditions: SQL[] = [
       isNotNull(schema.orders.logisticsLocationId),
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
-    if (effectiveStart) unitsConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
-    if (effectiveEnd) unitsConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
+    if (effectiveStart) unitsConditions.push(sql`${unitsDateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) unitsConditions.push(sql`${unitsDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
     const bCond3 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond3) unitsConditions.push(bCond3);
 
@@ -2838,6 +2852,7 @@ export class LogisticsService {
       .select({
         providerId: schema.logisticsLocations.providerId,
         availableStock: sql<string>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::text`,
+        reservedStock: sql<string>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)::text`,
       })
       .from(schema.inventoryLevels)
       .innerJoin(
@@ -2846,9 +2861,40 @@ export class LogisticsService {
       )
       .groupBy(schema.logisticsLocations.providerId);
 
-    const stockByProvider = new Map<string, number>();
+    const stockByProvider = new Map<string, { available: number; reserved: number }>();
     for (const row of stockRows) {
-      if (row.providerId) stockByProvider.set(row.providerId, Number(row.availableStock) || 0);
+      if (row.providerId) stockByProvider.set(row.providerId, { available: Number(row.availableStock) || 0, reserved: Number(row.reservedStock) || 0 });
+    }
+
+    // ── Pass 7: stock reconciliation totals per provider ────────────────────
+    // Aggregates received (INTAKE+TRANSFER_IN+RESTOCK), sold (DELIVERY),
+    // transferred out, adjustments, write-offs, and dispatched per provider
+    // so the team table can show a consistency check.
+    const reconRows = await this.db.execute<{
+      providerId: string;
+      received: number;
+      sold: number;
+      transferredOut: number;
+      adjusted: number;
+      writtenOff: number;
+      dispatched: number;
+    }>(sql`
+      SELECT
+        ll.provider_id AS "providerId",
+        COALESCE(SUM(CASE WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "received",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "sold",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
+      FROM stock_movements sm
+      INNER JOIN logistics_locations ll ON ll.id = COALESCE(sm.from_location_id, sm.to_location_id)
+      WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY','TRANSFER_OUT','ADJUSTMENT','WRITE_OFF','DISPATCH')
+      GROUP BY ll.provider_id
+    `);
+    const reconByProvider = new Map<string, { received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
+    for (const r of reconRows) {
+      if (r.providerId) reconByProvider.set(r.providerId, r);
     }
 
     // ── Build rollup ───────────────────────────────────────────────────────
@@ -2935,12 +2981,200 @@ export class LogisticsService {
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
         unitsDelivered: unitsByProvider.get(p.id) ?? 0,
-        availableStock: stockByProvider.get(p.id) ?? 0,
+        availableStock: stockByProvider.get(p.id)?.available ?? 0,
+        reservedStock: stockByProvider.get(p.id)?.reserved ?? 0,
+        stockReceived: reconByProvider.get(p.id)?.received ?? 0,
+        stockSold: reconByProvider.get(p.id)?.sold ?? 0,
+        stockTransferredOut: reconByProvider.get(p.id)?.transferredOut ?? 0,
+        stockAdjusted: reconByProvider.get(p.id)?.adjusted ?? 0,
+        stockWrittenOff: reconByProvider.get(p.id)?.writtenOff ?? 0,
+        stockDispatched: reconByProvider.get(p.id)?.dispatched ?? 0,
       };
     });
 
     // Sort: highest delivery rate first, then largest volume — providers with no
     // orders sink to the bottom (deliveryRate 0, totalAssigned 0).
+    result.sort((a, b) => {
+      if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
+      return b.totalAssigned - a.totalAssigned;
+    });
+
+    return result;
+  }
+
+  /**
+   * Per-location performance rollup — mirrors `getLogisticsProviderPerformance` but
+   * groups by `logistics_locations.id` instead of `logistics_providers.id`. Used by
+   * the "By Location" view toggle on the Logistics Team Analysis page.
+   */
+  async getLogisticsLocationPerformance(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    let effectiveStart: Date | null = null;
+    let effectiveEnd: Date | null = null;
+    if (startDate || endDate) {
+      if (startDate) effectiveStart = new Date(`${startDate}T00:00:00.000Z`);
+      if (endDate) effectiveEnd = new Date(`${endDate}T23:59:59.999Z`);
+    } else {
+      const now = new Date();
+      effectiveStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+      effectiveEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    }
+
+    // All locations with their provider
+    const locations = await this.db
+      .select({
+        id: schema.logisticsLocations.id,
+        name: schema.logisticsLocations.name,
+        providerId: schema.logisticsLocations.providerId,
+        providerName: schema.logisticsProviders.name,
+        status: schema.logisticsLocations.status,
+      })
+      .from(schema.logisticsLocations)
+      .innerJoin(schema.logisticsProviders, eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId));
+
+    if (locations.length === 0) return [];
+
+    // Orders per location
+    const dateCol = sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt})`;
+    const orderConds: SQL[] = [isNotNull(schema.orders.logisticsLocationId)];
+    if (effectiveStart) orderConds.push(sql`${dateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) orderConds.push(sql`${dateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) orderConds.push(bCond);
+
+    const statusRows = await this.db
+      .select({
+        locationId: schema.orders.logisticsLocationId,
+        status: schema.orders.status,
+        cnt: count(),
+      })
+      .from(schema.orders)
+      .where(and(...orderConds))
+      .groupBy(schema.orders.logisticsLocationId, schema.orders.status);
+
+    const statusByLoc = new Map<string, Map<string, number>>();
+    for (const r of statusRows) {
+      if (!r.locationId) continue;
+      let m = statusByLoc.get(r.locationId);
+      if (!m) { m = new Map(); statusByLoc.set(r.locationId, m); }
+      m.set(r.status, Number(r.cnt) || 0);
+    }
+
+    // Stock per location
+    const stockRows = await this.db
+      .select({
+        locationId: schema.inventoryLevels.locationId,
+        available: sql<string>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::text`,
+        reserved: sql<string>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)::text`,
+      })
+      .from(schema.inventoryLevels)
+      .groupBy(schema.inventoryLevels.locationId);
+    const stockByLoc = new Map<string, { available: number; reserved: number }>();
+    for (const r of stockRows) stockByLoc.set(r.locationId, { available: Number(r.available) || 0, reserved: Number(r.reserved) || 0 });
+
+    // Reconciliation per location
+    const reconRows = await this.db.execute<{
+      locationId: string; received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number;
+    }>(sql`
+      SELECT
+        COALESCE(sm.from_location_id, sm.to_location_id) AS "locationId",
+        COALESCE(SUM(CASE WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "received",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "sold",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
+      FROM stock_movements sm
+      WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY','TRANSFER_OUT','ADJUSTMENT','WRITE_OFF','DISPATCH')
+      GROUP BY COALESCE(sm.from_location_id, sm.to_location_id)
+    `);
+    const reconByLoc = new Map<string, { received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
+    for (const r of reconRows) if (r.locationId) reconByLoc.set(r.locationId, r);
+
+    // Units delivered per location
+    const unitsConds: SQL[] = [isNotNull(schema.orders.logisticsLocationId), inArray(schema.orders.status, ['DELIVERED', 'REMITTED'])];
+    if (effectiveStart) unitsConds.push(sql`${dateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) unitsConds.push(sql`${dateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    const bCond2 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond2) unitsConds.push(bCond2);
+
+    const unitsRows = await this.db
+      .select({
+        locationId: schema.orders.logisticsLocationId,
+        totalUnits: sql<string>`COALESCE(SUM(${schema.orderItems.quantity}), 0)::text`,
+      })
+      .from(schema.orders)
+      .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+      .where(and(...unitsConds))
+      .groupBy(schema.orders.logisticsLocationId);
+    const unitsByLoc = new Map<string, number>();
+    for (const r of unitsRows) if (r.locationId) unitsByLoc.set(r.locationId, Number(r.totalUnits) || 0);
+
+    // Remittance per location
+    const remitConds: SQL[] = [];
+    if (effectiveStart) remitConds.push(sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt}) >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) remitConds.push(sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt}) <= ${effectiveEnd.toISOString()}::timestamptz`);
+    const bCond3 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond3) remitConds.push(bCond3);
+
+    const remitRows = await this.db
+      .select({
+        locationId: schema.deliveryRemittances.logisticsLocationId,
+        remitted: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
+        pending: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
+      })
+      .from(schema.deliveryRemittances)
+      .innerJoin(schema.deliveryRemittanceOrders, eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id))
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+      .where(remitConds.length > 0 ? and(...remitConds) : undefined)
+      .groupBy(schema.deliveryRemittances.logisticsLocationId);
+    const remitByLoc = new Map<string, { remitted: string; pending: string }>();
+    for (const r of remitRows) if (r.locationId) remitByLoc.set(r.locationId, { remitted: r.remitted, pending: r.pending });
+
+    // Build
+    const result = locations.map((loc) => {
+      const counts = statusByLoc.get(loc.id) ?? new Map<string, number>();
+      const get = (s: string) => counts.get(s) ?? 0;
+      const delivered = get('DELIVERED') + get('REMITTED');
+      const returned = get('RETURNED');
+      const partiallyDelivered = get('PARTIALLY_DELIVERED');
+      const writtenOff = get('WRITTEN_OFF');
+      const totalAssigned = delivered + returned + partiallyDelivered + writtenOff + get('CANCELLED') + get('IN_TRANSIT') + get('DISPATCHED') + get('AGENT_ASSIGNED') + get('RESTOCKED');
+      const deliveryRate = totalAssigned > 0 ? (delivered / totalAssigned) * 100 : 0;
+      const delinquencyRate = totalAssigned > 0 ? ((returned + partiallyDelivered + writtenOff) / totalAssigned) * 100 : 0;
+      const stock = stockByLoc.get(loc.id);
+      const recon = reconByLoc.get(loc.id);
+      const remit = remitByLoc.get(loc.id);
+      return {
+        locationId: loc.id,
+        locationName: loc.name,
+        providerName: loc.providerName,
+        status: loc.status ?? 'ACTIVE',
+        totalAssigned,
+        delivered,
+        returned,
+        partiallyDelivered,
+        writtenOff,
+        deliveryRate,
+        delinquencyRate,
+        unitsDelivered: unitsByLoc.get(loc.id) ?? 0,
+        availableStock: stock?.available ?? 0,
+        reservedStock: stock?.reserved ?? 0,
+        remittedAmount: remit?.remitted ?? '0',
+        pendingRemittanceAmount: remit?.pending ?? '0',
+        stockReceived: recon?.received ?? 0,
+        stockSold: recon?.sold ?? 0,
+        stockTransferredOut: recon?.transferredOut ?? 0,
+        stockAdjusted: recon?.adjusted ?? 0,
+        stockWrittenOff: recon?.writtenOff ?? 0,
+        stockDispatched: recon?.dispatched ?? 0,
+      };
+    });
+
     result.sort((a, b) => {
       if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
       return b.totalAssigned - a.totalAssigned;

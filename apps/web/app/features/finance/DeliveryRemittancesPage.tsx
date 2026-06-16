@@ -570,7 +570,7 @@ export function DeliveryRemittancesPage({
                       { value: '', label: 'All locations' },
                       ...locations.map((loc) => ({
                         value: loc.id,
-                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                       })),
                     ]}
                   />
@@ -775,7 +775,7 @@ export function DeliveryRemittancesPage({
                         { value: '', label: 'All locations' },
                         ...locations.map((loc) => ({
                           value: loc.id,
-                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                          label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                         })),
                       ]}
                     />
@@ -818,7 +818,7 @@ export function DeliveryRemittancesPage({
                           { value: '', label: 'All locations' },
                           ...locations.map((loc) => ({
                             value: loc.id,
-                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                           })),
                         ]}
                       />
@@ -980,7 +980,7 @@ export function DeliveryRemittancesPage({
                   { value: '', label: 'All locations' },
                   ...locations.map((loc) => ({
                     value: loc.id,
-                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                   })),
                 ]}
               />

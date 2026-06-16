@@ -14,6 +14,7 @@ import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { FinanceService } from '../../finance/finance.service';
 import { getOrdersService, getFollowUpConfigService } from './orders.router';
+import { getCartOrdersService } from './cart-orders.router';
 import { getLogisticsService } from './logistics.router';
 import { getPayrollBatchService } from './hr.router';
 import { getUsersService } from './users.router';
@@ -72,13 +73,18 @@ export const financeRouter = router({
   getInvoiceByOrder: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      // Try main orders first; fall back to follow-up orders for visibility check
+      // Try main orders first; fall back to follow-up orders, then cart orders for visibility check.
       try {
         const order = await getOrdersService().getById(input.orderId);
         getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
       } catch {
-        // Follow-up order — visibility check passes for authed users
-        await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+        try {
+          // Follow-up order — visibility check passes for authed users
+          await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+        } catch {
+          // Cart order — visibility check passes for authed users.
+          // getInvoiceByOrderId will return null if no invoice exists.
+        }
       }
       return getFinanceService().getInvoiceByOrderId(input.orderId);
     }),
@@ -96,33 +102,56 @@ export const financeRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to generate invoices' });
       }
 
-      // Try main orders table first, fall back to follow-up orders
-      let order: {
+      // Try main orders table first, fall back to follow-up orders, then cart orders
+      type InvoiceOrder = {
         id: string;
         confirmedAt: string | Date | null;
         customerName: string;
         customerAddress: string | null;
         orderItems: Array<{ quantity: number; unitPrice: string; productName: string | null; productId: string }>;
       };
+      let order!: InvoiceOrder;
       try {
         const mainOrder = await getOrdersService().getById(input.orderId);
         getOrdersService().assertActorMayViewOrderForRead(ctx.user, mainOrder);
         order = mainOrder;
       } catch {
-        // Not in main orders — try follow-up orders
-        const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
-        order = {
-          id: fuDetail.id,
-          confirmedAt: fuDetail.confirmedAt,
-          customerName: fuDetail.customerName,
-          customerAddress: fuDetail.customerAddress,
-          orderItems: fuDetail.items.map((it: { quantity: number; unitPrice: string; productName?: string | null; productId: string }) => ({
-            quantity: it.quantity,
-            unitPrice: it.unitPrice,
-            productName: it.productName ?? null,
-            productId: it.productId,
-          })),
-        };
+        // Not in main orders — try follow-up, then cart orders
+        let resolved = false;
+        try {
+          const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
+          order = {
+            id: fuDetail.id,
+            confirmedAt: fuDetail.confirmedAt,
+            customerName: fuDetail.customerName,
+            customerAddress: fuDetail.customerAddress,
+            orderItems: fuDetail.items.map((it: { quantity: number; unitPrice: string; productName?: string | null; productId: string }) => ({
+              quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName ?? null, productId: it.productId,
+            })),
+          };
+          resolved = true;
+        } catch { /* not a follow-up order */ }
+
+        if (!resolved) {
+          try {
+            const co = await getCartOrdersService().getById(input.orderId);
+            const coItems = (co as { orderItems?: Array<{ quantity: number; unitPrice: string; productName?: string | null; productId: string }> }).orderItems ?? [];
+            order = {
+              id: co.id,
+              confirmedAt: co.confirmedAt,
+              customerName: co.customerName,
+              customerAddress: co.customerAddress ?? null,
+              orderItems: coItems.map((it) => ({
+                quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName ?? null, productId: it.productId,
+              })),
+            };
+            resolved = true;
+          } catch { /* not a cart order either */ }
+        }
+
+        if (!resolved) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+        }
       }
 
       return getFinanceService().ensureInvoiceForOrder({ order, actorId: ctx.user.id });

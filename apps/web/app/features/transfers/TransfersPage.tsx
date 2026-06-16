@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
+import { DotSeparator } from '~/components/ui/dot-separator';
 import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -337,10 +338,18 @@ export function TransfersPage({
     formDataFetcher.load('/api/transfers-form-data');
   }, [canInitiate, products, levels, formDataFetcher.state, formDataFetcher.data]);
 
-  const getLocationName = (id: string) => {
+  const getLocationName = (id: string): ReactNode => {
     const loc = locations.find((l: Location) => l.id === id);
     if (!loc) return id.slice(0, 8) + '...';
-    return loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name;
+    return loc.providerName
+      ? <>{loc.name}<DotSeparator />{loc.providerName}</>
+      : loc.name;
+  };
+  /** Plain-text variant for non-JSX contexts (cancel/reject confirm copy, filter labels). */
+  const getLocationLabel = (id: string): string => {
+    const loc = locations.find((l: Location) => l.id === id);
+    if (!loc) return id.slice(0, 8) + '...';
+    return loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name;
   };
 
   const activeLocations = locations.filter((l: Location) => l.status === 'ACTIVE');
@@ -536,7 +545,7 @@ export function TransfersPage({
             { value: '', label: 'All locations' },
             ...locations.map((l: Location) => ({
               value: l.id,
-              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
             })),
           ]}
         />
@@ -552,7 +561,7 @@ export function TransfersPage({
             { value: '', label: 'All locations' },
             ...locations.map((l: Location) => ({
               value: l.id,
-              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
             })),
           ]}
         />
@@ -607,7 +616,7 @@ export function TransfersPage({
             { value: '', label: 'From location' },
             ...locations.map((l: Location) => ({
               value: l.id,
-              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
             })),
           ]}
           wrapperClassName="w-full"
@@ -625,7 +634,7 @@ export function TransfersPage({
             { value: '', label: 'To location' },
             ...locations.map((l: Location) => ({
               value: l.id,
-              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
             })),
           ]}
           wrapperClassName="w-full"
@@ -855,7 +864,7 @@ export function TransfersPage({
                             searchPlaceholder="Search locations..."
                             options={activeLocations.map((l: Location) => ({
                               value: l.id,
-                              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+                              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
                               description: `${getLocationTotalStock(l.id)} units in stock`,
                             }))}
                           />
@@ -872,7 +881,7 @@ export function TransfersPage({
                               .filter((l: Location) => l.id !== selectedFromLocation)
                               .map((l: Location) => ({
                                 value: l.id,
-                                label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+                                label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
                                 description: `${getLocationTotalStock(l.id)} units in stock`,
                               }))}
                           />
@@ -1405,8 +1414,8 @@ export function TransfersPage({
         description={
           cancelTarget
             ? cancelTarget.transferStatus === 'PENDING'
-              ? `This transfer is still awaiting approval — cancelling leaves stock at ${getLocationName(cancelTarget.fromLocationId)} unchanged. The row stays for audit but flips to CANCELLED.`
-              : `This will add ${cancelTarget.quantitySent} unit(s) back to ${getLocationName(cancelTarget.fromLocationId)} and remove ${cancelTarget.quantityReceived ?? cancelTarget.quantitySent} unit(s) from ${getLocationName(cancelTarget.toLocationId)}. The transfer row stays for audit but flips to CANCELLED.`
+              ? `This transfer is still awaiting approval — cancelling leaves stock at ${getLocationLabel(cancelTarget.fromLocationId)} unchanged. The row stays for audit but flips to CANCELLED.`
+              : `This will add ${cancelTarget.quantitySent} unit(s) back to ${getLocationLabel(cancelTarget.fromLocationId)} and remove ${cancelTarget.quantityReceived ?? cancelTarget.quantitySent} unit(s) from ${getLocationLabel(cancelTarget.toLocationId)}. The transfer row stays for audit but flips to CANCELLED.`
             : ''
         }
         confirmLabel="Cancel transfer"
@@ -1455,7 +1464,7 @@ export function TransfersPage({
         title="Reject this transfer?"
         description={
           rejectTarget
-            ? `Rejecting will leave stock at ${getLocationName(rejectTarget.fromLocationId)} unchanged. The transfer row stays for audit but flips to REJECTED, and the initiator is notified.`
+            ? `Rejecting will leave stock at ${getLocationLabel(rejectTarget.fromLocationId)} unchanged. The transfer row stays for audit but flips to REJECTED, and the initiator is notified.`
             : ''
         }
         confirmLabel="Reject transfer"

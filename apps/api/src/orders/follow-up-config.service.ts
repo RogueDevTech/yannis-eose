@@ -1381,12 +1381,44 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       };
       const eventType = eventTypeMap[newStatus] ?? 'ORDER_VIEWED';
 
+      // Build a descriptive timeline message
+      let description = note;
+      if (!description) {
+        const logisticsLocationId = metadata?.logisticsLocationId as string | undefined;
+        let locationLabel: string | undefined;
+        if (logisticsLocationId) {
+          const [locRow] = await tx
+            .select({ name: schema.logisticsLocations.name, providerName: schema.logisticsProviders.name })
+            .from(schema.logisticsLocations)
+            .innerJoin(schema.logisticsProviders, eq(schema.logisticsLocations.providerId, schema.logisticsProviders.id))
+            .where(eq(schema.logisticsLocations.id, logisticsLocationId))
+            .limit(1);
+          locationLabel = locRow ? (locRow.providerName ? `${locRow.name} (${locRow.providerName})` : locRow.name) : undefined;
+        }
+        const isReassignment = order.status === 'AGENT_ASSIGNED' && newStatus === 'AGENT_ASSIGNED';
+        switch (newStatus) {
+          case 'CS_ASSIGNED': description = 'Order assigned to closer.'; break;
+          case 'CS_ENGAGED': description = 'CS started customer engagement.'; break;
+          case 'CONFIRMED': description = 'Order confirmed.'; break;
+          case 'AGENT_ASSIGNED':
+            description = isReassignment
+              ? `Reassigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`
+              : `Order assigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`;
+            break;
+          case 'DISPATCHED': description = 'Order dispatched to rider.'; break;
+          case 'IN_TRANSIT': description = 'Order in transit.'; break;
+          case 'DELIVERED': description = 'Order marked delivered.'; break;
+          case 'DELETED': description = 'Order deleted.'; break;
+          default: description = `Status changed to ${newStatus.replace(/_/g, ' ').toLowerCase()}.`;
+        }
+      }
+
       await tx.insert(schema.followUpOrderTimelineEvents).values({
         followUpOrderId: orderId,
         eventType,
         actorId: actor.id,
         actorName: actor.name,
-        description: note ?? `Status changed to ${newStatus}.`,
+        description,
         metadata: metadata ?? { previousStatus: order.status, newStatus },
         branchId: order.servicingBranchId,
       });

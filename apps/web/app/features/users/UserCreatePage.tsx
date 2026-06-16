@@ -885,7 +885,7 @@ export function UserCreatePage({
                   searchPlaceholder="Search locations..."
                   options={locations.map((loc: UserCreateLocation) => ({
                     value: loc.id,
-                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                     description: loc.address,
                   }))}
                 />

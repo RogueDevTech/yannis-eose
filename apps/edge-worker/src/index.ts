@@ -1963,7 +1963,7 @@ function renderStandardField(
     case 'preferredDeliveryDate': {
       const dateOpts = (fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
         ? fc.preferredDeliveryDateOptions
-        : ['Today', 'Tomorrow', 'Within 3 days']
+        : ['Today', 'Tomorrow', 'Specific date (mention in Notes)']
       ).map((o) => ({ value: o, label: o }));
       return `<label for="preferredDeliveryDate">${escapeHtml(field.label)}${requiredField('preferredDeliveryDate') ? ' <span class="required">*</span>' : ''}</label>
       ${renderCustomDropdown('preferredDeliveryDate', 'preferredDeliveryDate', 'Select...', dateOpts, { required: requiredField('preferredDeliveryDate') })}`;
