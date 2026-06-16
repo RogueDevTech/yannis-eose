@@ -150,9 +150,11 @@ export class CartOrdersService {
     startDate?: string,
     endDate?: string,
     effectiveBranchIds?: string[] | null,
+    mediaBuyerId?: string | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.cartOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
+    if (mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
     {
       const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
       if (bCond) conditions.push(bCond);
@@ -183,6 +185,7 @@ export class CartOrdersService {
       if (bCond) deletedConditions.push(bCond);
     }
     if (assignedCsId) deletedConditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
+    if (mediaBuyerId) deletedConditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
     if (startDate) deletedConditions.push(gte(schema.cartOrders.createdAt, new Date(startDate)));
     if (endDate) {
       const endDel = new Date(endDate);
@@ -693,22 +696,26 @@ export class CartOrdersService {
       .where(inArray(schema.products.id, productIds));
     const productMap = new Map(products.map((p) => [p.id, p]));
 
-    // Resolve campaign → branch mapping so each cart order inherits the
-    // campaign's branch when no explicit targetBranchId is provided.
+    // Resolve campaign → branch + mediaBuyer mapping so each cart order
+    // inherits the campaign's branch/MB when the cart abandonment lacks one.
     const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
     const campaignBranchMap = new Map<string, string>();
-    if (!targetBranchId && campaignIds.length > 0) {
+    const campaignMbMap = new Map<string, string>();
+    if (campaignIds.length > 0) {
       const rows = await this.db
-        .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId })
+        .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId, mediaBuyerId: schema.campaigns.mediaBuyerId })
         .from(schema.campaigns)
         .where(inArray(schema.campaigns.id, campaignIds));
       for (const r of rows) {
         if (r.branchId) campaignBranchMap.set(r.id, r.branchId);
+        if (r.mediaBuyerId) campaignMbMap.set(r.id, r.mediaBuyerId);
       }
     }
 
-    // Validate mediaBuyerIds
-    const mbIds = [...new Set(carts.map((c) => c.mediaBuyerId).filter(Boolean))] as string[];
+    // Validate mediaBuyerIds — include campaign-derived MBs as candidates
+    const directMbIds = carts.map((c) => c.mediaBuyerId).filter(Boolean) as string[];
+    const campaignMbIds = [...campaignMbMap.values()];
+    const mbIds = [...new Set([...directMbIds, ...campaignMbIds])];
     const validMbIds = new Set(
       mbIds.length > 0
         ? (await this.db.select({ id: schema.users.id }).from(schema.users).where(inArray(schema.users.id, mbIds))).map((u) => u.id)
@@ -735,7 +742,9 @@ export class CartOrdersService {
           if (match?.price != null) unitPrice = String(match.price);
         }
 
-        const safeMbId = cart.mediaBuyerId && validMbIds.has(cart.mediaBuyerId) ? cart.mediaBuyerId : null;
+        const directMb = cart.mediaBuyerId && validMbIds.has(cart.mediaBuyerId) ? cart.mediaBuyerId : null;
+        const campaignMb = !directMb && cart.campaignId ? campaignMbMap.get(cart.campaignId) ?? null : null;
+        const safeMbId = directMb ?? (campaignMb && validMbIds.has(campaignMb) ? campaignMb : null);
         const resolvedBranchId = targetBranchId ?? (cart.campaignId ? campaignBranchMap.get(cart.campaignId) ?? null : null);
 
         await withActor(this.db, actor, async (tx) => {

@@ -107,12 +107,14 @@ export const cartOrdersRouter = router({
     .input(z.object({ startDate: z.string().optional(), endDate: z.string().optional() }).optional())
     .query(async ({ input, ctx }) => {
       const isCloser = ctx.user.role === 'CS_CLOSER';
+      const isMB = ctx.user.role === 'MEDIA_BUYER';
       return getCartOrdersService().getStatusCounts(
         ctx.currentBranchId,
         isCloser ? ctx.user.id : undefined,
         input?.startDate,
         input?.endDate,
         ctx.effectiveBranchIds,
+        isMB ? ctx.user.id : undefined,
       );
     }),
 });

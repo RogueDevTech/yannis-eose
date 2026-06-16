@@ -30,6 +30,8 @@ import { formatNaira } from '~/lib/format-amount';
 export interface LogisticsTeamPageProps {
   providers: LogisticsProviderRow[];
   locations?: LogisticsLocationRow[];
+  productOptions?: { id: string; name: string }[];
+  productId?: string | null;
   dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
   page?: number;
   totalPages?: number;
@@ -48,13 +50,19 @@ function checkProviderConsistency(p: LogisticsProviderRow) {
   return { expected, diff, isConsistent: diff === 0 };
 }
 
-function generateProviderReport(p: LogisticsProviderRow): string {
+function generateProviderReport(p: LogisticsProviderRow, filters?: { productName?: string; startDate?: string; endDate?: string; periodAllTime?: boolean }): string {
   const c = checkProviderConsistency(p);
   const lines: string[] = [];
   lines.push(`STOCK RECONCILIATION REPORT`);
   lines.push(`==========================`);
   lines.push(`Provider: ${p.providerName}`);
   lines.push(`Locations: ${p.locationCount}`);
+  if (filters?.productName) lines.push(`Product: ${filters.productName}`);
+  if (filters?.periodAllTime) {
+    lines.push(`Period: All time`);
+  } else if (filters?.startDate && filters?.endDate) {
+    lines.push(`Period: ${filters.startDate} to ${filters.endDate}`);
+  }
   lines.push(`Generated: ${new Date().toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short' })}`);
   lines.push('');
   lines.push(`STOCK FLOW`);
@@ -332,6 +340,8 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
 export function LogisticsTeamPage({
   providers,
   locations: locationRows = [],
+  productOptions = [],
+  productId: activeProductId = null,
   dateFilters,
   page = 1,
   totalPages = 1,
@@ -351,7 +361,16 @@ export function LogisticsTeamPage({
   const [peekProvider, setPeekProvider] = useState<LogisticsProviderRow | null>(null);
   const [reportProvider, setReportProvider] = useState<LogisticsProviderRow | null>(null);
   const [reportView, setReportView] = useState<'summary' | 'breakdown'>('summary');
+  const [reportLocation, setReportLocation] = useState<LogisticsLocationRow | null>(null);
+  const [showAggregateReport, setShowAggregateReport] = useState(false);
   const [viewType, setViewType] = useState<'company' | 'location'>('company');
+
+  // Client-side search for locations (providers are filtered server-side)
+  const filteredLocations = useMemo(() => {
+    if (!q.trim()) return locationRows;
+    const lower = q.trim().toLowerCase();
+    return locationRows.filter((l) => l.locationName.toLowerCase().includes(lower) || l.providerName.toLowerCase().includes(lower));
+  }, [locationRows, q]);
 
   useEffect(() => {
     setSearchQuery(q);
@@ -385,10 +404,11 @@ export function LogisticsTeamPage({
 
   const logisticsTeamToolbarFilterBadge = useMemo(() => {
     let n = 0;
-    if (sortByFromLoader !== 'deliveryRate') n += 1;
+    if (sortByFromLoader !== 'assigned') n += 1;
     if (sortDirFromLoader !== 'desc') n += 1;
+    if (activeProductId) n += 1;
     return n;
-  }, [sortByFromLoader, sortDirFromLoader]);
+  }, [sortByFromLoader, sortDirFromLoader, activeProductId]);
 
   const showSearchEmpty = unfilteredCount > 0 && providers.length === 0;
 
@@ -545,7 +565,8 @@ export function LogisticsTeamPage({
       render: (l) => (
         <div className="min-w-0">
           <span className="font-medium text-app-fg truncate">{l.locationName}</span>
-          <span className="text-xs text-app-fg-muted ml-1.5">{l.providerName}</span>
+          <span className="text-app-fg-muted mx-1 text-[0.6em]">·</span>
+          <span className="text-xs text-app-fg-muted">{l.providerName}</span>
         </div>
       ),
     },
@@ -623,7 +644,51 @@ export function LogisticsTeamPage({
         );
       },
     },
-  ], []);
+    {
+      key: 'delinquencyRate',
+      header: 'Delinquency',
+      align: 'right',
+      nowrap: true,
+      render: (l) => {
+        const count = l.returned + l.partiallyDelivered + l.writtenOff;
+        return (
+          <span className="tabular-nums">
+            <span className="text-app-fg">{count.toLocaleString()}</span>
+            <span className="text-app-fg-muted mx-1">·</span>
+            <span className={delinquencyRateColorClass(l.delinquencyRate)}>{l.totalAssigned > 0 ? `${Math.round(l.delinquencyRate)}%` : '—'}</span>
+          </span>
+        );
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      tight: true,
+      nowrap: true,
+      render: (l) => (
+        <div className="flex items-center gap-1.5">
+          <TableActionButton onClick={() => setReportLocation(l)} variant="neutral">
+            Report
+          </TableActionButton>
+          <TableActionButton to={`/admin/logistics/team/${l.locationId}${listQuerySuffix}`} variant="primary">
+            Details
+          </TableActionButton>
+        </div>
+      ),
+    },
+  ], [listQuerySuffix]);
+
+  // Location-view stat strip aggregates
+  const locActiveCount = filteredLocations.filter((l) => l.status === 'ACTIVE').length;
+  const locTotalAvailable = filteredLocations.reduce((a, l) => a + l.availableStock, 0);
+  const locTotalReserved = filteredLocations.reduce((a, l) => a + (l.reservedStock ?? 0), 0);
+  const locTotalAssigned = filteredLocations.reduce((a, l) => a + l.totalAssigned, 0);
+  const locTotalDelivered = filteredLocations.reduce((a, l) => a + l.delivered, 0);
+  const locTotalUnits = filteredLocations.reduce((a, l) => a + l.unitsDelivered, 0);
+  const locDeliveryRate = locTotalAssigned > 0 ? (locTotalDelivered / locTotalAssigned) * 100 : 0;
+  const locInconsistent = filteredLocations.filter((l) => { const e = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched; return l.availableStock !== e; }).length;
+  const locTotalRemitted = filteredLocations.reduce((a, l) => a + (Number(l.remittedAmount) || 0), 0);
+  const locTotalPending = filteredLocations.reduce((a, l) => a + (Number(l.pendingRemittanceAmount) || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -642,7 +707,7 @@ export function LogisticsTeamPage({
                 onChange={(next) =>
                   mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
                 }
-                defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+                defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
                 options={SORT_MENU_OPTIONS}
                 className="w-full justify-center"
               />
@@ -654,7 +719,7 @@ export function LogisticsTeamPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <Button type="button" variant="secondary" size="sm" disabled title="Export coming soon">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowAggregateReport(true)}>
                   Generate report
                 </Button>
               </>
@@ -672,66 +737,25 @@ export function LogisticsTeamPage({
       <OverviewStatStrip
         mobileGrid
         showScrollControls={false}
-        items={[
-          {
-            label: 'Active providers',
-            value: activeCount,
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Total assigned',
-            value: totalAssigned,
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Units delivered',
-            value: totalUnitsDelivered.toLocaleString(),
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Available stock',
-            value: totalAvailableStock.toLocaleString(),
-            valueClassName: totalAvailableStock === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Stock status',
-            value: (
-              <span className="inline-flex flex-col items-center gap-0.5">
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${stockBalanced ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>
-                  {stockBalanced ? '✓ Balanced' : `✗ ${Math.abs(stockDiff).toLocaleString()} units off`}
-                </span>
-                {!stockBalanced && (
-                  <span className="text-[10px] text-app-fg-muted">{inconsistentProviders} provider{inconsistentProviders === 1 ? '' : 's'}</span>
-                )}
-              </span>
-            ),
-            plainValue: true,
-          },
-          {
-            label: 'Delivered',
-            value: totalDelivered.toLocaleString(),
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Delivery rate',
-            value: totalAssigned > 0 ? `${Math.round(overallDeliveryRate)}%` : '0%',
-            valueClassName: deliveryRateColorClass(overallDeliveryRate),
-          },
-          {
-            label: 'Delinquency',
-            value: totalAssigned > 0 ? `${Math.round(overallDelinquencyRate)}%` : '0%',
-            valueClassName: delinquencyRateColorClass(overallDelinquencyRate),
-          },
-          {
-            label: 'Remitted',
-            value: formatNaira(totalRemitted),
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          ...(totalPending > 0 ? [{
-            label: 'Pending',
-            value: formatNaira(totalPending),
-            valueClassName: 'text-warning-600 dark:text-warning-400',
-          }] : []),
+        items={viewType === 'company' ? [
+          { label: 'Active providers', value: activeCount, valueClassName: 'text-app-fg' },
+          { label: 'Total assigned', value: totalAssigned, valueClassName: 'text-app-fg' },
+          { label: 'Available stock', value: totalAvailableStock.toLocaleString(), valueClassName: totalAvailableStock === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400' },
+          { label: 'Stock status', value: (<span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${stockBalanced ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>{stockBalanced ? '✓ Balanced' : `✗ ${inconsistentProviders} off`}</span>), plainValue: true },
+          { label: 'Delivered', value: totalDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
+          { label: 'Delivery rate', value: totalAssigned > 0 ? `${Math.round(overallDeliveryRate)}%` : '0%', valueClassName: deliveryRateColorClass(overallDeliveryRate) },
+          { label: 'Remitted', value: formatNaira(totalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
+          ...(totalPending > 0 ? [{ label: 'Pending', value: formatNaira(totalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
+        ] : [
+          { label: 'Locations', value: filteredLocations.length, valueClassName: 'text-app-fg' },
+          { label: 'Total assigned', value: locTotalAssigned, valueClassName: 'text-app-fg' },
+          { label: 'Available stock', value: locTotalAvailable.toLocaleString(), valueClassName: locTotalAvailable === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400' },
+          ...(locTotalReserved > 0 ? [{ label: 'Reserved', value: locTotalReserved.toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
+          { label: 'Stock status', value: (<span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${locInconsistent === 0 ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>{locInconsistent === 0 ? '✓ Balanced' : `✗ ${locInconsistent} off`}</span>), plainValue: true },
+          { label: 'Delivered', value: locTotalDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
+          { label: 'Delivery rate', value: locTotalAssigned > 0 ? `${Math.round(locDeliveryRate)}%` : '0%', valueClassName: deliveryRateColorClass(locDeliveryRate) },
+          { label: 'Remitted', value: formatNaira(locTotalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
+          ...(locTotalPending > 0 ? [{ label: 'Pending', value: formatNaira(locTotalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
         ]}
       />
 
@@ -742,14 +766,6 @@ export function LogisticsTeamPage({
           badgeCount={logisticsTeamToolbarFilterBadge}
           searchRow={
             <div className="flex min-w-0 gap-2 flex-1 flex-wrap sm:flex-nowrap">
-              <FormSelect
-                value={viewType}
-                onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
-                className="w-auto shrink-0"
-              >
-                <option value="company">By company</option>
-                <option value="location">By location</option>
-              </FormSelect>
               <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 flex-1">
                 <SearchInput
                   value={searchQuery}
@@ -761,30 +777,58 @@ export function LogisticsTeamPage({
                   autoComplete="off"
                 />
               </form>
-            </div>
-          }
-          desktopInlineFilters={
-            <div className="relative">
-              {(sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
-                <FilterDismiss
-                  onClear={() =>
-                    mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })
-                  }
-                />
+              <FormSelect
+                value={viewType}
+                onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
+                className="w-auto shrink-0"
+              >
+                <option value="company">By Logistics company</option>
+                <option value="location">By Logistics location</option>
+              </FormSelect>
+              {productOptions.length > 0 && (
+                <div className="relative shrink-0">
+                  {activeProductId && (
+                    <FilterDismiss onClear={() => {
+                      const params = new URLSearchParams(searchParams);
+                      params.delete('productId');
+                      params.delete('page');
+                      setSearchParams(params);
+                    }} />
+                  )}
+                  <FormSelect
+                    value={activeProductId ?? ''}
+                    onChange={(e) => {
+                      const params = new URLSearchParams(searchParams);
+                      if (e.target.value) { params.set('productId', e.target.value); } else { params.delete('productId'); }
+                      params.delete('page');
+                      setSearchParams(params);
+                    }}
+                    className="w-auto"
+                  >
+                    <option value="">All products</option>
+                    {productOptions.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </FormSelect>
+                </div>
               )}
-              <SortMenu
-                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-                onChange={(next) =>
-                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-                }
-                defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
-                options={SORT_MENU_OPTIONS}
-              />
+              <div className="hidden md:block relative shrink-0">
+                {(sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
+                  <FilterDismiss onClear={() => mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })} />
+                )}
+                <SortMenu
+                  value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                  onChange={(next) => mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })}
+                  defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
+                  options={SORT_MENU_OPTIONS}
+                />
+              </div>
             </div>
           }
+          desktopInlineFilters={null}
           sheetFilterBody={
             <div className="relative">
-              {(sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
+              {(sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
                 <FilterDismiss
                   onClear={() =>
                     mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })
@@ -796,7 +840,7 @@ export function LogisticsTeamPage({
                 onChange={(next) =>
                   mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
                 }
-                defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+                defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
                 options={SORT_MENU_OPTIONS}
                 className="w-full justify-center"
               />
@@ -804,7 +848,7 @@ export function LogisticsTeamPage({
           }
         />
 
-        {totalCount > 0 && (q || sortByFromLoader !== 'deliveryRate' || sortDirFromLoader !== 'desc') && (
+        {totalCount > 0 && (q || sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
           <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">
             {totalCount} provider{totalCount === 1 ? '' : 's'}
             {q ? ` matching "${q}"` : ''}
@@ -859,7 +903,7 @@ export function LogisticsTeamPage({
             ) : (
             <CompactTable
               columns={locationColumns}
-              rows={locationRows}
+              rows={filteredLocations}
               rowKey={(l) => l.locationId}
               className="md:min-w-[900px]"
               renderMobileCard={(l) => (
@@ -969,12 +1013,19 @@ export function LogisticsTeamPage({
         const p = reportProvider;
         const c = checkProviderConsistency(p);
         const dateStr = new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const activeProductName = activeProductId ? productOptions.find((pr) => pr.id === activeProductId)?.name : undefined;
+        const reportFilters = { productName: activeProductName, startDate: dateFilters.startDate || undefined, endDate: dateFilters.endDate || undefined, periodAllTime: dateFilters.periodAllTime };
+        const subtitleParts = [
+          `${p.providerName} — ${p.locationCount} location${p.locationCount === 1 ? '' : 's'}`,
+          ...(activeProductName ? [`Product: ${activeProductName}`] : []),
+          ...(dateFilters.periodAllTime ? ['All time'] : dateFilters.startDate && dateFilters.endDate ? [`${dateFilters.startDate} to ${dateFilters.endDate}`] : []),
+        ];
         return (
-        <Modal open onClose={() => { setReportProvider(null); setReportView('summary'); }} contentClassName="p-0 flex flex-col" maxWidth="max-w-xl">
+        <Modal open onClose={() => { setReportProvider(null); setReportView('summary'); }} contentClassName="p-0 flex flex-col" maxWidth="max-w-md">
           <div className="px-5 py-4 border-b border-app-border flex items-start justify-between gap-3 shrink-0">
             <div>
               <h2 className="text-lg font-semibold text-app-fg">Stock Reconciliation Report</h2>
-              <p className="text-xs text-app-fg-muted mt-0.5">{p.providerName} — {p.locationCount} location{p.locationCount === 1 ? '' : 's'}</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">{subtitleParts.join(' · ')}</p>
             </div>
             <button type="button" onClick={() => { setReportProvider(null); setReportView('summary'); }} className="text-app-fg-muted hover:text-app-fg mt-0.5"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg></button>
           </div>
@@ -983,7 +1034,7 @@ export function LogisticsTeamPage({
           </div>
           <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
             {reportView === 'summary' ? (
-              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{generateProviderReport(p)}</pre>
+              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{generateProviderReport(p, reportFilters)}</pre>
             ) : (
               <div className="space-y-5">
                 <div className="space-y-2">
@@ -1037,6 +1088,192 @@ export function LogisticsTeamPage({
             <Button type="button" variant="primary" onClick={() => { const safeName = p.providerName.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-'); downloadReport(`stock-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, generateProviderReport(p)); }}>Download report</Button>
           </div>
         </Modal>
+        );
+      })()}
+
+      {/* Location Report Modal */}
+      {reportLocation && (() => {
+        const l = reportLocation;
+        const expected = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched;
+        const diff = l.availableStock - expected;
+        const isConsistent = diff === 0;
+        const activeProductName = activeProductId ? productOptions.find((pr) => pr.id === activeProductId)?.name : undefined;
+        const subtitleParts = [
+          `${l.locationName} · ${l.providerName}`,
+          ...(activeProductName ? [`Product: ${activeProductName}`] : []),
+          ...(dateFilters.periodAllTime ? ['All time'] : dateFilters.startDate && dateFilters.endDate ? [`${dateFilters.startDate} to ${dateFilters.endDate}`] : []),
+        ];
+        const buildLocationReport = () => {
+          const lines: string[] = [];
+          lines.push('STOCK RECONCILIATION REPORT');
+          lines.push('==========================');
+          lines.push(`Location: ${l.locationName}`);
+          lines.push(`Provider: ${l.providerName}`);
+          if (activeProductName) lines.push(`Product: ${activeProductName}`);
+          if (dateFilters.periodAllTime) lines.push('Period: All time');
+          else if (dateFilters.startDate && dateFilters.endDate) lines.push(`Period: ${dateFilters.startDate} to ${dateFilters.endDate}`);
+          lines.push(`Generated: ${new Date().toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short' })}`);
+          lines.push('');
+          lines.push('STOCK FLOW');
+          lines.push('----------');
+          lines.push(`Total Received:      ${l.stockReceived.toLocaleString()} units`);
+          lines.push(`Sold (Delivered):    ${l.stockSold.toLocaleString()} units`);
+          lines.push(`Transferred Out:     ${l.stockTransferredOut.toLocaleString()} units`);
+          if (l.stockAdjusted > 0) lines.push(`Manual Adjustments:  −${l.stockAdjusted.toLocaleString()} units`);
+          if (l.stockWrittenOff > 0) lines.push(`Written Off:         ${l.stockWrittenOff.toLocaleString()} units`);
+          if (l.stockDispatched > 0) lines.push(`Dispatched:          ${l.stockDispatched.toLocaleString()} units`);
+          lines.push('');
+          lines.push('BALANCE');
+          lines.push('-------');
+          lines.push(`Expected Available:  ${expected.toLocaleString()} units`);
+          lines.push(`Actual Available:    ${l.availableStock.toLocaleString()} units`);
+          lines.push(`Status:              ${isConsistent ? '✓ CONSISTENT' : `✗ INCONSISTENT (${diff > 0 ? '+' : ''}${diff.toLocaleString()} units)`}`);
+          lines.push('');
+          lines.push('ORDER PERFORMANCE');
+          lines.push('-----------------');
+          lines.push(`Total Assigned:      ${l.totalAssigned.toLocaleString()} orders`);
+          lines.push(`Delivered:           ${l.delivered.toLocaleString()} orders`);
+          lines.push(`Units Delivered:     ${l.unitsDelivered.toLocaleString()} units`);
+          lines.push(`Delivery Rate:       ${l.totalAssigned > 0 ? `${Math.round(l.deliveryRate)}%` : '—'}`);
+          lines.push('');
+          lines.push('REMITTANCE');
+          lines.push('----------');
+          lines.push(`Remitted:            ${formatNaira(l.remittedAmount)}`);
+          lines.push(`Pending:             ${formatNaira(l.pendingRemittanceAmount)}`);
+          lines.push('');
+          lines.push('--- End of Report ---');
+          return lines.join('\n');
+        };
+        return (
+        <Modal open onClose={() => { setReportLocation(null); setReportView('summary'); }} contentClassName="p-0 flex flex-col" maxWidth="max-w-md">
+          <div className="px-5 py-4 border-b border-app-border flex items-start justify-between gap-3 shrink-0">
+            <div>
+              <h2 className="text-lg font-semibold text-app-fg">Stock Reconciliation Report</h2>
+              <p className="text-xs text-app-fg-muted mt-0.5">{subtitleParts.join(' · ')}</p>
+            </div>
+            <button type="button" onClick={() => { setReportLocation(null); setReportView('summary'); }} className="text-app-fg-muted hover:text-app-fg mt-0.5"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg></button>
+          </div>
+          <div className="px-5 pt-3 pb-1 shrink-0">
+            <FilterPills value={reportView} onChange={(v) => setReportView(v as 'summary' | 'breakdown')} options={[{ value: 'summary', label: 'Summary' }, { value: 'breakdown', label: 'Breakdown' }]} />
+          </div>
+          <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
+            {reportView === 'summary' ? (
+              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{buildLocationReport()}</pre>
+            ) : (
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Stock Flow</h3>
+                  <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Total Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.stockReceived.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Sold (Delivered)</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums text-brand-600 dark:text-brand-400">{l.stockSold.toLocaleString()}</td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.stockTransferredOut.toLocaleString()}</td></tr>
+                    {l.stockAdjusted > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Manual Adjustments</td><td className="px-4 py-2.5 text-right font-semibold text-warning-600 dark:text-warning-400 tabular-nums">−{l.stockAdjusted.toLocaleString()}</td></tr>}
+                    {l.stockWrittenOff > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Written Off</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{l.stockWrittenOff.toLocaleString()}</td></tr>}
+                    {l.stockDispatched > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Dispatched</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.stockDispatched.toLocaleString()}</td></tr>}
+                  </tbody></table></div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Balance</h3>
+                  <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Expected Available</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{expected.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Actual Available</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.availableStock.toLocaleString()}</td></tr>
+                    {!isConsistent && <tr className="bg-danger-50 dark:bg-danger-900/10"><td className="px-4 py-2.5 text-danger-700 dark:text-danger-400 font-medium">Discrepancy</td><td className="px-4 py-2.5 text-right font-bold text-danger-700 dark:text-danger-400 tabular-nums">{diff > 0 ? '+' : ''}{diff.toLocaleString()}</td></tr>}
+                  </tbody></table></div>
+                  <div className={`flex items-start gap-2.5 rounded-lg px-4 py-3 text-sm ${isConsistent ? 'bg-success-50 dark:bg-success-900/10 text-success-800 dark:text-success-300' : 'bg-danger-50 dark:bg-danger-900/10 text-danger-800 dark:text-danger-300'}`}>
+                    <span className="text-base mt-0.5">{isConsistent ? '✓' : '✗'}</span>
+                    <p>{isConsistent ? 'All stock is accounted for.' : `${Math.abs(diff).toLocaleString()} ${diff > 0 ? 'more' : 'fewer'} units than expected.`}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Order Performance</h3>
+                  <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Total Assigned</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.totalAssigned.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Delivered</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.delivered.toLocaleString()}</td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Units Delivered</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.unitsDelivered.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Delivery Rate</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums">{l.totalAssigned > 0 ? `${Math.round(l.deliveryRate)}%` : '—'}</td></tr>
+                  </tbody></table></div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Remittance</h3>
+                  <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(l.remittedAmount)}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(l.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(l.pendingRemittanceAmount)}</span></td></tr>
+                  </tbody></table></div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="px-5 py-4 border-t border-app-border flex justify-end gap-2 shrink-0">
+            <Button type="button" variant="secondary" onClick={() => { setReportLocation(null); setReportView('summary'); }}>Close</Button>
+            <Button type="button" variant="primary" onClick={() => { const safeName = l.locationName.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-'); downloadReport(`stock-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, buildLocationReport()); }}>Download report</Button>
+          </div>
+        </Modal>
+        );
+      })()}
+
+      {/* Aggregate Logistics Report Modal */}
+      {showAggregateReport && (() => {
+        const activeProductName = activeProductId ? productOptions.find((pr) => pr.id === activeProductId)?.name : undefined;
+        const reportFilters = { productName: activeProductName, startDate: dateFilters.startDate || undefined, endDate: dateFilters.endDate || undefined, periodAllTime: dateFilters.periodAllTime };
+        const buildReportText = () => {
+          const lines: string[] = [];
+          lines.push('LOGISTICS ANALYSIS REPORT');
+          lines.push('========================');
+          lines.push(`View: ${viewType === 'company' ? 'By Company' : 'By Location'}`);
+          if (reportFilters.productName) lines.push(`Product: ${reportFilters.productName}`);
+          if (reportFilters.periodAllTime) lines.push('Period: All time');
+          else if (reportFilters.startDate && reportFilters.endDate) lines.push(`Period: ${reportFilters.startDate} to ${reportFilters.endDate}`);
+          lines.push(`Generated: ${new Date().toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short' })}`);
+          lines.push('');
+          if (viewType === 'company') {
+            lines.push(`Providers: ${providers.length}`);
+            lines.push('');
+            for (const p of providers) {
+              lines.push(generateProviderReport(p, reportFilters));
+              lines.push('');
+            }
+          } else {
+            lines.push(`Locations: ${filteredLocations.length}`);
+            lines.push('');
+            for (const l of filteredLocations) {
+              const expected = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched;
+              const diff = l.availableStock - expected;
+              lines.push(`${l.locationName} (${l.providerName})`);
+              lines.push(`  Received: ${l.stockReceived.toLocaleString()} | Sold: ${l.stockSold.toLocaleString()} | Transferred: ${l.stockTransferredOut.toLocaleString()}`);
+              lines.push(`  Available: ${l.availableStock.toLocaleString()} | Expected: ${expected.toLocaleString()} | ${diff === 0 ? '✓ Balanced' : `✗ ${diff > 0 ? '+' : ''}${diff.toLocaleString()} off`}`);
+              lines.push(`  Assigned: ${l.totalAssigned} | Delivered: ${l.delivered} | Remitted: ${formatNaira(l.remittedAmount)}`);
+              lines.push('');
+            }
+          }
+          return lines.join('\n');
+        };
+        const subtitleParts = [
+          viewType === 'company' ? `${providers.length} providers` : `${filteredLocations.length} locations`,
+          ...(activeProductName ? [`Product: ${activeProductName}`] : []),
+          ...(dateFilters.periodAllTime ? ['All time'] : dateFilters.startDate && dateFilters.endDate ? [`${dateFilters.startDate} to ${dateFilters.endDate}`] : []),
+        ];
+        return (
+          <Modal open onClose={() => setShowAggregateReport(false)} contentClassName="p-0 flex flex-col" maxWidth="max-w-md">
+            <div className="px-5 py-4 border-b border-app-border flex items-start justify-between gap-3 shrink-0">
+              <div>
+                <h2 className="text-lg font-semibold text-app-fg">Logistics Analysis Report</h2>
+                <p className="text-xs text-app-fg-muted mt-0.5">{subtitleParts.join(' · ')}</p>
+              </div>
+              <button type="button" onClick={() => setShowAggregateReport(false)} className="text-app-fg-muted hover:text-app-fg mt-0.5">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
+              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{buildReportText()}</pre>
+            </div>
+            <div className="px-5 py-4 border-t border-app-border flex justify-end gap-2 shrink-0">
+              <Button type="button" variant="secondary" onClick={() => setShowAggregateReport(false)}>Close</Button>
+              <Button type="button" variant="primary" onClick={() => {
+                const safeName = viewType === 'company' ? 'by-company' : 'by-location';
+                downloadReport(`logistics-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, buildReportText());
+              }}>Download report</Button>
+            </div>
+          </Modal>
         );
       })()}
     </div>

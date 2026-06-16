@@ -62,6 +62,7 @@ export interface DashboardPageProps {
   data: DashboardPageData;
   role: string | null;
   userName: string;
+  userId?: string;
   filters?: DashboardFilters;
   /**
    * True when the viewer is a Media Buyer who has been promoted to supervise

@@ -46,6 +46,7 @@ export function DashboardPage({
   data,
   role,
   userName,
+  userId,
   filters,
   isMarketingTeamSupervisor = false,
   isCsTeamSupervisor = false,
@@ -103,6 +104,7 @@ export function DashboardPage({
           data={data}
           role={role}
           naira={naira}
+          userId={userId}
           isMarketingTeamSupervisor={isMarketingTeamSupervisor}
         />
       )}
@@ -474,24 +476,31 @@ function CSDashboard({
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number }) {
+function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string }) {
+  /** Append `&mediaBuyerId=…` when viewing personal performance so the orders
+   *  page lands on the "My Orders" tab with the correct filter pre-selected. */
+  const q = (base: string) => {
+    if (!mediaBuyerId) return base;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}mediaBuyerId=${mediaBuyerId}`;
+  };
   return (
     <OverviewStatStrip
       mobileGrid
       tileClassName="min-w-[6rem]"
       items={[
-        { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/marketing/orders' },
+        { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: q('/admin/marketing/orders') },
         {
           label: 'Delivered',
           value: metrics.deliveredOrders.toString(),
           valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-          to: '/admin/marketing/orders?status=DELIVERED',
+          to: q('/admin/marketing/orders?status=DELIVERED'),
         },
         {
           label: 'Confirmed',
           value: metrics.confirmedOrders.toString(),
           valueClassName: metrics.confirmedOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-          to: '/admin/marketing/orders?status=CONFIRMED',
+          to: q('/admin/marketing/orders?status=CONFIRMED'),
         },
         { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
         {
@@ -504,20 +513,20 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           label: 'Delivery Rate',
           value: `${metrics.deliveryRate.toFixed(1)}%`,
           valueClassName: deliveryRateColorClass(metrics.deliveryRate),
-          to: '/admin/marketing/orders?status=DELIVERED',
+          to: q('/admin/marketing/orders?status=DELIVERED'),
         },
         {
           label: 'Confirmation Rate',
           value: `${metrics.confirmationRate.toFixed(1)}%`,
           valueClassName: confirmationRateColorClass(metrics.confirmationRate),
-          to: '/admin/marketing/orders?status=CONFIRMED',
+          to: q('/admin/marketing/orders?status=CONFIRMED'),
         },
         {
           label: 'Cart Abandonment',
           value: abandonedCartCount.toString(),
           valueClassName: abandonedCartCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
           title: 'Captured carts not yet recovered (browsing + dropped off)',
-          to: '/admin/marketing/orders?fromCart=1',
+          to: q('/admin/marketing/orders?fromCart=1'),
         },
         { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
       ]}
@@ -544,11 +553,13 @@ function MarketingDashboard({
   data,
   role,
   naira,
+  userId,
   isMarketingTeamSupervisor = false,
 }: {
   data: DashboardPageData;
   role: string;
   naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
+  userId?: string;
   isMarketingTeamSupervisor?: boolean;
 }) {
   const isHeadOfMarketing = role === 'HEAD_OF_MARKETING';
@@ -576,7 +587,7 @@ function MarketingDashboard({
         <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
           {(teamMetrics, personalMetrics, abandonedCartCount) => {
             const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
-            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />;
+            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
           }}
         </DashboardSupervisorMetricsSection>
 

@@ -7,7 +7,7 @@ import {
   Suspense,
   type ReactNode,
 } from 'react';
-import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
+import { Form, Link, useActionData, useFetcher, useNavigate, useNavigation } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
@@ -146,6 +146,7 @@ export function UserDetailPage({
     requiresApproval?: boolean;
   }>();
   const navigation = useNavigation();
+  const navigate = useNavigate();
   // Reset Password runs through its own fetcher so the form submission inside the portaled
   // modal stays isolated from the page-level <Form>s — those compete for navigation state and
   // were the source of the crash when the modal-portal Form's actionData reached an unmounted tree.
@@ -910,30 +911,7 @@ export function UserDetailPage({
 
   return (
     <div className="w-full space-y-6">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        {isSelfView ? (
-          <span className="text-app-fg-muted">My Profile</span>
-        ) : (
-          <Link
-            to={usersBasePath}
-            prefetch="intent"
-            className="text-app-fg-muted hover:text-brand-500 transition-colors"
-          >
-            Users
-          </Link>
-        )}
-        <svg
-          className="w-4 h-4 text-app-border"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-        <span className="text-app-fg font-medium truncate">{user.name}</span>
-      </div>
+{/* Breadcrumb removed — back arrow in profile banner navigates back */}
 
       {/* Action feedback */}
       {actionData?.error &&
@@ -974,15 +952,16 @@ export function UserDetailPage({
         <div className={`relative isolate overflow-hidden ${profileHeaderTone}`}>
           <div className="relative px-4 sm:px-6 pt-5 sm:pt-7 pb-16 sm:pb-20">
             <div className="flex items-start justify-between gap-3">
-              <Link
-                to={usersBasePath}
+              <button
+                type="button"
+                onClick={() => navigate(-1)}
                 className="mt-1 flex-shrink-0 h-9 w-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors"
-                aria-label="Back to staff list"
+                aria-label="Go back"
               >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
                 </svg>
-              </Link>
+              </button>
               <div className="max-w-3xl min-w-0">
                 <p className="text-mini font-semibold uppercase tracking-[0.22em] text-white/75">
                   {profileHeroLabel}

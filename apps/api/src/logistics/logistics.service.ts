@@ -2660,6 +2660,7 @@ export class LogisticsService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    productId?: string,
   ): Promise<
     Array<{
       providerId: string;
@@ -2848,6 +2849,8 @@ export class LogisticsService {
     }
 
     // ── Pass 6: available stock per provider ──────────────────────────────
+    const stockConds: SQL[] = [];
+    if (productId) stockConds.push(eq(schema.inventoryLevels.productId, productId));
     const stockRows = await this.db
       .select({
         providerId: schema.logisticsLocations.providerId,
@@ -2859,6 +2862,7 @@ export class LogisticsService {
         schema.logisticsLocations,
         eq(schema.logisticsLocations.id, schema.inventoryLevels.locationId),
       )
+      .where(stockConds.length > 0 ? and(...stockConds) : undefined)
       .groupBy(schema.logisticsLocations.providerId);
 
     const stockByProvider = new Map<string, { available: number; reserved: number }>();
@@ -2890,6 +2894,7 @@ export class LogisticsService {
       FROM stock_movements sm
       INNER JOIN logistics_locations ll ON ll.id = COALESCE(sm.from_location_id, sm.to_location_id)
       WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY','TRANSFER_OUT','ADJUSTMENT','WRITE_OFF','DISPATCH')
+        ${productId ? sql`AND sm.product_id = ${productId}::uuid` : sql``}
       GROUP BY ll.provider_id
     `);
     const reconByProvider = new Map<string, { received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
@@ -3012,6 +3017,7 @@ export class LogisticsService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    productId?: string,
   ) {
     let effectiveStart: Date | null = null;
     let effectiveEnd: Date | null = null;
@@ -3065,6 +3071,8 @@ export class LogisticsService {
     }
 
     // Stock per location
+    const locStockConds: SQL[] = [];
+    if (productId) locStockConds.push(eq(schema.inventoryLevels.productId, productId));
     const stockRows = await this.db
       .select({
         locationId: schema.inventoryLevels.locationId,
@@ -3072,6 +3080,7 @@ export class LogisticsService {
         reserved: sql<string>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)::text`,
       })
       .from(schema.inventoryLevels)
+      .where(locStockConds.length > 0 ? and(...locStockConds) : undefined)
       .groupBy(schema.inventoryLevels.locationId);
     const stockByLoc = new Map<string, { available: number; reserved: number }>();
     for (const r of stockRows) stockByLoc.set(r.locationId, { available: Number(r.available) || 0, reserved: Number(r.reserved) || 0 });
@@ -3090,6 +3099,7 @@ export class LogisticsService {
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
       FROM stock_movements sm
       WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY','TRANSFER_OUT','ADJUSTMENT','WRITE_OFF','DISPATCH')
+        ${productId ? sql`AND sm.product_id = ${productId}::uuid` : sql``}
       GROUP BY COALESCE(sm.from_location_id, sm.to_location_id)
     `);
     const reconByLoc = new Map<string, { received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
