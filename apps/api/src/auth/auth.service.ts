@@ -840,7 +840,15 @@ export class AuthService {
         .select({ id: schema.branches.id })
         .from(schema.branches)
         .where(eq(schema.branches.groupId, activeGroupId));
-      groupBranchIds = groupBranches.map((b) => b.id);
+      const allGroupIds = groupBranches.map((b) => b.id);
+      // Branch-scoped users only see branches they're assigned to within
+      // the group — prevents a HoM with 2 branches from getting all 4.
+      groupBranchIds = canViewAllBranches(user)
+        ? allGroupIds
+        : user.branchIds?.length
+          ? allGroupIds.filter((id) => user.branchIds!.includes(id))
+          : allGroupIds;
+      if (groupBranchIds.length === 0) groupBranchIds = allGroupIds;
     }
 
     const updated: SessionUser = {
