@@ -118,11 +118,16 @@ export const inventoryRouter = router({
    * Stock movements across all locations belonging to a logistics provider.
    * Powers the provider detail "Stock Activity" tab.
    */
+  providerShipments: authedProcedure
+    .input(z.object({ providerId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getInventoryService().getProviderShipments(input.providerId);
+    }),
+
   providerLocationBreakdown: authedProcedure
     .input(z.object({
       providerId: z.string().uuid(),
-      startDate: z.string().optional(),
-      endDate: z.string().optional(),
+      shipmentId: z.string().uuid().optional(),
     }))
     .query(async ({ input }) => {
       return getInventoryService().getProviderLocationBreakdown(input);
@@ -131,8 +136,7 @@ export const inventoryRouter = router({
   providerProductBreakdown: authedProcedure
     .input(z.object({
       providerId: z.string().uuid(),
-      startDate: z.string().optional(),
-      endDate: z.string().optional(),
+      shipmentId: z.string().uuid().optional(),
     }))
     .query(async ({ input }) => {
       return getInventoryService().getProviderProductBreakdown(input);

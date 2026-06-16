@@ -19,8 +19,6 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
-import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -272,18 +270,26 @@ export interface MovementsData {
   products: { id: string; name: string }[];
 }
 
+interface ShipmentOption {
+  id: string;
+  referenceNumber: number;
+  label: string | null;
+  destinationName: string | null;
+  verifiedAt: string | null;
+}
+
 export interface LogisticsProviderDetailPageProps {
   provider: LogisticsProviderDetailRecord;
   locations: Location[];
   performance: LogisticsProviderRow | null;
-  dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
-  periodAllTime: boolean;
   backHref: string;
   movementsData: MovementsData;
   productFilter: string | null;
   locationFilter: string | null;
+  shipmentFilter: string | null;
   productBreakdown: { productId: string; productName: string; received: number; sold: number; available: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
   locationBreakdown: { locationId: string; locationName: string; available: number; received: number; sold: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
+  shipments: ShipmentOption[];
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -292,19 +298,23 @@ export function LogisticsProviderDetailPage({
   provider,
   locations,
   performance,
-  dateFilters,
-  periodAllTime,
   backHref,
   movementsData,
   productFilter,
   locationFilter,
+  shipmentFilter,
   productBreakdown,
   locationBreakdown,
+  shipments,
 }: LogisticsProviderDetailPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true }).busy;
   const [selectedMovement, setSelectedMovement] = useState<MovementWithProduct | null>(null);
   const [direction, setDirection] = useState<DirectionFilter>('all');
+
+  // Aggregate stock totals from location breakdown for Performance strip
+  const totalReceived = locationBreakdown.reduce((acc, l) => acc + l.received, 0);
+  const totalAvailable = locationBreakdown.reduce((acc, l) => acc + l.available, 0);
 
   const handleProductFilter = useCallback(
     (productId: string) => {
@@ -334,12 +344,23 @@ export function LogisticsProviderDetailPage({
     [searchParams, setSearchParams],
   );
 
+  const handleShipmentFilter = useCallback(
+    (shipmentId: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (shipmentId) {
+        next.set('shipmentId', shipmentId);
+      } else {
+        next.delete('shipmentId');
+      }
+      setSearchParams(next);
+    },
+    [searchParams, setSearchParams],
+  );
+
   const filteredMovements = useMemo(() => {
     if (direction === 'all') return movementsData.movements;
     return movementsData.movements.filter((m) => classifyMovement(m) === direction);
   }, [movementsData.movements, direction]);
-
-  const isAllTime = periodAllTime || dateFilters.periodAllTime;
 
   const rateCardJson =
     provider.rateCard != null && typeof provider.rateCard === 'object'
@@ -381,21 +402,42 @@ export function LogisticsProviderDetailPage({
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={periodAllTime} chrome="pill" />
+                {shipments.length > 0 && (
+                  <FormSelect
+                    value={shipmentFilter ?? ''}
+                    onChange={(e) => handleShipmentFilter(e.target.value)}
+                    className="w-56"
+                  >
+                    <option value="">All shipments</option>
+                    {shipments.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}{s.destinationName ? ` → ${s.destinationName}` : ''}
+                      </option>
+                    ))}
+                  </FormSelect>
+                )}
               </div>
             }
           />
         }
       />
 
-      <MobileDateFilterRow
-        startDate={dateFilters.startDate}
-        endDate={dateFilters.endDate}
-        periodAllTime={periodAllTime}
-      />
+      {shipments.length > 0 && (
+        <div className="md:hidden">
+          <FormSelect
+            value={shipmentFilter ?? ''}
+            onChange={(e) => handleShipmentFilter(e.target.value)}
+            className="w-full"
+          >
+            <option value="">All shipments</option>
+            {shipments.map((s) => (
+              <option key={s.id} value={s.id}>
+                SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
+              </option>
+            ))}
+          </FormSelect>
+        </div>
+      )}
 
       {performance ? (
         <div>
@@ -405,6 +447,16 @@ export function LogisticsProviderDetailPage({
             wrap
             tileClassName="!py-3.5 !px-4 min-w-[9rem]"
             items={[
+              {
+                label: 'Received',
+                value: (<span className="font-semibold text-app-fg tabular-nums">{totalReceived.toLocaleString()}</span>),
+                plainValue: true,
+              },
+              {
+                label: 'Available',
+                value: (<span className={`font-semibold tabular-nums ${totalAvailable === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{totalAvailable.toLocaleString()}</span>),
+                plainValue: true,
+              },
               {
                 label: 'Assigned',
                 value: (<span className="font-semibold text-app-fg tabular-nums">{performance.totalAssigned.toLocaleString()}</span>),
@@ -419,6 +471,18 @@ export function LogisticsProviderDetailPage({
                 label: 'Units delivered',
                 value: (<span className="font-semibold text-app-fg tabular-nums">{performance.unitsDelivered.toLocaleString()}</span>),
                 plainValue: true,
+              },
+              {
+                label: 'Received',
+                value: (<span className="font-semibold text-app-fg tabular-nums">{totalReceived.toLocaleString()}</span>),
+                plainValue: true,
+                title: 'Total units ever received at this provider (all-time)',
+              },
+              {
+                label: 'Available stock',
+                value: (<span className={`font-semibold tabular-nums ${totalAvailable === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{totalAvailable.toLocaleString()}</span>),
+                plainValue: true,
+                title: 'Current available stock across all locations',
               },
               {
                 label: 'Returned',
@@ -480,7 +544,7 @@ export function LogisticsProviderDetailPage({
               plainValue: true,
             })),
             {
-              label: isAllTime ? 'Sold (all time)' : 'Sold (period)',
+              label: 'Sold',
               value: (
                 <span className="font-semibold text-brand-600 dark:text-brand-400 tabular-nums">{movementsData.deliveredQty.toLocaleString()}</span>
               ),

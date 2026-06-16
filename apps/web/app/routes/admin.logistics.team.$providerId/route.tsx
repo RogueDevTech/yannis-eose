@@ -9,7 +9,6 @@ import {
   requirePermissionOrRoles,
   redirectIfUnauthorized,
 } from '~/lib/api.server';
-import { resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 import { LogisticsProviderDetailPage } from '~/features/logistics/LogisticsProviderDetailPage';
 import { LogisticsProviderDetailLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { LogisticsProviderDetailRecord, LogisticsProviderRow } from '~/features/logistics/team-types';
@@ -120,48 +119,40 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const backHref = buildTeamListHref(url);
-  const { startDate, endDate, filters } = resolveMarketingDateFilters(url);
 
-  const logisticsProviderShell = { dateFilters: filters, backHref };
+  const logisticsProviderShell = { backHref };
 
   const pageData = (async () => {
-    const teamInput = {
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-    };
-
     const movementsPage = Math.max(1, Number(url.searchParams.get('movementsPage') ?? '1') || 1);
     const productFilter = url.searchParams.get('productId') ?? undefined;
     const locationFilter = url.searchParams.get('locationId') ?? undefined;
+    const shipmentFilter = url.searchParams.get('shipmentId') ?? undefined;
 
     const providerInput = encodeURIComponent(JSON.stringify({ providerId }));
     const locationsInput = encodeURIComponent(
       JSON.stringify({ providerId, page: 1, limit: 100 }),
     );
-    const teamInputEnc = encodeURIComponent(JSON.stringify(teamInput));
+    const teamInputEnc = encodeURIComponent(JSON.stringify({}));
     const movementsInput = encodeURIComponent(
       JSON.stringify({
         providerId,
         page: movementsPage,
         limit: 40,
-        ...(startDate ? { startDate } : {}),
-        ...(endDate ? { endDate } : {}),
         ...(productFilter ? { productId: productFilter } : {}),
         ...(locationFilter ? { locationId: locationFilter } : {}),
       }),
     );
 
-    const productBreakdownInput = encodeURIComponent(
+    const breakdownInput = encodeURIComponent(
       JSON.stringify({
         providerId,
-        ...(startDate ? { startDate } : {}),
-        ...(endDate ? { endDate } : {}),
+        ...(shipmentFilter ? { shipmentId: shipmentFilter } : {}),
       }),
     );
 
-    const locationBreakdownInput = productBreakdownInput; // same params
+    const shipmentsInput = encodeURIComponent(JSON.stringify({ providerId }));
 
-    const [providerRes, locationsRes, teamRes, movementsRes, productBreakdownRes, locationBreakdownRes] = await Promise.all([
+    const [providerRes, locationsRes, teamRes, movementsRes, productBreakdownRes, locationBreakdownRes, shipmentsRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/logistics.getProvider?input=${providerInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(
@@ -173,11 +164,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>(
-        `/trpc/inventory.providerProductBreakdown?input=${productBreakdownInput}`,
+        `/trpc/inventory.providerProductBreakdown?input=${breakdownInput}`,
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>(
-        `/trpc/inventory.providerLocationBreakdown?input=${locationBreakdownInput}`,
+        `/trpc/inventory.providerLocationBreakdown?input=${breakdownInput}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/inventory.providerShipments?input=${shipmentsInput}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -209,18 +204,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       : null;
     const locationBreakdown = Array.isArray(lbRaw) ? lbRaw : [];
 
+    // Parse shipments for dropdown
+    type ShipmentOption = { id: string; referenceNumber: number; label: string | null; destinationName: string | null; verifiedAt: string | null };
+    const shRaw = shipmentsRes.ok
+      ? ((shipmentsRes.data as Record<string, unknown>)?.result as { data?: ShipmentOption[] })?.data
+      : null;
+    const shipments = Array.isArray(shRaw) ? shRaw : [];
+
     return {
       provider,
       locations,
       performance: overviewRow,
-      dateFilters: filters,
-      periodAllTime: url.searchParams.get('period') === 'all_time',
       backHref,
       movementsData,
       productFilter: productFilter ?? null,
       locationFilter: locationFilter ?? null,
+      shipmentFilter: shipmentFilter ?? null,
       productBreakdown,
       locationBreakdown,
+      shipments,
     };
   })();
 
@@ -246,14 +248,14 @@ export default function LogisticsProviderDetailRoute() {
             provider={data.provider}
             locations={data.locations}
             performance={data.performance}
-            dateFilters={data.dateFilters}
-            periodAllTime={data.periodAllTime}
             backHref={data.backHref}
             movementsData={data.movementsData}
             productFilter={data.productFilter}
             locationFilter={data.locationFilter}
+            shipmentFilter={data.shipmentFilter}
             productBreakdown={data.productBreakdown}
             locationBreakdown={data.locationBreakdown}
+            shipments={data.shipments}
           />
         )}
       </CachedAwait>

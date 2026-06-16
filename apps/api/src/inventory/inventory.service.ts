@@ -1999,17 +1999,52 @@ export class InventoryService {
   }
 
   /**
+   * List shipments that were received at this provider's locations.
+   * Powers the shipment filter dropdown on the provider detail page.
+   */
+  async getProviderShipments(providerId: string) {
+    const locRows = await this.db
+      .select({ id: schema.logisticsLocations.id })
+      .from(schema.logisticsLocations)
+      .where(eq(schema.logisticsLocations.providerId, providerId));
+
+    if (locRows.length === 0) return [];
+
+    const rows = await this.db
+      .select({
+        id: schema.shipments.id,
+        referenceNumber: schema.shipments.referenceNumber,
+        label: schema.shipments.label,
+        destinationName: schema.logisticsLocations.name,
+        verifiedAt: schema.shipments.verifiedAt,
+      })
+      .from(schema.shipments)
+      .innerJoin(schema.logisticsLocations, eq(schema.logisticsLocations.id, schema.shipments.destinationLocationId))
+      .where(
+        and(
+          inArray(schema.shipments.destinationLocationId, locRows.map((r) => r.id)),
+          eq(schema.shipments.status, 'VERIFIED'),
+        ),
+      )
+      .orderBy(desc(schema.shipments.verifiedAt));
+
+    return rows.map((r) => ({
+      id: r.id,
+      referenceNumber: r.referenceNumber,
+      label: r.label,
+      destinationName: r.destinationName,
+      verifiedAt: r.verifiedAt?.toISOString() ?? null,
+    }));
+  }
+
+  /**
    * Per-location breakdown for a logistics provider.
    * Returns stock available, received, sold, and remittance data per location.
    */
   async getProviderLocationBreakdown(opts: {
     providerId: string;
-    startDate?: string;
-    endDate?: string;
+    shipmentId?: string;
   }) {
-    const startDate = opts.startDate?.trim() || null;
-    const endDate = opts.endDate?.trim() || null;
-
     const locRows = await this.db
       .select({
         id: schema.logisticsLocations.id,
@@ -2053,7 +2088,7 @@ export class InventoryService {
     const recvMap = new Map<string, number>();
     for (const r of recvRows) recvMap.set(r.locationId, r.received);
 
-    // Sold per location (date-filtered)
+    // Sold per location (all-time)
     const soldRows = await this.db.execute<{
       locationId: string;
       sold: number;
@@ -2068,8 +2103,6 @@ export class InventoryService {
           sm.from_location_id IN (${locIdList})
           OR o.logistics_location_id IN (${locIdList})
         )
-        AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
-        AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
       GROUP BY COALESCE(sm.from_location_id, o.logistics_location_id)
     `);
     const soldMap = new Map<string, number>();
@@ -2095,8 +2128,6 @@ export class InventoryService {
       LEFT JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
       WHERE o.logistics_location_id IN (${sql.join(locRows.map((l) => sql`${l.id}::uuid`), sql`,`)})
         AND o.status IN ('DELIVERED', 'REMITTED')
-        AND (${startDate}::date IS NULL OR o.allocated_at >= ${startDate}::date)
-        AND (${endDate}::date IS NULL OR o.allocated_at < (${endDate}::date + INTERVAL '1 day'))
       GROUP BY o.logistics_location_id
     `);
     const remitMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }>();
@@ -2124,11 +2155,9 @@ export class InventoryService {
    */
   async getProviderProductBreakdown(opts: {
     providerId: string;
-    startDate?: string;
-    endDate?: string;
+    shipmentId?: string;
   }) {
-    const startDate = opts.startDate?.trim() || null;
-    const endDate = opts.endDate?.trim() || null;
+    const shipmentId = opts.shipmentId?.trim() || null;
 
     // Resolve location IDs for this provider
     const locRows = await this.db
@@ -2157,7 +2186,11 @@ export class InventoryService {
       GROUP BY il.product_id, p.name
     `);
 
-    // Received (all-time — total stock ever sent to this provider, not date-filtered)
+    // Received — optionally scoped to a specific shipment's batches
+    const shipmentReceivedClause = shipmentId
+      ? sql`AND sm.reference_id IN (SELECT sb.id FROM stock_batches sb WHERE sb.shipment_id = ${shipmentId}::uuid)`
+      : sql``;
+
     const receivedRows = await this.db.execute<{
       productId: string;
       received: number;
@@ -2168,12 +2201,13 @@ export class InventoryService {
       FROM stock_movements sm
       WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK')
         AND sm.to_location_id IN (${locationList})
+        ${shipmentReceivedClause}
       GROUP BY sm.product_id
     `);
     const receivedMap = new Map<string, number>();
     for (const r of receivedRows) receivedMap.set(r.productId, r.received);
 
-    // Sold (date-filtered — DELIVERY movements in the period)
+    // Sold (all-time)
     const soldRows = await this.db.execute<{
       productId: string;
       sold: number;
@@ -2189,14 +2223,12 @@ export class InventoryService {
           OR sm.to_location_id IN (${locationList})
           OR o.logistics_location_id IN (${locationList})
         )
-        AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
-        AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
       GROUP BY sm.product_id
     `);
     const soldMap = new Map<string, number>();
     for (const r of soldRows) soldMap.set(r.productId, r.sold);
 
-    // Per-product remittance: qty remitted for, qty pending, amounts
+    // Per-product remittance (all-time)
     const revenueRows = await this.db.execute<{
       productId: string;
       qtyRemitted: number;
@@ -2216,8 +2248,6 @@ export class InventoryService {
       LEFT JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
       WHERE o.logistics_location_id IN (${locationList})
         AND o.status IN ('DELIVERED', 'REMITTED')
-        AND (${startDate}::date IS NULL OR o.allocated_at >= ${startDate}::date)
-        AND (${endDate}::date IS NULL OR o.allocated_at < (${endDate}::date + INTERVAL '1 day'))
       GROUP BY oi.product_id
     `);
 
