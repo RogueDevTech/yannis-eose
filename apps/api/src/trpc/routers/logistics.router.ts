@@ -347,6 +347,7 @@ export const logisticsRouter = router({
       z.object({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
+        productId: z.string().uuid().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -355,6 +356,7 @@ export const logisticsRouter = router({
         input.endDate,
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
+        input.productId,
       );
     }),
 
@@ -365,6 +367,7 @@ export const logisticsRouter = router({
       z.object({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
+        productId: z.string().uuid().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -373,6 +376,7 @@ export const logisticsRouter = router({
         input.endDate,
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
+        input.productId,
       );
     }),
 });

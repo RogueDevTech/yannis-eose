@@ -909,7 +909,7 @@ export function LogisticsProviderDetailPage({
         const c = checkConsistency(r);
         const dateStr = new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         return (
-        <Modal open onClose={() => { setReportModal(null); setReportView('summary'); }} contentClassName="p-0 flex flex-col" maxWidth="max-w-xl">
+        <Modal open onClose={() => { setReportModal(null); setReportView('summary'); }} contentClassName="p-0 flex flex-col" maxWidth="max-w-md">
           <div className="px-5 py-4 border-b border-app-border flex items-start justify-between gap-3 shrink-0">
             <div>
               <h2 className="text-lg font-semibold text-app-fg">Stock Reconciliation Report</h2>

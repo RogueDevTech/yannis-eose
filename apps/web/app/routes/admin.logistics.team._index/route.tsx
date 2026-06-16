@@ -49,17 +49,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { startDate, endDate, periodAllTime, filters } = resolveMarketingDateFilters(url);
   // URL-driven rows-per-page — the provider list is sliced client-side, so
   // `perPage` is both the slice size and the totalPages divisor.
-  const { perPage } = parsePerPage(url.searchParams);
+  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
 
+  const productId = url.searchParams.get('productId') || undefined;
   const logisticsTeamShell = { dateFilters: filters };
 
   const pageData = (async () => {
-    const teamInput = periodAllTime
-      ? { startDate: '2020-01-01', endDate: '2099-12-31' }
-      : {
-          ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate } : {}),
-        };
+    const teamInput = {
+      ...(periodAllTime
+        ? { startDate: '2020-01-01', endDate: '2099-12-31' }
+        : {
+            ...(startDate ? { startDate } : {}),
+            ...(endDate ? { endDate } : {}),
+          }),
+      ...(productId ? { productId } : {}),
+    };
 
     const [teamRes, locRes, productsRes] = await Promise.all([
       apiRequest<unknown>(
@@ -70,10 +74,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
         `/trpc/logistics.locationOverview?input=${encodeURIComponent(JSON.stringify(teamInput))}`,
         { method: 'GET', cookie },
       ),
+      apiRequest<unknown>(
+        `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`,
+        { method: 'GET', cookie },
+      ),
     ]);
     redirectIfUnauthorized(teamRes, url.pathname);
     const allProviders = parseProvidersList(teamRes);
     const allLocations = parseLocationsList(locRes);
+    const productOptions: { id: string; name: string }[] = (() => {
+      if (!productsRes.ok) return [];
+      const raw = productsRes.data as Record<string, unknown> | undefined;
+      const result = (raw?.result as { data?: { products?: Array<{ id: string; name: string }> } })?.data?.products;
+      return Array.isArray(result) ? result.map((p) => ({ id: p.id, name: p.name })) : [];
+    })();
 
     const SORT_BY_VALUES = new Set([
       'name',
@@ -144,6 +158,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return {
       providers: pagedProviders,
       locations: allLocations,
+      productOptions,
+      productId: productId ?? null,
       dateFilters: filters,
       periodAllTime,
       page,
@@ -174,6 +190,8 @@ export default function LogisticsTeamIndexRoute() {
           <LogisticsTeamPage
             providers={data.providers}
             locations={data.locations}
+            productOptions={data.productOptions}
+            productId={data.productId}
             dateFilters={data.dateFilters}
             page={data.page}
             totalPages={data.totalPages}

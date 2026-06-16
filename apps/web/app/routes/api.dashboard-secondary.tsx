@@ -123,7 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : Promise.resolve({ ok: false, data: {} });
     const cartAbandonedInput = JSON.stringify({ startDate, endDate });
     const cartAbandonedP = needsCartAbandoned
-      ? apiRequest<unknown>(`/trpc/cartOrders.getStatusCounts?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
+      ? apiRequest<unknown>(`/trpc/cartOrders.dashboardCounts?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
     const followUpInput = JSON.stringify({ startDate, endDate });
     const followUpP = needsFollowUp

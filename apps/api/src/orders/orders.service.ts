@@ -1454,44 +1454,42 @@ export class OrdersService {
 
     // Notify Head of CS + Head of Marketing only on new order (not every Sales closer — they get
     // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
+    const orderLabel = `YNS-${String(order.orderNumber).padStart(5, '0')}`;
+    const customerLabel = (order.customerName ?? '').trim() || 'A customer';
+    const campaignName = order.campaignId
+      ? (
+          await this.db
+            .select({ name: schema.campaigns.name })
+            .from(schema.campaigns)
+            .where(eq(schema.campaigns.id, order.campaignId))
+            .limit(1)
+        )[0]?.name ?? null
+      : null;
+
     this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
       type: 'order:new',
-      title: 'New order received',
-      body: 'A new order needs attention.',
-      data: { orderId: order.id },
+      title: `New order ${orderLabel}`,
+      body: `${customerLabel} placed an order${campaignName ? ` via ${campaignName}` : ''}.`,
+      data: { orderId: order.id, orderNumber: order.orderNumber, customerName: customerLabel },
     });
     this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
       type: 'order:new',
-      title: 'New order received',
-      body: 'A new order has been created.',
-      data: { orderId: order.id },
+      title: `New order ${orderLabel}`,
+      body: `${customerLabel} placed an order${campaignName ? ` via ${campaignName}` : ''}.`,
+      data: { orderId: order.id, orderNumber: order.orderNumber, customerName: customerLabel },
     });
 
-    // Notify Media Buyer if order is from their campaign. Body is
-    // personalized with the customer name + campaign name so the MB can
-    // distinguish multiple notifications stacking up in their bell. Customer
-    // name is non-PII (Pillar 2 only protects the phone). Falls back to the
-    // generic body if either lookup fails.
+    // Notify Media Buyer if order is from their campaign.
     if (order.mediaBuyerId) {
-      const campaignName = order.campaignId
-        ? (
-            await this.db
-              .select({ name: schema.campaigns.name })
-              .from(schema.campaigns)
-              .where(eq(schema.campaigns.id, order.campaignId))
-              .limit(1)
-          )[0]?.name ?? null
-        : null;
-      const customerLabel = (order.customerName ?? '').trim() || 'A customer';
       const body = campaignName
         ? `${customerLabel} just placed an order via ${campaignName}.`
         : `${customerLabel} just placed an order from your campaign.`;
       this.notifications.enqueueCreate({
         userId: order.mediaBuyerId,
         type: 'order:new_campaign',
-        title: 'New order from your campaign',
+        title: `New order ${orderLabel}`,
         body,
-        data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName, customerName: customerLabel },
+        data: { orderId: order.id, orderNumber: order.orderNumber, campaignId: order.campaignId ?? null, campaignName, customerName: customerLabel },
       });
     }
 
@@ -4573,38 +4571,40 @@ export class OrdersService {
         servicingBranchId: paystackServicingBranchId ?? null,
         mediaBuyerId: order.mediaBuyerId ?? null,
       });
+      const orderLabelPay = `YNS-${String(order.orderNumber).padStart(5, '0')}`;
+      const customerLabelPay = (order.customerName ?? '').trim() || 'A customer';
+      const campaignNamePay = order.campaignId
+        ? (
+            await this.db
+              .select({ name: schema.campaigns.name })
+              .from(schema.campaigns)
+              .where(eq(schema.campaigns.id, order.campaignId))
+              .limit(1)
+          )[0]?.name ?? null
+        : null;
+
       this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
         type: 'order:new',
-        title: 'New order received',
-        body: 'A new order needs attention.',
-        data: { orderId: order.id },
+        title: `New order ${orderLabelPay}`,
+        body: `${customerLabelPay} placed an order${campaignNamePay ? ` via ${campaignNamePay}` : ''}.`,
+        data: { orderId: order.id, orderNumber: order.orderNumber, customerName: customerLabelPay },
       });
       this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
         type: 'order:new',
-        title: 'New order received',
-        body: 'A new order has been created.',
-        data: { orderId: order.id },
+        title: `New order ${orderLabelPay}`,
+        body: `${customerLabelPay} placed an order${campaignNamePay ? ` via ${campaignNamePay}` : ''}.`,
+        data: { orderId: order.id, orderNumber: order.orderNumber, customerName: customerLabelPay },
       });
       if (order.mediaBuyerId) {
-        const campaignNamePay = order.campaignId
-          ? (
-              await this.db
-                .select({ name: schema.campaigns.name })
-                .from(schema.campaigns)
-                .where(eq(schema.campaigns.id, order.campaignId))
-                .limit(1)
-            )[0]?.name ?? null
-          : null;
-        const customerLabelPay = (order.customerName ?? '').trim() || 'A customer';
         const bodyPay = campaignNamePay
           ? `${customerLabelPay} just placed an order via ${campaignNamePay}.`
           : `${customerLabelPay} just placed an order from your campaign.`;
         this.notifications.enqueueCreate({
           userId: order.mediaBuyerId,
           type: 'order:new_campaign',
-          title: 'New order from your campaign',
+          title: `New order ${orderLabelPay}`,
           body: bodyPay,
-          data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName: campaignNamePay, customerName: customerLabelPay },
+          data: { orderId: order.id, orderNumber: order.orderNumber, campaignId: order.campaignId ?? null, campaignName: campaignNamePay, customerName: customerLabelPay },
         });
       }
       const mediaBuyerNamePay = order.mediaBuyerId
