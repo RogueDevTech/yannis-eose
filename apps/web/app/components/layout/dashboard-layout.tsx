@@ -584,8 +584,7 @@ function getNavGroupsForUser(
         // outside their supervised MBs even if the link is exposed.
         if (
           MARKETING_SUPERVISOR_NAV_HREFS.has(item.href) &&
-          user?.isMarketingTeamSupervisorOnActiveBranch === true &&
-          user.currentBranchId
+          user?.isMarketingTeamSupervisorOnActiveBranch === true
         )
           return true;
         return false;

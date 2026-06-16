@@ -1603,7 +1603,7 @@ function RecipientBalancesPanel({
       </div>
       {/* Desktop */}
       <div className="hidden md:block">
-        <CompactTable data={filtered} columns={columns} emptyMessage="No recipient balances found." />
+        <CompactTable rows={filtered} columns={columns} rowKey={(b) => b.userId} emptyTitle="No recipient balances found." />
       </div>
       {/* Mobile */}
       <div className="md:hidden">

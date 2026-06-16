@@ -71,9 +71,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? 'distributing'
     : sectionParam === 'received'
       ? 'received'
-      : canDistribute
-        ? 'distributing'
-        : 'received';
+      : sectionParam === 'balances' && canDistribute
+        ? 'balances'
+        : canDistribute
+          ? 'distributing'
+          : 'received';
 
   const tabParam = url.searchParams.get('tab');
   const activeTab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
@@ -110,7 +112,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // fetch logic (per section, entry type, status) server-side via Promise.all.
   const bundleInput = encodeURIComponent(
     JSON.stringify({
-      section: activeSection,
+      section: activeSection === 'balances' ? 'distributing' : activeSection,
       entryType: entryTypeFilter,
       page,
       limit: PER_PAGE,

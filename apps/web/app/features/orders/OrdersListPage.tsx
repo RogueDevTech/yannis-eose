@@ -1015,7 +1015,7 @@ function OrdersListPageImpl({
   const assignCloserOptions = (csClosersForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName }));
   const allocateLocationOptions = logisticsLocationsForBulk.map((loc) => ({
     value: loc.id,
-    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
   }));
 
   /** Derive branch from selected orders — avoids the branch-picker modal for

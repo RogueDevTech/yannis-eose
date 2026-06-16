@@ -461,7 +461,7 @@ export function RemitPage({
             searchPlaceholder="Search locations..."
             options={toLocationOptions.map((l) => ({
               value: l.id,
-              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
             }))}
           />
           <TextInput

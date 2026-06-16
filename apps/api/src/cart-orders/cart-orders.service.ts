@@ -9,6 +9,23 @@ import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
+/** Valid values for the order_timeline_events.event_type enum.
+ *  Cart order timeline uses plain text — filter before copying to orders. */
+const VALID_TIMELINE_EVENT_TYPES = new Set([
+  'ORDER_RECEIVED', 'ORDER_AUTO_ASSIGNED', 'ORDER_MANUALLY_ASSIGNED',
+  'ORDER_REASSIGNED', 'ORDER_CLAIMED', 'ORDER_VIEWED',
+  'CALL_INITIATED', 'CALL_COMPLETED', 'CALL_NO_ANSWER', 'CALL_FAILED',
+  'MANUAL_CALL_LOGGED', 'SMS_SENT', 'WHATSAPP_SENT',
+  'ORDER_CONFIRMED', 'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED',
+  'CALLBACK_SCHEDULED', 'ORDER_ALLOCATED', 'ORDER_DISPATCHED',
+  'ORDER_IN_TRANSIT', 'ORDER_DELIVERED', 'ORDER_PARTIALLY_DELIVERED',
+  'ORDER_RETURNED', 'ORDER_RESTOCKED', 'ORDER_WRITTEN_OFF',
+  'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED', 'ORDER_DELETED',
+  'LINE_PRICE_CHANGE_REQUESTED', 'LINE_PRICE_CHANGE_APPROVED', 'LINE_PRICE_CHANGE_REJECTED',
+  'CS_ORDER_COMMENT', 'ORDER_RESTORED', 'ORDER_RETRACKED',
+  'ORDER_CS_TRANSFERRED_POST_STATUS', 'ORDER_DUPLICATE_FLAGGED', 'ORDER_UNFROZEN',
+]);
+
 @Injectable()
 export class CartOrdersService {
   private readonly logger = new Logger(CartOrdersService.name);
@@ -345,12 +362,44 @@ export class CartOrdersService {
       };
       const eventType = eventTypeMap[newStatus] ?? 'ORDER_VIEWED';
 
+      // Build a descriptive timeline message instead of the generic "Status changed to X."
+      let description = note;
+      if (!description) {
+        const logisticsLocationId = metadata?.logisticsLocationId as string | undefined;
+        let locationLabel: string | undefined;
+        if (logisticsLocationId) {
+          const [locRow] = await tx
+            .select({ name: schema.logisticsLocations.name, providerName: schema.logisticsProviders.name })
+            .from(schema.logisticsLocations)
+            .innerJoin(schema.logisticsProviders, eq(schema.logisticsLocations.providerId, schema.logisticsProviders.id))
+            .where(eq(schema.logisticsLocations.id, logisticsLocationId))
+            .limit(1);
+          locationLabel = locRow ? (locRow.providerName ? `${locRow.name} (${locRow.providerName})` : locRow.name) : undefined;
+        }
+        const isReassignment = order.status === 'AGENT_ASSIGNED' && newStatus === 'AGENT_ASSIGNED';
+        switch (newStatus) {
+          case 'CS_ASSIGNED': description = 'Order assigned to closer.'; break;
+          case 'CS_ENGAGED': description = 'CS started customer engagement.'; break;
+          case 'CONFIRMED': description = 'Order confirmed.'; break;
+          case 'AGENT_ASSIGNED':
+            description = isReassignment
+              ? `Reassigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`
+              : `Order assigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`;
+            break;
+          case 'DISPATCHED': description = 'Order dispatched to rider.'; break;
+          case 'IN_TRANSIT': description = 'Order in transit.'; break;
+          case 'DELIVERED': description = 'Order marked delivered.'; break;
+          case 'DELETED': description = 'Order deleted.'; break;
+          default: description = `Status changed to ${newStatus.replace(/_/g, ' ').toLowerCase()}.`;
+        }
+      }
+
       await tx.insert(schema.cartOrderTimelineEvents).values({
         cartOrderId: orderId,
         eventType,
         actorId: actor.id,
         actorName: actor.name,
-        description: note ?? `Status changed to ${newStatus}.`,
+        description,
         metadata: metadata ?? { previousStatus: order.status, newStatus },
         branchId: order.servicingBranchId,
       });
@@ -440,16 +489,22 @@ export class CartOrdersService {
       }
 
       if (graduated) {
-        // Copy the full cart order journey timeline
+        // Copy the full cart order journey timeline.
+        // cart_order_timeline_events uses a plain text column, but
+        // order_timeline_events uses a strict enum — filter out any
+        // event types that don't exist in the enum (e.g. raw status
+        // strings like CS_ASSIGNED stored by older code paths).
         const coTimeline = await tx
           .select()
           .from(schema.cartOrderTimelineEvents)
           .where(eq(schema.cartOrderTimelineEvents.cartOrderId, cartOrderId))
           .orderBy(asc(schema.cartOrderTimelineEvents.createdAt));
 
-        if (coTimeline.length > 0) {
+        // Filter to only event types the orders timeline enum accepts
+        const validTimeline = coTimeline.filter((t) => VALID_TIMELINE_EVENT_TYPES.has(t.eventType));
+        if (validTimeline.length > 0) {
           await tx.insert(schema.orderTimelineEvents).values(
-            coTimeline.map((t) => ({
+            validTimeline.map((t) => ({
               orderId: graduated.id,
               eventType: t.eventType as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
               actorId: t.actorId,

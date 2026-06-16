@@ -784,8 +784,8 @@ export function MarketingOrdersPage({
         <FilterPills
           variant="tab"
           options={[
+            { label: 'My Team', value: 'team' },
             { label: 'My Performance', value: 'personal' },
-            { label: 'Team Performance', value: 'team' },
           ]}
           value={myTeamTab}
           onChange={(v) => {
@@ -857,6 +857,7 @@ export function MarketingOrdersPage({
                   mobileGrid
                   tileClassName="!py-2.5"
                   liveFlash={liveState.showGreen}
+                  loading={deferredLoading}
                   items={[
                     {
                       label: 'Total Orders',

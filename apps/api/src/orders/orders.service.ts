@@ -2947,8 +2947,12 @@ export class OrdersService {
       detail = await this.getById(orderId);
       this.assertActorMayViewOrderForRead(actor, detail);
     } catch {
-      // Fallback: try follow_up_orders table
-      return this.getFollowUpClipboardSummaryText(orderId);
+      // Fallback: try follow_up_orders, then cart_orders
+      try {
+        return await this.getFollowUpClipboardSummaryText(orderId);
+      } catch {
+        return await this.getCartOrderClipboardSummaryText(orderId, actor);
+      }
     }
 
     const [phoneRow] = await this.db
@@ -3036,6 +3040,50 @@ export class OrdersService {
       assignedCsName: null,
       campaignCustomFieldDefs: [],
       customFields: fu.customFields as Record<string, unknown> | null | undefined,
+    });
+  }
+
+  /** Clipboard summary for a cart order (lives in cart_orders, not orders). */
+  private async getCartOrderClipboardSummaryText(orderId: string, _actor: SessionUser): Promise<string> {
+    const [co] = await this.db.select().from(schema.cartOrders).where(and(eq(schema.cartOrders.id, orderId), isNull(schema.cartOrders.deletedAt))).limit(1);
+    if (!co) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+
+    const items = await this.db
+      .select({ productId: schema.cartOrderItems.productId, quantity: schema.cartOrderItems.quantity, unitPrice: schema.cartOrderItems.unitPrice, offerLabel: schema.cartOrderItems.offerLabel, productName: schema.products.name })
+      .from(schema.cartOrderItems)
+      .innerJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
+      .where(eq(schema.cartOrderItems.cartOrderId, orderId));
+
+    const resolved = resolveOrderClipboardPhone({
+      customerPhone: co.customerPhone,
+      deliveryNotes: co.deliveryNotes,
+      customerAddress: co.customerAddress,
+      customFields: co.customFields as Record<string, unknown> | null | undefined,
+    });
+    const phoneForPaste = resolved != null
+      ? formatNigerianPhoneForClipboardPaste(resolved.trim())
+      : 'Not available';
+
+    return buildOrderClipboardSummaryText({
+      id: co.id,
+      orderNumber: co.orderNumber,
+      status: co.status,
+      customerName: co.customerName,
+      customerPhoneForPaste: phoneForPaste,
+      deliveryAddress: co.deliveryAddress ?? null,
+      customerAddress: co.customerAddress ?? null,
+      deliveryState: co.deliveryState ?? null,
+      orderItems: items.map((it) => ({ id: it.productId, productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName, offerLabel: it.offerLabel })),
+      totalAmount: co.totalAmount ?? null,
+      createdAt: co.createdAt ? String(co.createdAt) : null,
+      preferredDeliveryDate: co.preferredDeliveryDate ?? null,
+      logisticsLocationName: null,
+      logisticsProviderName: null,
+      paymentStatus: co.paymentStatus ?? null,
+      deliveryNotes: co.deliveryNotes ?? null,
+      assignedCsName: null,
+      campaignCustomFieldDefs: [],
+      customFields: co.customFields as Record<string, unknown> | null | undefined,
     });
   }
 

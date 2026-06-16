@@ -120,6 +120,12 @@ type OverviewStatStripProps = {
    * don't trigger the arrow.
    */
   liveFlash?: boolean;
+  /**
+   * When true, each tile renders its label but replaces the value with a
+   * skeleton pulse bar. Used as Suspense/deferred-loading fallback so the
+   * strip layout stays mounted while data streams in.
+   */
+  loading?: boolean;
 };
 
 /** Tiny green up-arrow shown beside a value that just changed. */
@@ -151,6 +157,7 @@ export function OverviewStatStrip({
   mobileGrid = false,
   wrap = false,
   liveFlash = false,
+  loading = false,
 }: OverviewStatStripProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = useCallback((delta: number) => {
@@ -223,6 +230,8 @@ export function OverviewStatStrip({
     [],
   );
 
+  const valueSkeleton = <div className="mt-1 h-6 w-10 rounded bg-app-hover/70 animate-pulse md:mx-auto" />;
+
   const tileBase = [
     'shrink-0',
     'rounded-lg',
@@ -294,7 +303,9 @@ export function OverviewStatStrip({
         const inner = (
           <>
             <p className="truncate text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
-            {item.plainValue ? (
+            {loading ? (
+              valueSkeleton
+            ) : item.plainValue ? (
               <div className="mt-0.5 flex items-center justify-center">
                 {item.value}
                 {stamp !== undefined && <LiveFlashArrow key={stamp} />}
@@ -337,7 +348,9 @@ export function OverviewStatStrip({
           const inner = (
             <div>
               <p className={`truncate ${labelClass}`}>{item.label}</p>
-              {item.plainValue ? (
+              {loading ? (
+                valueSkeleton
+              ) : item.plainValue ? (
                 <div className="mt-0.5 flex items-center justify-center">
                   {item.value}
                   {stamp !== undefined && <LiveFlashArrow key={stamp} />}

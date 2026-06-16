@@ -81,7 +81,7 @@ export const DEFAULT_DELIVERY_STATE_OPTIONS: string[] = [
 export const DEFAULT_PREFERRED_DELIVERY_DATE_OPTIONS: string[] = [
   'Today',
   'Tomorrow',
-  'Within 3 days',
+  'Specific date (mention in Notes)',
 ];
 
 export const DEFAULT_GENDER_OPTIONS: string[] = ['Male', 'Female'];

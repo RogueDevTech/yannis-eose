@@ -357,4 +357,22 @@ export const logisticsRouter = router({
         ctx.effectiveBranchIds,
       );
     }),
+
+  /** Per-location performance rollup — same gate as teamOverview. */
+  locationOverview: authedProcedure
+    .use(logisticsTeamOverviewGate)
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getLogisticsLocationPerformance(
+        input.startDate,
+        input.endDate,
+        ctx.currentBranchId,
+        ctx.effectiveBranchIds,
+      );
+    }),
 });

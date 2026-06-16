@@ -236,15 +236,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 offerLabel: (it.offerLabel as string) ?? null,
               })),
               callLogs: synthesizeCallLogs(fuTimeline),
-              // Follow-up lifecycle: UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → DELIVERED
+              // Follow-up lifecycle: UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → DELIVERED
               // No skipping — must go through engagement before confirming.
+              // Post-CONFIRMED transitions (assign agent, dispatch, deliver) are open to all CS.
               allowedTransitions: (() => {
                 const s = fuData.status as string;
                 const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
                 if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
                 if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
                 if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
-                if (s === 'CONFIRMED') return elevated ? ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'] : ['DELIVERED', 'DELETED'];
+                if (s === 'CONFIRMED') return ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'];
                 if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
                 if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
                 if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
@@ -314,13 +315,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 offerLabel: (it.offerLabel as string) ?? null,
               })),
               callLogs: synthesizeCallLogs(coTimeline),
+              // Cart order lifecycle mirrors follow-up: post-CONFIRMED transitions open to all CS.
               allowedTransitions: (() => {
                 const s = coData.status as string;
                 const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
                 if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
                 if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
                 if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
-                if (s === 'CONFIRMED') return elevated ? ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'] : ['DELIVERED', 'DELETED'];
+                if (s === 'CONFIRMED') return ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'];
                 if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
                 if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
                 if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];

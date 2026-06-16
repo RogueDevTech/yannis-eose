@@ -6,7 +6,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { canMirror, canViewAllBranches } from '../common/authz';
+import { canMirror, canViewAllBranches, isAdminLevel } from '../common/authz';
 import { and, eq, inArray, isNull, sql, desc, asc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
@@ -254,13 +254,24 @@ export class AuthService {
         .limit(1);
       if (firstGroup) activeGroupId = firstGroup.id;
     }
-    // Resolve the group's branch IDs so effectiveBranchIds is correctly scoped on login
+    // Resolve the group's branch IDs so effectiveBranchIds is correctly scoped on login.
+    // Only truly global users (SuperAdmin/Admin/scopeGlobal) see all branches in the group.
+    // Everyone else — including HoM/HoCS/HoL — only sees their assigned branches.
     if (activeGroupId) {
       const groupBranches = await this.db
         .select({ id: schema.branches.id })
         .from(schema.branches)
         .where(eq(schema.branches.groupId, activeGroupId));
-      selectedBranchIds = groupBranches.map((b) => b.id);
+      const allGroupIds = groupBranches.map((b) => b.id);
+      const memberBranchIds = memberships.map((m) => m.branchId as string);
+      if (isAdminLevel(user) || user.scopeGlobal) {
+        selectedBranchIds = allGroupIds;
+      } else if (memberBranchIds.length > 0) {
+        const scoped = allGroupIds.filter((id) => memberBranchIds.includes(id));
+        selectedBranchIds = scoped.length > 0 ? scoped : allGroupIds;
+      } else {
+        selectedBranchIds = allGroupIds;
+      }
     }
 
     const sessionUser: SessionUser = {
@@ -841,9 +852,10 @@ export class AuthService {
         .from(schema.branches)
         .where(eq(schema.branches.groupId, activeGroupId));
       const allGroupIds = groupBranches.map((b) => b.id);
-      // Branch-scoped users only see branches they're assigned to within
-      // the group — prevents a HoM with 2 branches from getting all 4.
-      groupBranchIds = canViewAllBranches(user)
+      // Only truly global users (SuperAdmin/Admin/scopeGlobal) see all
+      // group branches. Everyone else — including HoM/HoCS/HoL — is
+      // scoped to their assigned branches within the group.
+      groupBranchIds = (isAdminLevel(user) || user.scopeGlobal)
         ? allGroupIds
         : user.branchIds?.length
           ? allGroupIds.filter((id) => user.branchIds!.includes(id))

@@ -2108,6 +2108,28 @@ export class InventoryService {
     const soldMap = new Map<string, number>();
     for (const r of soldRows) soldMap.set(r.locationId, r.sold);
 
+    // Reconciliation: transferred out, adjustments, write-offs, dispatched per location
+    const reconRows = await this.db.execute<{
+      locationId: string;
+      transferredOut: number;
+      adjusted: number;
+      writtenOff: number;
+      dispatched: number;
+    }>(sql`
+      SELECT
+        sm.from_location_id AS "locationId",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
+      FROM stock_movements sm
+      WHERE sm.movement_type IN ('TRANSFER_OUT', 'ADJUSTMENT', 'WRITE_OFF', 'DISPATCH')
+        AND sm.from_location_id IN (${locIdList})
+      GROUP BY sm.from_location_id
+    `);
+    const reconMap = new Map<string, { transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
+    for (const r of reconRows) reconMap.set(r.locationId, r);
+
     // Remittance per location
     const remitRows = await this.db.execute<{
       locationId: string;
@@ -2135,12 +2157,17 @@ export class InventoryService {
 
     return locRows.map((l) => {
       const rm = remitMap.get(l.id);
+      const rc = reconMap.get(l.id);
       return {
         locationId: l.id,
         locationName: l.name,
         available: stockMap.get(l.id) ?? 0,
         received: recvMap.get(l.id) ?? 0,
         sold: soldMap.get(l.id) ?? 0,
+        transferredOut: rc?.transferredOut ?? 0,
+        adjusted: rc?.adjusted ?? 0,
+        writtenOff: rc?.writtenOff ?? 0,
+        dispatched: rc?.dispatched ?? 0,
         qtyRemitted: rm?.qtyRemitted ?? 0,
         qtyPending: rm?.qtyPending ?? 0,
         amountRemitted: rm?.amountRemitted ?? '0',
@@ -2228,6 +2255,28 @@ export class InventoryService {
     const soldMap = new Map<string, number>();
     for (const r of soldRows) soldMap.set(r.productId, r.sold);
 
+    // Reconciliation: transferred out, adjustments, write-offs, dispatched per product
+    const reconRows = await this.db.execute<{
+      productId: string;
+      transferredOut: number;
+      adjusted: number;
+      writtenOff: number;
+      dispatched: number;
+    }>(sql`
+      SELECT
+        sm.product_id AS "productId",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
+      FROM stock_movements sm
+      WHERE sm.movement_type IN ('TRANSFER_OUT', 'ADJUSTMENT', 'WRITE_OFF', 'DISPATCH')
+        AND sm.from_location_id IN (${locationList})
+      GROUP BY sm.product_id
+    `);
+    const productReconMap = new Map<string, { transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
+    for (const r of reconRows) productReconMap.set(r.productId, r);
+
     // Per-product remittance (all-time)
     const revenueRows = await this.db.execute<{
       productId: string;
@@ -2258,12 +2307,17 @@ export class InventoryService {
 
     return stockRows.map((r) => {
       const rv = revenueMap.get(r.productId);
+      const rc = productReconMap.get(r.productId);
       return {
         productId: r.productId,
         productName: r.productName ?? 'Unknown',
         received: receivedMap.get(r.productId) ?? 0,
         sold: soldMap.get(r.productId) ?? 0,
         available: r.available,
+        transferredOut: rc?.transferredOut ?? 0,
+        adjusted: rc?.adjusted ?? 0,
+        writtenOff: rc?.writtenOff ?? 0,
+        dispatched: rc?.dispatched ?? 0,
         qtyRemitted: rv?.qtyRemitted ?? 0,
         qtyPending: rv?.qtyPending ?? 0,
         amountRemitted: rv?.amountRemitted ?? '0',

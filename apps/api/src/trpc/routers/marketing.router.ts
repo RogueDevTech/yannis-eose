@@ -52,6 +52,7 @@ import {
 import { getProductsService } from './products.router';
 import { getUsersService } from './users.router';
 import { getCartService } from './cart.router';
+import { getCartOrdersService } from './cart-orders.router';
 import { isAdminLevel } from '../../common/authz';
 import { hasFinanceAccess } from '../../common/utils/strip-finance-fields';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
@@ -823,9 +824,6 @@ export const marketingRouter = router({
         });
       };
 
-      const abandonedCartMbId =
-        ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : undefined;
-
       const [metrics, leaderboard, balancesList, recentOrders, liveActivity, abandonedCartCount] = await Promise.all([
         getMarketingService().getPerformanceMetrics(
           undefined,
@@ -848,7 +846,9 @@ export const marketingRouter = router({
         getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds),
         getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
-        getCartService().countAllCarts({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined, effectiveBranchIds: eIds, startDate: input.startDate, endDate: input.endDate }),
+        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds)
+          .then((counts) => Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0))
+          .catch(() => 0),
       ]);
 
       return {
@@ -1167,9 +1167,12 @@ export const marketingRouter = router({
           null, // Forms are global — never branch-scoped (but company-group-scoped via effectiveBranchIds)
           { enrichProductIds: false, effectiveBranchIds: ctx.effectiveBranchIds }, // Orders page only needs id+name for the filter dropdown
         ),
-        // Total abandoned carts (regardless of recovery) — marketers track the
-        // full abandonment volume. Clicking through shows recovery status.
-        getCartService().countAllCarts({ mediaBuyerId: metricsBuyerId, branchId, effectiveBranchIds: ctx.effectiveBranchIds, startDate, endDate }),
+        // Cart orders total — marketers see how many abandoned carts entered the
+        // recovery pipeline. Scoped by branch so the stat strip matches the
+        // Cart Orders page for the same branch selection.
+        getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, ctx.effectiveBranchIds)
+          .then((counts) => Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0))
+          .catch(() => 0),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
           ordersScope.mediaBuyerId,

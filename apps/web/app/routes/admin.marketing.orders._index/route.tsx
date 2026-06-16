@@ -203,59 +203,53 @@ export async function loader({ request }: LoaderFunctionArgs) {
         JSON.stringify({
           page,
           limit: ORDERS_PER_PAGE,
-          ...(mediaBuyerId ? { mediaBuyerId } : {}),
           ...(search ? { search } : {}),
           ...(startDate ? { startDate } : {}),
           ...(endDate ? { endDate } : {}),
         }),
       );
-      const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
+      const cartsRes = await apiRequest<unknown>(`/trpc/cartOrders.list?input=${cartsInput}`, {
         method: 'GET',
         cookie,
       });
+      type CartOrder = {
+        id: string;
+        orderNumber: number;
+        customerName: string;
+        status: string;
+        totalAmount: string | null;
+        createdAt: string;
+        assignedCsId: string | null;
+        assignedCsName: string | null;
+        mediaBuyerId: string | null;
+        mediaBuyerName: string | null;
+        campaignId: string | null;
+        campaignName: string | null;
+        orderItems: Array<{ productId: string; productName: string | null; quantity: number; unitPrice: string }>;
+      };
       const cartsData = cartsRes.ok
-        ? (
-            cartsRes.data as {
-              result?: {
-                data?: {
-                  items: Array<{
-                    id: string;
-                    customerName: string;
-                    customerPhoneDisplay: string;
-                    productId: string | null;
-                    productName: string | null;
-                    campaignId: string | null;
-                    campaignName: string | null;
-                    mediaBuyerId: string | null;
-                    mediaBuyerName: string | null;
-                    updatedAt: string;
-                    quantity: number | null;
-                  }>;
-                  total: number;
-                };
-              };
-            }
-          )?.result?.data
+        ? (cartsRes.data as { result?: { data?: { orders: CartOrder[]; total: number; totalPages: number } } })?.result?.data
         : null;
       const total = cartsData?.total ?? 0;
-      const totalPages = total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE);
-      const orders: Order[] = (cartsData?.items ?? []).map((c) => ({
+      const totalPages = cartsData?.totalPages ?? (total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE));
+      const orders: Order[] = (cartsData?.orders ?? []).map((c) => ({
         id: c.id,
+        orderNumber: c.orderNumber,
         customerName: c.customerName,
         customerPhoneDisplay: '',
-        status: c.recovered ? 'CART_RECOVERED' : 'CART',
-        totalAmount: null,
-        createdAt: c.updatedAt,
-        assignedCsId: null,
-        primaryProductId: c.productId ?? null,
-        primaryProductName: c.productName ?? null,
-        itemCount: c.quantity ?? 0,
-        campaignId: c.campaignId ?? null,
-        campaignName: c.campaignName ?? null,
-        mediaBuyerId: c.mediaBuyerId ?? null,
-        mediaBuyerName: c.mediaBuyerName ?? null,
-        cartId: c.id,
-      })) as Order[];
+        status: c.status,
+        totalAmount: c.totalAmount,
+        createdAt: c.createdAt,
+        assignedCsId: c.assignedCsId,
+        assignedCsName: c.assignedCsName,
+        mediaBuyerId: c.mediaBuyerId,
+        mediaBuyerName: c.mediaBuyerName,
+        primaryProductId: c.orderItems[0]?.productId ?? null,
+        primaryProductName: c.orderItems[0]?.productName ?? null,
+        itemCount: c.orderItems.length,
+        campaignId: c.campaignId,
+        campaignName: c.campaignName,
+      }));
       return { orders, total, totalPages };
     }
 
@@ -336,8 +330,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
       const defaultMetrics = { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 };
       const m = data?.metrics ?? defaultMetrics;
+
+      // When cart abandonment view is active, swap the stat strip counts
+      // for cart_orders status counts so pills match the list below.
+      let statusCounts = data?.statusCounts ?? {};
+      if (fromCart) {
+        const cartCountsInput = encodeURIComponent(JSON.stringify({
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+        }));
+        const cartCountsRes = await apiRequest<unknown>(
+          `/trpc/cartOrders.getStatusCounts?input=${cartCountsInput}`,
+          { method: 'GET', cookie },
+        );
+        const cartCounts = cartCountsRes.ok
+          ? (cartCountsRes.data as { result?: { data?: Record<string, number> } })?.result?.data
+          : null;
+        if (cartCounts) statusCounts = cartCounts;
+      }
+
       return {
-        statusCounts: data?.statusCounts ?? {},
+        statusCounts,
         cpa: m.cpa ?? null,
         totalAdSpend: m.totalSpend ?? null,
         metrics: m,
