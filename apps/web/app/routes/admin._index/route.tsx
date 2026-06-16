@@ -119,6 +119,7 @@ export default function AdminDashboard() {
   const parentData = useRouteLoaderData('routes/admin') as
     | {
         user: {
+          id: string;
           name: string;
           role: string;
           email: string;
@@ -134,6 +135,7 @@ export default function AdminDashboard() {
     | undefined;
   const role = parentData?.user?.role ?? null;
   const userName = parentData?.user?.name ?? 'User';
+  const userId = parentData?.user?.id ?? undefined;
   const isMarketingTeamSupervisor =
     role === 'HEAD_OF_MARKETING' ||
     parentData?.user?.isMarketingTeamSupervisorOnActiveBranch === true;
@@ -194,6 +196,7 @@ export default function AdminDashboard() {
             data={data as OrdersAndCounts}
             role={role}
             userName={userName}
+            userId={userId}
             filters={loaderData.filters}
             isMarketingTeamSupervisor={isMarketingTeamSupervisor}
             isCsTeamSupervisor={isCsTeamSupervisor}

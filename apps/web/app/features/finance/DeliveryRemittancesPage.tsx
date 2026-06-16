@@ -965,7 +965,7 @@ export function DeliveryRemittancesPage({
                 controlSize="md"
               />
             </form>
-            <div className="relative">
+            <div className="relative w-full sm:w-fit sm:justify-self-end">
               {!!filters.location && (
                 <FilterDismiss onClear={() => handleLocationChange('')} />
               )}
@@ -987,7 +987,7 @@ export function DeliveryRemittancesPage({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-app-hover px-2.5 py-2 sm:px-3">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md bg-app-hover px-2.5 py-1.5 sm:px-3">
             <div className="text-xs text-app-fg-muted sm:text-sm">
               <span className="font-medium text-app-fg">{eligibleSelectedIds.size}</span> selected
               {eligibleTotal > 0 ? (
@@ -1023,7 +1023,7 @@ export function DeliveryRemittancesPage({
                           : undefined
                   }
                 >
-                  Confirm
+                  Confirm Selection
                 </Button>
               )}
             </div>

@@ -846,7 +846,7 @@ export const marketingRouter = router({
         getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds),
         getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
-        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds)
+        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds, restrictMbIds?.length === 1 ? restrictMbIds[0] : undefined)
           .then((counts) => Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0))
           .catch(() => 0),
       ]);
@@ -1170,7 +1170,7 @@ export const marketingRouter = router({
         // Cart orders total — marketers see how many abandoned carts entered the
         // recovery pipeline. Scoped by branch so the stat strip matches the
         // Cart Orders page for the same branch selection.
-        getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, ctx.effectiveBranchIds)
+        getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, ctx.effectiveBranchIds, ordersScope.mediaBuyerId)
           .then((counts) => Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0))
           .catch(() => 0),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.

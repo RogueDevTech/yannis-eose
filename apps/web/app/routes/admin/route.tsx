@@ -172,9 +172,13 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
-  // Exit Mirror Mode — restores the original admin session and bounces home.
-  // The success path always redirects so the freshly-restored cookie is used on the next render.
+  // Exit Mirror Mode — restores the original admin session and redirects
+  // back to the mirrored user's profile so the admin can continue reviewing.
   if (intent === 'exitMirror') {
+    // Capture the mirrored user's ID before stopping (current session = target user)
+    const currentUser = await getCurrentUser(request);
+    const mirroredUserId = currentUser?.id;
+
     const res = await apiRequest<{ user?: { role?: string } }>('/auth/mirror/stop', {
       method: 'POST', cookie, body: {},
     });
@@ -186,9 +190,10 @@ export async function action({ request }: ActionFunctionArgs) {
     for (const c of res.setCookies) {
       headers.append('Set-Cookie', c);
     }
-    // Redirect to the appropriate dashboard for the restored user's role
-    const role = res.data?.user?.role;
-    const landing = (role === 'SUPER_ADMIN' || role === 'ADMIN') ? '/admin/ceo' : '/admin';
+    // Redirect back to the mirrored user's profile page
+    const landing = mirroredUserId
+      ? `/hr/users/${mirroredUserId}`
+      : '/admin';
     throw redirect(`${landing}?_reload=1`, { headers });
   }
 
