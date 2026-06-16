@@ -7,6 +7,7 @@ import {
 } from '~/components/ui/compact-table';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { FilterPills } from '~/components/ui/filter-pills';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { FormSelect } from '~/components/ui/form-select';
@@ -683,9 +684,10 @@ export function LogisticsTeamLoadingShell({
         items={[
           { label: 'Active providers', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Total assigned', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Delivered', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Delivery rate', value: <StatValuePulse className="min-w-[3rem]" /> },
-          { label: 'Delinquency rate', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'Delivered', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Units delivered', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Delinquency', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Remitted', value: <StatValuePulse className="min-w-[4rem]" /> },
         ]}
       />
       {/* Mobile skeleton cards */}
@@ -719,29 +721,109 @@ export function LogisticsTeamLoadingShell({
   );
 }
 
-/** Single provider detail — tabs + panels pulse. */
+/** Single provider detail — mirrors `LogisticsProviderDetailPage` chrome. */
 export function LogisticsProviderDetailLoadingShell() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <div className="h-4 w-40 rounded bg-app-hover animate-pulse" aria-hidden />
-      <div className="h-8 w-64 max-w-full rounded bg-app-hover animate-pulse" aria-hidden />
-      <Tabs
-        value="overview"
+    <div className="space-y-4 w-full min-w-0" aria-busy="true" aria-live="polite">
+      {/* PageHeader skeleton — back link, title, status + meta, actions */}
+      <PageHeader
+        title={<span className="inline-block h-6 w-48 rounded bg-app-hover animate-pulse" aria-hidden />}
+        backTo="/admin/logistics/team"
+        mobileInlineActions
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="h-5 w-14 rounded-full bg-app-hover animate-pulse" aria-hidden />
+            <span className="h-4 w-24 rounded bg-app-hover animate-pulse" aria-hidden />
+            <span className="h-4 w-32 rounded bg-app-hover animate-pulse hidden sm:inline-block" aria-hidden />
+          </span>
+        }
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Provider toolbar"
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <PageRefreshButton />
+                <span className="h-8 w-24 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </div>
+            }
+          />
+        }
+      />
+
+      {/* Performance stat strip */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
+        <OverviewStatStrip
+          mobileGrid
+          wrap
+          tileClassName="!py-3.5 !px-4 min-w-[9rem]"
+          items={[
+            { label: 'Received', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+            { label: 'Available', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+            { label: 'Sold', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+            { label: 'Delivered', value: <StatValuePulse className="min-w-[4rem]" /> },
+            { label: 'Delinquency', value: <StatValuePulse className="min-w-[4rem]" /> },
+            { label: 'Remitted', value: <StatValuePulse className="min-w-[3rem]" /> },
+            { label: 'Pending', value: <StatValuePulse className="min-w-[3rem]" /> },
+          ]}
+        />
+      </div>
+
+      {/* Inventory / Movements pill tabs */}
+      <FilterPills
+        value="inventory"
         onChange={() => {}}
-        tabs={[
-          { value: 'overview', label: 'Overview' },
-          { value: 'activity', label: 'Activity' },
+        options={[
+          { value: 'inventory', label: 'Inventory' },
+          { value: 'movements', label: 'Movements' },
         ]}
       />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-4 space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-4 rounded bg-app-hover animate-pulse" aria-hidden />
+
+      {/* Locations skeleton cards */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Locations</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="rounded-lg border border-app-border bg-app-card p-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="h-3 w-24 rounded bg-app-hover animate-pulse" aria-hidden />
+                <span className="h-4 w-16 rounded-full bg-app-hover animate-pulse" aria-hidden />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                {[1, 2, 3, 4, 5, 6].map((j) => (
+                  <span key={j} className="flex items-baseline gap-1">
+                    <span className="h-3 w-[5.5rem] rounded bg-app-hover animate-pulse shrink-0" aria-hidden />
+                    <span className="h-3 w-8 rounded bg-app-hover animate-pulse" aria-hidden />
+                  </span>
+                ))}
+              </div>
+              <span className="h-3 w-20 rounded bg-app-hover animate-pulse block" aria-hidden />
+            </div>
           ))}
         </div>
-        <div className="card p-4 space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 rounded bg-app-hover animate-pulse" aria-hidden />
+      </div>
+
+      {/* Product Analysis skeleton cards */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Product Analysis</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2].map((i) => (
+            <div key={i} className="rounded-lg border border-app-border bg-app-card p-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="h-3 w-28 rounded bg-app-hover animate-pulse" aria-hidden />
+                <span className="h-4 w-16 rounded-full bg-app-hover animate-pulse" aria-hidden />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                {[1, 2, 3, 4].map((j) => (
+                  <span key={j} className="flex items-baseline gap-1">
+                    <span className="h-3 w-[5.5rem] rounded bg-app-hover animate-pulse shrink-0" aria-hidden />
+                    <span className="h-3 w-8 rounded bg-app-hover animate-pulse" aria-hidden />
+                  </span>
+                ))}
+              </div>
+              <span className="h-3 w-20 rounded bg-app-hover animate-pulse block" aria-hidden />
+            </div>
           ))}
         </div>
       </div>

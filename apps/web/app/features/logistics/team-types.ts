@@ -33,6 +33,46 @@ export interface LogisticsProviderRow {
   unitsDelivered: number;
   /** Available stock across all locations for this provider. */
   availableStock: number;
+  /** Reserved stock across all locations for this provider. */
+  reservedStock: number;
+  /** Stock reconciliation: total units ever received (INTAKE+TRANSFER_IN+RESTOCK). */
+  stockReceived: number;
+  /** Stock reconciliation: total units sold (DELIVERY movements). */
+  stockSold: number;
+  /** Stock reconciliation: total units transferred out. */
+  stockTransferredOut: number;
+  /** Stock reconciliation: total negative manual adjustments. */
+  stockAdjusted: number;
+  /** Stock reconciliation: total units written off. */
+  stockWrittenOff: number;
+  /** Stock reconciliation: total units dispatched to agents. */
+  stockDispatched: number;
+}
+
+/** Per-location row from `logistics.locationOverview`. */
+export interface LogisticsLocationRow {
+  locationId: string;
+  locationName: string;
+  providerName: string;
+  status: string;
+  totalAssigned: number;
+  delivered: number;
+  returned: number;
+  partiallyDelivered: number;
+  writtenOff: number;
+  deliveryRate: number;
+  delinquencyRate: number;
+  unitsDelivered: number;
+  availableStock: number;
+  reservedStock: number;
+  remittedAmount: string;
+  pendingRemittanceAmount: string;
+  stockReceived: number;
+  stockSold: number;
+  stockTransferredOut: number;
+  stockAdjusted: number;
+  stockWrittenOff: number;
+  stockDispatched: number;
 }
 
 /** Single logistics company from `logistics.getProvider` (loader detail page). */

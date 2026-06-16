@@ -503,7 +503,7 @@ function LogisticsOrdersPageImpl({
                     searchPlaceholder="Search locations..."
                     options={allocatableLocations.map((loc) => ({
                       value: loc.id,
-                      label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                      label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                     }))}
                     wrapperClassName="w-36"
                     controlSize="sm"
@@ -686,7 +686,7 @@ function LogisticsOrdersPageImpl({
                             { value: '', label: 'All locations' },
                             ...locations.map((loc) => ({
                               value: loc.id,
-                              label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                              label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                             })),
                           ]}
                           triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
@@ -774,7 +774,7 @@ function LogisticsOrdersPageImpl({
                     searchPlaceholder="Search locations..."
                     options={allocatableLocations.map((loc) => ({
                       value: loc.id,
-                      label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                      label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                     }))}
                   />
                   <Button
@@ -1179,7 +1179,7 @@ function LogisticsOrdersPageImpl({
                         searchPlaceholder="Search locations..."
                         options={allocatableLocations.map((loc) => ({
                           value: loc.id,
-                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                          label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                         }))}
                         wrapperClassName="min-w-0 flex-1"
                         controlSize="sm"

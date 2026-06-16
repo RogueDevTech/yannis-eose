@@ -1011,13 +1011,13 @@ export function LogisticsOrderDetailPage({
                       richAllocatableLocations && richAllocatableLocations.length > 0
                         ? richAllocatableLocations.map((loc) => ({
                             value: loc.id,
-                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                             disabled: !loc.eligible,
                             description: describeRichAllocatableLocation(loc),
                           }))
                         : allocatableLocations.map((loc) => ({
                             value: loc.id,
-                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                             disabled: Boolean(loc.dispatchLocked),
                             description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
                           }))
@@ -1063,13 +1063,13 @@ export function LogisticsOrderDetailPage({
                       richAllocatableLocations && richAllocatableLocations.length > 0
                         ? richAllocatableLocations.map((loc) => ({
                             value: loc.id,
-                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                             disabled: !loc.eligible || loc.id === order.logisticsLocationId,
                             description: describeRichAllocatableLocation(loc),
                           }))
                         : allocatableLocations.map((loc) => ({
                             value: loc.id,
-                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                             disabled: Boolean(loc.dispatchLocked) || loc.id === order.logisticsLocationId,
                             description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
                           }))

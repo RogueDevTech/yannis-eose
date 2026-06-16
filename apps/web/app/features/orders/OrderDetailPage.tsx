@@ -938,10 +938,11 @@ export function OrderDetailPage({
   useEffect(() => {
     if (fetcher.state === 'submitting' || recordCallFetcher.state === 'submitting' ||
         scheduleFetcher.state === 'submitting' || adjustItemsFetcher.state === 'submitting' ||
-        priceRequestFetcher.state === 'submitting' || csCommentFetcher.state === 'submitting') {
+        priceRequestFetcher.state === 'submitting' || csCommentFetcher.state === 'submitting' ||
+        ensureInvoiceFetcher.state === 'submitting' || invoiceFetcher.state === 'submitting') {
       invalidateCachedLoader(window.location.pathname);
     }
-  }, [fetcher.state, recordCallFetcher.state, scheduleFetcher.state, adjustItemsFetcher.state, priceRequestFetcher.state, csCommentFetcher.state]);
+  }, [fetcher.state, recordCallFetcher.state, scheduleFetcher.state, adjustItemsFetcher.state, priceRequestFetcher.state, csCommentFetcher.state, ensureInvoiceFetcher.state, invoiceFetcher.state]);
 
   // Snapshot formData when each fetcher starts submitting so we can reference
   // it after the server responds (fetcher.formData is cleared when idle).
@@ -1539,6 +1540,31 @@ export function OrderDetailPage({
     revalidatedForEnsureInvoiceRef.current = false;
   }, [order.id]);
 
+  // Auto-generate invoice for admin/finance when the invoice fetch resolves
+  // with no invoice. Fires once per order — the user never needs to click
+  // "Generate invoice" manually.
+  const autoEnsureInvoiceFiredRef = useRef(false);
+  useEffect(() => { autoEnsureInvoiceFiredRef.current = false; }, [order.id]);
+  useEffect(() => {
+    if (autoEnsureInvoiceFiredRef.current) return;
+    if (!canGenerateInvoice) return;
+    // Wait for the invoice fetch to complete with a definitive "no invoice" result
+    const fetchDone = invoiceFetcher.state === 'idle' && invoiceFetcher.data;
+    if (!fetchDone) return;
+    const hasInvoice = invoiceFetcher.data.ok && invoiceFetcher.data.invoice;
+    if (hasInvoice) return;
+    // Also skip if streamed invoice is present
+    if (invoice !== undefined) return;
+    // Don't double-fire if ensureInvoice is already in flight or completed
+    if (ensureInvoiceFetcher.state !== 'idle' || ensureInvoiceFetcher.data) return;
+    autoEnsureInvoiceFiredRef.current = true;
+    const fd = new FormData();
+    fd.set('intent', 'ensureInvoice');
+    if (isFollowUpOrder) fd.set('isFollowUpOrder', 'true');
+    if (isCartOrder) fd.set('isCartOrder', 'true');
+    ensureInvoiceFetcher.submit(fd, { method: 'post' });
+  }, [invoiceFetcher.state, invoiceFetcher.data, invoice, canGenerateInvoice, ensureInvoiceFetcher, isFollowUpOrder, isCartOrder]);
+
   // Close modals when their fetcher returns success — edge-triggered via the
   // shared `useCloseOnFetcherSuccess` hook so the modal closes the same React
   // tick as the toast (no waiting for loader revalidation).
@@ -2045,32 +2071,40 @@ export function OrderDetailPage({
               }
 
               if (!i) {
+                const isAutoGenerating = canGenerateInvoice && ensureInvoiceFetcher.state !== 'idle';
                 return (
                   <div className="card">
                     <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
-                    <p className="text-sm text-app-fg-muted mb-3">
-                      This order doesn’t have an invoice yet.
-                    </p>
-                    <InlineNotification
-                      variant="info"
-                      message="Invoices are auto-generated the first time an order is confirmed. If this was confirmed before the invoice feature was enabled (or if generation failed), ask an admin/finance to regenerate."
-                    />
-                    {canGenerateInvoice && (
-                      <div className="mt-3 flex justify-end">
-                        <ensureInvoiceFetcher.Form method="post">
-                          <input type="hidden" name="intent" value="ensureInvoice" />
-                          {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
-                          {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
-                          <Button
-                            type="submit"
-                            variant="primary"
-                            size="sm"
-                            disabled={ensureInvoiceFetcher.state !== 'idle'}
-                          >
-                            {ensureInvoiceFetcher.state !== 'idle' ? 'Generating…' : 'Generate invoice'}
-                          </Button>
-                        </ensureInvoiceFetcher.Form>
-                      </div>
+                    {isAutoGenerating ? (
+                      <p className="text-sm text-app-fg-muted">Generating invoice…</p>
+                    ) : (
+                      <>
+                        <p className="text-sm text-app-fg-muted mb-3">
+                          This order doesn’t have an invoice yet.
+                        </p>
+                        {canGenerateInvoice ? (
+                          <div className="flex justify-end">
+                            <ensureInvoiceFetcher.Form method="post">
+                              <input type="hidden" name="intent" value="ensureInvoice" />
+                              {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                              {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
+                              <Button
+                                type="submit"
+                                variant="primary"
+                                size="sm"
+                                disabled={ensureInvoiceFetcher.state !== 'idle'}
+                              >
+                                Generate invoice
+                              </Button>
+                            </ensureInvoiceFetcher.Form>
+                          </div>
+                        ) : (
+                          <InlineNotification
+                            variant="info"
+                            message="Invoices are auto-generated the first time an order is confirmed. If this order is missing one, an admin or finance user can generate it."
+                          />
+                        )}
+                      </>
                     )}
                   </div>
                 );
@@ -2389,8 +2423,8 @@ export function OrderDetailPage({
                     </>
                   )}
 
-                  {/* Reassign to another location — secondary after mark delivered */}
-                  {order.status === 'AGENT_ASSIGNED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
+                  {/* Reassign to another location — available from CONFIRMED through IN_TRANSIT */}
+                  {['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(order.status) && logisticsLocations.length > 0 && (
                     <Button
                       type="button"
                       variant="secondary"
@@ -3216,7 +3250,7 @@ export function OrderDetailPage({
                   searchPlaceholder="Search locations..."
                   options={eligibleOnly.map((loc) => ({
                     value: loc.id,
-                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                     description: describeAllocatableLocation(loc),
                   }))}
                 />
@@ -3303,7 +3337,7 @@ export function OrderDetailPage({
                   const description = [stockDesc, originLabel].filter(Boolean).join(' · ') || undefined;
                   return {
                     value: loc.id,
-                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                     description,
                     _isAllocated: isAllocated,
                   };
@@ -3429,7 +3463,7 @@ export function OrderDetailPage({
                   searchPlaceholder="Search locations..."
                   options={locationsWithGroup.map((loc) => ({
                     value: loc.id,
-                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
                   }))}
                 />
                 {locationsWithGroup.length === 0 && (

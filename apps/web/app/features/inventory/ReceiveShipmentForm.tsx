@@ -177,7 +177,7 @@ export function ReceiveShipmentForm({
             disabled={disabled || isEdit}
             options={locations.map((l) => ({
               value: l.id,
-              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              label: l.providerName ? `${l.name} ● ${l.providerName}` : l.name,
             }))}
           />
         </FormField>

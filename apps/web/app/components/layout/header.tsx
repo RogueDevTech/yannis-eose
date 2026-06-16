@@ -142,8 +142,9 @@ export function Header({
     ? '/tpl/notifications'
     : '/admin/notifications';
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
+  const [isMobileBranchApplying, setIsMobileBranchApplying] = useState(false);
   const isMobileBranchSwitching =
-    navigation.state !== 'idle' && navigation.formAction?.includes('/admin/branches/switch');
+    isMobileBranchApplying || (navigation.state !== 'idle' && navigation.formAction?.includes('/admin/branches/switch'));
 
   const canSeeAllBranches = canRoleSeeAllBranchesInHeader(user?.role ?? '');
   const mobileCurrentBranch = branches?.find((b) => b.id === (currentBranchId ?? null)) ?? null;
@@ -249,7 +250,7 @@ export function Header({
   const handleMobileBranchApply = useCallback(async () => {
     if (!branches || isMobileBranchSwitching) return;
     clearLoaderCache();
-    setMobileUserMenuOpen(false);
+    setIsMobileBranchApplying(true);
 
     let branchId = '';
     let selectedBranchIds = '';
@@ -890,10 +891,11 @@ function HeaderBranchSwitcher({
     [branches, inactiveGroupIds],
   );
   const [open, setOpen] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const submit = useSubmit();
   const navigation = useNavigation();
-  const isSubmitting = navigation.state !== 'idle' && navigation.formAction === '/admin/branches/switch';
+  const isSubmitting = isApplying || (navigation.state !== 'idle' && navigation.formAction === '/admin/branches/switch');
 
   const canSeeAllBranches = canRoleSeeAllBranchesInHeader(userRole);
   const canSwitch = shouldShowHeaderBranchSwitcher(visibleBranches.length, userRole);
@@ -983,7 +985,7 @@ function HeaderBranchSwitcher({
 
   const handleApply = async () => {
     clearLoaderCache();
-    setOpen(false);
+    setIsApplying(true);
 
     let branchId = '';
     let selectedBranchIds = '';

@@ -13,7 +13,7 @@ import {
 import { resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 import { LogisticsTeamPage } from '~/features/logistics/LogisticsTeamPage';
 import { LogisticsTeamLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
-import type { LogisticsProviderRow } from '~/features/logistics/team-types';
+import type { LogisticsProviderRow, LogisticsLocationRow } from '~/features/logistics/team-types';
 
 export const meta: MetaFunction = () => [
   { title: 'Logistics Agent Analysis — Yannis EOSE' },
@@ -24,6 +24,15 @@ function parseProvidersList(res: { ok: boolean; status: number; data: unknown })
   const raw = res.data as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== 'object') return [];
   const result = raw.result as { data?: LogisticsProviderRow[] } | undefined;
+  const data = result?.data;
+  return Array.isArray(data) ? data : [];
+}
+
+function parseLocationsList(res: { ok: boolean; status: number; data: unknown }): LogisticsLocationRow[] {
+  if (!res.ok) return [];
+  const raw = res.data as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return [];
+  const result = raw.result as { data?: LogisticsLocationRow[] } | undefined;
   const data = result?.data;
   return Array.isArray(data) ? data : [];
 }
@@ -45,17 +54,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const logisticsTeamShell = { dateFilters: filters };
 
   const pageData = (async () => {
-    const teamInput = {
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-    };
+    const teamInput = periodAllTime
+      ? { startDate: '2020-01-01', endDate: '2099-12-31' }
+      : {
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+        };
 
-    const teamRes = await apiRequest<unknown>(
-      `/trpc/logistics.teamOverview?input=${encodeURIComponent(JSON.stringify(teamInput))}`,
-      { method: 'GET', cookie },
-    );
+    const [teamRes, locRes, productsRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/logistics.teamOverview?input=${encodeURIComponent(JSON.stringify(teamInput))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/logistics.locationOverview?input=${encodeURIComponent(JSON.stringify(teamInput))}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
     redirectIfUnauthorized(teamRes, url.pathname);
     const allProviders = parseProvidersList(teamRes);
+    const allLocations = parseLocationsList(locRes);
 
     const SORT_BY_VALUES = new Set([
       'name',
@@ -69,8 +87,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ]);
     const q = (url.searchParams.get('q') ?? '').trim();
     const qLower = q.toLowerCase();
-    const sortByRaw = url.searchParams.get('sortBy') ?? 'deliveryRate';
-    const sortBy = SORT_BY_VALUES.has(sortByRaw) ? sortByRaw : 'deliveryRate';
+    const sortByRaw = url.searchParams.get('sortBy') ?? 'assigned';
+    const sortBy = SORT_BY_VALUES.has(sortByRaw) ? sortByRaw : 'assigned';
     const sortDirParam = url.searchParams.get('sortDir');
     const sortDir: 'asc' | 'desc' =
       sortDirParam === 'asc' || sortDirParam === 'desc'
@@ -125,6 +143,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return {
       providers: pagedProviders,
+      locations: allLocations,
       dateFilters: filters,
       periodAllTime,
       page,
@@ -154,6 +173,7 @@ export default function LogisticsTeamIndexRoute() {
       {(data) => (
           <LogisticsTeamPage
             providers={data.providers}
+            locations={data.locations}
             dateFilters={data.dateFilters}
             page={data.page}
             totalPages={data.totalPages}

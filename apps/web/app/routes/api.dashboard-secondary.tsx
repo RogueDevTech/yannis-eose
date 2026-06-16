@@ -121,11 +121,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const payoutP = needsPayout
       ? apiRequest<unknown>('/trpc/hr.payoutSummary', deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
-    const cartAbandonedInput = JSON.stringify({
-      ...(role === 'MEDIA_BUYER' ? { mediaBuyerId: user.id } : {}),
-    });
+    const cartAbandonedInput = JSON.stringify({ startDate, endDate });
     const cartAbandonedP = needsCartAbandoned
-      ? apiRequest<unknown>(`/trpc/cart.countAbandoned?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
+      ? apiRequest<unknown>(`/trpc/cartOrders.getStatusCounts?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
     const followUpInput = JSON.stringify({ startDate, endDate });
     const followUpP = needsFollowUp
@@ -159,8 +157,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => ({})),
       cartAbandonedP
         .then((r) => {
-          const d = r.ok ? (r.data as { result?: { data?: { count: number } } })?.result?.data : null;
-          return d?.count ?? 0;
+          const d = r.ok ? (r.data as { result?: { data?: Record<string, number> } })?.result?.data : null;
+          if (!d) return 0;
+          return Object.entries(d).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
         })
         .catch(() => 0),
       followUpP

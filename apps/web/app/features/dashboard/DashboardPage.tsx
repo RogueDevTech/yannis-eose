@@ -487,6 +487,12 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
           to: '/admin/marketing/orders?status=DELIVERED',
         },
+        {
+          label: 'Confirmed',
+          value: metrics.confirmedOrders.toString(),
+          valueClassName: metrics.confirmedOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+          to: '/admin/marketing/orders?status=CONFIRMED',
+        },
         { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
         {
           label: 'True ROAS',
@@ -560,8 +566,8 @@ function MarketingDashboard({
         <FilterPills
           variant="tab"
           options={[
+            { label: 'My Team', value: 'team' },
             { label: 'My Performance', value: 'personal' },
-            { label: 'Team', value: 'team' },
           ]}
           value={viewTab}
           onChange={(v) => setViewTab(v as 'personal' | 'team')}
