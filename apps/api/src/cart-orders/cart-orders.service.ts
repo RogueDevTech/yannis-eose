@@ -32,7 +32,29 @@ export class CartOrdersService {
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-  ) {}
+  ) {
+    // One-time backfill: set media_buyer_id on cart_orders that are missing it
+    // by looking up the source cart abandonment's campaign → mediaBuyerId.
+    this.backfillMissingMediaBuyers().catch((err) =>
+      this.logger.warn(`Cart orders MB backfill failed: ${err.message}`),
+    );
+  }
+
+  private async backfillMissingMediaBuyers() {
+    const result = await this.db.execute(sql`
+      UPDATE cart_orders co
+      SET media_buyer_id = c.media_buyer_id
+      FROM cart_abandonments ca
+      JOIN campaigns c ON c.id = ca.campaign_id
+      WHERE co.source_cart_id = ca.id
+        AND co.media_buyer_id IS NULL
+        AND c.media_buyer_id IS NOT NULL
+    `);
+    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (count > 0) {
+      this.logger.log(`Backfilled media_buyer_id on ${count} cart orders`);
+    }
+  }
 
   // ── List Cart Orders ─────────────────────────────────────────────────
 

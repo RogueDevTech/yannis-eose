@@ -1,0 +1,28 @@
+# Render Blueprint — DEV ONLY
+# https://render.com/docs/blueprint-spec
+#
+# Usage: connect this repo on Render and it auto-discovers this file.
+# All secrets are marked sync:false — set them manually in the Render dashboard.
+
+services:
+  - type: web
+    name: yannis-api-dev
+    runtime: docker
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: .
+    plan: starter # free-tier; upgrade to starter-plus ($7/mo) to avoid cold starts
+    region: frankfurt # closest to europe-west2 (prod GCP region)
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: PORT
+        value: "4444"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false # set to your Vercel preview URL, e.g. https://yannis-dev.vercel.app
