@@ -131,12 +131,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const productFilter = url.searchParams.get('productId') ?? undefined;
     const locationFilter = url.searchParams.get('locationId') ?? undefined;
     const shipmentFilter = url.searchParams.get('shipmentId') ?? undefined;
+    const startDate = url.searchParams.get('startDate') ?? undefined;
+    const endDate = url.searchParams.get('endDate') ?? undefined;
+    const periodAllTime = url.searchParams.get('periodAllTime') === 'true';
 
     const providerInput = encodeURIComponent(JSON.stringify({ providerId }));
     const locationsInput = encodeURIComponent(
       JSON.stringify({ providerId, page: 1, limit: 100 }),
     );
-    const teamInputEnc = encodeURIComponent(JSON.stringify({}));
+    const teamInputEnc = encodeURIComponent(JSON.stringify({
+      ...(periodAllTime ? {} : {
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      }),
+      ...(productFilter ? { productId: productFilter } : {}),
+    }));
     const movementsInput = encodeURIComponent(
       JSON.stringify({
         providerId,
@@ -144,6 +153,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         limit: 40,
         ...(productFilter ? { productId: productFilter } : {}),
         ...(locationFilter ? { locationId: locationFilter } : {}),
+        ...(periodAllTime ? {} : {
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+        }),
       }),
     );
 
@@ -227,6 +240,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       productBreakdown,
       locationBreakdown,
       shipments,
+      dateFilters: {
+        startDate: startDate ?? null,
+        endDate: endDate ?? null,
+        periodAllTime,
+      },
     };
   })();
 
@@ -260,6 +278,7 @@ export default function LogisticsProviderDetailRoute() {
             productBreakdown={data.productBreakdown}
             locationBreakdown={data.locationBreakdown}
             shipments={data.shipments}
+            dateFilters={data.dateFilters}
           />
         )}
       </CachedAwait>

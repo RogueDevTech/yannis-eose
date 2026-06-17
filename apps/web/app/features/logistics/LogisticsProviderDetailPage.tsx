@@ -18,6 +18,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Pagination } from '~/components/ui/pagination';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -383,6 +384,7 @@ export interface LogisticsProviderDetailPageProps {
   productBreakdown: { productId: string; productName: string; received: number; sold: number; available: number; reserved: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
   locationBreakdown: { locationId: string; locationName: string; available: number; reserved: number; received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
   shipments: ShipmentOption[];
+  dateFilters?: { startDate: string | null; endDate: string | null; periodAllTime: boolean };
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -399,6 +401,7 @@ export function LogisticsProviderDetailPage({
   productBreakdown,
   locationBreakdown,
   shipments,
+  dateFilters,
 }: LogisticsProviderDetailPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true }).busy;
@@ -580,6 +583,13 @@ export function LogisticsProviderDetailPage({
             )}
           />
         }
+      />
+
+      <DateFilterBar
+        startDate={dateFilters?.startDate ?? undefined}
+        endDate={dateFilters?.endDate ?? undefined}
+        periodAllTime={dateFilters?.periodAllTime}
+        chrome="pill"
       />
 
       {shipments.length > 0 && (
