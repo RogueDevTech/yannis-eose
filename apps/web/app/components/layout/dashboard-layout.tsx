@@ -1205,6 +1205,7 @@ function DashboardLayoutInner({
         currentBranchId={user?.currentBranchId}
         selectedBranchIds={(user as { selectedBranchIds?: string[] | null })?.selectedBranchIds ?? undefined}
         mirroredBy={user?.mirroredBy ?? null}
+        onSearchOpen={() => setSearchOpen(true)}
       />
 
       <IosInstallBanner />

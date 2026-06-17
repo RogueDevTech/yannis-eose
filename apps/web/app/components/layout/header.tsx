@@ -62,6 +62,7 @@ interface HeaderProps {
    * Surfaced from the layout, threaded down from `getCurrentUser`.
    */
   mirroredBy?: { id: string; name: string; role: string } | null;
+  onSearchOpen?: () => void;
 }
 
 const NOTIFICATION_COLORS: Record<string, string> = {
@@ -124,6 +125,7 @@ export function Header({
   selectedBranchIds,
   branchGroups,
   mirroredBy,
+  onSearchOpen,
 }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileUserMenuOpen, setMobileUserMenuOpen] = useState(false);
@@ -311,6 +313,18 @@ export function Header({
 
       {/* Branch + actions: single row with even gaps (avoids justify-between wedge between branch and bell). */}
       <div className="flex items-center gap-2 lg:gap-3 ml-auto min-w-0">
+        {onSearchOpen && (
+          <button
+            type="button"
+            onClick={onSearchOpen}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-app-fg-muted hover:text-app-fg hover:bg-app-hover transition-colors"
+            aria-label="Search"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+          </button>
+        )}
         {!branchesHydrationReady && (
           <div
             className="hidden lg:flex items-center shrink-0 h-9 w-[min(12rem,28vw)] rounded-md bg-app-hover animate-pulse"
