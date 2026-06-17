@@ -88,17 +88,24 @@ export function CachedAwait<T>({
   // page 2 props while the promise resolves — and `isLoaderRefetchBusy` keeps
   // the skeleton overlay stuck because navigation already completed.
   const resolvedForKeyRef = useRef(cacheKey);
+  const prevPathnameRef = useRef(location.pathname);
   if (cacheKey !== resolvedForKeyRef.current) {
+    const prevPathname = prevPathnameRef.current;
+    prevPathnameRef.current = location.pathname;
     resolvedForKeyRef.current = cacheKey;
     const freshCache = getCachedLoaderEntry(cacheKey);
     cachedRef.current = freshCache;
-    if (freshCache) {
-      // Cache hit for the new URL — show it immediately (stale-while-revalidate).
+    const isSamePageFilterChange = location.pathname === prevPathname;
+    if (freshCache && !isSamePageFilterChange) {
+      // Cross-page cache hit — show it immediately (stale-while-revalidate).
       setResolved(freshCache.data as T);
-    } else {
-      // No cache — clear stale data so fallback renders.
+    } else if (!freshCache && !resolved) {
+      // No cache and no current data — show fallback skeleton.
       setResolved(null);
     }
+    // Same-page filter change (with or without cache): keep showing current
+    // data behind the TableLoadingOverlay until the fresh promise resolves.
+    // This prevents the jarring flash of stale cached data from a prior visit.
   }
 
   // Resolve the live deferred promise; on settle, snapshot into cache and

@@ -920,7 +920,8 @@ export function OrderDetailPage({
   callablePhone,
   isFollowUpOrder = false,
   isCartOrder = false,
-}: OrderDetailStreamData & OrderDetailPageExtraProps) {
+  isMirroring = false,
+}: OrderDetailStreamData & OrderDetailPageExtraProps & { isMirroring?: boolean }) {
   const fetcher = useFetcher();
   const recordCallFetcher = useFetcher();
   const scheduleFetcher = useFetcher();
@@ -1297,7 +1298,7 @@ export function OrderDetailPage({
     successMessage: 'Price change request submitted',
     skipErrorToast: adjustItemsModalOpen,
   });
-  useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated' });
+  useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated', skipErrorToast: true });
   useFetcherToast(csCommentFetcher.data, {
     successMessage: 'Comment added',
     skipErrorToast: addCommentModalOpen,
@@ -1544,6 +1545,7 @@ export function OrderDetailPage({
   useEffect(() => { autoEnsureInvoiceFiredRef.current = false; }, [order.id]);
   useEffect(() => {
     if (autoEnsureInvoiceFiredRef.current) return;
+    if (isMirroring) return;
     // Wait for the invoice fetch to complete with a definitive "no invoice" result
     const fetchDone = invoiceFetcher.state === 'idle' && invoiceFetcher.data;
     if (!fetchDone) return;
@@ -2076,23 +2078,25 @@ export function OrderDetailPage({
                     ) : (
                       <>
                         <p className="text-sm text-app-fg-muted mb-3">
-                          This order doesn't have an invoice yet.
+                          This order doesn&apos;t have an invoice yet.
                         </p>
-                        <div className="flex justify-end">
-                          <ensureInvoiceFetcher.Form method="post">
-                            <input type="hidden" name="intent" value="ensureInvoice" />
-                            {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
-                            {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
-                            <Button
-                              type="submit"
-                              variant="primary"
-                              size="sm"
-                              disabled={ensureInvoiceFetcher.state !== 'idle'}
-                            >
-                              Generate invoice
-                            </Button>
-                          </ensureInvoiceFetcher.Form>
-                        </div>
+                        {!isMirroring && (
+                          <div className="flex justify-end">
+                            <ensureInvoiceFetcher.Form method="post">
+                              <input type="hidden" name="intent" value="ensureInvoice" />
+                              {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                              {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
+                              <Button
+                                type="submit"
+                                variant="primary"
+                                size="sm"
+                                disabled={ensureInvoiceFetcher.state !== 'idle'}
+                              >
+                                Generate invoice
+                              </Button>
+                            </ensureInvoiceFetcher.Form>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>

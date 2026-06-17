@@ -153,6 +153,9 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
       if (exportCampaignId) base.campaignId = exportCampaignId;
       if (exportMediaBuyerId) base.mediaBuyerId = exportMediaBuyerId;
     }
+    if (config.reportKey === 'logistics_partners') {
+      if (exportProductId) base.productId = exportProductId;
+    }
     if (config.reportKey === 'inventory') {
       if (inventoryStatus) base.status = inventoryStatus;
       const parsedMax = Number.parseInt(inventoryMaxAvailable, 10);
@@ -474,6 +477,32 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
               onChange={(e) => setInventoryMaxAvailable(e.target.value)}
               placeholder="Leave blank for no threshold"
             />
+          </div>
+        )}
+
+        {config.reportKey === 'logistics_partners' && (
+          <div className="space-y-3 rounded-md border border-app-border bg-app-hover/40 p-3">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Logistics filters (optional)</p>
+            <FormSelect
+              label="Status"
+              value={exportStatus}
+              onChange={(e) => setExportStatus(e.target.value)}
+              options={[
+                { value: '', label: 'Any status' },
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'INACTIVE', label: 'Inactive' },
+              ]}
+            />
+            {productOptions.length > 0 && (
+              <SearchableSelect
+                label="Product"
+                value={exportProductId}
+                onChange={setExportProductId}
+                options={productOptions}
+                placeholder="All products"
+                controlSize="sm"
+              />
+            )}
           </div>
         )}
 

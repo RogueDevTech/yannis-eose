@@ -81,7 +81,11 @@ function parseProviderMovements(res: { ok: boolean; data: unknown }): ProviderMo
 }
 
 function buildTeamListHref(url: URL): string {
-  const qs = url.searchParams.toString();
+  // If we came from the partners page, go back there.
+  if (url.searchParams.get('from') === 'partners') return '/admin/logistics/partners';
+  const sp = new URLSearchParams(url.searchParams);
+  sp.delete('from');
+  const qs = sp.toString();
   return qs ? `/admin/logistics/team?${qs}` : '/admin/logistics/team';
 }
 

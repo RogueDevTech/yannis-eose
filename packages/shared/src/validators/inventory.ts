@@ -113,6 +113,8 @@ export type StockAdjustmentInput = z.infer<typeof stockAdjustmentSchema>;
 export const listInventorySchema = z.object({
   productId: z.string().uuid().optional(),
   locationId: z.string().uuid().optional(),
+  /** Filter by logistics provider — returns levels across all of the provider's locations. */
+  providerId: z.string().uuid().optional(),
   /** Only levels that still hold FIFO from this verified shipment (batch remaining > 0). */
   shipmentId: z.string().uuid().optional(),
   belowThreshold: z.boolean().optional(),

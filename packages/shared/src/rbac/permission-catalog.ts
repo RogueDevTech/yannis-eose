@@ -204,6 +204,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'finance.export', resource: 'finance', action: 'export', description: 'Download CSV / XLSX of disbursements, delivery remittances, invoices, P&L' },
   { code: 'hr.export', resource: 'hr', action: 'export', description: 'Download payroll batch payout documents (sensitive — includes bank fields)' },
   { code: 'audit.export', resource: 'audit', action: 'export', description: 'Download CSV of the audit trail' },
+  { code: 'logistics.export', resource: 'logistics', action: 'export', description: 'Download CSV / XLSX of logistics partner performance, stock, and remittance data' },
 ];
 
 export const CANONICAL_PERMISSIONS: PermissionCatalogEntry[] = [
@@ -272,6 +273,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'audit.export',
     'hr.export',
     'marketing.export',
+    'logistics.export',
     // Page-scoped slice of logistics.read so Branch Admin keeps Logistics
     // companies visibility after the 2026-05 split. Branch Admin never had
     // transfers.read, so partner transfers remains out of scope.
@@ -431,6 +433,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'finance.read',
     'orders.export',
     'inventory.export',
+    'logistics.export',
     // Page-scoped slices of logistics.read / transfers.read — preserves
     // visibility after the 2026-05 split into per-page codes.
     'logistics.providers.view',

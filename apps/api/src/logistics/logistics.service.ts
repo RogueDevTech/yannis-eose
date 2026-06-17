@@ -2885,14 +2885,23 @@ export class LogisticsService {
     }>(sql`
       SELECT
         ll.provider_id AS "providerId",
-        COALESCE(SUM(CASE WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "received",
+        COALESCE(SUM(CASE
+          WHEN sm.movement_type IN ('INTAKE','RESTOCK') THEN ABS(sm.quantity)
+          WHEN sm.movement_type = 'TRANSFER_IN' AND (ll_from.provider_id IS NULL OR ll_from.provider_id != ll.provider_id) THEN ABS(sm.quantity)
+          ELSE 0
+        END), 0)::int AS "received",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "sold",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE
+          WHEN sm.movement_type = 'TRANSFER_OUT' AND (ll_to.provider_id IS NULL OR ll_to.provider_id != ll.provider_id) THEN ABS(sm.quantity)
+          ELSE 0
+        END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN sm.quantity ELSE 0 END), 0)::int AS "adjusted",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
       FROM stock_movements sm
       INNER JOIN logistics_locations ll ON ll.id = COALESCE(sm.from_location_id, sm.to_location_id)
+      LEFT JOIN logistics_locations ll_from ON ll_from.id = sm.from_location_id
+      LEFT JOIN logistics_locations ll_to ON ll_to.id = sm.to_location_id
       WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK','DELIVERY','TRANSFER_OUT','ADJUSTMENT','WRITE_OFF','DISPATCH')
         ${productId ? sql`AND sm.product_id = ${productId}::uuid` : sql``}
       GROUP BY ll.provider_id
@@ -2997,14 +3006,20 @@ export class LogisticsService {
       };
     });
 
+    // When group-scoped, hide providers with zero activity in the selected group.
+    // They belong to other companies and are just noise.
+    const filtered = effectiveBranchIds?.length
+      ? result.filter((p) => p.totalAssigned > 0 || p.availableStock > 0 || p.reservedStock > 0)
+      : result;
+
     // Sort: highest delivery rate first, then largest volume — providers with no
     // orders sink to the bottom (deliveryRate 0, totalAssigned 0).
-    result.sort((a, b) => {
+    filtered.sort((a, b) => {
       if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
       return b.totalAssigned - a.totalAssigned;
     });
 
-    return result;
+    return filtered;
   }
 
   /**
@@ -3094,7 +3109,7 @@ export class LogisticsService {
         COALESCE(SUM(CASE WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "received",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "sold",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN sm.quantity ELSE 0 END), 0)::int AS "adjusted",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
       FROM stock_movements sm
@@ -3186,11 +3201,16 @@ export class LogisticsService {
       };
     });
 
-    result.sort((a, b) => {
+    // When group-scoped, hide locations with zero activity in the selected group.
+    const filtered = effectiveBranchIds?.length
+      ? result.filter((l) => l.totalAssigned > 0 || l.availableStock > 0 || l.reservedStock > 0)
+      : result;
+
+    filtered.sort((a, b) => {
       if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
       return b.totalAssigned - a.totalAssigned;
     });
 
-    return result;
+    return filtered;
   }
 }

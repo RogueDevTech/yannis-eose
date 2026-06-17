@@ -80,11 +80,12 @@ interface StockBreakdownRow {
   adjusted: number;
   writtenOff: number;
   dispatched: number;
+  reserved: number;
   available: number;
 }
 
 function checkConsistency(row: StockBreakdownRow) {
-  const expectedAvailable = row.received - row.sold - row.transferredOut - row.adjusted - row.writtenOff - row.dispatched;
+  const expectedAvailable = row.received - row.sold - row.transferredOut + row.adjusted - row.writtenOff - row.reserved;
   const diff = row.available - expectedAvailable;
   return { expectedAvailable, diff, isConsistent: diff === 0 };
 }
@@ -105,12 +106,11 @@ function generateStockReport(
   lines.push('');
   lines.push(`STOCK FLOW SUMMARY`);
   lines.push(`------------------`);
-  lines.push(`Total Received:      ${row.received.toLocaleString()} units`);
+  const netReceived = row.received + row.adjusted;
+  lines.push(`Received:            ${netReceived.toLocaleString()} units`);
   lines.push(`Sold (Delivered):    ${row.sold.toLocaleString()} units`);
-  lines.push(`Transferred Out:     ${row.transferredOut.toLocaleString()} units`);
-  if (row.adjusted > 0) lines.push(`Manual Adjustments:  −${row.adjusted.toLocaleString()} units`);
-  if (row.writtenOff > 0) lines.push(`Written Off:         ${row.writtenOff.toLocaleString()} units`);
-  if (row.dispatched > 0) lines.push(`Dispatched (in transit): ${row.dispatched.toLocaleString()} units`);
+  lines.push(`Transferred Out:     ${row.transferredOut > 0 ? '−' : ''}${row.transferredOut.toLocaleString()} units`);
+  lines.push(`Reserved:            ${row.reserved.toLocaleString()} units`);
   lines.push('');
   lines.push(`BALANCE`);
   lines.push(`-------`);
@@ -380,8 +380,8 @@ export interface LogisticsProviderDetailPageProps {
   productFilter: string | null;
   locationFilter: string | null;
   shipmentFilter: string | null;
-  productBreakdown: { productId: string; productName: string; received: number; sold: number; available: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
-  locationBreakdown: { locationId: string; locationName: string; available: number; received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
+  productBreakdown: { productId: string; productName: string; received: number; sold: number; available: number; reserved: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
+  locationBreakdown: { locationId: string; locationName: string; available: number; reserved: number; received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[];
   shipments: ShipmentOption[];
 }
 
@@ -416,6 +416,7 @@ export function LogisticsProviderDetailPage({
   const totalAdjusted = locationBreakdown.reduce((acc, l) => acc + l.adjusted, 0);
   const totalWrittenOff = locationBreakdown.reduce((acc, l) => acc + l.writtenOff, 0);
   const totalDispatched = locationBreakdown.reduce((acc, l) => acc + l.dispatched, 0);
+  const totalReserved = locationBreakdown.reduce((acc, l) => acc + l.reserved, 0);
 
   const handleProductFilter = useCallback(
     (productId: string) => {
@@ -506,6 +507,7 @@ export function LogisticsProviderDetailPage({
                       adjusted: totalAdjusted,
                       writtenOff: totalWrittenOff,
                       dispatched: totalDispatched,
+                      reserved: totalReserved,
                       available: totalAvailable,
                       qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
                       qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
@@ -548,6 +550,7 @@ export function LogisticsProviderDetailPage({
                       adjusted: totalAdjusted,
                       writtenOff: totalWrittenOff,
                       dispatched: totalDispatched,
+                      reserved: totalReserved,
                       available: totalAvailable,
                       qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
                       qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
@@ -601,14 +604,13 @@ export function LogisticsProviderDetailPage({
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
           <OverviewStatStrip
             mobileGrid
-            wrap
             tileClassName="!py-3.5 !px-4 min-w-[9rem]"
             items={[
               {
                 label: 'Received',
-                value: (<span className="font-semibold text-app-fg tabular-nums">{totalReceived.toLocaleString()}</span>),
+                value: (<span className="font-semibold text-app-fg tabular-nums">{(totalReceived + totalAdjusted).toLocaleString()}</span>),
                 plainValue: true,
-                title: 'Total units ever received at this provider (all-time)',
+                title: 'Total units received at this provider (net of reconciliations)',
               },
               {
                 label: 'Available',
@@ -622,30 +624,18 @@ export function LogisticsProviderDetailPage({
                 plainValue: true,
                 title: 'Total units sold via delivery movements',
               },
-              ...(totalTransferredOut > 0 ? [{
+              {
                 label: 'Transferred out',
-                value: (<span className="font-semibold text-app-fg tabular-nums">{totalTransferredOut.toLocaleString()}</span>),
-                plainValue: true as const,
+                value: (<span className={`font-semibold tabular-nums ${totalTransferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{totalTransferredOut > 0 ? '−' : ''}{totalTransferredOut.toLocaleString()}</span>),
+                plainValue: true,
                 title: 'Units transferred out to other providers/locations',
-              }] : []),
-              ...(totalAdjusted > 0 ? [{
-                label: 'Adjusted',
-                value: (<span className="font-semibold text-warning-600 dark:text-warning-400 tabular-nums">−{totalAdjusted.toLocaleString()}</span>),
-                plainValue: true as const,
-                title: 'Units removed via manual stock adjustments',
-              }] : []),
-              ...(totalWrittenOff > 0 ? [{
-                label: 'Written off',
-                value: (<span className="font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{totalWrittenOff.toLocaleString()}</span>),
-                plainValue: true as const,
-                title: 'Units written off (damaged, lost, expired)',
-              }] : []),
-              ...(totalDispatched > 0 ? [{
-                label: 'Dispatched',
-                value: (<span className="font-semibold text-app-fg tabular-nums">{totalDispatched.toLocaleString()}</span>),
-                plainValue: true as const,
-                title: 'Units dispatched to delivery agents (in transit)',
-              }] : []),
+              },
+              {
+                label: 'Reserved',
+                value: (<span className={`font-semibold tabular-nums ${totalReserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{totalReserved.toLocaleString()}</span>),
+                plainValue: true,
+                title: 'Units reserved for confirmed orders (not yet delivered)',
+              },
               {
                 label: 'Delivered',
                 value: (
@@ -717,13 +707,11 @@ export function LogisticsProviderDetailPage({
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-sm tabular-nums min-w-0">
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Received</span> <span className="font-semibold text-app-fg">{l.received.toLocaleString()}</span></span>
+                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Received</span> <span className="font-semibold text-app-fg">{(l.received + l.adjusted).toLocaleString()}</span></span>
                 <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Sold</span> <span className={`font-semibold ${l.sold > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>{l.sold.toLocaleString()}</span></span>
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Transferred</span> <span className={`font-semibold ${l.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.transferredOut.toLocaleString()}</span></span>
+                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Transferred</span> <span className={`font-semibold ${l.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.transferredOut > 0 ? '−' : ''}{l.transferredOut.toLocaleString()}</span></span>
                 <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Available</span> <span className={`font-semibold ${l.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{l.available.toLocaleString()}</span></span>
-                {l.adjusted > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Adjusted</span> <span className="font-semibold text-warning-600 dark:text-warning-400">−{l.adjusted.toLocaleString()}</span></span>}
-                {l.writtenOff > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Written off</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.writtenOff.toLocaleString()}</span></span>}
-                {l.dispatched > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Dispatched</span> <span className="font-semibold text-app-fg">{l.dispatched.toLocaleString()}</span></span>}
+                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Reserved</span> <span className={`font-semibold ${l.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.reserved.toLocaleString()}</span></span>
                 <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Remitted</span> <span className={`font-semibold ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{l.qtyRemitted.toLocaleString()}</span> <span className={l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>({formatNaira(l.amountRemitted)})</span>{l.qtyPending > 0 && <><span className="text-app-fg-muted text-[0.6em] mx-1">●</span><span className="font-semibold text-warning-600 dark:text-warning-400">{l.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(l.amountPending)}) pending</span></>}</span>
                 {(() => { const awaiting = Math.max(0, l.sold - l.qtyRemitted - l.qtyPending); return awaiting > 0 ? <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{awaiting.toLocaleString()} sold — no remittance yet</span></span> : null; })()}
               </div>
@@ -755,13 +743,11 @@ export function LogisticsProviderDetailPage({
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-sm tabular-nums min-w-0">
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Received</span> <span className="font-semibold text-app-fg">{p.received.toLocaleString()}</span></span>
+                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Received</span> <span className="font-semibold text-app-fg">{(p.received + p.adjusted).toLocaleString()}</span></span>
                   <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Sold</span> <span className={`font-semibold ${p.sold > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>{p.sold.toLocaleString()}</span></span>
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Transferred</span> <span className={`font-semibold ${p.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.transferredOut.toLocaleString()}</span></span>
+                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Transferred</span> <span className={`font-semibold ${p.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.transferredOut > 0 ? '−' : ''}{p.transferredOut.toLocaleString()}</span></span>
                   <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Available</span> <span className={`font-semibold ${p.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{p.available.toLocaleString()}</span></span>
-                  {p.adjusted > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Adjusted</span> <span className="font-semibold text-warning-600 dark:text-warning-400">−{p.adjusted.toLocaleString()}</span></span>}
-                  {p.writtenOff > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Written off</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.writtenOff.toLocaleString()}</span></span>}
-                  {p.dispatched > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Dispatched</span> <span className="font-semibold text-app-fg">{p.dispatched.toLocaleString()}</span></span>}
+                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Reserved</span> <span className={`font-semibold ${p.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.reserved.toLocaleString()}</span></span>
                   <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Remitted</span> <span className={`font-semibold ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{p.qtyRemitted.toLocaleString()}</span> <span className={p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>({formatNaira(p.amountRemitted)})</span>{p.qtyPending > 0 && <><span className="text-app-fg-muted text-[0.6em] mx-1">●</span><span className="font-semibold text-warning-600 dark:text-warning-400">{p.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(p.amountPending)}) pending</span></>}</span>
                   {(() => { const awaiting = Math.max(0, p.sold - p.qtyRemitted - p.qtyPending); return awaiting > 0 ? <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{awaiting.toLocaleString()} sold — no remittance yet</span></span> : null; })()}
                 </div>
@@ -928,12 +914,10 @@ export function LogisticsProviderDetailPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Stock Flow</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Total Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{r.received.toLocaleString()}</td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{(r.received + r.adjusted).toLocaleString()}</td></tr>
                     <tr><td className="px-4 py-2.5 text-app-fg-muted">Sold (Delivered)</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums text-brand-600 dark:text-brand-400">{r.sold.toLocaleString()}</td></tr>
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{r.transferredOut.toLocaleString()}</td></tr>
-                    {r.adjusted > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Manual Adjustments</td><td className="px-4 py-2.5 text-right font-semibold text-warning-600 dark:text-warning-400 tabular-nums">−{r.adjusted.toLocaleString()}</td></tr>}
-                    {r.writtenOff > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Written Off</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{r.writtenOff.toLocaleString()}</td></tr>}
-                    {r.dispatched > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Dispatched</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{r.dispatched.toLocaleString()}</td></tr>}
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${r.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{r.transferredOut > 0 ? '−' : ''}{r.transferredOut.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Reserved</td><td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${r.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{r.reserved.toLocaleString()}</td></tr>
                   </tbody></table></div>
                 </div>
                 <div className="space-y-2">

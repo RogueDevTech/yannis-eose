@@ -919,12 +919,12 @@ export const ordersRouter = router({
    * List Sales closers for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
    */
   listCSClosers: authedProcedure.query(async ({ ctx }) => {
-    return getOrdersService().listCSClosers(ctx.user);
+    return getOrdersService().listCSClosers(ctx.user, ctx.effectiveBranchIds);
   }),
 
   /** Like listCSClosers but includes branch memberships — used by follow-up group modal. */
   listCSClosersWithBranches: permissionProcedure('orders.followUp').query(async ({ ctx }) => {
-    return getOrdersService().listCSClosersWithBranches(ctx.user);
+    return getOrdersService().listCSClosersWithBranches(ctx.user, ctx.effectiveBranchIds);
   }),
 
   /**
@@ -1349,6 +1349,7 @@ export const ordersRouter = router({
               { page: 1, limit: 100, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
               ctx.user.id,
               ctx.user.role,
+              ctx.activeGroupId,
             )
           : Promise.resolve(null),
         getCartService().countAbandoned({
@@ -2196,8 +2197,8 @@ export const ordersRouter = router({
     }),
 
   listFollowUpGroups: permissionProcedure('orders.followUp')
-    .query(async () => {
-      return getOrdersService().listFollowUpGroups();
+    .query(async ({ ctx }) => {
+      return getOrdersService().listFollowUpGroups(ctx.effectiveBranchIds);
     }),
 
   getFollowUpGroup: permissionProcedure('orders.followUp')
@@ -2228,8 +2229,8 @@ export const ordersRouter = router({
 
   followUpConfigListRules: permissionProcedure('orders.followUpConfig')
     .input(listFollowUpRulesSchema)
-    .query(async ({ input }) => {
-      return getFollowUpConfigService().listRules(input.enabledOnly);
+    .query(async ({ input, ctx }) => {
+      return getFollowUpConfigService().listRules(input.enabledOnly, ctx.effectiveBranchIds);
     }),
 
   followUpConfigCreateRule: permissionProcedure('orders.followUpConfig')
