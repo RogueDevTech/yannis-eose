@@ -3162,6 +3162,7 @@ export class LogisticsService {
       return {
         locationId: loc.id,
         locationName: loc.name,
+        providerId: loc.providerId,
         providerName: loc.providerName,
         status: loc.status ?? 'ACTIVE',
         totalAssigned,

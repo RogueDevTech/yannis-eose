@@ -226,7 +226,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'bulkTransition') {
-    await requirePermission(request, 'orders.write');
+    await requirePermission(request, 'orders.bulkAssign');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
     const newStatus = form.get('newStatus') as string;
     const reason = form.get('reason')?.toString() || undefined;

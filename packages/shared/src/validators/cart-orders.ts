@@ -8,6 +8,7 @@ export const listCartOrdersSchema = z.object({
   status: z.string().optional(),
   statuses: z.array(z.string()).optional(),
   assignedCsId: z.string().uuid().optional(),
+  mediaBuyerId: z.string().uuid().optional(),
   unassignedOnly: z.boolean().optional(),
   branchId: z.string().uuid().optional(),
   search: z.string().optional(),

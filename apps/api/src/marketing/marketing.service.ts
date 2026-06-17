@@ -5843,6 +5843,22 @@ export class MarketingService {
     if (input.status) {
       conditions.push(eq(schema.campaigns.status, input.status));
     }
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        or(
+          ilike(schema.campaigns.name, term),
+          ilike(schema.campaigns.id, term),
+          inArray(
+            schema.campaigns.mediaBuyerId,
+            this.db
+              .select({ id: schema.users.id })
+              .from(schema.users)
+              .where(ilike(schema.users.name, term)),
+          ),
+        )!,
+      );
+    }
     const eIds = opts?.effectiveBranchIds;
     if (branchId) {
       // A branch's form list shows forms attributed to it, PLUS "parked" forms

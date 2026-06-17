@@ -33,6 +33,7 @@ import {
   type OnboardingModalGate,
   useLoginModalGate,
 } from '~/contexts/login-modal-gate';
+import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
 
 interface Notification {
   id: string;
@@ -776,6 +777,8 @@ function DashboardLayoutInner({
   const { onboardingGate } = useLoginModalGate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  useSearchShortcut(() => setSearchOpen(true));
   const [showPushBanner, setShowPushBanner] = useState(false);
   const [pushEnabling, setPushEnabling] = useState(false);
   const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription(user?.id ?? null, { readOnly: user?.role === 'SUPPORT' });
@@ -1163,6 +1166,7 @@ function DashboardLayoutInner({
           </div>
         </div>
       )}
+      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
       <NavProgressBar />
       <Sidebar
         groups={navGroups}

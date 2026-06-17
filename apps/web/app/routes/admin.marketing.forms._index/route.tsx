@@ -116,7 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const listInput = {
     page: 1,
-    limit: 20,
+    limit: 500,
     ...(mediaBuyerId && { mediaBuyerId }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));

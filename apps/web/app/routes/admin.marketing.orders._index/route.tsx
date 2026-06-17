@@ -206,6 +206,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           ...(search ? { search } : {}),
           ...(startDate ? { startDate } : {}),
           ...(endDate ? { endDate } : {}),
+          ...(mediaBuyerId ? { mediaBuyerId } : {}),
         }),
       );
       const cartsRes = await apiRequest<unknown>(`/trpc/cartOrders.list?input=${cartsInput}`, {

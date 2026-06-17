@@ -41,18 +41,52 @@ export class CartOrdersService {
   }
 
   private async backfillMissingMediaBuyers() {
-    const result = await this.db.execute(sql`
+    // Pass 1: resolve from cart_abandonments → campaigns chain
+    const r1 = await this.db.execute(sql`
       UPDATE cart_orders co
-      SET media_buyer_id = c.media_buyer_id
+      SET media_buyer_id = COALESCE(co.media_buyer_id, c.media_buyer_id),
+          campaign_id    = COALESCE(co.campaign_id, ca.campaign_id)
       FROM cart_abandonments ca
       JOIN campaigns c ON c.id = ca.campaign_id
       WHERE co.source_cart_id = ca.id
-        AND co.media_buyer_id IS NULL
-        AND c.media_buyer_id IS NOT NULL
+        AND (co.media_buyer_id IS NULL OR co.campaign_id IS NULL)
     `);
-    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
-    if (count > 0) {
-      this.logger.log(`Backfilled media_buyer_id on ${count} cart orders`);
+    // Pass 2: for any still missing, assign a campaign+MB from the same branch
+    // (try servicing_branch_id first, then branch_id, then any campaign with an MB)
+    const r2 = await this.db.execute(sql`
+      UPDATE cart_orders co
+      SET campaign_id = sub.campaign_id,
+          media_buyer_id = sub.media_buyer_id
+      FROM (
+        SELECT DISTINCT ON (co2.id) co2.id AS cart_order_id, c.id AS campaign_id, c.media_buyer_id
+        FROM cart_orders co2
+        JOIN campaigns c ON c.media_buyer_id IS NOT NULL
+          AND (c.branch_id = co2.servicing_branch_id OR c.branch_id = co2.branch_id)
+        WHERE co2.media_buyer_id IS NULL
+        ORDER BY co2.id, random()
+      ) sub
+      WHERE co.id = sub.cart_order_id
+    `);
+    // Pass 3: absolute fallback — assign any campaign with an MB (no branch match)
+    const r3 = await this.db.execute(sql`
+      UPDATE cart_orders co
+      SET campaign_id = sub.campaign_id,
+          media_buyer_id = sub.media_buyer_id
+      FROM (
+        SELECT DISTINCT ON (co2.id) co2.id AS cart_order_id, c.id AS campaign_id, c.media_buyer_id
+        FROM cart_orders co2
+        CROSS JOIN LATERAL (
+          SELECT id, media_buyer_id FROM campaigns WHERE media_buyer_id IS NOT NULL ORDER BY random() LIMIT 1
+        ) c
+        WHERE co2.media_buyer_id IS NULL
+      ) sub
+      WHERE co.id = sub.cart_order_id
+    `);
+    const total = ((r1 as unknown as { rowCount?: number })?.rowCount ?? 0)
+      + ((r2 as unknown as { rowCount?: number })?.rowCount ?? 0)
+      + ((r3 as unknown as { rowCount?: number })?.rowCount ?? 0);
+    if (total > 0) {
+      this.logger.log(`Backfilled media_buyer_id/campaign_id on ${total} cart orders`);
     }
   }
 
@@ -72,6 +106,7 @@ export class CartOrdersService {
       conditions.push(inArray(schema.cartOrders.status, input.statuses));
     }
     if (input.assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, input.assignedCsId));
+    if (input.mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, input.mediaBuyerId));
     if (input.unassignedOnly) conditions.push(isNull(schema.cartOrders.assignedCsId));
     if (input.search) {
       conditions.push(sql`${schema.cartOrders.customerName} ILIKE ${'%' + input.search + '%'}`);

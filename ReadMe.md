@@ -294,3 +294,15 @@ echo "$NEW_URL"
 
 
 
+
+
+# GCP_WORKLOAD_IDENTITY_PROVIDER=projects/297686176779/locations/global/workloadIdentityPools/github-actions/providers/github
+# GCP_SERVICE_ACCOUNT_EMAIL=github-deploy-dev@project-26c432ec-b4f1-4e21-a6a.iam.gserviceaccount.com
+
+# GCP_PROJECT_ID=project-26c432ec-b4f1-4e21-a6a
+# GCP_VM_NAME=dev-yannis-eose-vm
+# GCP_REGION=europe-west2
+# GCP_ZONE=europe-west2-a
+# GCP_ARTIFACT_REPOSITORY_ID=dev-yannis-eose
+# GCP_RUNTIME_ENV_SECRET_NAME=dev-yannis-runtime-env
+
