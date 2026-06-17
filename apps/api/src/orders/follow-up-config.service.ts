@@ -1476,7 +1476,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       resolvedOrderSource = src?.orderSource ?? 'follow-up';
     }
 
-    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+    const graduatedOrderId = await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       // Insert into orders table as a delivered follow-up order
       const [graduated] = await tx
         .insert(schema.orders)
@@ -1573,9 +1573,53 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           branchId: fuOrder.servicingBranchId,
         });
       }
+
+      return graduated?.id ?? null;
     });
 
     this.logger.log(`Follow-up order ${followUpOrderId} graduated to orders table`);
+
+    // Auto-generate invoice for the graduated order (same logic as CONFIRMED trigger).
+    if (graduatedOrderId) {
+      try {
+        const items = await this.db
+          .select({
+            quantity: schema.orderItems.quantity,
+            unitPrice: schema.orderItems.unitPrice,
+            offerLabel: schema.orderItems.offerLabel,
+            productName: schema.products.name,
+          })
+          .from(schema.orderItems)
+          .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+          .where(eq(schema.orderItems.orderId, graduatedOrderId));
+
+        if (items.length > 0) {
+          const lineItems = items.map((it) => ({
+            description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
+            quantity: it.quantity,
+            unitPrice: String(it.unitPrice),
+          }));
+          const totalAmount = items.reduce((sum, it) => sum + Number(it.unitPrice), 0);
+
+          await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+            await tx.insert(schema.invoices).values({
+              orderId: graduatedOrderId,
+              recipientInfo: {
+                name: fuOrder.customerName,
+                address: fuOrder.customerAddress ?? undefined,
+              },
+              lineItems,
+              taxRate: null,
+              totalAmount: totalAmount.toFixed(2),
+              dueDate: null,
+              status: 'DRAFT',
+            });
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`Auto-invoice for graduated follow-up ${graduatedOrderId} failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
   }
 
   // ── Transfer Follow-Up Order Between Branches ──────────────────────
