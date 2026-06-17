@@ -1,5 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
+import { inArray } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { db as schema } from '@yannis/shared';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import {
   listFundingSchema,
@@ -8,11 +11,13 @@ import {
   listOrdersSchema,
 } from '@yannis/shared';
 import type { ExportReportInput, ExportDateRange, ListOrdersInput } from '@yannis/shared';
+import { DRIZZLE } from '../database/database.module';
 import { OrdersService } from '../orders/orders.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
 import { UsersService } from '../users/users.service';
+import { LogisticsService } from '../logistics/logistics.service';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -87,12 +92,34 @@ function resolveOrderListDates(
 @Injectable()
 export class ReportsService {
   constructor(
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly ordersService: OrdersService,
     private readonly marketingService: MarketingService,
     private readonly inventoryService: InventoryService,
     private readonly financeService: FinanceService,
     private readonly usersService: UsersService,
+    private readonly logisticsService: LogisticsService,
   ) {}
+
+  /** Batch-resolve product IDs → names. */
+  private async resolveProductNames(ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({ id: schema.products.id, name: schema.products.name })
+      .from(schema.products)
+      .where(inArray(schema.products.id, ids));
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
+  /** Batch-resolve location IDs → names. */
+  private async resolveLocationNames(ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({ id: schema.logisticsLocations.id, name: schema.logisticsLocations.name })
+      .from(schema.logisticsLocations)
+      .where(inArray(schema.logisticsLocations.id, ids));
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
 
   async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null): Promise<{ filename: string; csvContent: string }> {
     const date = todayISODate();
@@ -111,6 +138,8 @@ export class ReportsService {
         return this.exportInventory(input as Extract<ExportReportInput, { reportKey: 'inventory' }>, user, date);
       case 'finance_invoices':
         return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date, effectiveBranchIds);
+      case 'logistics_partners':
+        return this.exportLogisticsPartners(input as Extract<ExportReportInput, { reportKey: 'logistics_partners' }>, user, currentBranchId, date, effectiveBranchIds);
       default:
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unsupported report key' });
     }
@@ -504,9 +533,15 @@ export class ReportsService {
         });
       }
     }
+    const productIds = [...new Set(all.map((inv) => inv.productId))];
+    const locationIds = [...new Set(all.map((inv) => inv.locationId))];
+    const [productNames, locationNames] = await Promise.all([
+      this.resolveProductNames(productIds),
+      this.resolveLocationNames(locationIds),
+    ]);
     const rows = all.map((inv) => ({
-      product: inv.productId,
-      location: inv.locationId,
+      product: productNames.get(inv.productId) ?? inv.productId,
+      location: locationNames.get(inv.locationId) ?? inv.locationId,
       stock: inv.stockCount,
       reserved: inv.reservedCount,
       available: Number(inv.stockCount) - Number(inv.reservedCount),
@@ -573,5 +608,77 @@ export class ReportsService {
       { key: 'dueDate', label: 'Due Date' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `invoices-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
+  }
+
+  private async exportLogisticsPartners(
+    input: Extract<ExportReportInput, { reportKey: 'logistics_partners' }>,
+    user: SessionUser,
+    currentBranchId: string | null,
+    date: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
+    const { startDate, endDate } = resolveDateRange(input.dateRange);
+    const performance = await this.logisticsService.getLogisticsProviderPerformance(
+      startDate,
+      endDate,
+      currentBranchId,
+      effectiveBranchIds,
+      input.filters?.productId,
+    );
+
+    let data = performance;
+    if (input.filters?.providerId) {
+      data = data.filter((p) => p.providerId === input.filters!.providerId);
+    }
+    if (input.filters?.status) {
+      data = data.filter((p) => p.status === input.filters!.status);
+    }
+
+    const rows = data.map((p) => ({
+      providerName: p.providerName,
+      status: p.status,
+      locationCount: p.locationCount,
+      totalAssigned: p.totalAssigned,
+      delivered: p.delivered,
+      inTransit: p.inTransit,
+      dispatched: p.dispatched,
+      returned: p.returned,
+      deliveryRate: `${p.deliveryRate.toFixed(2)}%`,
+      delinquencyRate: `${p.delinquencyRate.toFixed(2)}%`,
+      remittedAmount: p.remittedAmount,
+      pendingRemittanceAmount: p.pendingRemittanceAmount,
+      unitsDelivered: p.unitsDelivered,
+      availableStock: p.availableStock,
+      reservedStock: p.reservedStock,
+      stockReceived: p.stockReceived,
+      stockSold: p.stockSold,
+      stockTransferredOut: p.stockTransferredOut,
+      stockAdjusted: p.stockAdjusted,
+    }));
+
+    const columns = [
+      { key: 'providerName', label: 'Company' },
+      { key: 'status', label: 'Status' },
+      { key: 'locationCount', label: 'Locations' },
+      { key: 'totalAssigned', label: 'Orders Assigned' },
+      { key: 'delivered', label: 'Delivered' },
+      { key: 'inTransit', label: 'In Transit' },
+      { key: 'dispatched', label: 'Dispatched' },
+      { key: 'returned', label: 'Returned' },
+      { key: 'deliveryRate', label: 'Delivery %' },
+      { key: 'delinquencyRate', label: 'Delinquency %' },
+      { key: 'remittedAmount', label: 'Cash Remitted (₦)' },
+      { key: 'pendingRemittanceAmount', label: 'Pending Remittance (₦)' },
+      { key: 'unitsDelivered', label: 'Units Delivered' },
+      { key: 'availableStock', label: 'Available Stock' },
+      { key: 'reservedStock', label: 'Reserved Stock' },
+      { key: 'stockReceived', label: 'Stock Received' },
+      { key: 'stockSold', label: 'Stock Sold' },
+      { key: 'stockTransferredOut', label: 'Transferred Out' },
+      { key: 'stockAdjusted', label: 'Reconciled' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+
+    return { filename: `logistics-partners-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 }

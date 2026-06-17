@@ -357,6 +357,15 @@ export function InventoryOverviewLoadingShell() {
           />
         }
       />
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          { label: 'Total Stock', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Reserved', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Available', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Total Locations', value: <StatValuePulse className="min-w-[2rem]" /> },
+        ]}
+      />
       <Tabs
         value="levels"
         onChange={() => {}}
@@ -366,17 +375,9 @@ export function InventoryOverviewLoadingShell() {
           { value: 'reconciliation', label: 'Reconciliation' },
         ]}
       />
-      <OverviewStatStrip
-        mobileGrid
-        items={[
-          { label: 'Total Stock', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Reserved', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Available', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Movements', value: <StatValuePulse className="min-w-[2rem]" /> },
-        ]}
-      />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+      {/* Desktop filters */}
+      <div className="hidden md:flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <SearchableSelect
           id="levels-product-filter-shell"
           value={currentProduct}
@@ -458,7 +459,24 @@ export function InventoryOverviewLoadingShell() {
         ) : null}
       </div>
 
-      <div className="list-panel">
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
+              <div className="h-4 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block list-panel">
         <CompactTable<{ id: string }>
           withCard={false}
           columns={inventoryLevelsShellColumns()}

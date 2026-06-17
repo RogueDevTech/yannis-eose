@@ -111,6 +111,8 @@ export interface InventoryStreamData {
   levelsProductFilter?: string;
   /** Logistics location UUID filter (empty string = no filter). */
   levelsLocationFilter?: string;
+  /** Logistics provider UUID filter (empty string = no filter). */
+  levelsProviderFilter?: string;
   /** Inbound shipment UUID filter (empty string = no filter). */
   levelsShipmentFilter?: string;
   /** Broader location list for resolving names on stock rows (3PL, etc.); warehouse-only list stays on `locations` for receive UI. */

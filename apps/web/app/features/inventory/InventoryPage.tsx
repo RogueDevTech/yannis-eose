@@ -140,6 +140,34 @@ function LowStockAlertStrip({ items }: { items: LowStockAlertItem[] }) {
 
 type LowStockAlertItem = LowStockAlertsResult['items'][number];
 
+function LowStockAlertsCard({ alerts }: { alerts: LowStockAlertsResult }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-3 py-3 sm:px-4">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <svg className="w-5 h-5 text-warning-600 dark:text-warning-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+        </svg>
+        <p className="text-sm font-medium text-warning-800 dark:text-warning-200 min-w-0 flex-1">
+          {alerts.items.length} {alerts.items.length === 1 ? 'item' : 'items'} below the{' '}
+          <span className="tabular-nums">{alerts.threshold}</span>-unit threshold or with no stock
+        </p>
+        <svg
+          className={`w-4 h-4 text-warning-600 dark:text-warning-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {expanded && <LowStockAlertStrip items={alerts.items} />}
+    </div>
+  );
+}
+
 export function InventoryPage(props: InventoryStreamData) {
   if (props.inventoryExtras) {
     const { inventoryExtras, ...rest } = props;
@@ -166,7 +194,7 @@ export function InventoryPage(props: InventoryStreamData) {
     levelsTotalPages = 1,
     levelsLimit = 20,
     levelsProductFilter: serverProductFilter = '', levelsLocationFilter: serverLocationFilter = '',
-    levelsShipmentFilter: serverShipmentFilter = '',
+    levelsProviderFilter: serverProviderFilter = '', levelsShipmentFilter: serverShipmentFilter = '',
     levelsSearch: serverSearch = '',
     levelsSort: serverSort = 'default',
     levelsSortBy: serverSortBy = 'updatedAt',
@@ -202,7 +230,7 @@ export function InventoryPage(props: InventoryStreamData) {
   type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const updateLevelsParam = (key: 'productId' | 'locationId' | 'shipmentId' | 'sort' | 'search', value: string) => {
+  const updateLevelsParam = (key: 'productId' | 'locationId' | 'providerId' | 'shipmentId' | 'sort' | 'search', value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (!value || value === 'ALL' || value === 'default') next.delete(key);
@@ -238,6 +266,7 @@ export function InventoryPage(props: InventoryStreamData) {
       const next = new URLSearchParams(prev);
       next.delete('productId');
       next.delete('locationId');
+      next.delete('providerId');
       next.delete('shipmentId');
       next.delete('sort');
       next.delete('sortBy');
@@ -352,6 +381,16 @@ export function InventoryPage(props: InventoryStreamData) {
     }
     return map;
   }, [levels, products]);
+
+  // Low-stock alerts — resolved from deferred promise, shown via header button
+  const [resolvedAlerts, setResolvedAlerts] = useState<LowStockAlertsResult | null>(null);
+  useEffect(() => {
+    if (!lowStockAlerts) return;
+    Promise.resolve(lowStockAlerts).then((a) => {
+      const result = a as LowStockAlertsResult;
+      if (result?.items?.length > 0) setResolvedAlerts(result);
+    }).catch(() => {});
+  }, [lowStockAlerts]);
 
   // Low-stock threshold editor (admin-only)
   const [showThresholdModal, setShowThresholdModal] = useState(false);
@@ -601,6 +640,7 @@ export function InventoryPage(props: InventoryStreamData) {
   const levelsHasActiveFilters =
     currentProductFilter !== 'ALL' ||
     currentLocationFilter !== 'ALL' ||
+    !!serverProviderFilter ||
     currentShipmentFilter !== 'ALL' ||
     serverSortBy !== 'updatedAt' ||
     serverSortDir !== 'desc' ||
@@ -608,6 +648,7 @@ export function InventoryPage(props: InventoryStreamData) {
   const levelsFilterBadgeCount =
     (currentProductFilter !== 'ALL' ? 1 : 0) +
     (currentLocationFilter !== 'ALL' ? 1 : 0) +
+    (serverProviderFilter ? 1 : 0) +
     (currentShipmentFilter !== 'ALL' ? 1 : 0) +
     (serverSortBy !== 'updatedAt' || serverSortDir !== 'desc' ? 1 : 0);
   /** Toolbar hides entirely when there's no data AND no active filter. */
@@ -759,6 +800,7 @@ export function InventoryPage(props: InventoryStreamData) {
             filtersBadgeCount={
               activeTab === 'levels' && levelsShowToolbar ? levelsFilterBadgeCount : 0
             }
+            onClearFilters={levelsHasActiveFilters ? resetLevelsFilters : undefined}
             filters={
               activeTab === 'levels' && levelsShowToolbar ? levelsFilterControls : undefined
             }
@@ -1328,31 +1370,13 @@ export function InventoryPage(props: InventoryStreamData) {
             value: (totalStock - totalReserved).toLocaleString(),
             valueClassName: 'text-success-600 dark:text-success-400',
           },
+          { label: 'Total Locations', value: (displayLocations.length > 0 ? displayLocations : locations).length.toLocaleString(), valueClassName: 'text-app-fg' },
         ]}
       />
 
-      {activeTab === 'levels' && lowStockAlerts && (
-        <DeferredSection resolve={lowStockAlerts} fallback={<LowStockAlertsDeferredFallback />}>
-          {(alerts) => {
-            const a = alerts as LowStockAlertsResult;
-            if (a.items.length === 0) return null;
-            const preview = a.items;
-            return (
-              <div className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-3 py-3 sm:px-4">
-                <div className="flex items-center gap-2">
-                  <svg className="w-5 h-5 text-warning-600 dark:text-warning-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                  </svg>
-                  <p className="text-sm font-medium text-warning-800 dark:text-warning-200 min-w-0">
-                    {a.items.length} {a.items.length === 1 ? 'item' : 'items'} below the{' '}
-                    <span className="tabular-nums">{a.threshold}</span>-unit threshold or with no stock
-                  </p>
-                </div>
-                <LowStockAlertStrip items={preview} />
-              </div>
-            );
-          }}
-        </DeferredSection>
+      {/* Low-stock alerts — always visible inline when there are alerts */}
+      {activeTab === 'levels' && resolvedAlerts && resolvedAlerts.items.length > 0 && (
+        <LowStockAlertsCard alerts={resolvedAlerts} />
       )}
 
       {/* Tabs directly under the overview stats (stock levels plus optional inventory sub-views). */}
@@ -1375,6 +1399,7 @@ export function InventoryPage(props: InventoryStreamData) {
           const hasActiveFilters =
             currentProductFilter !== 'ALL' ||
             currentLocationFilter !== 'ALL' ||
+            !!serverProviderFilter ||
             currentShipmentFilter !== 'ALL' ||
             serverSortBy !== 'updatedAt' ||
             serverSortDir !== 'desc' ||
@@ -1382,6 +1407,7 @@ export function InventoryPage(props: InventoryStreamData) {
           const filterBadgeCount =
             (currentProductFilter !== 'ALL' ? 1 : 0) +
             (currentLocationFilter !== 'ALL' ? 1 : 0) +
+            (serverProviderFilter ? 1 : 0) +
             (currentShipmentFilter !== 'ALL' ? 1 : 0) +
             (serverSortBy !== 'updatedAt' || serverSortDir !== 'desc' ? 1 : 0);
 
@@ -1541,6 +1567,12 @@ export function InventoryPage(props: InventoryStreamData) {
                 <>
                   {productSelect}
                   {locationSelect}
+                  {serverProviderFilter && (
+                    <div className="relative flex items-center rounded-md border border-app-border bg-app-hover px-3 h-9">
+                      <FilterDismiss onClear={() => updateLevelsParam('providerId', '')} />
+                      <span className="text-xs text-app-fg-muted whitespace-nowrap">Filtered by company</span>
+                    </div>
+                  )}
                   {shipmentSelect}
                   {sortMenu}
                   {resetBtn}
@@ -1576,25 +1608,40 @@ export function InventoryPage(props: InventoryStreamData) {
             const available = level.stockCount - level.reservedCount;
             const isLow = available < lowStockThreshold;
             const isEmpty = isEmptyLocationRow(level.id);
+            const isOptimistic = isOptimisticId(level.id);
             return (
-              <button
-                type="button"
-                onClick={() => setPeekLevel(level)}
-                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-sm font-medium truncate ${isEmpty ? 'text-app-fg-muted italic' : 'text-app-fg'}`}>
-                    {productName(level.productId)}
-                  </span>
-                  <span className={`text-sm font-semibold tabular-nums shrink-0 ${isLow ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
-                    {available} avail
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-app-fg-muted">
-                  <span className="truncate">{locationName(level.locationId)}</span>
-                  <span className="shrink-0 tabular-nums">Stock: {level.stockCount}</span>
-                </div>
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setPeekLevel(level)}
+                  className="-mx-3 -mt-2.5 block w-[calc(100%+1.5rem)] px-3 pt-2.5 pb-1 space-y-1.5 text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-sm font-medium truncate ${isEmpty ? 'text-app-fg-muted italic' : 'text-app-fg'}`}>
+                      {productName(level.productId)}
+                    </span>
+                    <span className={`text-sm font-semibold tabular-nums shrink-0 ${isLow ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                      {available} avail
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-app-fg-muted">
+                    <span className="truncate">{locationName(level.locationId)}</span>
+                    <span className="shrink-0 tabular-nums">Stock: {level.stockCount}</span>
+                  </div>
+                </button>
+                {!isEmpty && !isOptimistic && (
+                  <div className="flex items-center gap-2 border-t border-app-border pt-2 -mx-3 px-3 -mb-0.5">
+                    <Link to={`/admin/inventory/${level.id}`} prefetch="intent" className="text-xs font-medium text-brand-600 dark:text-brand-400" onClick={(e) => e.stopPropagation()}>
+                      View
+                    </Link>
+                    {canAdjust && (
+                      <button type="button" className="text-xs font-medium text-brand-600 dark:text-brand-400" onClick={(e) => { e.stopPropagation(); openAdjustModal(level); }}>
+                        Reconcile
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           }}
         />

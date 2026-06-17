@@ -45,7 +45,7 @@ export interface LogisticsTeamPageProps {
 }
 
 function checkProviderConsistency(p: LogisticsProviderRow) {
-  const expected = p.stockReceived - p.stockSold - p.stockTransferredOut - p.stockAdjusted - p.stockWrittenOff - p.stockDispatched;
+  const expected = p.stockReceived - p.stockSold - p.stockTransferredOut + p.stockAdjusted - p.stockWrittenOff - (p.reservedStock ?? 0);
   const diff = p.availableStock - expected;
   return { expected, diff, isConsistent: diff === 0 };
 }
@@ -67,12 +67,10 @@ function generateProviderReport(p: LogisticsProviderRow, filters?: { productName
   lines.push('');
   lines.push(`STOCK FLOW`);
   lines.push(`----------`);
-  lines.push(`Total Received:      ${p.stockReceived.toLocaleString()} units`);
+  lines.push(`Received:            ${(p.stockReceived + p.stockAdjusted).toLocaleString()} units`);
   lines.push(`Sold (Delivered):    ${p.stockSold.toLocaleString()} units`);
-  lines.push(`Transferred Out:     ${p.stockTransferredOut.toLocaleString()} units`);
-  if (p.stockAdjusted > 0) lines.push(`Manual Adjustments:  −${p.stockAdjusted.toLocaleString()} units`);
-  if (p.stockWrittenOff > 0) lines.push(`Written Off:         ${p.stockWrittenOff.toLocaleString()} units`);
-  if (p.stockDispatched > 0) lines.push(`Dispatched:          ${p.stockDispatched.toLocaleString()} units`);
+  lines.push(`Transferred Out:     ${p.stockTransferredOut > 0 ? '−' : ''}${p.stockTransferredOut.toLocaleString()} units`);
+  lines.push(`Reserved:            ${(p.reservedStock ?? 0).toLocaleString()} units`);
   lines.push('');
   lines.push(`BALANCE`);
   lines.push(`-------`);
@@ -432,10 +430,10 @@ export function LogisticsTeamPage({
   const totalStockAdjusted = providers.reduce((acc, p) => acc + p.stockAdjusted, 0);
   const totalStockWrittenOff = providers.reduce((acc, p) => acc + p.stockWrittenOff, 0);
   const totalStockDispatched = providers.reduce((acc, p) => acc + p.stockDispatched, 0);
-  const expectedStock = totalStockReceived - totalStockSold - totalStockTransferred - totalStockAdjusted - totalStockWrittenOff - totalStockDispatched;
+  const expectedStock = totalStockReceived - totalStockSold - totalStockTransferred + totalStockAdjusted - totalStockWrittenOff - totalReservedStock;
   const stockDiff = totalAvailableStock - expectedStock;
   const stockBalanced = stockDiff === 0;
-  const inconsistentProviders = providers.filter((p) => { const e = p.stockReceived - p.stockSold - p.stockTransferredOut - p.stockAdjusted - p.stockWrittenOff - p.stockDispatched; return p.availableStock !== e; }).length;
+  const inconsistentProviders = providers.filter((p) => { const e = p.stockReceived - p.stockSold - p.stockTransferredOut + p.stockAdjusted - p.stockWrittenOff - (p.reservedStock ?? 0); return p.availableStock !== e; }).length;
   const overallDeliveryRate = totalAssigned > 0 ? (totalDelivered / totalAssigned) * 100 : 0;
   const overallDelinquencyRate =
     totalAssigned > 0 ? (totalDelinquent / totalAssigned) * 100 : 0;
@@ -473,7 +471,7 @@ export function LogisticsTeamPage({
         align: 'center',
         nowrap: true,
         render: (p) => {
-          const expected = p.stockReceived - p.stockSold - p.stockTransferredOut - p.stockAdjusted - p.stockWrittenOff - p.stockDispatched;
+          const expected = p.stockReceived - p.stockSold - p.stockTransferredOut + p.stockAdjusted - p.stockWrittenOff - (p.reservedStock ?? 0);
           const diff = p.availableStock - expected;
           const ok = diff === 0;
           return (
@@ -593,7 +591,7 @@ export function LogisticsTeamPage({
       align: 'center',
       nowrap: true,
       render: (l) => {
-        const expected = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched;
+        const expected = l.stockReceived - l.stockSold - l.stockTransferredOut + l.stockAdjusted - l.stockWrittenOff - (l.reservedStock ?? 0);
         const diff = l.availableStock - expected;
         const ok = diff === 0;
         return (
@@ -686,7 +684,7 @@ export function LogisticsTeamPage({
   const locTotalDelivered = filteredLocations.reduce((a, l) => a + l.delivered, 0);
   const locTotalUnits = filteredLocations.reduce((a, l) => a + l.unitsDelivered, 0);
   const locDeliveryRate = locTotalAssigned > 0 ? (locTotalDelivered / locTotalAssigned) * 100 : 0;
-  const locInconsistent = filteredLocations.filter((l) => { const e = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched; return l.availableStock !== e; }).length;
+  const locInconsistent = filteredLocations.filter((l) => { const e = l.stockReceived - l.stockSold - l.stockTransferredOut + l.stockAdjusted - l.stockWrittenOff - (l.reservedStock ?? 0); return l.availableStock !== e; }).length;
   const locTotalRemitted = filteredLocations.reduce((a, l) => a + (Number(l.remittedAmount) || 0), 0);
   const locTotalPending = filteredLocations.reduce((a, l) => a + (Number(l.pendingRemittanceAmount) || 0), 0);
 
@@ -1040,12 +1038,10 @@ export function LogisticsTeamPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Stock Flow</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Total Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{p.stockReceived.toLocaleString()}</td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{(p.stockReceived + p.stockAdjusted).toLocaleString()}</td></tr>
                     <tr><td className="px-4 py-2.5 text-app-fg-muted">Sold (Delivered)</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums text-brand-600 dark:text-brand-400">{p.stockSold.toLocaleString()}</td></tr>
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{p.stockTransferredOut.toLocaleString()}</td></tr>
-                    {p.stockAdjusted > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Manual Adjustments</td><td className="px-4 py-2.5 text-right font-semibold text-warning-600 dark:text-warning-400 tabular-nums">−{p.stockAdjusted.toLocaleString()}</td></tr>}
-                    {p.stockWrittenOff > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Written Off</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{p.stockWrittenOff.toLocaleString()}</td></tr>}
-                    {p.stockDispatched > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Dispatched</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{p.stockDispatched.toLocaleString()}</td></tr>}
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${p.stockTransferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.stockTransferredOut > 0 ? '−' : ''}{p.stockTransferredOut.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Reserved</td><td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${(p.reservedStock ?? 0) > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{(p.reservedStock ?? 0).toLocaleString()}</td></tr>
                   </tbody></table></div>
                 </div>
                 <div className="space-y-2">
@@ -1094,7 +1090,7 @@ export function LogisticsTeamPage({
       {/* Location Report Modal */}
       {reportLocation && (() => {
         const l = reportLocation;
-        const expected = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched;
+        const expected = l.stockReceived - l.stockSold - l.stockTransferredOut + l.stockAdjusted - l.stockWrittenOff - (l.reservedStock ?? 0);
         const diff = l.availableStock - expected;
         const isConsistent = diff === 0;
         const activeProductName = activeProductId ? productOptions.find((pr) => pr.id === activeProductId)?.name : undefined;
@@ -1116,12 +1112,10 @@ export function LogisticsTeamPage({
           lines.push('');
           lines.push('STOCK FLOW');
           lines.push('----------');
-          lines.push(`Total Received:      ${l.stockReceived.toLocaleString()} units`);
+          lines.push(`Received:            ${(l.stockReceived + l.stockAdjusted).toLocaleString()} units`);
           lines.push(`Sold (Delivered):    ${l.stockSold.toLocaleString()} units`);
-          lines.push(`Transferred Out:     ${l.stockTransferredOut.toLocaleString()} units`);
-          if (l.stockAdjusted > 0) lines.push(`Manual Adjustments:  −${l.stockAdjusted.toLocaleString()} units`);
-          if (l.stockWrittenOff > 0) lines.push(`Written Off:         ${l.stockWrittenOff.toLocaleString()} units`);
-          if (l.stockDispatched > 0) lines.push(`Dispatched:          ${l.stockDispatched.toLocaleString()} units`);
+          lines.push(`Transferred Out:     ${l.stockTransferredOut > 0 ? '−' : ''}${l.stockTransferredOut.toLocaleString()} units`);
+          lines.push(`Reserved:            ${(l.reservedStock ?? 0).toLocaleString()} units`);
           lines.push('');
           lines.push('BALANCE');
           lines.push('-------');
@@ -1164,12 +1158,10 @@ export function LogisticsTeamPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Stock Flow</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Total Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.stockReceived.toLocaleString()}</td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Received</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{(l.stockReceived + l.stockAdjusted).toLocaleString()}</td></tr>
                     <tr><td className="px-4 py-2.5 text-app-fg-muted">Sold (Delivered)</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums text-brand-600 dark:text-brand-400">{l.stockSold.toLocaleString()}</td></tr>
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.stockTransferredOut.toLocaleString()}</td></tr>
-                    {l.stockAdjusted > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Manual Adjustments</td><td className="px-4 py-2.5 text-right font-semibold text-warning-600 dark:text-warning-400 tabular-nums">−{l.stockAdjusted.toLocaleString()}</td></tr>}
-                    {l.stockWrittenOff > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Written Off</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{l.stockWrittenOff.toLocaleString()}</td></tr>}
-                    {l.stockDispatched > 0 && <tr><td className="px-4 py-2.5 text-app-fg-muted">Dispatched</td><td className="px-4 py-2.5 text-right font-semibold text-app-fg tabular-nums">{l.stockDispatched.toLocaleString()}</td></tr>}
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Transferred Out</td><td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${l.stockTransferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.stockTransferredOut > 0 ? '−' : ''}{l.stockTransferredOut.toLocaleString()}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Reserved</td><td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${(l.reservedStock ?? 0) > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{(l.reservedStock ?? 0).toLocaleString()}</td></tr>
                   </tbody></table></div>
                 </div>
                 <div className="space-y-2">
@@ -1236,7 +1228,7 @@ export function LogisticsTeamPage({
             lines.push(`Locations: ${filteredLocations.length}`);
             lines.push('');
             for (const l of filteredLocations) {
-              const expected = l.stockReceived - l.stockSold - l.stockTransferredOut - l.stockAdjusted - l.stockWrittenOff - l.stockDispatched;
+              const expected = l.stockReceived - l.stockSold - l.stockTransferredOut + l.stockAdjusted - l.stockWrittenOff - (l.reservedStock ?? 0);
               const diff = l.availableStock - expected;
               lines.push(`${l.locationName} (${l.providerName})`);
               lines.push(`  Received: ${l.stockReceived.toLocaleString()} | Sold: ${l.stockSold.toLocaleString()} | Transferred: ${l.stockTransferredOut.toLocaleString()}`);

@@ -85,15 +85,26 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   // ── Rule CRUD ──────────────────────────────────────────────────────
 
-  async listRules(enabledOnly?: boolean) {
+  async listRules(enabledOnly?: boolean, effectiveBranchIds?: string[] | null) {
     // Always exclude CART_ABANDONMENT rules — cart orders have their own pipeline.
     const conditions = [ne(schema.followUpRules.sourceStatus, 'CART_ABANDONMENT')];
     if (enabledOnly) conditions.push(eq(schema.followUpRules.enabled, true));
-    const rules = await this.db
+    let rules = await this.db
       .select()
       .from(schema.followUpRules)
       .where(and(...conditions))
       .orderBy(desc(schema.followUpRules.priority), asc(schema.followUpRules.createdAt));
+
+    // When group-scoped, only show rules that target/source branches in the active group
+    // (or rules with no branch constraint — "All branches").
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      const branchSet = new Set(effectiveBranchIds);
+      rules = rules.filter((r) => {
+        const sourceOk = !r.sourceBranchId || branchSet.has(r.sourceBranchId);
+        const targetOk = !r.targetBranchId || branchSet.has(r.targetBranchId);
+        return sourceOk && targetOk;
+      });
+    }
 
     // Enrich with target names
     const branchIds = rules.map((r) => r.targetBranchId).filter(Boolean) as string[];

@@ -57,6 +57,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const rawProductFilter = url.searchParams.get('productId') ?? '';
   const rawLocationFilter = url.searchParams.get('locationId') ?? '';
+  const rawProviderFilter = url.searchParams.get('providerId') ?? '';
   const rawShipmentFilter = url.searchParams.get('shipmentId') ?? '';
   const rawSort = url.searchParams.get('sort') ?? '';
   // New explicit URL contract: ?sortBy=available|updatedAt and ?sortDir=asc|desc.
@@ -72,6 +73,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const levelsInput: {
     productId?: string;
     locationId?: string;
+    providerId?: string;
     shipmentId?: string;
     search?: string;
     sortBy?: 'available' | 'updatedAt';
@@ -81,6 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } = { page, limit: LEVELS_LIMIT };
   if (rawProductFilter) levelsInput.productId = rawProductFilter;
   if (rawLocationFilter) levelsInput.locationId = rawLocationFilter;
+  if (rawProviderFilter) levelsInput.providerId = rawProviderFilter;
   if (rawShipmentFilter) levelsInput.shipmentId = rawShipmentFilter;
   if (rawSearch) levelsInput.search = rawSearch;
   // Prefer the new explicit params when present; fall back to the legacy fused enum.
@@ -275,6 +278,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     levelsLimit: LEVELS_LIMIT,
     levelsProductFilter: rawProductFilter,
     levelsLocationFilter: rawLocationFilter,
+    levelsProviderFilter: rawProviderFilter,
     levelsShipmentFilter: rawShipmentFilter,
     levelsSearch: rawSearch,
     levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
