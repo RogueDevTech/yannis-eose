@@ -96,11 +96,8 @@ export const financeRouter = router({
   ensureInvoiceByOrder: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
-      const perms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
-      const mayGenerate = isAdminLevel(ctx.user) || perms.includes(canonicalPermissionCode('finance.read'));
-      if (!mayGenerate) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to generate invoices' });
-      }
+      // Any authenticated user can trigger invoice generation — it's idempotent
+      // and only creates a DRAFT if the order is confirmed and has no invoice yet.
 
       // Try main orders table first, fall back to follow-up orders, then cart orders
       type InvoiceOrder = {

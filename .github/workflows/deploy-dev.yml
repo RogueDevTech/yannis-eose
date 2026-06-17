@@ -1,8 +1,10 @@
 name: Deploy to Dev
 
 on:
-  push:
-    branches: [dev]
+  # PAUSED: dev deploys via Vercel (web) + Render (api) — re-enable when switching back to GCP
+  # push:
+  #   branches: [dev]
+  workflow_dispatch: # manual-only trigger while paused
 
 concurrency:
   group: deploy-dev-${{ github.ref }}

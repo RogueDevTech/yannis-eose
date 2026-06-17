@@ -70,7 +70,7 @@ export const cartOrdersRouter = router({
       return getCartOrdersService().bulkAssign(input.orderIds, input.closerIds, ctx.user);
     }),
 
-  transition: permissionProcedure('orders.write')
+  transition: permissionProcedure('orders.detail.manage')
     .input(transitionCartOrderSchema)
     .mutation(async ({ input, ctx }) => {
       return getCartOrdersService().transitionStatus(
@@ -88,7 +88,7 @@ export const cartOrdersRouter = router({
       return getCartOrdersService().initiateCall(input.orderId, ctx.user);
     }),
 
-  pullFromCarts: permissionProcedure('orders.write')
+  pullFromCarts: permissionProcedure('orders.bulkAssign')
     .input(
       listCartOrdersSchema.pick({}).extend({
         cartIds: bulkAssignCartOrdersSchema.shape.orderIds,

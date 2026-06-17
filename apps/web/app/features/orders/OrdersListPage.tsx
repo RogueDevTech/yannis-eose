@@ -675,8 +675,12 @@ function OrdersListPageImpl({
   // rollup an order in IN_TRANSIT inflates Total but isn't reflected in any pill,
   // so the strip looks inconsistent (Total = pill-sum + sub-stage orphans).
   const remittedMergedIntoDelivered = excludeStatuses?.includes('REMITTED') ?? false;
+  const isCloserRole = userRole === 'CS_CLOSER';
   const PIPELINE_KEYS = STATUS_OPTIONS.filter(
-    (s) => s !== 'ALL' && !excludeStatuses?.includes(s),
+    (s) =>
+      s !== 'ALL' &&
+      !excludeStatuses?.includes(s) &&
+      !(s === 'UNPROCESSED' && isCloserRole),
   );
   const CONFIRMED_SUBSTAGES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'] as const;
   const confirmedAbsorbsSubstages = !PIPELINE_KEYS.some((s) =>
@@ -1426,7 +1430,7 @@ function OrdersListPageImpl({
   );
 
   const statusOptions = [
-    ...STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status)).map((status) => ({
+    ...STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status) && !(status === 'UNPROCESSED' && isCloserRole)).map((status) => ({
       value: status,
       label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
     })),

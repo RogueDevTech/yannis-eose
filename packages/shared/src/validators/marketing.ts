@@ -716,6 +716,7 @@ export const listCampaignsSchema = z.object({
    */
   mediaBuyerIds: z.array(z.string().uuid()).max(2000).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(500).default(20),
 });

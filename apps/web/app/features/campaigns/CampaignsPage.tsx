@@ -198,7 +198,8 @@ export function FormsPage({
       list = list.filter(
         (c) =>
           c.name.toLowerCase().includes(q) ||
-          (c.mediaBuyerName ?? '').toLowerCase().includes(q),
+          (c.mediaBuyerName ?? '').toLowerCase().includes(q) ||
+          c.id.toLowerCase().includes(q),
       );
     }
     return list;
@@ -358,7 +359,7 @@ export function FormsPage({
           <SearchInput
             value={searchQuery}
             onChange={applySearch}
-            placeholder="Search forms by name…"
+            placeholder="Search by name or ID…"
             wrapperClassName="w-full"
           />
         </form>
