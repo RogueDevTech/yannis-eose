@@ -1,7 +1,6 @@
 import { uuid, pgTable, text, numeric, jsonb, timestamp, serial, integer } from 'drizzle-orm/pg-core';
 import { invoiceStatusEnum, approvalRequestTypeEnum, approvalStatusEnum, settlementWindowEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
-import { orders } from './orders';
 import { users } from './users';
 import { branchGroups } from './branch-groups';
 
@@ -9,7 +8,7 @@ import { branchGroups } from './branch-groups';
 export const invoices = pgTable('invoices', {
   id: uuidv7Pk(),
   referenceNumber: serial('reference_number').notNull().unique(),
-  orderId: uuid('order_id').references(() => orders.id),
+  orderId: uuid('order_id'),
   recipientInfo: jsonb('recipient_info'),
   lineItems: jsonb('line_items'),
   taxRate: numeric('tax_rate', { precision: 5, scale: 4 }),

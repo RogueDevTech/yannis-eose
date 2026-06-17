@@ -625,19 +625,27 @@ export class NotificationsService {
    * namespace, so the existing invalidations in `create` / `markAsRead` /
    * `markAllAsRead` already cover it — no extra wiring needed.
    */
-  async getUnreadCount(userId: string) {
-    const cacheKey = `cache:notif:${userId}:unreadCount`;
+  async getUnreadCount(userId: string, effectiveBranchIds?: string[] | null) {
+    const eKey = effectiveBranchIds?.length ? effectiveBranchIds.sort().join(',') : null;
+    const cacheKey = `cache:notif:${userId}:unreadCount` + (eKey ? `:g:${eKey}` : '');
     const TTL = 15; // seconds — matches the list cache
     return this.cache.getOrSet(cacheKey, TTL, async () => {
+      const conditions = [
+        eq(schema.notifications.userId, userId),
+        eq(schema.notifications.read, false),
+      ];
+
+      if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+        const inList = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
+        conditions.push(
+          sql`(${schema.notifications.data}->>'branchId' IS NULL OR ${schema.notifications.data}->>'branchId' IN (${inList}))`,
+        );
+      }
+
       const rows = await this.db
         .select({ count: count() })
         .from(schema.notifications)
-        .where(
-          and(
-            eq(schema.notifications.userId, userId),
-            eq(schema.notifications.read, false),
-          ),
-        );
+        .where(and(...conditions));
 
       return rows[0]?.count ?? 0;
     });

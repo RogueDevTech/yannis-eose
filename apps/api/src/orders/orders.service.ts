@@ -5159,12 +5159,25 @@ export class OrdersService {
    * List active Sales closers (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
    * Agent-initiated order transfers have been removed — reassignment is management-only.
    */
-  async listCSClosers(actor: SessionUser): Promise<Array<{ agentId: string; agentName: string }>> {
+  async listCSClosers(actor: SessionUser, effectiveBranchIds?: string[] | null): Promise<Array<{ agentId: string; agentName: string }>> {
     const hasReassign =
       (actor.permissions ?? [])
         .map((p) => canonicalPermissionCode(p))
         .includes(canonicalPermissionCode('orders.reassign'));
     if (actor.role === 'SUPER_ADMIN' || hasReassign) {
+      // When group-scoped, only return closers belonging to branches in the active group
+      if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+        const agents = await this.db
+          .selectDistinct({ id: schema.users.id, name: schema.users.name })
+          .from(schema.users)
+          .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.users.id))
+          .where(and(
+            eq(schema.users.role, 'CS_CLOSER'),
+            eq(schema.users.status, 'ACTIVE'),
+            inArray(schema.userBranches.branchId, effectiveBranchIds),
+          ));
+        return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
+      }
       const agents = await this.db
         .select({ id: schema.users.id, name: schema.users.name })
         .from(schema.users)
@@ -5183,12 +5196,12 @@ export class OrdersService {
   }
 
   /** Like listCSClosers but includes branch memberships for filtering in the UI. */
-  async listCSClosersWithBranches(actor: SessionUser): Promise<Array<{
+  async listCSClosersWithBranches(actor: SessionUser, effectiveBranchIds?: string[] | null): Promise<Array<{
     agentId: string;
     agentName: string;
     branches: Array<{ branchId: string; branchName: string }>;
   }>> {
-    const closers = await this.listCSClosers(actor);
+    const closers = await this.listCSClosers(actor, effectiveBranchIds);
     if (closers.length === 0) return [];
 
     const agentIds = closers.map((c) => c.agentId);
@@ -9067,7 +9080,7 @@ export class OrdersService {
     return { success: true };
   }
 
-  async listFollowUpGroups() {
+  async listFollowUpGroups(effectiveBranchIds?: string[] | null) {
     const groups = await this.db
       .select({
         id: schema.followUpGroups.id,
@@ -9092,6 +9105,21 @@ export class OrdersService {
           .where(inArray(schema.followUpGroupMembers.groupId, groupIds))
       : [];
 
+    // When group-scoped, find user IDs that belong to branches in the active group
+    // and filter groups to those with at least one matching member.
+    let allowedUserIds: Set<string> | null = null;
+    if (effectiveBranchIds && effectiveBranchIds.length > 0 && members.length > 0) {
+      const memberUserIds = [...new Set(members.map((m) => m.userId))];
+      const branchMembers = await this.db
+        .select({ userId: schema.userBranches.userId })
+        .from(schema.userBranches)
+        .where(and(
+          inArray(schema.userBranches.userId, memberUserIds),
+          inArray(schema.userBranches.branchId, effectiveBranchIds),
+        ));
+      allowedUserIds = new Set(branchMembers.map((r) => r.userId));
+    }
+
     const membersByGroup = new Map<string, Array<{ userId: string; userName: string }>>();
     for (const m of members) {
       const list = membersByGroup.get(m.groupId) ?? [];
@@ -9106,7 +9134,7 @@ export class OrdersService {
       : [];
     const creatorNames = new Map(creators.map((u) => [u.id, u.name]));
 
-    return groups.map((g) => ({
+    const result = groups.map((g) => ({
       id: g.id,
       name: g.name,
       createdByName: creatorNames.get(g.createdById) ?? null,
@@ -9114,6 +9142,14 @@ export class OrdersService {
       members: membersByGroup.get(g.id) ?? [],
       createdAt: g.createdAt,
     }));
+
+    // When group-scoped, only return groups that have at least one member in the active group's branches.
+    if (allowedUserIds) {
+      return result.filter((g) =>
+        g.members.some((m) => allowedUserIds!.has(m.userId)),
+      );
+    }
+    return result;
   }
 
   async getFollowUpGroup(groupId: string) {

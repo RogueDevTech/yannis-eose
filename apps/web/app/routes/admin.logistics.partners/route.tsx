@@ -5,6 +5,7 @@ import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { handleExportReportAction } from '~/lib/export-report.server';
 import { LogisticsPage } from '~/features/logistics/LogisticsPage';
 import { LogisticsPartnersLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { Provider, Location, LogisticsStreamData } from '~/features/logistics/types';
@@ -18,10 +19,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async (): Promise<LogisticsStreamData> => {
-    // limit 100 (schema max) so the page loads every partner — the Logistics
-    // Partners page has no pagination UI and searches client-side.
-    const providersInput = JSON.stringify({ page: 1, limit: 100, kind: 'THIRD_PARTY' });
-    const locationsInput = JSON.stringify({ page: 1, limit: 100, providerKind: 'THIRD_PARTY' });
+    // Fetch all partners — client-side pagination + search.
+    const providersInput = JSON.stringify({ page: 1, limit: 500, kind: 'THIRD_PARTY' });
+    const locationsInput = JSON.stringify({ page: 1, limit: 500, providerKind: 'THIRD_PARTY' });
     const providersPromise = apiRequest<unknown>(
       `/trpc/logistics.listProviders?input=${encodeURIComponent(providersInput)}`,
       { method: 'GET', cookie },
@@ -75,6 +75,9 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
+  const exportResult = await handleExportReportAction(request);
+  if (exportResult) return exportResult;
+
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();

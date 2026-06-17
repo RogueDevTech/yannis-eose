@@ -639,6 +639,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: user.id,
       currentBranchId: user.currentBranchId ?? null,
       permissions: user.permissions ?? [],
+      isMirroring: !!user.mirroredBy,
       csClosersForAssign: csClosersForAssign,
       logisticsLocations,
       allocatableLocations: resolvedAllocatable,
@@ -1445,6 +1446,7 @@ export default function OrderDetailRoute() {
     userId,
     currentBranchId,
     permissions,
+    isMirroring,
     csClosersForAssign,
     logisticsLocations,
     allocatableLocations,
@@ -1500,6 +1502,7 @@ export default function OrderDetailRoute() {
       userId={userId}
       currentBranchId={currentBranchId}
       permissions={permissions}
+      isMirroring={isMirroring}
       csClosersForAssign={csClosersForAssign}
       logisticsLocations={logisticsLocations}
       allocatableLocations={allocatableLocations}

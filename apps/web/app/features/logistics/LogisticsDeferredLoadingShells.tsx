@@ -326,7 +326,7 @@ export function LogisticsPartnersLoadingShell() {
               <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Location</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Address</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Logistics company</th>
-              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Total stock</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Available stock</th>
               <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Alert threshold</th>
               <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Status</th>
               <th className="px-3 py-2 w-px" />

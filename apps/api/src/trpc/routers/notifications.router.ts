@@ -69,7 +69,7 @@ export const notificationsRouter = router({
    * Get unread notification count.
    */
   unreadCount: authedProcedure.query(async ({ ctx }) => {
-    const count = await getNotificationsService().getUnreadCount(ctx.user.id);
+    const count = await getNotificationsService().getUnreadCount(ctx.user.id, ctx.effectiveBranchIds);
     return { count };
   }),
 

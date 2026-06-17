@@ -1535,6 +1535,14 @@ export class InventoryService {
     if (input.locationId) {
       conditions.push(eq(schema.inventoryLevels.locationId, input.locationId));
     }
+    if (input.providerId) {
+      conditions.push(
+        sql`${schema.inventoryLevels.locationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          WHERE ll.provider_id = ${input.providerId}
+        )`,
+      );
+    }
     // Company-group isolation: only show inventory at locations belonging to providers in this group
     if (groupId) {
       conditions.push(
@@ -2059,20 +2067,24 @@ export class InventoryService {
     const stockRows = await this.db.execute<{
       locationId: string;
       available: number;
+      reserved: number;
     }>(sql`
       SELECT
         il.location_id AS "locationId",
-        COALESCE(SUM(il.stock_count - il.reserved_count), 0)::int AS "available"
+        COALESCE(SUM(il.stock_count - il.reserved_count), 0)::int AS "available",
+        COALESCE(SUM(il.reserved_count), 0)::int AS "reserved"
       FROM inventory_levels il
       WHERE il.location_id IN (${sql.join(locRows.map((l) => sql`${l.id}::uuid`), sql`,`)})
       GROUP BY il.location_id
     `);
-    const stockMap = new Map<string, number>();
-    for (const r of stockRows) stockMap.set(r.locationId, r.available);
+    const stockMap = new Map<string, { available: number; reserved: number }>();
+    for (const r of stockRows) stockMap.set(r.locationId, { available: r.available, reserved: r.reserved });
 
     const locIdList = sql.join(locRows.map((l) => sql`${l.id}::uuid`), sql`,`);
 
     // Received per location (all-time — total stock ever sent, not date-filtered)
+    // Exclude intra-provider TRANSFER_IN (where both source and dest belong to this provider)
+    // — those are just internal moves, not new stock entering the provider.
     const recvRows = await this.db.execute<{
       locationId: string;
       received: number;
@@ -2083,6 +2095,7 @@ export class InventoryService {
       FROM stock_movements sm
       WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK')
         AND sm.to_location_id IN (${locIdList})
+        AND NOT (sm.movement_type = 'TRANSFER_IN' AND sm.from_location_id IN (${locIdList}))
       GROUP BY sm.to_location_id
     `);
     const recvMap = new Map<string, number>();
@@ -2109,6 +2122,7 @@ export class InventoryService {
     for (const r of soldRows) soldMap.set(r.locationId, r.sold);
 
     // Reconciliation: transferred out, adjustments, write-offs, dispatched per location
+    // Exclude intra-provider TRANSFER_OUT (destination is also this provider's location)
     const reconRows = await this.db.execute<{
       locationId: string;
       transferredOut: number;
@@ -2117,15 +2131,15 @@ export class InventoryService {
       dispatched: number;
     }>(sql`
       SELECT
-        sm.from_location_id AS "locationId",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(sm.from_location_id, sm.to_location_id) AS "locationId",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' AND NOT (sm.to_location_id IN (${locIdList})) THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN sm.quantity ELSE 0 END), 0)::int AS "adjusted",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
       FROM stock_movements sm
       WHERE sm.movement_type IN ('TRANSFER_OUT', 'ADJUSTMENT', 'WRITE_OFF', 'DISPATCH')
-        AND sm.from_location_id IN (${locIdList})
-      GROUP BY sm.from_location_id
+        AND (sm.from_location_id IN (${locIdList}) OR sm.to_location_id IN (${locIdList}))
+      GROUP BY COALESCE(sm.from_location_id, sm.to_location_id)
     `);
     const reconMap = new Map<string, { transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
     for (const r of reconRows) reconMap.set(r.locationId, r);
@@ -2161,7 +2175,8 @@ export class InventoryService {
       return {
         locationId: l.id,
         locationName: l.name,
-        available: stockMap.get(l.id) ?? 0,
+        available: stockMap.get(l.id)?.available ?? 0,
+        reserved: stockMap.get(l.id)?.reserved ?? 0,
         received: recvMap.get(l.id) ?? 0,
         sold: soldMap.get(l.id) ?? 0,
         transferredOut: rc?.transferredOut ?? 0,
@@ -2202,11 +2217,13 @@ export class InventoryService {
       productId: string;
       productName: string | null;
       available: number;
+      reserved: number;
     }>(sql`
       SELECT
         il.product_id AS "productId",
         p.name AS "productName",
-        COALESCE(SUM(il.stock_count - il.reserved_count), 0)::int AS "available"
+        COALESCE(SUM(il.stock_count - il.reserved_count), 0)::int AS "available",
+        COALESCE(SUM(il.reserved_count), 0)::int AS "reserved"
       FROM inventory_levels il
       INNER JOIN products p ON p.id = il.product_id
       WHERE il.location_id IN (${locationList})
@@ -2228,6 +2245,7 @@ export class InventoryService {
       FROM stock_movements sm
       WHERE sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK')
         AND sm.to_location_id IN (${locationList})
+        AND NOT (sm.movement_type = 'TRANSFER_IN' AND sm.from_location_id IN (${locationList}))
         ${shipmentReceivedClause}
       GROUP BY sm.product_id
     `);
@@ -2265,13 +2283,13 @@ export class InventoryService {
     }>(sql`
       SELECT
         sm.product_id AS "productId",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
-        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "adjusted",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' AND NOT (sm.to_location_id IN (${locationList})) THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "transferredOut",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN sm.quantity ELSE 0 END), 0)::int AS "adjusted",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOff",
         COALESCE(SUM(CASE WHEN sm.movement_type = 'DISPATCH' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "dispatched"
       FROM stock_movements sm
       WHERE sm.movement_type IN ('TRANSFER_OUT', 'ADJUSTMENT', 'WRITE_OFF', 'DISPATCH')
-        AND sm.from_location_id IN (${locationList})
+        AND (sm.from_location_id IN (${locationList}) OR sm.to_location_id IN (${locationList}))
       GROUP BY sm.product_id
     `);
     const productReconMap = new Map<string, { transferredOut: number; adjusted: number; writtenOff: number; dispatched: number }>();
@@ -2314,6 +2332,7 @@ export class InventoryService {
         received: receivedMap.get(r.productId) ?? 0,
         sold: soldMap.get(r.productId) ?? 0,
         available: r.available,
+        reserved: r.reserved,
         transferredOut: rc?.transferredOut ?? 0,
         adjusted: rc?.adjusted ?? 0,
         writtenOff: rc?.writtenOff ?? 0,

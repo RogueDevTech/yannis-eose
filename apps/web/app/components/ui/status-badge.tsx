@@ -92,6 +92,8 @@ interface StatusBadgeProps {
   /** Custom display label — defaults to formatted status string */
   label?: string;
   showDot?: boolean;
+  /** Render only a colored dot (no text/border). Tooltip shows status on tap/hover. */
+  dotOnly?: boolean;
   size?: BadgeSize;
   className?: string;
 }
@@ -108,11 +110,28 @@ export function StatusBadge({
   variant,
   label,
   showDot = false,
+  dotOnly = false,
   size = 'md',
   className = '',
 }: StatusBadgeProps) {
   const resolvedVariant = variant ?? STATUS_VARIANT_MAP[status.toLowerCase()] ?? 'neutral';
   const displayLabel = label ?? ORDER_STATUS_LABELS[status] ?? formatStatusLabel(status);
+
+  if (dotOnly) {
+    return (
+      <span
+        title={displayLabel}
+        className={[
+          'inline-block rounded-full shrink-0 cursor-default',
+          dotColorClasses[resolvedVariant],
+          size === 'lg' ? 'w-2.5 h-2.5' : 'w-2 h-2',
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      />
+    );
+  }
 
   return (
     <span

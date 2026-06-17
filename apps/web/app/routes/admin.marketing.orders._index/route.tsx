@@ -332,23 +332,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const defaultMetrics = { totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0, totalSpend: 0 };
       const m = data?.metrics ?? defaultMetrics;
 
-      // When cart abandonment view is active, swap the stat strip counts
-      // for cart_orders status counts so pills match the list below.
-      let statusCounts = data?.statusCounts ?? {};
-      if (fromCart) {
-        const cartCountsInput = encodeURIComponent(JSON.stringify({
-          ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate } : {}),
-        }));
-        const cartCountsRes = await apiRequest<unknown>(
-          `/trpc/cartOrders.getStatusCounts?input=${cartCountsInput}`,
-          { method: 'GET', cookie },
-        );
-        const cartCounts = cartCountsRes.ok
-          ? (cartCountsRes.data as { result?: { data?: Record<string, number> } })?.result?.data
-          : null;
-        if (cartCounts) statusCounts = cartCounts;
-      }
+      // Always show order status counts in the stat strip — cart breakdown
+      // lives on the dedicated Cart Orders page.
+      const statusCounts = data?.statusCounts ?? {};
 
       return {
         statusCounts,

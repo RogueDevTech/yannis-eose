@@ -31,7 +31,12 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { Pagination } from '~/components/ui/pagination';
+import { TableRowActionsSheet, type TableRowSheetAction } from '~/components/ui/table-row-actions-sheet';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { ExportModal } from '~/components/ui/export-modal';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type {
   Provider,
   Location,
@@ -204,6 +209,12 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [filterState, setFilterState] = useState('');
   const [filterHasStock, setFilterHasStock] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'stock-asc' | 'stock-desc' | 'provider'>('name');
+  const [providerSortBy, setProviderSortBy] = useState<'name' | 'status' | 'stock-desc' | 'stock-asc'>('name');
+  const [filterProviderStatus, setFilterProviderStatus] = useState('');
+  const [filterProviderHasStock, setFilterProviderHasStock] = useState('');
+  const [locPage, setLocPage] = useState(1);
+  const [provPage, setProvPage] = useState(1);
+  const [perPage, setPerPage] = useState(25);
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
@@ -213,6 +224,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [viewingLocation, setViewingLocation] = useState<Location | null>(null);
   const [deleteProvider, setDeleteProvider] = useState<Provider | null>(null);
   const [deleteLocation, setDeleteLocation] = useState<Location | null>(null);
+  const [showExport, setShowExport] = useState(false);
   const deleteFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const deleteSubmitting = deleteFetcher.state !== 'idle';
   useFetcherToast(deleteFetcher.data, { successMessage: 'Removed successfully' });
@@ -378,14 +390,39 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
   /** Client-side search over the rows already loaded for the active tab. */
   const searchQuery = search.trim().toLowerCase();
+  const getProviderTotalStock = useCallback((providerId: string) => {
+    return displayLocations.filter((l) => l.providerId === providerId).reduce((sum, l) => sum + (l.totalStock ?? 0), 0);
+  }, [displayLocations]);
+
   const filteredProviders = useMemo(() => {
-    if (!searchQuery) return displayProviders;
-    return displayProviders.filter((p) =>
-      [p.name, p.contactInfo, p.coverageArea].some((field) =>
-        (field ?? '').toLowerCase().includes(searchQuery),
-      ),
-    );
-  }, [displayProviders, searchQuery]);
+    let result = displayProviders;
+    if (filterProviderStatus) {
+      result = result.filter((p) => p.status === filterProviderStatus);
+    }
+    if (filterProviderHasStock === 'has_stock') {
+      result = result.filter((p) => getProviderTotalStock(p.id) > 0);
+    } else if (filterProviderHasStock === 'no_stock') {
+      result = result.filter((p) => getProviderTotalStock(p.id) === 0);
+    }
+    if (searchQuery) {
+      result = result.filter((p) =>
+        [p.name, p.contactInfo, p.coverageArea].some((field) =>
+          (field ?? '').toLowerCase().includes(searchQuery),
+        ),
+      );
+    }
+    const sorted = [...result];
+    if (providerSortBy === 'status') {
+      sorted.sort((a, b) => (a.status ?? '').localeCompare(b.status ?? ''));
+    } else if (providerSortBy === 'stock-desc') {
+      sorted.sort((a, b) => getProviderTotalStock(b.id) - getProviderTotalStock(a.id));
+    } else if (providerSortBy === 'stock-asc') {
+      sorted.sort((a, b) => getProviderTotalStock(a.id) - getProviderTotalStock(b.id));
+    } else {
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return sorted;
+  }, [displayProviders, searchQuery, filterProviderStatus, filterProviderHasStock, providerSortBy, getProviderTotalStock]);
   const filteredLocations = useMemo(() => {
     let result = displayLocations;
     if (filterProviderId) {
@@ -440,6 +477,16 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     return NIGERIAN_STATES.filter((s) => stateSet.has(s));
   }, [displayLocations, displayProviders]);
 
+  // Reset page when filters change
+  useEffect(() => { setLocPage(1); }, [filterProviderId, filterState, filterHasStock, sortBy, searchQuery, activeTab]);
+  useEffect(() => { setProvPage(1); }, [filterProviderStatus, filterProviderHasStock, providerSortBy, searchQuery, activeTab]);
+
+  // Pagination slices
+  const locTotalPages = Math.max(1, Math.ceil(filteredLocations.length / perPage));
+  const provTotalPages = Math.max(1, Math.ceil(filteredProviders.length / perPage));
+  const pagedLocations = useMemo(() => filteredLocations.slice((locPage - 1) * perPage, locPage * perPage), [filteredLocations, locPage, perPage]);
+  const pagedProviders = useMemo(() => filteredProviders.slice((provPage - 1) * perPage, provPage * perPage), [filteredProviders, provPage, perPage]);
+
   const providerTableColumns: CompactTableColumn<Provider>[] = useMemo(
     () => [
       {
@@ -465,6 +512,22 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         render: (p) => <span className="text-app-fg-muted">{p.coverageArea ?? '—'}</span>,
       },
       {
+        key: 'totalStock',
+        header: 'Available stock',
+        align: 'right',
+        mobileAlign: 'left',
+        hideOnMobile: true,
+        render: (p) => {
+          const providerLocations = displayLocations.filter((l) => l.providerId === p.id);
+          const total = providerLocations.reduce((sum, l) => sum + (l.totalStock ?? 0), 0);
+          return (
+            <span className={`tabular-nums ${total === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
+              {total.toLocaleString()}
+            </span>
+          );
+        },
+      },
+      {
         key: 'status',
         header: 'Status',
         render: (p) => <StatusBadge status={p.status} />,
@@ -475,33 +538,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         align: 'right',
         mobileShowLabel: false,
         tight: true,
+        nowrap: true,
         render: (p) => {
           const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
+          if (isOptimistic) return null;
           const providerLocations = displayLocations.filter((l) => l.providerId === p.id);
           const providerTotalStock = providerLocations.reduce((sum, l) => sum + (l.totalStock ?? 0), 0);
-          return (
-            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-              <CompactTableActionButton disabled={isOptimistic} to={`/admin/logistics/team/${p.id}`}>
-                View
-              </CompactTableActionButton>
-              <CompactTableActionButton
-                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
-                disabled={isOptimistic}
-                onClick={() => setEditingProvider(p)}
-              >
-                Edit
-              </CompactTableActionButton>
-              {providerTotalStock === 0 && (
-                <CompactTableActionButton
-                  tone="danger"
-                  disabled={isOptimistic}
-                  onClick={() => setDeleteProvider(p)}
-                >
-                  Remove
-                </CompactTableActionButton>
-              )}
-            </div>
-          );
+          const actions: TableRowSheetAction[] = [
+            { key: 'view', kind: 'link', label: 'View', to: `/admin/logistics/team/${p.id}?from=partners` },
+            { key: 'stock', kind: 'link', label: 'Stock', to: `/admin/inventory?providerId=${p.id}` },
+            { key: 'edit', kind: 'button', label: 'Edit', onClick: () => setEditingProvider(p) },
+            { key: 'remove', kind: 'button', label: 'Remove', tone: 'danger', onClick: () => setDeleteProvider(p), show: providerTotalStock === 0 },
+          ];
+          return <TableRowActionsSheet ariaLabel={`Actions for ${p.name}`} actions={actions} />;
         },
       },
     ],
@@ -549,7 +598,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       },
       {
         key: 'totalStock',
-        header: 'Total stock',
+        header: 'Available stock',
         align: 'right',
         mobileAlign: 'left',
         hideOnMobile: true,
@@ -609,38 +658,18 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         align: 'right',
         mobileShowLabel: false,
         tight: true,
+        nowrap: true,
         render: (l) => {
           const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
+          if (isOptimistic) return null;
           const hasStock = (l.totalStock ?? 0) > 0;
-          return (
-            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-              <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingLocation(l)}>
-                View
-              </CompactTableActionButton>
-              <CompactTableActionButton
-                disabled={isOptimistic}
-                to={`/admin/inventory?locationId=${l.id}`}
-              >
-                Stock
-              </CompactTableActionButton>
-              <CompactTableActionButton
-                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
-                disabled={isOptimistic}
-                onClick={() => setEditingLocation(l)}
-              >
-                Edit
-              </CompactTableActionButton>
-              {!hasStock && (
-                <CompactTableActionButton
-                  tone="danger"
-                  disabled={isOptimistic}
-                  onClick={() => setDeleteLocation(l)}
-                >
-                  Remove
-                </CompactTableActionButton>
-              )}
-            </div>
-          );
+          const actions: TableRowSheetAction[] = [
+            { key: 'view', kind: 'button', label: 'View', onClick: () => setViewingLocation(l) },
+            { key: 'stock', kind: 'link', label: 'Stock', to: `/admin/inventory?locationId=${l.id}` },
+            { key: 'edit', kind: 'button', label: 'Edit', onClick: () => setEditingLocation(l) },
+            { key: 'remove', kind: 'button', label: 'Remove', tone: 'danger', onClick: () => setDeleteLocation(l), show: !hasStock },
+          ];
+          return <TableRowActionsSheet ariaLabel={`Actions for ${l.name}`} actions={actions} />;
         },
       },
     ],
@@ -674,6 +703,29 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Logistics toolbar"
+            filtersBadgeCount={
+              activeTab === 'locations'
+                ? (filterProviderId ? 1 : 0) + (filterState ? 1 : 0) + (filterHasStock ? 1 : 0)
+                : (filterProviderStatus ? 1 : 0) + (filterProviderHasStock ? 1 : 0)
+            }
+            filters={(() => {
+              const fBox = 'relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+              const fSel = '!bg-transparent !border-transparent !text-center';
+              return activeTab === 'locations' ? (
+                <>
+                  <div className={fBox}><SearchableSelect value={filterProviderId} onChange={(v) => setFilterProviderId(v)} placeholder="All companies" options={[{ value: '', label: 'All companies' }, ...displayProviders.map((p) => ({ value: p.id, label: p.name }))]} searchPlaceholder="Search companies..." wrapperClassName="w-full" triggerClassName={fSel} inlineChevron /></div>
+                  <div className={fBox}><SearchableSelect value={filterState} onChange={(v) => setFilterState(v)} placeholder="All states" options={[{ value: '', label: 'All states' }, ...availableStates.map((s) => ({ value: s, label: s }))]} searchPlaceholder="Search states..." wrapperClassName="w-full" triggerClassName={fSel} inlineChevron /></div>
+                  <div className={fBox}><FormSelect value={filterHasStock} onChange={(e) => setFilterHasStock(e.target.value)} options={[{ value: '', label: 'All stock levels' }, { value: 'has_stock', label: 'Has stock' }, { value: 'no_stock', label: 'No stock' }]} wrapperClassName="w-full" className={fSel} inlineChevron /></div>
+                  <div className={fBox}><FormSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} options={[{ value: 'name', label: 'Sort: Name' }, { value: 'stock-desc', label: 'Sort: Stock (high)' }, { value: 'stock-asc', label: 'Sort: Stock (low)' }, { value: 'provider', label: 'Sort: Company' }]} wrapperClassName="w-full" className={fSel} inlineChevron /></div>
+                </>
+              ) : (
+                <>
+                  <div className={fBox}><FormSelect value={filterProviderStatus} onChange={(e) => setFilterProviderStatus(e.target.value)} options={[{ value: '', label: 'All statuses' }, { value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }]} wrapperClassName="w-full" className={fSel} inlineChevron /></div>
+                  <div className={fBox}><FormSelect value={filterProviderHasStock} onChange={(e) => setFilterProviderHasStock(e.target.value)} options={[{ value: '', label: 'All stock levels' }, { value: 'has_stock', label: 'Has stock' }, { value: 'no_stock', label: 'No stock' }]} wrapperClassName="w-full" className={fSel} inlineChevron /></div>
+                  <div className={fBox}><FormSelect value={providerSortBy} onChange={(e) => setProviderSortBy(e.target.value as typeof providerSortBy)} options={[{ value: 'name', label: 'Sort: Name' }, { value: 'status', label: 'Sort: Status' }, { value: 'stock-desc', label: 'Sort: Stock (high)' }, { value: 'stock-asc', label: 'Sort: Stock (low)' }]} wrapperClassName="w-full" className={fSel} inlineChevron /></div>
+                </>
+              );
+            })()}
             desktop={
               <div className="flex flex-wrap gap-2">
                 <PageRefreshButton />
@@ -686,6 +738,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-primary btn-sm">
                   Import from Excel
                 </Link>
+                <Button variant="secondary" size="sm" onClick={() => setShowExport(true)}>
+                  Generate report
+                </Button>
               </div>
             }
             sheet={
@@ -699,10 +754,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-secondary h-12 w-full justify-center text-center">
                   Import from Excel
                 </Link>
+                <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => setShowExport(true)}>
+                  Generate report
+                </Button>
               </>
             }
           />
         }
+      />
+
+      <ExportModal
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        config={EXPORT_CONFIGS.logistics_partners}
       />
 
       {actionError && !dismissedError && !mutationModalOpen && (
@@ -1289,171 +1353,343 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         }}
         tabs={[
           { value: 'locations', label: `Locations (${filteredLocations.length !== displayTotalLocations ? `${filteredLocations.length}/` : ''}${displayTotalLocations})` },
-          { value: 'providers', label: `Companies (${displayTotalProviders})` },
+          { value: 'providers', label: `Companies (${filteredProviders.length !== displayTotalProviders ? `${filteredProviders.length}/` : ''}${displayTotalProviders})` },
         ]}
       />
 
-      <div className="flex flex-wrap items-end gap-2">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          clearable
-          placeholder={
-            activeTab === 'providers'
-              ? 'Search companies by name, contact, or coverage…'
-              : 'Search locations by name, address, or company…'
-          }
-          wrapperClassName="w-full flex-1 min-w-0 md:min-w-[12rem] md:max-w-md"
-          className="!bg-app-elevated"
-        />
-        {activeTab === 'locations' && (
-          <>
-            <SearchableSelect
-              value={filterProviderId}
-              onChange={(v) => setFilterProviderId(v)}
-              placeholder="All companies"
-              options={[
-                { value: '', label: 'All companies' },
-                ...displayProviders.map((p) => ({ value: p.id, label: p.name })),
-              ]}
-              searchPlaceholder="Search companies..."
-              wrapperClassName="w-40 sm:w-48"
-            />
-            <SearchableSelect
-              value={filterState}
-              onChange={(v) => setFilterState(v)}
-              placeholder="All states"
-              options={[
-                { value: '', label: 'All states' },
-                ...availableStates.map((s) => ({ value: s, label: s })),
-              ]}
-              searchPlaceholder="Search states..."
-              wrapperClassName="w-36 sm:w-44"
-            />
-            <FormSelect
-              value={filterHasStock}
-              onChange={(e) => setFilterHasStock(e.target.value)}
-              placeholder="All stock"
-              options={[
-                { value: '', label: 'All stock levels' },
-                { value: 'has_stock', label: 'Has stock' },
-                { value: 'no_stock', label: 'No stock' },
-              ]}
-              wrapperClassName="w-36 sm:w-40"
-            />
-            <FormSelect
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              options={[
-                { value: 'name', label: 'Sort: Name' },
-                { value: 'stock-desc', label: 'Sort: Stock (high)' },
-                { value: 'stock-asc', label: 'Sort: Stock (low)' },
-                { value: 'provider', label: 'Sort: Company' },
-              ]}
-              wrapperClassName="w-36 sm:w-44"
-            />
-            {(filterProviderId || filterState || filterHasStock) && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => { setFilterProviderId(''); setFilterState(''); setFilterHasStock(''); }}
-              >
-                Clear filters
-              </Button>
-            )}
-          </>
-        )}
-      </div>
+      <ToolbarFiltersCollapsible
+        hideMobileSheet
+        badgeCount={
+          activeTab === 'locations'
+            ? (filterProviderId ? 1 : 0) + (filterState ? 1 : 0) + (filterHasStock ? 1 : 0)
+            : (filterProviderStatus ? 1 : 0) + (filterProviderHasStock ? 1 : 0)
+        }
+        onClearAll={
+          activeTab === 'locations'
+            ? () => { setFilterProviderId(''); setFilterState(''); setFilterHasStock(''); }
+            : () => { setFilterProviderStatus(''); setFilterProviderHasStock(''); }
+        }
+        searchRow={
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            clearable
+            withSubmitButton
+            placeholder={
+              activeTab === 'providers'
+                ? 'Search by name, contact, or coverage…'
+                : 'Search by name, address, or company…'
+            }
+            wrapperClassName="w-full min-w-0 flex-1"
+          />
+        }
+        desktopInlineFilters={
+          activeTab === 'locations' ? (
+            <>
+              <SearchableSelect
+                value={filterProviderId}
+                onChange={(v) => setFilterProviderId(v)}
+                placeholder="All companies"
+                options={[
+                  { value: '', label: 'All companies' },
+                  ...displayProviders.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                searchPlaceholder="Search companies..."
+                wrapperClassName="w-40 sm:w-48"
+              />
+              <SearchableSelect
+                value={filterState}
+                onChange={(v) => setFilterState(v)}
+                placeholder="All states"
+                options={[
+                  { value: '', label: 'All states' },
+                  ...availableStates.map((s) => ({ value: s, label: s })),
+                ]}
+                searchPlaceholder="Search states..."
+                wrapperClassName="w-36 sm:w-44"
+              />
+              <FormSelect
+                value={filterHasStock}
+                onChange={(e) => setFilterHasStock(e.target.value)}
+                options={[
+                  { value: '', label: 'All stock levels' },
+                  { value: 'has_stock', label: 'Has stock' },
+                  { value: 'no_stock', label: 'No stock' },
+                ]}
+                wrapperClassName="w-36 sm:w-40"
+              />
+              <FormSelect
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                options={[
+                  { value: 'name', label: 'Sort: Name' },
+                  { value: 'stock-desc', label: 'Sort: Stock (high)' },
+                  { value: 'stock-asc', label: 'Sort: Stock (low)' },
+                  { value: 'provider', label: 'Sort: Company' },
+                ]}
+                wrapperClassName="w-36 sm:w-44"
+              />
+            </>
+          ) : (
+            <>
+              <FormSelect
+                value={filterProviderStatus}
+                onChange={(e) => setFilterProviderStatus(e.target.value)}
+                options={[
+                  { value: '', label: 'All statuses' },
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                ]}
+                wrapperClassName="w-36 sm:w-40"
+              />
+              <FormSelect
+                value={filterProviderHasStock}
+                onChange={(e) => setFilterProviderHasStock(e.target.value)}
+                options={[
+                  { value: '', label: 'All stock levels' },
+                  { value: 'has_stock', label: 'Has stock' },
+                  { value: 'no_stock', label: 'No stock' },
+                ]}
+                wrapperClassName="w-36 sm:w-44"
+              />
+              <FormSelect
+                value={providerSortBy}
+                onChange={(e) => setProviderSortBy(e.target.value as typeof providerSortBy)}
+                options={[
+                  { value: 'name', label: 'Sort: Name' },
+                  { value: 'status', label: 'Sort: Status' },
+                  { value: 'stock-desc', label: 'Sort: Stock (high)' },
+                  { value: 'stock-asc', label: 'Sort: Stock (low)' },
+                ]}
+                wrapperClassName="w-36 sm:w-44"
+              />
+            </>
+          )
+        }
+        sheetFilterBody={
+          activeTab === 'locations' ? (
+            <div className="flex flex-col gap-3">
+              <SearchableSelect
+                value={filterProviderId}
+                onChange={(v) => setFilterProviderId(v)}
+                placeholder="All companies"
+                options={[
+                  { value: '', label: 'All companies' },
+                  ...displayProviders.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                searchPlaceholder="Search companies..."
+                wrapperClassName="w-full"
+              />
+              <SearchableSelect
+                value={filterState}
+                onChange={(v) => setFilterState(v)}
+                placeholder="All states"
+                options={[
+                  { value: '', label: 'All states' },
+                  ...availableStates.map((s) => ({ value: s, label: s })),
+                ]}
+                searchPlaceholder="Search states..."
+                wrapperClassName="w-full"
+              />
+              <FormSelect
+                value={filterHasStock}
+                onChange={(e) => setFilterHasStock(e.target.value)}
+                options={[
+                  { value: '', label: 'All stock levels' },
+                  { value: 'has_stock', label: 'Has stock' },
+                  { value: 'no_stock', label: 'No stock' },
+                ]}
+                wrapperClassName="w-full"
+              />
+              <FormSelect
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                options={[
+                  { value: 'name', label: 'Sort: Name' },
+                  { value: 'stock-desc', label: 'Sort: Stock (high)' },
+                  { value: 'stock-asc', label: 'Sort: Stock (low)' },
+                  { value: 'provider', label: 'Sort: Company' },
+                ]}
+                wrapperClassName="w-full"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <FormSelect
+                value={filterProviderStatus}
+                onChange={(e) => setFilterProviderStatus(e.target.value)}
+                options={[
+                  { value: '', label: 'All statuses' },
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                ]}
+                wrapperClassName="w-full"
+              />
+              <FormSelect
+                value={filterProviderHasStock}
+                onChange={(e) => setFilterProviderHasStock(e.target.value)}
+                options={[
+                  { value: '', label: 'All stock levels' },
+                  { value: 'has_stock', label: 'Has stock' },
+                  { value: 'no_stock', label: 'No stock' },
+                ]}
+                wrapperClassName="w-full"
+              />
+              <FormSelect
+                value={providerSortBy}
+                onChange={(e) => setProviderSortBy(e.target.value as typeof providerSortBy)}
+                options={[
+                  { value: 'name', label: 'Sort: Name' },
+                  { value: 'status', label: 'Sort: Status' },
+                  { value: 'stock-desc', label: 'Sort: Stock (high)' },
+                  { value: 'stock-asc', label: 'Sort: Stock (low)' },
+                ]}
+                wrapperClassName="w-full"
+              />
+            </div>
+          )
+        }
+      />
 
       {/* Content */}
       {activeTab === 'providers' && (
-        <CompactTable<Provider>
-          columns={providerTableColumns}
-          rows={filteredProviders}
-          rowKey={(p) => p.id}
-          rowClassName={(p) =>
-            isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id) ? 'opacity-60' : ''
-          }
-          emptyTitle={searchQuery ? 'No companies match your search' : 'No logistics companies yet'}
-          emptyDescription={searchQuery ? 'Try a different name, contact, or coverage area.' : undefined}
-          renderMobileCard={(p) => {
-            const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
-            const body = (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-app-fg truncate">{p.name}</span>
-                  <StatusBadge status={p.status} />
+        <>
+          <CompactTable<Provider>
+            columns={providerTableColumns}
+            rows={pagedProviders}
+            rowKey={(p) => p.id}
+            rowClassName={(p) =>
+              isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id) ? 'opacity-60' : ''
+            }
+            emptyTitle={searchQuery || filterProviderStatus || filterProviderHasStock ? 'No companies match your filters' : 'No logistics companies yet'}
+            emptyDescription={searchQuery || filterProviderStatus || filterProviderHasStock ? 'Try adjusting your search or filters.' : undefined}
+            renderMobileCard={(p) => {
+              const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
+              const pLocs = displayLocations.filter((l) => l.providerId === p.id);
+              const pStock = pLocs.reduce((sum, l) => sum + (l.totalStock ?? 0), 0);
+              return (
+                <div className="space-y-2">
+                  <Link
+                    to={`/admin/logistics/team/${p.id}?from=partners`}
+                    prefetch="intent"
+                    className="-mx-3 -mt-2.5 block w-[calc(100%+1.5rem)] px-3 pt-2.5 pb-1 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-app-fg truncate">{p.name}</span>
+                      <StatusBadge status={p.status} />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-app-fg-muted truncate">
+                      <span>{p.coverageArea ?? '—'}</span>
+                      <span className={`tabular-nums font-medium ${pStock === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                        {pStock.toLocaleString()} units
+                      </span>
+                    </div>
+                  </Link>
+                  {!isOptimistic && (
+                    <div className="flex items-center gap-2 border-t border-app-border pt-2 -mx-3 px-3 -mb-0.5">
+                      <button type="button" className="text-xs font-medium text-brand-600 dark:text-brand-400" onClick={(e) => { e.stopPropagation(); setEditingProvider(p); }}>
+                        Edit
+                      </button>
+                      <Link to={`/admin/inventory?providerId=${p.id}`} prefetch="intent" className="text-xs font-medium text-brand-600 dark:text-brand-400" onClick={(e) => e.stopPropagation()}>
+                        Stock
+                      </Link>
+                      {pStock === 0 && (
+                        <button type="button" className="text-xs font-medium text-danger-600 dark:text-danger-400" onClick={(e) => { e.stopPropagation(); setDeleteProvider(p); }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-app-fg-muted truncate">
-                  {p.contactInfo ? <span>{p.contactInfo}</span> : null}
-                  {p.coverageArea ? <span>{p.coverageArea}</span> : null}
-                </div>
-              </>
-            );
-            if (isOptimistic) return body;
-            return (
-              <Link
-                to={`/admin/logistics/team/${p.id}`}
-                prefetch="intent"
-                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
-              >
-                {body}
-              </Link>
-            );
-          }}
-        />
+              );
+            }}
+          />
+          {provTotalPages > 1 && (
+            <Pagination
+              page={provPage}
+              totalPages={provTotalPages}
+              onPageChange={setProvPage}
+              pageSizeOptions={[25, 50, 100]}
+              pageSize={perPage}
+              onPageSizeChange={(s) => { setPerPage(s); setProvPage(1); }}
+            />
+          )}
+        </>
       )}
 
       {activeTab === 'locations' && (
-        <CompactTable<Location>
-          columns={locationTableColumns}
-          rows={filteredLocations}
-          rowKey={(l) => l.id}
-          rowClassName={(l) =>
-            isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id) ? 'opacity-60' : ''
-          }
-          emptyTitle={
-            searchQuery || filterProviderId || filterState || filterHasStock
-              ? 'No locations match your filters'
-              : 'No locations yet'
-          }
-          emptyDescription={
-            searchQuery || filterProviderId || filterState || filterHasStock
-              ? 'Try adjusting your search, company, state, or stock filter.'
-              : 'Add a logistics company first, then add locations.'
-          }
-          renderMobileCard={(l) => {
-            const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
-            const body = (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-app-fg truncate">{l.name}</span>
-                  <StatusBadge status={l.status} />
+        <>
+          <CompactTable<Location>
+            columns={locationTableColumns}
+            rows={pagedLocations}
+            rowKey={(l) => l.id}
+            rowClassName={(l) =>
+              isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id) ? 'opacity-60' : ''
+            }
+            emptyTitle={
+              searchQuery || filterProviderId || filterState || filterHasStock
+                ? 'No locations match your filters'
+                : 'No locations yet'
+            }
+            emptyDescription={
+              searchQuery || filterProviderId || filterState || filterHasStock
+                ? 'Try adjusting your search, company, state, or stock filter.'
+                : 'Add a logistics company first, then add locations.'
+            }
+            renderMobileCard={(l) => {
+              const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
+              const stockCount = l.totalStock ?? 0;
+              return (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => !isOptimistic && setViewingLocation(l)}
+                    className="-mx-3 -mt-2.5 block w-[calc(100%+1.5rem)] px-3 pt-2.5 pb-1 space-y-1.5 text-left"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-app-fg truncate">{l.name}</span>
+                      <StatusBadge status={l.status} />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-app-fg-muted truncate">
+                      <span>{l.providerName ?? 'Unknown company'}</span>
+                      <span className={`tabular-nums font-medium ${stockCount === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                        {stockCount.toLocaleString()} units
+                      </span>
+                    </div>
+                    {l.address ? (
+                      <p className="text-xs text-app-fg-muted truncate">{l.address}</p>
+                    ) : null}
+                  </button>
+                  {!isOptimistic && (
+                    <div className="flex items-center gap-2 border-t border-app-border pt-2 -mx-3 px-3 -mb-0.5">
+                      <Link to={`/admin/inventory?locationId=${l.id}`} className="text-xs font-medium text-brand-600 dark:text-brand-400" onClick={(e) => e.stopPropagation()}>
+                        Stock
+                      </Link>
+                      <button type="button" className="text-xs font-medium text-brand-600 dark:text-brand-400" onClick={(e) => { e.stopPropagation(); setEditingLocation(l); }}>
+                        Edit
+                      </button>
+                      {stockCount === 0 && (
+                        <button type="button" className="text-xs font-medium text-danger-600 dark:text-danger-400" onClick={(e) => { e.stopPropagation(); setDeleteLocation(l); }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 text-xs text-app-fg-muted truncate">
-                  <span>{l.providerName ?? 'Unknown company'}</span>
-                  {(l.totalStock ?? 0) > 0 ? (
-                    <span className="tabular-nums">{(l.totalStock ?? 0).toLocaleString()} units</span>
-                  ) : null}
-                </div>
-                {l.address ? (
-                  <p className="text-xs text-app-fg-muted truncate">{l.address}</p>
-                ) : null}
-              </>
-            );
-            if (isOptimistic) return body;
-            return (
-              <button
-                type="button"
-                onClick={() => setViewingLocation(l)}
-                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
-              >
-                {body}
-              </button>
-            );
-          }}
-        />
+              );
+            }}
+          />
+          {locTotalPages > 1 && (
+            <Pagination
+              page={locPage}
+              totalPages={locTotalPages}
+              onPageChange={setLocPage}
+              pageSizeOptions={[25, 50, 100]}
+              pageSize={perPage}
+              onPageSizeChange={(s) => { setPerPage(s); setLocPage(1); }}
+            />
+          )}
+        </>
       )}
 
       <ConfirmActionModal

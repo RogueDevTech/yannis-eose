@@ -52,7 +52,7 @@ export class CartOrdersService {
         AND (co.media_buyer_id IS NULL OR co.campaign_id IS NULL)
     `);
     // Pass 2: for any still missing, assign a campaign+MB from the same branch
-    // (try servicing_branch_id first, then branch_id, then any campaign with an MB)
+    // (validate user FK to avoid constraint violations)
     const r2 = await this.db.execute(sql`
       UPDATE cart_orders co
       SET campaign_id = sub.campaign_id,
@@ -62,12 +62,13 @@ export class CartOrdersService {
         FROM cart_orders co2
         JOIN campaigns c ON c.media_buyer_id IS NOT NULL
           AND (c.branch_id = co2.servicing_branch_id OR c.branch_id = co2.branch_id)
+        JOIN users u ON u.id = c.media_buyer_id
         WHERE co2.media_buyer_id IS NULL
         ORDER BY co2.id, random()
       ) sub
       WHERE co.id = sub.cart_order_id
     `);
-    // Pass 3: absolute fallback — assign any campaign with an MB (no branch match)
+    // Pass 3: absolute fallback — any campaign with a valid MB user
     const r3 = await this.db.execute(sql`
       UPDATE cart_orders co
       SET campaign_id = sub.campaign_id,
@@ -76,7 +77,11 @@ export class CartOrdersService {
         SELECT DISTINCT ON (co2.id) co2.id AS cart_order_id, c.id AS campaign_id, c.media_buyer_id
         FROM cart_orders co2
         CROSS JOIN LATERAL (
-          SELECT id, media_buyer_id FROM campaigns WHERE media_buyer_id IS NOT NULL ORDER BY random() LIMIT 1
+          SELECT c2.id, c2.media_buyer_id
+          FROM campaigns c2
+          JOIN users u ON u.id = c2.media_buyer_id
+          WHERE c2.media_buyer_id IS NOT NULL
+          ORDER BY random() LIMIT 1
         ) c
         WHERE co2.media_buyer_id IS NULL
       ) sub

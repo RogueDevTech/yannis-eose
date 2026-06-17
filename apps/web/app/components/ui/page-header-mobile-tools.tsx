@@ -41,6 +41,8 @@ export interface PageHeaderMobileToolsProps {
   filters?: ReactNode | PageHeaderMobileToolsSheetRender;
   /** Active filter count — shows a dot on the kebab trigger when &gt; 0. */
   filtersBadgeCount?: number;
+  /** Called when the user taps the red filter-clear badge. */
+  onClearFilters?: () => void;
   /** Sheet heading (also used for `aria-labelledby`). */
   sheetTitle: string;
   sheetSubtitle?: ReactNode;
@@ -68,6 +70,7 @@ export function PageHeaderMobileTools({
   sheet,
   filters,
   filtersBadgeCount = 0,
+  onClearFilters,
   sheetTitle,
   sheetSubtitle,
   triggerAriaLabel,
@@ -108,10 +111,23 @@ export function PageHeaderMobileTools({
           >
             <KebabVerticalIcon />
             {hasFilters && filtersBadgeCount > 0 ? (
-              <span
-                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-brand-500 ring-2 ring-app-elevated"
-                aria-hidden
-              />
+              onClearFilters ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onClearFilters(); }}
+                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger-500 ring-2 ring-app-elevated"
+                  aria-label="Clear filters"
+                >
+                  <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              ) : (
+                <span
+                  className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-danger-500 ring-2 ring-app-elevated"
+                  aria-hidden
+                />
+              )
             ) : null}
           </Button>
         ) : null}

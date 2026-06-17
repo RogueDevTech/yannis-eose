@@ -1155,6 +1155,7 @@ export const marketingRouter = router({
           },
           ctx.user.id,
           ctx.user.role,
+          ctx.activeGroupId,
         ),
         getMarketingService().listCampaigns(
           {
