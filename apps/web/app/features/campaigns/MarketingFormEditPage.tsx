@@ -236,7 +236,7 @@ export function MarketingFormEditPage({
     () =>
       compatibleOfferGroups.map((g) => ({
         value: g.id,
-        label: `${g.name} · ${String(g.status).toUpperCase()} (${g.items.length} items)`,
+        label: `${g.name} (${g.items.length} items)`,
       })),
     [compatibleOfferGroups],
   );

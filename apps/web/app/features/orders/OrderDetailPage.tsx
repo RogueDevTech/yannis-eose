@@ -1302,8 +1302,6 @@ export function OrderDetailPage({
     successMessage: 'Comment added',
     skipErrorToast: addCommentModalOpen,
   });
-  const canGenerateInvoice =
-    isAdminLevel({ role: userRole }) || (permissions ?? []).includes('finance.read');
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
@@ -1540,14 +1538,12 @@ export function OrderDetailPage({
     revalidatedForEnsureInvoiceRef.current = false;
   }, [order.id]);
 
-  // Auto-generate invoice for admin/finance when the invoice fetch resolves
-  // with no invoice. Fires once per order — the user never needs to click
-  // "Generate invoice" manually.
+  // Auto-generate invoice when viewing a confirmed order that has none.
+  // Fires once per order — any role can trigger it (backend is idempotent).
   const autoEnsureInvoiceFiredRef = useRef(false);
   useEffect(() => { autoEnsureInvoiceFiredRef.current = false; }, [order.id]);
   useEffect(() => {
     if (autoEnsureInvoiceFiredRef.current) return;
-    if (!canGenerateInvoice) return;
     // Wait for the invoice fetch to complete with a definitive "no invoice" result
     const fetchDone = invoiceFetcher.state === 'idle' && invoiceFetcher.data;
     if (!fetchDone) return;
@@ -1563,7 +1559,7 @@ export function OrderDetailPage({
     if (isFollowUpOrder) fd.set('isFollowUpOrder', 'true');
     if (isCartOrder) fd.set('isCartOrder', 'true');
     ensureInvoiceFetcher.submit(fd, { method: 'post' });
-  }, [invoiceFetcher.state, invoiceFetcher.data, invoice, canGenerateInvoice, ensureInvoiceFetcher, isFollowUpOrder, isCartOrder]);
+  }, [invoiceFetcher.state, invoiceFetcher.data, invoice, ensureInvoiceFetcher, isFollowUpOrder, isCartOrder]);
 
   // Close modals when their fetcher returns success — edge-triggered via the
   // shared `useCloseOnFetcherSuccess` hook so the modal closes the same React
@@ -2071,7 +2067,7 @@ export function OrderDetailPage({
               }
 
               if (!i) {
-                const isAutoGenerating = canGenerateInvoice && ensureInvoiceFetcher.state !== 'idle';
+                const isAutoGenerating = ensureInvoiceFetcher.state !== 'idle';
                 return (
                   <div className="card">
                     <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
@@ -2080,30 +2076,23 @@ export function OrderDetailPage({
                     ) : (
                       <>
                         <p className="text-sm text-app-fg-muted mb-3">
-                          This order doesn’t have an invoice yet.
+                          This order doesn't have an invoice yet.
                         </p>
-                        {canGenerateInvoice ? (
-                          <div className="flex justify-end">
-                            <ensureInvoiceFetcher.Form method="post">
-                              <input type="hidden" name="intent" value="ensureInvoice" />
-                              {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
-                              {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
-                              <Button
-                                type="submit"
-                                variant="primary"
-                                size="sm"
-                                disabled={ensureInvoiceFetcher.state !== 'idle'}
-                              >
-                                Generate invoice
-                              </Button>
-                            </ensureInvoiceFetcher.Form>
-                          </div>
-                        ) : (
-                          <InlineNotification
-                            variant="info"
-                            message="Invoices are auto-generated the first time an order is confirmed. If this order is missing one, an admin or finance user can generate it."
-                          />
-                        )}
+                        <div className="flex justify-end">
+                          <ensureInvoiceFetcher.Form method="post">
+                            <input type="hidden" name="intent" value="ensureInvoice" />
+                            {isFollowUpOrder && <input type="hidden" name="isFollowUpOrder" value="true" />}
+                            {isCartOrder && <input type="hidden" name="isCartOrder" value="true" />}
+                            <Button
+                              type="submit"
+                              variant="primary"
+                              size="sm"
+                              disabled={ensureInvoiceFetcher.state !== 'idle'}
+                            >
+                              Generate invoice
+                            </Button>
+                          </ensureInvoiceFetcher.Form>
+                        </div>
                       </>
                     )}
                   </div>

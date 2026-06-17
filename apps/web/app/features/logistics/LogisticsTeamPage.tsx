@@ -670,7 +670,7 @@ export function LogisticsTeamPage({
           <TableActionButton onClick={() => setReportLocation(l)} variant="neutral">
             Report
           </TableActionButton>
-          <TableActionButton to={`/admin/logistics/team/${l.locationId}${listQuerySuffix}`} variant="primary">
+          <TableActionButton to={`/admin/logistics/team/${l.providerId}?locationId=${l.locationId}${listQuerySuffix ? `&${listQuerySuffix.substring(1)}` : ''}`} variant="primary">
             Details
           </TableActionButton>
         </div>

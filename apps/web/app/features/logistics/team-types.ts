@@ -53,6 +53,7 @@ export interface LogisticsProviderRow {
 export interface LogisticsLocationRow {
   locationId: string;
   locationName: string;
+  providerId: string;
   providerName: string;
   status: string;
   totalAssigned: number;
