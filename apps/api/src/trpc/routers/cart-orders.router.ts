@@ -9,6 +9,7 @@ import {
   updateCartOrderSchema,
 } from '@yannis/shared';
 import type { CartOrdersService } from '../../cart-orders/cart-orders.service';
+import { getFinanceService } from './finance.router';
 
 // ── Service Injection (NestJS → tRPC singleton bridge) ──────────────
 
@@ -73,13 +74,55 @@ export const cartOrdersRouter = router({
   transition: permissionProcedure('orders.detail.manage')
     .input(transitionCartOrderSchema)
     .mutation(async ({ input, ctx }) => {
-      return getCartOrdersService().transitionStatus(
+      const result = await getCartOrdersService().transitionStatus(
         input.orderId,
         input.newStatus,
         ctx.user,
         input.note,
         input.metadata,
       );
+
+      // Auto-generate invoice on CONFIRMED — mirrors follow-up/main order behaviour
+      if (input.newStatus === 'CONFIRMED') {
+        try {
+          const co = await getCartOrdersService().getById(input.orderId);
+          const coItems = (co as { orderItems?: Array<{ quantity: number; unitPrice: string; productName?: string | null; productId: string }> }).orderItems ?? [];
+          await getFinanceService().ensureInvoiceForOrder({
+            order: {
+              id: co.id,
+              confirmedAt: co.confirmedAt ?? new Date(),
+              customerName: co.customerName,
+              customerAddress: co.customerAddress ?? null,
+              orderItems: coItems.map((it) => ({
+                quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName ?? null, productId: it.productId,
+              })),
+            },
+            actorId: ctx.user.id,
+          });
+        } catch { /* non-critical — user can generate manually */ }
+      }
+
+      return result;
+    }),
+
+  ensureInvoice: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const co = await getCartOrdersService().getById(input.orderId);
+      const coItems = (co as { orderItems?: Array<{ quantity: number; unitPrice: string; productName?: string | null; productId: string }> }).orderItems ?? [];
+      await getFinanceService().ensureInvoiceForOrder({
+        order: {
+          id: co.id,
+          confirmedAt: co.confirmedAt ?? new Date(),
+          customerName: co.customerName,
+          customerAddress: co.customerAddress ?? null,
+          orderItems: coItems.map((it) => ({
+            quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName ?? null, productId: it.productId,
+          })),
+        },
+        actorId: ctx.user.id,
+      });
+      return { success: true };
     }),
 
   initiateCall: authedProcedure

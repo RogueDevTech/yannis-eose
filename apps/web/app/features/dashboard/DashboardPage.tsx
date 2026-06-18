@@ -381,7 +381,7 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={9} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
         {(metrics) => (
           <div>
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders Funnel</h2>
@@ -390,7 +390,6 @@ function CSDashboard({
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
-              { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400' },
               // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live
@@ -484,6 +483,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
     const sep = base.includes('?') ? '&' : '?';
     return `${base}${sep}mediaBuyerId=${mediaBuyerId}`;
   };
+  const unconfirmedOrders = Math.max(0, metrics.totalOrders - metrics.confirmedOrders);
   return (
     <OverviewStatStrip
       mobileGrid
@@ -491,15 +491,21 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
       items={[
         { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: q('/admin/marketing/orders') },
         {
+          label: 'Unconfirmed',
+          value: unconfirmedOrders.toString(),
+          valueClassName: 'text-warning-600 dark:text-warning-400',
+          to: q('/admin/marketing/orders?status=UNPROCESSED'),
+        },
+        {
           label: 'Delivered',
           value: metrics.deliveredOrders.toString(),
-          valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+          valueClassName: 'text-success-600 dark:text-success-400',
           to: q('/admin/marketing/orders?status=DELIVERED'),
         },
         {
           label: 'Confirmed',
           value: metrics.confirmedOrders.toString(),
-          valueClassName: metrics.confirmedOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+          valueClassName: 'text-success-600 dark:text-success-400',
           to: q('/admin/marketing/orders?status=CONFIRMED'),
         },
         { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
@@ -524,7 +530,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
         {
           label: 'Cart Abandonment',
           value: abandonedCartCount.toString(),
-          valueClassName: abandonedCartCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
+          valueClassName: 'text-amber-600 dark:text-amber-400',
           title: 'Captured carts not yet recovered (browsing + dropped off)',
           to: q('/admin/marketing/orders?fromCart=1'),
         },
@@ -568,6 +574,7 @@ function MarketingDashboard({
   // ads — "My Performance" shows their own orders (zero when they haven't).
   const showsPersonalToggle = isHeadOfMarketing || isMarketingTeamSupervisor;
   const showsSupervisorLayout = isHeadOfMarketing || isMarketingTeamSupervisor;
+  const deletedCount = (data.orderCounts as Record<string, number>)['DELETED'] ?? 0;
   const [viewTab, setViewTab] = useState<'personal' | 'team'>('team');
 
   // MB-Supervisor with personal/team toggle
@@ -584,7 +591,7 @@ function MarketingDashboard({
           onChange={(v) => setViewTab(v as 'personal' | 'team')}
         />
 
-        <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+        <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
           {(teamMetrics, personalMetrics, abandonedCartCount) => {
             const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
             return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
@@ -624,7 +631,7 @@ function MarketingDashboard({
   if (isHeadOfMarketing) {
     return (
       <>
-        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
           {(metrics, abandonedCartCount) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />}
         </DashboardMetricsSection>
 
@@ -657,7 +664,7 @@ function MarketingDashboard({
   // Non-supervisor MB: original layout
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
         {(metrics, abandonedCartCount) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />}
       </DashboardMetricsSection>
 

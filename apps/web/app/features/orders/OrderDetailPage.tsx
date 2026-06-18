@@ -1541,11 +1541,14 @@ export function OrderDetailPage({
 
   // Auto-generate invoice when viewing a confirmed order that has none.
   // Fires once per order — any role can trigger it (backend is idempotent).
+  const PRE_CONFIRMED_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']);
   const autoEnsureInvoiceFiredRef = useRef(false);
   useEffect(() => { autoEnsureInvoiceFiredRef.current = false; }, [order.id]);
   useEffect(() => {
     if (autoEnsureInvoiceFiredRef.current) return;
     if (isMirroring) return;
+    // Only auto-generate for CONFIRMED and beyond — pre-confirmed orders have no confirmedAt
+    if (PRE_CONFIRMED_STATUSES.has(order.status)) return;
     // Wait for the invoice fetch to complete with a definitive "no invoice" result
     const fetchDone = invoiceFetcher.state === 'idle' && invoiceFetcher.data;
     if (!fetchDone) return;
@@ -1561,7 +1564,7 @@ export function OrderDetailPage({
     if (isFollowUpOrder) fd.set('isFollowUpOrder', 'true');
     if (isCartOrder) fd.set('isCartOrder', 'true');
     ensureInvoiceFetcher.submit(fd, { method: 'post' });
-  }, [invoiceFetcher.state, invoiceFetcher.data, invoice, ensureInvoiceFetcher, isFollowUpOrder, isCartOrder]);
+  }, [invoiceFetcher.state, invoiceFetcher.data, invoice, ensureInvoiceFetcher, isFollowUpOrder, isCartOrder, order.status]);
 
   // Close modals when their fetcher returns success — edge-triggered via the
   // shared `useCloseOnFetcherSuccess` hook so the modal closes the same React
@@ -2416,8 +2419,8 @@ export function OrderDetailPage({
                     </>
                   )}
 
-                  {/* Reassign to another location — available from CONFIRMED through IN_TRANSIT */}
-                  {['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(order.status) && logisticsLocations.length > 0 && (
+                  {/* Reassign to another location — available from AGENT_ASSIGNED through IN_TRANSIT */}
+                  {['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(order.status) && logisticsLocations.length > 0 && (
                     <Button
                       type="button"
                       variant="secondary"
