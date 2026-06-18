@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, inArray, isNull, lte, ne, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type {
@@ -867,7 +867,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   // ── Follow-Up Order Lifecycle ──────────────────────────────────────
 
-  async listFollowUpOrders(input: ListFollowUpOrdersInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listFollowUpOrders(input: ListFollowUpOrdersInput, branchId?: string | null, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
     const conditions: Parameters<typeof and>[0][] = input.showDeleted
       ? [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`]
       : [isNull(schema.followUpOrders.deletedAt)];
@@ -884,7 +884,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
     {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId ?? input.branchId, effectiveBranchIds);
-      if (bCond) conditions.push(bCond);
+      const isSelfQuery = viewerCloserId && input.assignedCsId === viewerCloserId;
+      if (isSelfQuery && bCond) {
+        conditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, viewerCloserId))!);
+      } else if (bCond) {
+        conditions.push(bCond);
+      }
     }
     if (input.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(input.startDate)));
     if (input.endDate) {
@@ -996,13 +1001,17 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     };
   }
 
-  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null) {
+  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
-    if (branchId) {
-      conditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
-    } else if (effectiveBranchIds?.length) {
-      conditions.push(inArray(schema.followUpOrders.servicingBranchId, effectiveBranchIds));
+    {
+      const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId, effectiveBranchIds);
+      const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
+      if (isSelfQuery && bCond) {
+        conditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, viewerCloserId))!);
+      } else if (bCond) {
+        conditions.push(bCond);
+      }
     }
     if (startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -1025,12 +1034,16 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     // Separate deleted count (soft-deleted orders are excluded from the main query)
     const deletedConditions: Parameters<typeof and>[0][] = [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`];
-    if (branchId) {
-      deletedConditions.push(eq(schema.followUpOrders.servicingBranchId, branchId));
-    } else if (effectiveBranchIds?.length) {
-      deletedConditions.push(inArray(schema.followUpOrders.servicingBranchId, effectiveBranchIds));
-    }
     if (assignedCsId) deletedConditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
+    {
+      const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId, effectiveBranchIds);
+      const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
+      if (isSelfQuery && bCond) {
+        deletedConditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, viewerCloserId))!);
+      } else if (bCond) {
+        deletedConditions.push(bCond);
+      }
+    }
     if (startDate) deletedConditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
     if (endDate) {
       const endDel = new Date(endDate);
@@ -1047,16 +1060,20 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   /** Lightweight per-status counts for dashboard stat strips. */
-  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string; endDate?: string }) {
+  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string; endDate?: string; viewerCloserId?: string | null }) {
     const eIdsKey = opts?.effectiveBranchIds?.join(',') ?? '';
     const cacheKey = `cache:followup:dashboard_counts:${opts?.assignedCsId ?? 'all'}:${opts?.branchId ?? 'all'}:${eIdsKey}:${opts?.startDate ?? ''}:${opts?.endDate ?? ''}`;
     return this.cache.getOrSet(cacheKey, 30, async () => {
       const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
       if (opts?.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, opts.assignedCsId));
-      if (opts?.branchId) {
-        conditions.push(eq(schema.followUpOrders.servicingBranchId, opts.branchId));
-      } else if (opts?.effectiveBranchIds?.length) {
-        conditions.push(inArray(schema.followUpOrders.servicingBranchId, opts.effectiveBranchIds));
+      {
+        const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, opts?.branchId, opts?.effectiveBranchIds);
+        const isSelfQuery = opts?.viewerCloserId && opts?.assignedCsId === opts.viewerCloserId;
+        if (isSelfQuery && bCond) {
+          conditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, opts!.viewerCloserId!))!);
+        } else if (bCond) {
+          conditions.push(bCond);
+        }
       }
       if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(opts.startDate)));
       if (opts?.endDate) {
@@ -1162,13 +1179,23 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         .set(setFields)
         .where(eq(schema.followUpOrders.id, orderId));
 
+      const fieldLabels: Record<string, string> = {
+        customerName: 'customer name',
+        deliveryAddress: 'delivery address',
+        deliveryState: 'delivery state',
+        deliveryNotes: 'delivery notes',
+        customerEmail: 'customer email',
+        preferredDeliveryDate: 'preferred delivery date',
+      };
+      const changedFields = Object.keys(updates).filter((k) => updates[k as keyof typeof updates] !== undefined);
+      const readableFields = changedFields.map((f) => fieldLabels[f] ?? f);
       await tx.insert(schema.followUpOrderTimelineEvents).values({
         followUpOrderId: orderId,
         eventType: 'ORDER_DETAILS_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
-        description: 'Order details updated.',
-        metadata: { fields: Object.keys(updates).filter((k) => updates[k as keyof typeof updates] !== undefined) },
+        description: `Updated ${readableFields.join(', ')}.`,
+        metadata: { fields: changedFields },
         branchId: null,
       });
     });
@@ -1352,6 +1379,41 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     return { success: true };
   }
 
+  /**
+   * Record a manual call on a follow-up order.
+   * Transitions to CS_ENGAGED if the order is still pre-engaged,
+   * and always writes a MANUAL_CALL_LOGGED timeline event so the confirm gate is satisfied.
+   */
+  async recordManualCall(orderId: string, actor: SessionUser) {
+    const [order] = await this.db
+      .select({ id: schema.followUpOrders.id, status: schema.followUpOrders.status, servicingBranchId: schema.followUpOrders.servicingBranchId })
+      .from(schema.followUpOrders)
+      .where(eq(schema.followUpOrders.id, orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Follow-up order not found' });
+
+    await withActor(this.db, actor, async (tx) => {
+      if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
+        await tx
+          .update(schema.followUpOrders)
+          .set({ status: 'CS_ENGAGED', updatedAt: new Date() })
+          .where(eq(schema.followUpOrders.id, orderId));
+      }
+
+      await tx.insert(schema.followUpOrderTimelineEvents).values({
+        followUpOrderId: orderId,
+        eventType: 'MANUAL_CALL_LOGGED',
+        actorId: actor.id,
+        actorName: actor.name,
+        description: 'Manual call recorded.',
+        metadata: { previousStatus: order.status },
+        branchId: order.servicingBranchId,
+      });
+    });
+
+    return { success: true, callInitiated: true, callLog: null };
+  }
+
   async transitionFollowUpOrderStatus(
     orderId: string,
     newStatus: string,
@@ -1401,8 +1463,28 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       };
       const eventType = eventTypeMap[newStatus] ?? 'ORDER_VIEWED';
 
+      // Detect retrack (rolling back to an earlier status).
+      const STATUS_ORDER = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED'];
+      const prevIdx = STATUS_ORDER.indexOf(order.status);
+      const newIdx = STATUS_ORDER.indexOf(newStatus);
+      const isRetrack = prevIdx > 0 && newIdx >= 0 && newIdx < prevIdx && newStatus !== 'DELETED';
+
+      const statusLabel = (s: string) => {
+        const labels: Record<string, string> = {
+          UNPROCESSED: 'Unassigned', CS_ASSIGNED: 'Assigned', CS_ENGAGED: 'Unconfirmed',
+          CONFIRMED: 'Confirmed', AGENT_ASSIGNED: 'Agent Assigned', DISPATCHED: 'Dispatched',
+          IN_TRANSIT: 'In Transit', DELIVERED: 'Delivered', REMITTED: 'Remitted', DELETED: 'Deleted',
+        };
+        return labels[s] ?? s.replace(/_/g, ' ').toLowerCase();
+      };
+
       // Build a descriptive timeline message
-      let description = note;
+      let description: string | undefined;
+      if (isRetrack) {
+        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? ` — ${note}` : ''}`;
+      } else if (note) {
+        description = note;
+      }
       if (!description) {
         const logisticsLocationId = metadata?.logisticsLocationId as string | undefined;
         let locationLabel: string | undefined;

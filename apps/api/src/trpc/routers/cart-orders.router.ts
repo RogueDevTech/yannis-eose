@@ -32,18 +32,22 @@ export const cartOrdersRouter = router({
   list: permissionProcedure('orders.read')
     .input(listCartOrdersSchema)
     .query(async ({ input, ctx }) => {
-      return getCartOrdersService().list(input, ctx.currentBranchId, ctx.effectiveBranchIds);
+      const viewerCloserId = ctx.user.role === 'CS_CLOSER' ? ctx.user.id : null;
+      return getCartOrdersService().list(input, ctx.currentBranchId, ctx.effectiveBranchIds, viewerCloserId);
     }),
 
   getStatusCounts: permissionProcedure('orders.read')
     .input(listCartOrdersSchema.pick({ assignedCsId: true, branchId: true, startDate: true, endDate: true }))
     .query(async ({ input, ctx }) => {
+      const viewerCloserId = ctx.user.role === 'CS_CLOSER' ? ctx.user.id : null;
       return getCartOrdersService().getStatusCounts(
         ctx.currentBranchId ?? input.branchId,
         input.assignedCsId,
         input.startDate,
         input.endDate,
         ctx.effectiveBranchIds,
+        undefined, // mediaBuyerId
+        viewerCloserId,
       );
     }),
 

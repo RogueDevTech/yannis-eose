@@ -2356,7 +2356,8 @@ export const ordersRouter = router({
   followUpOrdersList: permissionProcedure('orders.followUp')
     .input(listFollowUpOrdersSchema)
     .query(async ({ input, ctx }) => {
-      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId, ctx.effectiveBranchIds);
+      const viewerCloserId = ctx.user.role === 'CS_CLOSER' ? ctx.user.id : null;
+      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId, ctx.effectiveBranchIds, viewerCloserId);
     }),
 
   followUpOrdersStatusCounts: permissionProcedure('orders.followUp')
@@ -2368,7 +2369,8 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const assignedCsId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
       const branchId = input.branchId ?? ctx.currentBranchId ?? undefined;
-      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds);
+      const viewerCloserId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
+      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds, viewerCloserId);
     }),
 
   /** Lightweight follow-up counts for dashboard stat strips (assigned + delivered). */
@@ -2383,6 +2385,7 @@ export const ordersRouter = router({
         effectiveBranchIds: ctx.effectiveBranchIds,
         startDate: input?.startDate,
         endDate: input?.endDate,
+        viewerCloserId: isCloser ? ctx.user.id : null,
       });
     }),
 
@@ -2484,5 +2487,13 @@ export const ordersRouter = router({
       }
 
       return result;
+    }),
+
+  /** Record a manual call on a follow-up order. Transitions to CS_ENGAGED if pre-engaged,
+   *  and always writes a MANUAL_CALL_LOGGED timeline event so the confirm gate is satisfied. */
+  followUpRecordCall: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().recordManualCall(input.orderId, ctx.user);
     }),
 });

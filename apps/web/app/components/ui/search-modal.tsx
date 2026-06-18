@@ -68,35 +68,64 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
       const apiUrl = getBrowserApiBaseUrl();
       const searchParam = encodeURIComponent(JSON.stringify({ search: q, limit: 5 }));
 
-      const [ordersRes, productsRes, usersRes] = await Promise.all([
-        fetch(`${apiUrl}/trpc/orders.list?input=${searchParam}`, {
-          credentials: 'include',
-          signal: controller.signal,
-        }).then((r) => r.json()).catch(() => null),
-        fetch(`${apiUrl}/trpc/products.list?input=${searchParam}`, {
-          credentials: 'include',
-          signal: controller.signal,
-        }).then((r) => r.json()).catch(() => null),
-        fetch(`${apiUrl}/trpc/users.list?input=${searchParam}`, {
-          credentials: 'include',
-          signal: controller.signal,
-        }).then((r) => r.json()).catch(() => null),
+      const fetchOpts = { credentials: 'include' as const, signal: controller.signal };
+      const [ordersRes, followUpRes, cartRes, productsRes, usersRes] = await Promise.all([
+        fetch(`${apiUrl}/trpc/orders.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
+        fetch(`${apiUrl}/trpc/orders.followUpOrdersList?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
+        fetch(`${apiUrl}/trpc/cartOrders.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
+        fetch(`${apiUrl}/trpc/products.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
+        fetch(`${apiUrl}/trpc/users.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
       ]);
 
       if (controller.signal.aborted) return;
 
       const combined: SearchResult[] = [];
+      const seenIds = new Set<string>();
 
-      // Parse orders
+      // Parse main orders
       const orders = ordersRes?.result?.data?.orders;
       if (Array.isArray(orders)) {
         for (const o of orders.slice(0, 5)) {
+          if (seenIds.has(o.id)) continue;
+          seenIds.add(o.id);
           combined.push({
             id: o.id,
             type: 'order',
             title: o.customerName || 'Unnamed Order',
             subtitle: `${o.status?.replace(/_/g, ' ')} ${o.totalAmount ? `· ₦${parseFloat(o.totalAmount).toLocaleString()}` : ''}`,
             href: `/admin/orders/${o.id}`,
+          });
+        }
+      }
+
+      // Parse follow-up orders
+      const fuOrders = followUpRes?.result?.data?.orders;
+      if (Array.isArray(fuOrders)) {
+        for (const o of fuOrders.slice(0, 5)) {
+          if (seenIds.has(o.id)) continue;
+          seenIds.add(o.id);
+          combined.push({
+            id: o.id,
+            type: 'order',
+            title: o.customerName || 'Unnamed Order',
+            subtitle: `Follow-up · ${o.status?.replace(/_/g, ' ')} ${o.totalAmount ? `· ₦${parseFloat(o.totalAmount).toLocaleString()}` : ''}`,
+            href: `/admin/orders/${o.id}?from=followup`,
+          });
+        }
+      }
+
+      // Parse cart orders
+      const cartOrders = cartRes?.result?.data?.orders;
+      if (Array.isArray(cartOrders)) {
+        for (const o of cartOrders.slice(0, 5)) {
+          if (seenIds.has(o.id)) continue;
+          seenIds.add(o.id);
+          combined.push({
+            id: o.id,
+            type: 'order',
+            title: o.customerName || 'Unnamed Order',
+            subtitle: `Cart · ${o.status?.replace(/_/g, ' ')} ${o.totalAmount ? `· ₦${parseFloat(o.totalAmount).toLocaleString()}` : ''}`,
+            href: `/admin/orders/${o.id}?from=cart-orders`,
           });
         }
       }

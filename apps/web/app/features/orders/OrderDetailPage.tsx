@@ -1547,6 +1547,9 @@ export function OrderDetailPage({
   useEffect(() => {
     if (autoEnsureInvoiceFiredRef.current) return;
     if (isMirroring) return;
+    // Cart/follow-up orders auto-generate invoices during the CONFIRMED transition —
+    // skip the client-side auto-ensure to avoid cascading revalidation crashes.
+    if (isCartOrder || isFollowUpOrder) return;
     // Only auto-generate for CONFIRMED and beyond — pre-confirmed orders have no confirmedAt
     if (PRE_CONFIRMED_STATUSES.has(order.status)) return;
     // Wait for the invoice fetch to complete with a definitive "no invoice" result
@@ -1635,6 +1638,7 @@ export function OrderDetailPage({
     restoreModalOpen,
     allocateModalOpen,
     deliverModalOpen,
+    editStatusModalOpen,
     unfreezeModalOpen,
     logisticsLocations,
     logisticsDispatchTemplates,
@@ -2408,7 +2412,7 @@ export function OrderDetailPage({
                         onClick={() => {
                           setDeliverNote('');
                           setDeliverProofUrl('');
-                          setDeliverLocationId(order.logisticsLocationId ?? '');
+                          setDeliverLocationId(order.logisticsLocationId ?? logisticsLocations[0]?.id ?? '');
                           setDeliverCost('');
                           setDeliverModalOpen(true);
                         }}
@@ -2425,7 +2429,7 @@ export function OrderDetailPage({
                       type="button"
                       variant="secondary"
                       className="w-full"
-                      onClick={() => { setAllocateLocationId(''); setAllocateModalOpen(true); }}
+                      onClick={() => { setAllocateLocationId(order.logisticsLocationId ?? ''); setAllocateModalOpen(true); }}
                       disabled={fetcher.state === 'submitting'}
                     >
                       Reassign to another location
@@ -3840,6 +3844,8 @@ export function OrderDetailPage({
                   intent: 'transition',
                   newStatus: editStatusTarget,
                   reason: editStatusReason.trim(),
+                  ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
+                  ...(isCartOrder ? { isCartOrder: 'true' } : {}),
                 },
                 { method: 'post' },
               );

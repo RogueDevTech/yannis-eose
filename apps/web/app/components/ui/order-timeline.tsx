@@ -290,9 +290,12 @@ export function OrderTimeline({ events }: OrderTimelineProps) {
     );
   }
 
+  // Ensure chronological order (oldest first) — newest events appear at the bottom.
+  const sorted = [...events].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
   return (
     <ol className="space-y-3">
-      {events.map((event) => {
+      {sorted.map((event) => {
         const borderClass =
           EVENT_BORDER[event.eventType] ?? 'border-app-border dark:border-neutral-600';
         const actorLabel = timelineActorLabel(event);
