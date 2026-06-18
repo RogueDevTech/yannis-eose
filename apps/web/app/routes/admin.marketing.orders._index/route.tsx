@@ -61,6 +61,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
+  // Optional time-of-day refinement from `<DateFilterBar>` (HH:MM, 24-hour).
+  // When present, we combine date+time into an ISO datetime before sending to the
+  // API so the EOD bump (which would otherwise stretch the window to 23:59) is
+  // skipped. Validators still accept the bare date format for back-compat.
+  let startTime = url.searchParams.get('startTime') ?? undefined;
+  let endTime = url.searchParams.get('endTime') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
     const def = getDefaultTodayRange();
     startDate = def.startDate;
@@ -69,8 +75,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (periodAllTime) {
     startDate = undefined;
     endDate = undefined;
+    startTime = undefined;
+    endTime = undefined;
   }
-  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
+  // Normalise: a time without a matching date is meaningless.
+  if (!startDate) startTime = undefined;
+  if (!endDate) endTime = undefined;
+  /** Compose an ISO datetime when time is present so the API sees an exact moment.
+   *  Otherwise return the bare YYYY-MM-DD which the API expands to whole-day bounds. */
+  const composeBound = (date: string | undefined, time: string | undefined): string | undefined => {
+    if (!date) return undefined;
+    if (!time) return date;
+    return `${date}T${time}:00`;
+  };
+  const apiStartDate = composeBound(startDate, startTime);
+  const apiEndDate = composeBound(endDate, endTime);
+  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', startTime: startTime ?? '', endTime: endTime ?? '', periodAllTime };
 
   // Marketing team supervisors get the My/Team toggle; Head of Marketing gets
   // the same toggle so they can drill into their own activity vs the full team.
@@ -118,8 +138,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productId: productIdParam,
     campaignId: campaignIdParam,
     branchScope: 'marketing' as const,
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
+    ...(apiStartDate && { startDate: apiStartDate }),
+    ...(apiEndDate && { endDate: apiEndDate }),
     ...(testOrders && { testOrders: true }),
     // Marketing only shows edge-form orders — offline orders affect Sales only.
     // When an explicit orderSource filter is active (rare), honour it; otherwise
@@ -148,8 +168,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } = { includeMarketingExportPicklists: loadMarketingExportPicklists };
   if (teamBundleMedioBuyerId) bundleInput.mediaBuyerId = teamBundleMedioBuyerId;
   if (status) bundleInput.status = status;
-  if (startDate) bundleInput.startDate = startDate;
-  if (endDate) bundleInput.endDate = endDate;
+  if (apiStartDate) bundleInput.startDate = apiStartDate;
+  if (apiEndDate) bundleInput.endDate = apiEndDate;
   const bundleInputStr = encodeURIComponent(JSON.stringify(bundleInput));
 
   // Supervisors + HoM get both team stats AND personal stats pre-fetched so
@@ -160,8 +180,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         mediaBuyerId: user.id,
         includeMarketingExportPicklists: false,
         ...(status ? { status } : {}),
-        ...(startDate ? { startDate } : {}),
-        ...(endDate ? { endDate } : {}),
+        ...(apiStartDate ? { startDate: apiStartDate } : {}),
+        ...(apiEndDate ? { endDate: apiEndDate } : {}),
       }
     : null;
   const personalBundleInputStr = personalBundleInput
@@ -204,8 +224,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           page,
           limit: ORDERS_PER_PAGE,
           ...(search ? { search } : {}),
-          ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate } : {}),
+          ...(apiStartDate ? { startDate: apiStartDate } : {}),
+          ...(apiEndDate ? { endDate: apiEndDate } : {}),
           ...(mediaBuyerId ? { mediaBuyerId } : {}),
         }),
       );

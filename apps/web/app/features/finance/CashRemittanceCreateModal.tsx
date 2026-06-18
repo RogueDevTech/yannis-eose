@@ -57,6 +57,10 @@ export function CashRemittanceCreateModal({
   const [notes, setNotes] = useState('');
   const [markReceivedNow, setMarkReceivedNow] = useState(false);
   const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
+  const [commitmentFee, setCommitmentFee] = useState('');
+  const [posFee, setPosFee] = useState('');
+  const [failedDeliveryCost, setFailedDeliveryCost] = useState('');
+  const [showExtraCosts, setShowExtraCosts] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   // Pre-populate delivery fees from orders that already have one set (e.g. by CS closer).
@@ -79,6 +83,10 @@ export function CashRemittanceCreateModal({
       setNotes('');
       setMarkReceivedNow(false);
       setDeliveryFees({});
+      setCommitmentFee('');
+      setPosFee('');
+      setFailedDeliveryCost('');
+      setShowExtraCosts(false);
       setInlineError(null);
     }
   }, [open]);
@@ -115,7 +123,11 @@ export function CashRemittanceCreateModal({
     [selectedOrders, deliveryFees],
   );
 
-  const totalAmount = totalOrderAmount - totalDeliveryFees;
+  const parsedCommitmentFee = parseFloat(commitmentFee) || 0;
+  const parsedPosFee = parseFloat(posFee) || 0;
+  const parsedFailedDeliveryCost = parseFloat(failedDeliveryCost) || 0;
+  const totalExtraCosts = parsedCommitmentFee + parsedPosFee + parsedFailedDeliveryCost;
+  const totalAmount = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
   const submitting = fetcher.state !== 'idle';
 
@@ -149,6 +161,9 @@ export function CashRemittanceCreateModal({
     if (Object.keys(feesMap).length > 0) {
       fd.set('deliveryFees', JSON.stringify(feesMap));
     }
+    if (parsedCommitmentFee > 0) fd.set('commitmentFee', commitmentFee);
+    if (parsedPosFee > 0) fd.set('posFee', posFee);
+    if (parsedFailedDeliveryCost > 0) fd.set('failedDeliveryCost', failedDeliveryCost);
     fetcher.submit(fd, { method: 'POST', action: actionUrl });
   };
 
@@ -210,8 +225,8 @@ export function CashRemittanceCreateModal({
                       </span>
                     </div>
                     {/* Delivery cost input */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-app-fg-muted whitespace-nowrap shrink-0">Delivery cost</span>
+                    <div>
+                      <label className="block text-xs text-app-fg-muted mb-1">Delivery cost</label>
                       <AmountInput
                         placeholder="0"
                         value={deliveryFees[o.id] ?? ''}
@@ -234,11 +249,79 @@ export function CashRemittanceCreateModal({
                   </li>
                 );
               })}
+              {/* Collapsible extra costs */}
+              <li className="bg-app-elevated px-3 py-2.5 space-y-2">
+                {!showExtraCosts ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowExtraCosts(true)}
+                    className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                  >
+                    + Add more costs
+                  </button>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-app-fg-muted">Other costs</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowExtraCosts(false)}
+                        className="text-micro text-app-fg-muted hover:text-app-fg"
+                      >
+                        Hide
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-app-fg-muted mb-1">Commitment fee</label>
+                        <AmountInput
+                          placeholder="0"
+                          value={commitmentFee}
+                          onChange={setCommitmentFee}
+                          prefix="₦"
+                          className="input input-sm w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-app-fg-muted mb-1">POS fee</label>
+                        <AmountInput
+                          placeholder="0"
+                          value={posFee}
+                          onChange={setPosFee}
+                          prefix="₦"
+                          className="input input-sm w-full"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs text-app-fg-muted mb-1">Failed delivery</label>
+                        <AmountInput
+                          placeholder="0"
+                          value={failedDeliveryCost}
+                          onChange={setFailedDeliveryCost}
+                          prefix="₦"
+                          className="input input-sm w-full"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs text-app-fg-muted mb-1">Description (optional)</label>
+                        <textarea
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          rows={2}
+                          placeholder="e.g. POS charge for card payment, commitment fee deducted by logistics"
+                          maxLength={1000}
+                          className="input input-sm w-full resize-none"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </li>
             </ul>
           )}
 
           <div className="rounded-md bg-app-hover px-3 py-2 space-y-1">
-            {totalDeliveryFees > 0 && (
+            {(totalDeliveryFees > 0 || totalExtraCosts > 0) && (
               <>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-app-fg-muted">Order total</span>
@@ -246,12 +329,38 @@ export function CashRemittanceCreateModal({
                     <NairaPrice amount={totalOrderAmount} />
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-app-fg-muted">Delivery costs</span>
-                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                    -<NairaPrice amount={totalDeliveryFees} />
-                  </span>
-                </div>
+                {totalDeliveryFees > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-app-fg-muted">Delivery costs</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={totalDeliveryFees} />
+                    </span>
+                  </div>
+                )}
+                {parsedCommitmentFee > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-app-fg-muted">Commitment fee</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={parsedCommitmentFee} />
+                    </span>
+                  </div>
+                )}
+                {parsedPosFee > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-app-fg-muted">POS fee</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={parsedPosFee} />
+                    </span>
+                  </div>
+                )}
+                {parsedFailedDeliveryCost > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-app-fg-muted">Failed delivery</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={parsedFailedDeliveryCost} />
+                    </span>
+                  </div>
+                )}
               </>
             )}
             <div className="flex items-center justify-between">
@@ -267,47 +376,6 @@ export function CashRemittanceCreateModal({
           )}
         </div>
 
-        <div className="space-y-2">
-          <FileUpload
-            folder={ASSET_FOLDERS.RECEIPTS}
-            onUpload={(url) => setReceiptUrls((prev) => [...prev, url])}
-            onUploadStateChange={(s) => setUploadState(s)}
-            label="Upload receipt(s) (optional)"
-            size="sm"
-          />
-          {receiptUrls.length > 0 && (
-            <ul className="text-xs text-app-fg-muted space-y-1">
-              {receiptUrls.map((url, idx) => (
-                <li key={url} className="flex items-center justify-between gap-2">
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-brand-500 hover:text-brand-600 truncate"
-                  >
-                    Receipt {idx + 1}
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => setReceiptUrls((prev) => prev.filter((u) => u !== url))}
-                    className="text-app-fg-muted hover:text-danger-600"
-                    aria-label={`Remove receipt ${idx + 1}`}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <Textarea
-            label="Notes (optional)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="e.g. dropped off by John"
-            maxLength={1000}
-          />
-        </div>
 
         <label
           className={`block rounded-lg border p-3 cursor-pointer transition-colors ${

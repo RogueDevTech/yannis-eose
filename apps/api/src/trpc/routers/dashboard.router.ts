@@ -76,7 +76,7 @@ async function _ceoOverviewFetch(params: {
       ? Promise.resolve(null)
       : financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
     (hasDateRange || isBranchScoped)
-      ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false).catch(logErr('statusCounts'))
+      ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false).catch(logErr('statusCounts'))
       : Promise.resolve(undefined),
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
     financeService!.getInvoiceSummary(effectiveBranchIds).catch(logErr('invoiceSummary')),
@@ -130,7 +130,7 @@ async function _ceoOverviewFetch(params: {
   } else if (!branchId && fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
     statusCounts = fastProfitResult.statusCounts as Record<string, number>;
   } else {
-    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false).catch(logErr('statusCounts'));
+    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false).catch(logErr('statusCounts'));
     statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
   }
 

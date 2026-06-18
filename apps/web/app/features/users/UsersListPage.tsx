@@ -12,7 +12,7 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
+import { useBranchesCatalog, useBranchGroupsCatalog } from '~/contexts/branches-catalog-context';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -269,17 +269,38 @@ export function UsersListPage({
 
   /** Branch picker (admin-class only). Search ignores branch scope so org-wide users are always discoverable. */
   const branchesCatalog = useBranchesCatalog();
+  const branchGroupsCatalog = useBranchGroupsCatalog();
   const currentBranchParam = searchParams.has('branchId')
     ? searchParams.get('branchId') || 'ALL'
     : 'ALL';
   const branchPickerVisible = canPickBranch && branchesCatalog.length > 0;
-  const branchPickerOptions = useMemo(
-    () => [
+  const branchPickerOptions = useMemo(() => {
+    const activeGroups = branchGroupsCatalog.filter((g) => g.status !== 'INACTIVE');
+    // When multiple groups exist, show branches grouped under their company header
+    if (activeGroups.length > 1) {
+      const opts: Array<{ value: string; label: string; disabled?: boolean }> = [
+        { value: 'ALL', label: 'All branches' },
+      ];
+      for (const group of activeGroups) {
+        const groupBranches = branchesCatalog.filter((b) => b.groupId === group.id);
+        if (groupBranches.length === 0) continue;
+        opts.push({ value: `__group_${group.id}`, label: `── ${group.name} ──`, disabled: true });
+        for (const b of groupBranches) {
+          opts.push({ value: b.id, label: b.name });
+        }
+      }
+      // Ungrouped branches (if any)
+      const ungrouped = branchesCatalog.filter((b) => !b.groupId);
+      for (const b of ungrouped) {
+        opts.push({ value: b.id, label: b.name });
+      }
+      return opts;
+    }
+    return [
       { value: 'ALL', label: 'All branches' },
       ...branchesCatalog.map((b) => ({ value: b.id, label: b.name })),
-    ],
-    [branchesCatalog],
-  );
+    ];
+  }, [branchesCatalog, branchGroupsCatalog]);
   const handleBranchChange = (value: string) => {
     setSearchParams(
       (prev) => {

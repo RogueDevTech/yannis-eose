@@ -1372,10 +1372,19 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (newStatus === 'DISPATCHED') timestampUpdates.dispatchedAt = new Date();
     if (newStatus === 'DELIVERED') timestampUpdates.deliveredAt = new Date();
 
+    // Persist logistics fields from metadata (mirrors regular order transitions)
+    const logisticsUpdates: Record<string, unknown> = {};
+    if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
+    if (metadata?.logisticsProviderId) logisticsUpdates.logisticsProviderId = metadata.logisticsProviderId;
+    if (metadata?.riderId) logisticsUpdates.riderId = metadata.riderId;
+    if (metadata?.preferredDeliveryDate) logisticsUpdates.preferredDeliveryDate = metadata.preferredDeliveryDate;
+    if (metadata?.deliveryNote) logisticsUpdates.deliveryNotes = metadata.deliveryNote;
+    if (metadata?.deliveryProofUrl) logisticsUpdates.deliveryProofUrl = metadata.deliveryProofUrl;
+
     await withActor(this.db, actor, async (tx) => {
       await tx
         .update(schema.followUpOrders)
-        .set({ status: newStatus, ...timestampUpdates })
+        .set({ status: newStatus, ...timestampUpdates, ...logisticsUpdates })
         .where(eq(schema.followUpOrders.id, orderId));
 
       // Map status to timeline event type

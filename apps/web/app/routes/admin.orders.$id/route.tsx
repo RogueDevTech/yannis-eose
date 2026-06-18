@@ -121,6 +121,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             deliveryState: (coData.deliveryState as string) ?? null,
             preferredDeliveryDate: (coData.preferredDeliveryDate as string) ?? null,
             frozenForFollowUp: false,
+            logisticsLocationId: (coData.logisticsLocationId as string) ?? null,
+            logisticsProviderId: (coData.logisticsProviderId as string) ?? null,
+            riderId: (coData.riderId as string) ?? null,
             orderItems: coItems.map((it) => ({
               id: it.id as string,
               productId: it.productId as string,
@@ -306,6 +309,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               deliveryState: (coData.deliveryState as string) ?? null,
               preferredDeliveryDate: (coData.preferredDeliveryDate as string) ?? null,
               frozenForFollowUp: false,
+              logisticsLocationId: (coData.logisticsLocationId as string) ?? null,
+              logisticsProviderId: (coData.logisticsProviderId as string) ?? null,
+              riderId: (coData.riderId as string) ?? null,
               orderItems: coItems.map((it) => ({
                 id: it.id as string,
                 productId: it.productId as string,
@@ -729,6 +735,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'ensureInvoice') {
     const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    const isCartOrder = formData.get('isCartOrder') === 'true';
     if (isFollowUp) {
       // Follow-up orders: use the same approach as the auto-generate on CONFIRMED
       const res = await apiRequest<unknown>('/trpc/orders.followUpEnsureInvoice', {
@@ -739,6 +746,28 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
       if (!res.ok) {
         // Fallback to normal endpoint (might work after graduation)
+        const fallbackRes = await apiRequest<unknown>('/trpc/finance.ensureInvoiceByOrder', {
+          method: 'POST',
+          cookie,
+          body: { orderId },
+          timeoutMs: 20_000,
+        });
+        if (!fallbackRes.ok) {
+          return json({ error: extractApiErrorMessage(fallbackRes.data, 'Could not generate invoice') }, { status: safeStatus(fallbackRes.status) });
+        }
+      }
+      return json({ success: true });
+    }
+    if (isCartOrder) {
+      // Cart orders: use the dedicated cart-order invoice endpoint
+      const res = await apiRequest<unknown>('/trpc/cartOrders.ensureInvoice', {
+        method: 'POST',
+        cookie,
+        body: { orderId },
+        timeoutMs: 20_000,
+      });
+      if (!res.ok) {
+        // Fallback to generic endpoint
         const fallbackRes = await apiRequest<unknown>('/trpc/finance.ensureInvoiceByOrder', {
           method: 'POST',
           cookie,

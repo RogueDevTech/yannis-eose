@@ -1369,6 +1369,11 @@ export class LogisticsService {
       const markReceivedNow = !!input.markReceivedNow;
       const now = new Date();
 
+      // Parse remittance-level cost deductions
+      const commitmentFee = parseFloat(input.commitmentFee ?? '0') || 0;
+      const posFee = parseFloat(input.posFee ?? '0') || 0;
+      const failedDeliveryCost = parseFloat(input.failedDeliveryCost ?? '0') || 0;
+
       const [row] = await tx
         .insert(schema.deliveryRemittances)
         .values({
@@ -1377,6 +1382,9 @@ export class LogisticsService {
           receiptUrls: input.receiptUrls,
           status: markReceivedNow ? 'RECEIVED' : 'SENT',
           notes: input.notes ?? null,
+          ...(commitmentFee > 0 ? { commitmentFee: sql`${commitmentFee.toFixed(2)}::numeric` } : {}),
+          ...(posFee > 0 ? { posFee: sql`${posFee.toFixed(2)}::numeric` } : {}),
+          ...(failedDeliveryCost > 0 ? { failedDeliveryCost: sql`${failedDeliveryCost.toFixed(2)}::numeric` } : {}),
           ...(markReceivedNow ? { receivedAt: now, receivedBy: actor.id } : {}),
         })
         .returning();
@@ -1420,6 +1428,8 @@ export class LogisticsService {
           const fee = inputFee != null ? parseFloat(inputFee) : Number(orderRow.deliveryFee ?? 0);
           completedAmountTotal += orderTotal - (Number.isFinite(fee) ? fee : 0);
         }
+        // Deduct remittance-level costs from the completed total
+        completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost;
         await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })

@@ -408,10 +408,19 @@ export class CartOrdersService {
     if (newStatus === 'DELIVERED') timestampUpdates.deliveredAt = new Date();
     if (newStatus === 'DELETED') timestampUpdates.deletedAt = new Date();
 
+    // Persist logistics fields from metadata (mirrors regular order transitions)
+    const logisticsUpdates: Record<string, unknown> = {};
+    if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
+    if (metadata?.logisticsProviderId) logisticsUpdates.logisticsProviderId = metadata.logisticsProviderId;
+    if (metadata?.riderId) logisticsUpdates.riderId = metadata.riderId;
+    if (metadata?.preferredDeliveryDate) logisticsUpdates.preferredDeliveryDate = metadata.preferredDeliveryDate;
+    if (metadata?.deliveryNote) logisticsUpdates.deliveryNotes = metadata.deliveryNote;
+    if (metadata?.deliveryProofUrl) logisticsUpdates.deliveryProofUrl = metadata.deliveryProofUrl;
+
     await withActor(this.db, actor, async (tx) => {
       await tx
         .update(schema.cartOrders)
-        .set({ status: newStatus, ...timestampUpdates })
+        .set({ status: newStatus, ...timestampUpdates, ...logisticsUpdates })
         .where(eq(schema.cartOrders.id, orderId));
 
       const eventTypeMap: Record<string, string> = {

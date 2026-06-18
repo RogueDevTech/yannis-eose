@@ -79,7 +79,11 @@ export function DeliveryRemittanceDetailPage({
     (sum, order) => sum + (order.deliveryFee != null ? Number(order.deliveryFee) : 0),
     0,
   );
-  const remittanceTotal = totalOrderAmount - totalDeliveryFees;
+  const commitmentFee = Number(detail.commitmentFee ?? 0);
+  const posFee = Number(detail.posFee ?? 0);
+  const failedDeliveryCost = Number(detail.failedDeliveryCost ?? 0);
+  const totalExtraCosts = commitmentFee + posFee + failedDeliveryCost;
+  const remittanceTotal = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
   const recordedByLabel =
     detail.sentByName?.trim() || userMap[detail.sentBy] || `${detail.sentBy.slice(0, 8)}…`;
@@ -332,7 +336,7 @@ export function DeliveryRemittanceDetailPage({
           <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">
             Remittance total
           </p>
-          {totalDeliveryFees > 0 && (
+          {(totalDeliveryFees > 0 || totalExtraCosts > 0) && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-app-fg-muted">Order total</span>
@@ -340,20 +344,46 @@ export function DeliveryRemittanceDetailPage({
                   <NairaPrice amount={totalOrderAmount} />
                 </span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-app-fg-muted">Delivery costs</span>
-                <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                  -<NairaPrice amount={totalDeliveryFees} />
-                </span>
-              </div>
+              {totalDeliveryFees > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-app-fg-muted">Delivery costs</span>
+                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                    -<NairaPrice amount={totalDeliveryFees} />
+                  </span>
+                </div>
+              )}
+              {commitmentFee > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-app-fg-muted">Commitment fee</span>
+                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                    -<NairaPrice amount={commitmentFee} />
+                  </span>
+                </div>
+              )}
+              {posFee > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-app-fg-muted">POS fee</span>
+                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                    -<NairaPrice amount={posFee} />
+                  </span>
+                </div>
+              )}
+              {failedDeliveryCost > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-app-fg-muted">Failed delivery</span>
+                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                    -<NairaPrice amount={failedDeliveryCost} />
+                  </span>
+                </div>
+              )}
             </div>
           )}
           <p className="text-2xl font-bold text-brand-700 dark:text-brand-300">
             <NairaPrice amount={remittanceTotal} />
           </p>
           <p className="text-xs text-brand-500 dark:text-brand-400">
-            {totalDeliveryFees > 0
-              ? `Net from ${detail.orders.length} order(s) after delivery costs`
+            {(totalDeliveryFees > 0 || totalExtraCosts > 0)
+              ? `Net from ${detail.orders.length} order(s) after deductions`
               : `Sum of ${detail.orders.length} linked order(s)`}
           </p>
         </div>

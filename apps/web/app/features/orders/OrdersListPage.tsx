@@ -1934,7 +1934,7 @@ function OrdersListPageImpl({
             ...(hideOfflineAndCartStats ? [] : [{
               label: 'Offline',
               value: offlineCount ?? 0,
-              valueClassName: (offlineCount ?? 0) > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+              valueClassName: 'text-purple-600 dark:text-purple-400',
               title: 'Orders created manually via offline order',
               onClick: () => handleStatusSelect(OFFLINE_STATUS_VALUE),
               active: selectedStatus === OFFLINE_STATUS_VALUE,
