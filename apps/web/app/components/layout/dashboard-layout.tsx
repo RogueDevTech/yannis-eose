@@ -24,7 +24,7 @@ import { isNotificationSoundEnabled } from '~/lib/notification-sound-preference'
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
-import { BranchesCatalogProvider } from '~/contexts/branches-catalog-context';
+import { BranchesCatalogProvider, BranchGroupsCatalogProvider } from '~/contexts/branches-catalog-context';
 import { OnboardingNudge } from './onboarding-nudge';
 import { canAccessGlobalAuditLog, isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -381,7 +381,7 @@ const navStructure: NavGroupDef[] = [
       // Permission-first: link appears only with hr.onboarding.* on the session (or admin-class).
       // Do not add HR_MANAGER (or any role) as a sidebar bypass — grant the caps via template / overrides.
       {
-        label: 'Staff onboarding documents',
+        label: 'Staff Onboarding',
         href: '/hr/staff-onboarding-documents',
         icon: SidebarIcons.orders,
         permission: 'hr.onboarding.read',
@@ -1304,6 +1304,7 @@ function DashboardLayoutInner({
             aria-live="polite"
           >
             <BranchesCatalogProvider value={branches ?? []}>
+            <BranchGroupsCatalogProvider value={branchGroups ?? []}>
               {/* Cross-route nav swap — when the user clicks a sidebar link, render the
                   destination route's own loading shell (matched by pathname against the
                   registry in `~/lib/route-shells.tsx`) so Skeleton #1 == Skeleton #2 and
@@ -1318,6 +1319,7 @@ function DashboardLayoutInner({
                     navigation.location!.search,
                   ) ?? <Outlet />)
                 : <Outlet />}
+            </BranchGroupsCatalogProvider>
             </BranchesCatalogProvider>
           </div>
         </div>

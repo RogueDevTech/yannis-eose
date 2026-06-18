@@ -608,6 +608,8 @@ export function MarketingOrdersPage({
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
+                    startTime={dateFilters.startTime}
+                    endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <Button
                   type="button"
@@ -777,6 +779,8 @@ export function MarketingOrdersPage({
       <MobileDateFilterRow
         startDate={dateFilters.startDate}
         endDate={dateFilters.endDate}
+        startTime={dateFilters.startTime}
+        endTime={dateFilters.endTime}
         periodAllTime={dateFilters.periodAllTime}
       />
 

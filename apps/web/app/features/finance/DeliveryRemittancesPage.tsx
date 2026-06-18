@@ -26,7 +26,8 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { SearchInput } from '~/components/ui/search-input';
 import { TableActionButton } from '~/components/ui/table-action-button';
-import { CashRemittanceCreateModal, type EligibleOrder } from './CashRemittanceCreateModal';
+import { useNavigate } from '@remix-run/react';
+import type { EligibleOrder } from './CashRemittanceCreateModal';
 
 export interface DeliveryRemittanceListItem {
   id: string;
@@ -52,6 +53,9 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
   receivedAt?: string | null;
   receivedBy?: string | null;
   receivedByName?: string | null;
+  commitmentFee?: string | null;
+  posFee?: string | null;
+  failedDeliveryCost?: string | null;
   orders: Array<{
     id: string;
     customerName: string;
@@ -159,8 +163,8 @@ export function DeliveryRemittancesPage({
     page: eligiblePage,
     pageSize: eligiblePageSize,
   } = eligiblePagination;
+  const navigateTo = useNavigate();
   const [showExportModal, setShowExportModal] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [eligibleInvoicePreview, setEligibleInvoicePreview] = useState<OrderInvoice | null>(null);
   const [eligibleSelectedIds, setEligibleSelectedIds] = useState<Set<string>>(() => new Set());
   const [selectedEligibleById, setSelectedEligibleById] = useState<Map<string, EligibleOrder>>(
@@ -516,12 +520,9 @@ export function DeliveryRemittancesPage({
     ) {
       return;
     }
-    setShowCreateModal(true);
-  }, [eligibleSelectedIds, eligibleMultiLocation, remittanceSelectionComplete]);
-
-  const closeCreateModal = useCallback(() => {
-    setShowCreateModal(false);
-  }, []);
+    const ids = [...eligibleSelectedIds].join(',');
+    navigateTo(`/admin/finance/delivery-remittances/create?orders=${ids}`);
+  }, [eligibleSelectedIds, eligibleMultiLocation, remittanceSelectionComplete, navigateTo]);
 
   return (
     <div className="space-y-4">
@@ -634,16 +635,6 @@ export function DeliveryRemittancesPage({
         periodAllTime={filters.periodAllTime}
       />
 
-      <CashRemittanceCreateModal
-        open={showCreateModal}
-        onClose={closeCreateModal}
-        selectedOrders={remittanceSelectedOrders}
-        actionUrl="/admin/finance/delivery-remittances"
-        onSuccess={() => {
-          setEligibleSelectedIds(new Set());
-          setSelectedEligibleById(new Map());
-        }}
-      />
       <InvoicePreviewModal
         invoice={eligibleInvoicePreview}
         onClose={() => setEligibleInvoicePreview(null)}

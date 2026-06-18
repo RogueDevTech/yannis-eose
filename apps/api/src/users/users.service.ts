@@ -1114,6 +1114,7 @@ export class UsersService {
     currentBranchId: string | null,
     mode: 'list' | 'rosterBreakdown',
     effectiveBranchIds?: string[] | null,
+    _activeGroupId?: string | null,
   ): SQL[] {
     const conditions: SQL[] = [];
 
@@ -1188,21 +1189,18 @@ export class UsersService {
         )`,
       );
     } else if (skipBranchScopeButGroupScoped) {
-      // Company-wide list but group-scoped: show users in the active group's
-      // branches PLUS org-wide users (no branch membership — heads/finance/admin).
+      // Company-wide list but group-scoped: show ONLY users who have at least
+      // one branch in the active group. Org-wide users (no branch membership)
+      // are excluded when a group is active — they are cross-group and cannot
+      // be tied to a specific company. CEO directive: complete group isolation.
       conditions.push(
-        or(
-          inArray(
-            schema.users.id,
-            this.db
-              .select({ userId: schema.userBranches.userId })
-              .from(schema.userBranches)
-              .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
-          ),
-          sql<boolean>`NOT EXISTS (
-            SELECT 1 FROM user_branches ub WHERE ub.user_id = ${schema.users.id}
-          )`,
-        )!,
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
+        ),
       );
     } else if (branchFilter) {
       conditions.push(
@@ -1220,21 +1218,16 @@ export class UsersService {
       effectiveBranchIds.length > 0
     ) {
       // Company-group isolation: user has no specific branch selected but is
-      // scoped to a set of branches via effectiveBranchIds. Include org-wide
-      // users (no branch membership) so they remain discoverable.
+      // scoped to a set of branches via effectiveBranchIds. Only show users
+      // who have at least one branch in the active group — complete isolation.
       conditions.push(
-        or(
-          inArray(
-            schema.users.id,
-            this.db
-              .select({ userId: schema.userBranches.userId })
-              .from(schema.userBranches)
-              .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
-          ),
-          sql<boolean>`NOT EXISTS (
-            SELECT 1 FROM user_branches ub WHERE ub.user_id = ${schema.users.id}
-          )`,
-        )!,
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
       );
     } else if (
       !skipBranchScope &&
@@ -1303,8 +1296,9 @@ export class UsersService {
     actor: { id: string; role: string; permissions?: string[] } | null = null,
     currentBranchId: string | null = null,
     effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
   ) {
-    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'list', effectiveBranchIds);
+    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'list', effectiveBranchIds, activeGroupId);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const orderByColumn = {
@@ -1403,13 +1397,14 @@ export class UsersService {
     actor: { id: string; role: string; permissions?: string[] } | null = null,
     currentBranchId: string | null = null,
     effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
   ): Promise<{
     active: number;
     pending: number;
     inactiveArchived: number;
     distinctRoles: number;
   }> {
-    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'rosterBreakdown', effectiveBranchIds);
+    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'rosterBreakdown', effectiveBranchIds, activeGroupId);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [statusRows, roleRows] = await Promise.all([

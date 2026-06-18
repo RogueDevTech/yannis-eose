@@ -71,7 +71,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => [] as Array<{ id: string; name: string; code: string }>);
 
-  return defer({ user, notifications: notificationsPromise, branches: branchesPromise });
+  // Fetch branch groups for the header switcher (non-blocking).
+  // Any role that sees all branches needs group headers to avoid cross-company mixing.
+  type BranchGroupEntry = { id: string; name: string; status?: string };
+  const ALL_BRANCHES_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS']);
+  const branchGroupsPromise = ALL_BRANCHES_ROLES.has(user?.role ?? '')
+    ? apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie })
+        .then((res) => {
+          if (!res.ok) return [] as BranchGroupEntry[];
+          const data = (res.data as { result?: { data?: BranchGroupEntry[] } })?.result?.data;
+          return data ?? [];
+        })
+        .catch(() => [] as BranchGroupEntry[])
+    : Promise.resolve([] as BranchGroupEntry[]);
+
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise });
 }
 
 /**
@@ -144,10 +158,13 @@ export async function action({ request }: ActionFunctionArgs) {
  * Single mount + state bridge keeps the Outlet alive across resolution.
  */
 export default function HrLayout() {
-  const { user, notifications, branches } = useLoaderData<typeof loader>();
+  const { user, notifications, branches, branchGroups } = useLoaderData<typeof loader>();
   const [resolvedBranches, setResolvedBranches] = useState<
     Array<{ id: string; name: string; code: string }> | null
   >(null);
+  const [resolvedGroups, setResolvedGroups] = useState<
+    Array<{ id: string; name: string; status?: string }> | undefined
+  >(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,15 +175,23 @@ export default function HrLayout() {
       .catch(() => {
         if (!cancelled) setResolvedBranches([]);
       });
+    Promise.resolve(branchGroups)
+      .then((value) => {
+        if (!cancelled) setResolvedGroups(value?.length ? value : undefined);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedGroups(undefined);
+      });
     return () => {
       cancelled = true;
     };
-  }, [branches]);
+  }, [branches, branchGroups]);
 
   return (
     <DashboardLayout
       user={user}
       branches={resolvedBranches ?? []}
+      branchGroups={resolvedGroups}
       branchesHydrationReady={resolvedBranches !== null}
       notificationsPromise={notifications}
       notificationsActionUrl="/hr"

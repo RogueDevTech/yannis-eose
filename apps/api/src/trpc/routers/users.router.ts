@@ -84,14 +84,14 @@ export const usersRouter = router({
   list: permissionProcedure('users.read')
     .input(listUsersSchema)
     .query(async ({ input, ctx }) => {
-      return getUsersService().list(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
+      return getUsersService().list(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds, ctx.activeGroupId);
     }),
 
   /** HR Users page KPI strip — full-roster status/role aggregates matching list filters (minus status equality). */
   rosterSummary: permissionProcedure('users.read')
     .input(usersRosterSummarySchema)
     .query(async ({ input, ctx }) => {
-      return getUsersService().rosterSummary(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
+      return getUsersService().rosterSummary(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds, ctx.activeGroupId);
     }),
 
   /**

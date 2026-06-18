@@ -7,7 +7,7 @@
 
 @layer base {
   :root {
-    --sidebar-width: 260px;
+    --sidebar-width: 230px;
     --sidebar-collapsed-width: 72px;
     --header-height: 56px;
     --bottom-nav-height: 4.5rem;
@@ -162,7 +162,9 @@
   [data-app-theme='ink'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
   [data-app-theme='ink'] input[type='month']::-webkit-calendar-picker-indicator,
   [data-app-theme='ink'] input[type='week']::-webkit-calendar-picker-indicator {
-    filter: invert(1);
+    /* color-scheme: dark on the parent input already tells the browser to render
+       a light icon. Do NOT apply filter: invert(1) — Safari honours color-scheme
+       for the indicator too, so invert would flip the icon back to dark-on-dark. */
     opacity: 0.65;
     cursor: pointer;
   }

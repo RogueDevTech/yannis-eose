@@ -25,6 +25,10 @@ export const deliveryRemittances = pgTable('delivery_remittances', {
   receivedBy: uuid('received_by').references(() => users.id),
   disputeReason: text('dispute_reason'),
   notes: text('notes'),
+  /** Remittance-level deductions (not per-order). Recorded at creation time. */
+  commitmentFee: numeric('commitment_fee', { precision: 12, scale: 2 }).default('0').notNull(),
+  posFee: numeric('pos_fee', { precision: 12, scale: 2 }).default('0').notNull(),
+  failedDeliveryCost: numeric('failed_delivery_cost', { precision: 12, scale: 2 }).default('0').notNull(),
   ...temporalColumns,
 });
 
