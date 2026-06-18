@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useLoaderData, useLocation } from '@remix-run/react';
+import { useLoaderData, useLocation, useRouteError, isRouteErrorResponse } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { json } from '@remix-run/node';
@@ -51,7 +51,13 @@ function canManageOrderDetail(user: { role: string; permissions?: string[] } | n
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, ['orders.read', 'marketing.orders']);
+  let user;
+  try {
+    user = await requirePermission(request, ['orders.read', 'marketing.orders']);
+  } catch (err) {
+    console.error('[OrderDetail loader] requirePermission threw:', err instanceof Response ? `Response ${err.status}` : err);
+    throw err;
+  }
   const cookie = getSessionCookie(request);
   const orderId = params['id'];
 
@@ -139,7 +145,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
               if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
               if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
-              if (s === 'CONFIRMED') return elevated ? ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'] : ['DELIVERED', 'DELETED'];
+              if (s === 'CONFIRMED') return ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'];
               if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
               if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
               if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
@@ -149,21 +155,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             })(),
           };
           const coPhone = (coData.customerPhone as string) ?? null;
+          const timelineData = coTimeline.map((t) => ({
+            id: t.id as string,
+            orderId: coData.id as string,
+            eventType: t.eventType as string,
+            actorId: (t.actorId as string) ?? null,
+            actorName: (t.actorName as string) ?? null,
+            description: t.description as string,
+            metadata: (t.metadata as Record<string, unknown>) ?? null,
+            createdAt: t.createdAt as string,
+          }));
           return {
             order,
             voipEnabled: false,
             voipProviderDisplayName: '',
-            latestCall: Promise.resolve(null),
-            timeline: Promise.resolve(coTimeline.map((t) => ({
-              id: t.id as string,
-              orderId: coData.id as string,
-              eventType: t.eventType as string,
-              actorId: (t.actorId as string) ?? null,
-              actorName: (t.actorName as string) ?? null,
-              description: t.description as string,
-              metadata: (t.metadata as Record<string, unknown>) ?? null,
-              createdAt: t.createdAt as string,
-            }))),
+            latestCall: null as unknown as Promise<null>,
+            timeline: timelineData as unknown as Promise<typeof timelineData>,
             itemOffers: [],
             callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
             isFollowUpOrder: false,
@@ -230,6 +237,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               preferredDeliveryDate: (fuData.preferredDeliveryDate as string) ?? null,
               // orderSource not in OrderDetail type
               frozenForFollowUp: false,
+              logisticsLocationId: (fuData.logisticsLocationId as string) ?? null,
+              logisticsProviderId: (fuData.logisticsProviderId as string) ?? null,
+              riderId: (fuData.riderId as string) ?? null,
               orderItems: fuItems.map((it) => ({
                 id: it.id as string,
                 productId: it.productId as string,
@@ -261,7 +271,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               order,
               voipEnabled: false,
               voipProviderDisplayName: '',
-              latestCall: Promise.resolve(null),
+              latestCall: null as unknown as Promise<null>,
+              timeline: fuTimeline.map((t) => ({
+                id: t.id as string,
+                orderId: fuData.id as string,
+                eventType: t.eventType as string,
+                actorId: (t.actorId as string) ?? null,
+                actorName: (t.actorName as string) ?? null,
+                description: t.description as string,
+                metadata: (t.metadata as Record<string, unknown>) ?? null,
+                createdAt: t.createdAt as string,
+              })) as unknown as Promise<typeof fuTimeline>,
               itemOffers: [],
               callablePhone: fuPhone ? { phone: fuPhone, isDialable: true } : null,
               isFollowUpOrder: true,
@@ -341,8 +361,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               order,
               voipEnabled: false,
               voipProviderDisplayName: '',
-              latestCall: Promise.resolve(null),
-              timeline: Promise.resolve(coTimeline.map((t) => ({
+              latestCall: null as unknown as Promise<null>,
+              timeline: coTimeline.map((t) => ({
                 id: t.id as string,
                 orderId: coData.id as string,
                 eventType: t.eventType as string,
@@ -351,7 +371,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 description: t.description as string,
                 metadata: (t.metadata as Record<string, unknown>) ?? null,
                 createdAt: t.createdAt as string,
-              }))),
+              })) as unknown as Promise<typeof coTimeline>,
               itemOffers: [],
               callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
               isFollowUpOrder: false,
@@ -798,15 +818,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const isCartOrder = formData.get('isCartOrder') === 'true';
 
     if (isFollowUp) {
-      // Follow-up orders: transition to CS_ENGAGED (records timeline event) instead of main orders.initiateCall
-      const res = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+      // Follow-up orders: record the call. If still pre-engaged, also transition to CS_ENGAGED.
+      const res = await apiRequest<unknown>('/trpc/orders.followUpRecordCall', {
         method: 'POST',
         cookie,
-        body: { orderId, newStatus: 'CS_ENGAGED', note: 'Manual call recorded.' },
+        body: { orderId },
         timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
       });
       if (!res.ok) {
-        return json({ error: extractApiErrorMessage(res.data, 'Failed to record call') }, { status: safeStatus(res.status) });
+        // Fallback: try the old transition approach (for backward compat)
+        const fallback = await apiRequest<unknown>('/trpc/orders.followUpOrdersTransition', {
+          method: 'POST',
+          cookie,
+          body: { orderId, newStatus: 'CS_ENGAGED', note: 'Manual call recorded.' },
+          timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
+        });
+        if (!fallback.ok) {
+          return json({ error: extractApiErrorMessage(fallback.data, 'Failed to record call') }, { status: safeStatus(fallback.status) });
+        }
       }
       return json({ success: true, callInitiated: true, callLog: null });
     }
@@ -1538,5 +1567,36 @@ export default function OrderDetailRoute() {
       logisticsDispatchTemplates={logisticsDispatchTemplates}
       invoice={invoice}
     />
+  );
+}
+
+/**
+ * ErrorBoundary — catches turbo-stream deserialization errors that occur when
+ * multiple concurrent revalidations race on cart/follow-up order detail pages.
+ * Instead of showing a dead-end "Page Not Found", auto-reload the page so the
+ * user lands on a fresh SSR render that always works.
+ */
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const isResponse = isRouteErrorResponse(error);
+
+  useEffect(() => {
+    // Auto-reload after a short delay — the full SSR page load always works.
+    const timer = setTimeout(() => {
+      window.location.reload();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="flex items-center justify-center min-h-[50vh]">
+      <div className="text-center space-y-3">
+        <svg className="w-8 h-8 mx-auto animate-spin text-brand-500" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        <p className="text-sm text-app-fg-muted">Refreshing order...</p>
+      </div>
+    </div>
   );
 }

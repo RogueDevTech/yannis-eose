@@ -3002,11 +3002,16 @@ export class OrdersService {
     const [fu] = await this.db.select().from(schema.followUpOrders).where(eq(schema.followUpOrders.id, orderId)).limit(1);
     if (!fu) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
 
-    const items = await this.db
-      .select({ productId: schema.followUpOrderItems.productId, quantity: schema.followUpOrderItems.quantity, unitPrice: schema.followUpOrderItems.unitPrice, offerLabel: schema.followUpOrderItems.offerLabel, productName: schema.products.name })
-      .from(schema.followUpOrderItems)
-      .innerJoin(schema.products, eq(schema.products.id, schema.followUpOrderItems.productId))
-      .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+    const [items, closerName] = await Promise.all([
+      this.db
+        .select({ productId: schema.followUpOrderItems.productId, quantity: schema.followUpOrderItems.quantity, unitPrice: schema.followUpOrderItems.unitPrice, offerLabel: schema.followUpOrderItems.offerLabel, productName: schema.products.name })
+        .from(schema.followUpOrderItems)
+        .innerJoin(schema.products, eq(schema.products.id, schema.followUpOrderItems.productId))
+        .where(eq(schema.followUpOrderItems.followUpOrderId, orderId)),
+      fu.assignedCsId
+        ? this.db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, fu.assignedCsId)).limit(1).then((r) => r[0]?.name ?? null)
+        : Promise.resolve(null),
+    ]);
 
     const resolved = resolveOrderClipboardPhone({
       customerPhone: fu.customerPhone,
@@ -3035,7 +3040,7 @@ export class OrdersService {
       logisticsProviderName: null,
       paymentStatus: fu.paymentStatus ?? null,
       deliveryNotes: fu.deliveryNotes ?? null,
-      assignedCsName: null,
+      assignedCsName: closerName,
       campaignCustomFieldDefs: [],
       customFields: fu.customFields as Record<string, unknown> | null | undefined,
     });
@@ -3046,11 +3051,16 @@ export class OrdersService {
     const [co] = await this.db.select().from(schema.cartOrders).where(and(eq(schema.cartOrders.id, orderId), isNull(schema.cartOrders.deletedAt))).limit(1);
     if (!co) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
 
-    const items = await this.db
-      .select({ productId: schema.cartOrderItems.productId, quantity: schema.cartOrderItems.quantity, unitPrice: schema.cartOrderItems.unitPrice, offerLabel: schema.cartOrderItems.offerLabel, productName: schema.products.name })
-      .from(schema.cartOrderItems)
-      .innerJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
-      .where(eq(schema.cartOrderItems.cartOrderId, orderId));
+    const [items, closerName] = await Promise.all([
+      this.db
+        .select({ productId: schema.cartOrderItems.productId, quantity: schema.cartOrderItems.quantity, unitPrice: schema.cartOrderItems.unitPrice, offerLabel: schema.cartOrderItems.offerLabel, productName: schema.products.name })
+        .from(schema.cartOrderItems)
+        .innerJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
+        .where(eq(schema.cartOrderItems.cartOrderId, orderId)),
+      co.assignedCsId
+        ? this.db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, co.assignedCsId)).limit(1).then((r) => r[0]?.name ?? null)
+        : Promise.resolve(null),
+    ]);
 
     const resolved = resolveOrderClipboardPhone({
       customerPhone: co.customerPhone,
@@ -3079,7 +3089,7 @@ export class OrdersService {
       logisticsProviderName: null,
       paymentStatus: co.paymentStatus ?? null,
       deliveryNotes: co.deliveryNotes ?? null,
-      assignedCsName: null,
+      assignedCsName: closerName,
       campaignCustomFieldDefs: [],
       customFields: co.customFields as Record<string, unknown> | null | undefined,
     });

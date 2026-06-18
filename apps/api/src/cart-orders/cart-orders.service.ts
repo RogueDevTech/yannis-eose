@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, inArray, isNull, lte, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lte, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput } from '@yannis/shared';
@@ -101,6 +101,9 @@ export class CartOrdersService {
     input: ListCartOrdersInput,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    /** The logged-in closer's ID — enables (branch OR assigned=me) expansion
+     *  ONLY when the closer is viewing their own queue. */
+    viewerCloserId?: string | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = input.showDeleted
       ? [sql`${schema.cartOrders.deletedAt} IS NOT NULL`]
@@ -110,15 +113,23 @@ export class CartOrdersService {
     if (input.statuses && input.statuses.length > 0) {
       conditions.push(inArray(schema.cartOrders.status, input.statuses));
     }
-    if (input.assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, input.assignedCsId));
     if (input.mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, input.mediaBuyerId));
     if (input.unassignedOnly) conditions.push(isNull(schema.cartOrders.assignedCsId));
     if (input.search) {
       conditions.push(sql`${schema.cartOrders.customerName} ILIKE ${'%' + input.search + '%'}`);
     }
+    if (input.assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, input.assignedCsId));
     {
       const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId ?? input.branchId, effectiveBranchIds);
-      if (bCond) conditions.push(bCond);
+      // CS closer self-query: show orders in their branch OR assigned to them
+      // so orders serviced by a different branch are still visible to the closer.
+      // Only applies when the closer is viewing their own queue (viewerCloserId matches).
+      const isSelfQuery = viewerCloserId && input.assignedCsId === viewerCloserId;
+      if (isSelfQuery && bCond) {
+        conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);
+      } else if (bCond) {
+        conditions.push(bCond);
+      }
     }
     if (input.startDate) conditions.push(gte(schema.cartOrders.createdAt, new Date(input.startDate)));
     if (input.endDate) {
@@ -213,13 +224,19 @@ export class CartOrdersService {
     endDate?: string,
     effectiveBranchIds?: string[] | null,
     mediaBuyerId?: string | null,
+    viewerCloserId?: string | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.cartOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
     {
       const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
-      if (bCond) conditions.push(bCond);
+      const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
+      if (isSelfQuery && bCond) {
+        conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);
+      } else if (bCond) {
+        conditions.push(bCond);
+      }
     }
     if (startDate) conditions.push(gte(schema.cartOrders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -436,8 +453,28 @@ export class CartOrdersService {
       };
       const eventType = eventTypeMap[newStatus] ?? 'ORDER_VIEWED';
 
+      // Detect retrack (rolling back to an earlier status).
+      const STATUS_ORDER = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED'];
+      const prevIdx = STATUS_ORDER.indexOf(order.status);
+      const newIdx = STATUS_ORDER.indexOf(newStatus);
+      const isRetrack = prevIdx > 0 && newIdx >= 0 && newIdx < prevIdx && newStatus !== 'DELETED';
+
+      const statusLabel = (s: string) => {
+        const labels: Record<string, string> = {
+          UNPROCESSED: 'Unassigned', CS_ASSIGNED: 'Assigned', CS_ENGAGED: 'Unconfirmed',
+          CONFIRMED: 'Confirmed', AGENT_ASSIGNED: 'Agent Assigned', DISPATCHED: 'Dispatched',
+          IN_TRANSIT: 'In Transit', DELIVERED: 'Delivered', REMITTED: 'Remitted', DELETED: 'Deleted',
+        };
+        return labels[s] ?? s.replace(/_/g, ' ').toLowerCase();
+      };
+
       // Build a descriptive timeline message instead of the generic "Status changed to X."
-      let description = note;
+      let description: string | undefined;
+      if (isRetrack) {
+        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? ` — ${note}` : ''}`;
+      } else if (note) {
+        description = note;
+      }
       if (!description) {
         const logisticsLocationId = metadata?.logisticsLocationId as string | undefined;
         let locationLabel: string | undefined;
@@ -731,13 +768,22 @@ export class CartOrdersService {
         .set(updates)
         .where(eq(schema.cartOrders.id, input.orderId));
 
+      const fieldLabels: Record<string, string> = {
+        customerName: 'customer name',
+        deliveryAddress: 'delivery address',
+        deliveryState: 'delivery state',
+        deliveryNotes: 'delivery notes',
+        customerEmail: 'customer email',
+        preferredDeliveryDate: 'preferred delivery date',
+      };
       const changedFields = Object.keys(updates).filter((k) => k !== 'updatedAt');
+      const readableFields = changedFields.map((f) => fieldLabels[f] ?? f);
       await tx.insert(schema.cartOrderTimelineEvents).values({
         cartOrderId: input.orderId,
         eventType: 'ORDER_DETAILS_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
-        description: `Order details updated (${changedFields.join(', ')}).`,
+        description: `Updated ${readableFields.join(', ')}.`,
         metadata: { changedFields },
         branchId: order.servicingBranchId,
       });
@@ -757,25 +803,27 @@ export class CartOrdersService {
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
 
-    // Transition to CS_ENGAGED if not already past it
-    if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
-      await withActor(this.db, actor, async (tx) => {
+    await withActor(this.db, actor, async (tx) => {
+      // Transition to CS_ENGAGED if not already past it
+      if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
         await tx
           .update(schema.cartOrders)
           .set({ status: 'CS_ENGAGED', updatedAt: new Date() })
           .where(eq(schema.cartOrders.id, orderId));
+      }
 
-        await tx.insert(schema.cartOrderTimelineEvents).values({
-          cartOrderId: orderId,
-          eventType: 'MANUAL_CALL_LOGGED',
-          actorId: actor.id,
-          actorName: actor.name,
-          description: 'Manual call recorded.',
-          metadata: { previousStatus: order.status, newStatus: 'CS_ENGAGED' },
-          branchId: order.servicingBranchId,
-        });
+      // Always record the manual call — even if already CS_ENGAGED.
+      // The confirm gate requires at least one call log to exist.
+      await tx.insert(schema.cartOrderTimelineEvents).values({
+        cartOrderId: orderId,
+        eventType: 'MANUAL_CALL_LOGGED',
+        actorId: actor.id,
+        actorName: actor.name,
+        description: 'Manual call recorded.',
+        metadata: { previousStatus: order.status },
+        branchId: order.servicingBranchId,
       });
-    }
+    });
 
     return { success: true, callInitiated: true, callLog: null };
   }
