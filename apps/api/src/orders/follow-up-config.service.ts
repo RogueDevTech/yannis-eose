@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type {
@@ -939,7 +939,20 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (input.unassignedOnly) conditions.push(isNull(schema.followUpOrders.assignedCsId));
     if (input.ruleId) conditions.push(eq(schema.followUpOrders.followUpRuleId, input.ruleId));
     if (input.search) {
-      conditions.push(sql`${schema.followUpOrders.customerName} ILIKE ${'%' + input.search + '%'}`);
+      const trimmed = input.search.trim();
+      if (trimmed.length > 0) {
+        const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
+        const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+        if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
+          const combined = or(
+            eq(schema.followUpOrders.orderNumber, parsedOrderNum),
+            ilike(schema.followUpOrders.customerName, `%${trimmed}%`),
+          );
+          if (combined) conditions.push(combined);
+        } else {
+          conditions.push(ilike(schema.followUpOrders.customerName, `%${trimmed}%`));
+        }
+      }
     }
     {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId ?? input.branchId, effectiveBranchIds);
@@ -1305,16 +1318,24 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
 
     return withActor(this.db, actor, async (tx) => {
-      await tx.delete(schema.followUpOrderItems).where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+      const deleted = await tx.delete(schema.followUpOrderItems)
+        .where(eq(schema.followUpOrderItems.followUpOrderId, orderId))
+        .returning({ id: schema.followUpOrderItems.id });
+      this.logger.log(`adjustFollowUpOrderItems: deleted ${deleted.length} existing items for ${orderId}`);
+
+      const inserted = [];
       for (const item of items) {
-        await tx.insert(schema.followUpOrderItems).values({
+        const [row] = await tx.insert(schema.followUpOrderItems).values({
           followUpOrderId: orderId,
           productId: item.productId,
           quantity: item.quantity,
           unitPrice: sql`${item.unitPrice}::numeric`,
           offerLabel: item.offerLabel ?? null,
-        });
+        }).returning({ id: schema.followUpOrderItems.id });
+        inserted.push(row);
       }
+      this.logger.log(`adjustFollowUpOrderItems: inserted ${inserted.length} new items for ${orderId}`);
+
       await tx
         .update(schema.followUpOrders)
         .set({ totalAmount: sql`${totalAmount}::numeric`, updatedAt: new Date() })
