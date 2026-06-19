@@ -220,33 +220,33 @@ export const logisticsRouter = router({
 
   // Escalation & Monitoring
   shrinkageAlerts: permissionProcedure('logistics.read')
-    .query(async () => {
-      return getLogisticsService().getShrinkageAlerts();
+    .query(async ({ ctx }) => {
+      return getLogisticsService().getShrinkageAlerts(ctx.effectiveBranchIds);
     }),
 
   stuckOrders: permissionProcedure('logistics.read')
     .input(z.object({ thresholdHours: z.number().min(1).default(24) }))
-    .query(async ({ input }) => {
-      return getLogisticsService().getStuckOrders(input.thresholdHours);
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getStuckOrders(input.thresholdHours, ctx.effectiveBranchIds);
     }),
 
   transferDelays: permissionProcedure('logistics.read')
     .input(z.object({ thresholdHours: z.number().min(1).default(48) }))
-    .query(async ({ input }) => {
-      return getLogisticsService().getTransferDelays(input.thresholdHours);
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getTransferDelays(input.thresholdHours, ctx.effectiveBranchIds);
     }),
 
   healthDashboard: permissionProcedure('logistics.read')
-    .query(async () => {
-      return getLogisticsService().getLogisticsHealthDashboard();
+    .query(async ({ ctx }) => {
+      return getLogisticsService().getLogisticsHealthDashboard(ctx.effectiveBranchIds);
     }),
 
   /**
    * List riders (TPL_RIDER, ACTIVE) for dispatch assignment dropdowns.
    * Returns id, name, logisticsLocationId. Gated by logistics.read.
    */
-  listRiders: permissionProcedure('logistics.read').query(async () => {
-    return getLogisticsService().listRiders();
+  listRiders: permissionProcedure('logistics.read').query(async ({ ctx }) => {
+    return getLogisticsService().listRiders(ctx.effectiveBranchIds);
   }),
 
   // Transfer remittances (3PL → warehouse)
@@ -324,7 +324,7 @@ export const logisticsRouter = router({
   listDeliveryConfirmationRequests: permissionProcedure('logistics.read')
     .input(listDeliveryConfirmationRequestsSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryConfirmationRequests(input, ctx.user);
+      return getLogisticsService().listDeliveryConfirmationRequests(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   approveDeliveryConfirmation: permissionProcedure('logistics.write')

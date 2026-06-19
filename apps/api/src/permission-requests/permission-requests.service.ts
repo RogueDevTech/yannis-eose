@@ -413,10 +413,12 @@ export class PermissionRequestsService {
     } else if (req.type === 'ORDER_LINE_PRICE_CHANGE') {
       const payload = req.payload as {
         orderId?: string;
+        orderType?: 'followUp' | 'cart';
         items?: UpdateOrderInput['items'];
         totalAmount?: number;
       } | null;
       const orderId = payload?.orderId;
+      const orderType = payload?.orderType;
       const items = payload?.items;
       const totalAmount = payload?.totalAmount;
       if (!orderId || !items?.length || totalAmount == null || Number.isNaN(Number(totalAmount))) {
@@ -425,29 +427,53 @@ export class PermissionRequestsService {
           message: 'Invalid payload for order line price change.',
         });
       }
-      await this.ordersService.update(
-        { orderId, items, totalAmount: Number(totalAmount) },
-        approver,
-      );
-      // Surface the approval on the order timeline. The underlying `update` call writes
-      // a `QUANTITY_UPDATED` event when items change, but that doesn't tell the Sales rep
-      // (or auditor) that this was specifically an approval of THEIR pending request.
+      if (orderType === 'followUp') {
+        // Dynamic import to avoid circular DI — follow-up service is accessed via the tRPC singleton getter
+        const { getFollowUpConfigService } = await import('../trpc/routers/orders.router');
+        await getFollowUpConfigService().adjustFollowUpOrderItems(orderId, items, Number(totalAmount), approver);
+      } else if (orderType === 'cart') {
+        const { getCartOrdersService } = await import('../trpc/routers/cart-orders.router');
+        await getCartOrdersService().adjustItems(orderId, items, Number(totalAmount), approver);
+      } else {
+        await this.ordersService.update(
+          { orderId, items, totalAmount: Number(totalAmount) },
+          approver,
+        );
+      }
+      // Regenerate invoice after item changes — best-effort
+      try {
+        const { getFinanceService } = await import('../trpc/routers/finance.router');
+        const order = orderType === 'cart'
+          ? await (await import('../trpc/routers/cart-orders.router')).getCartOrdersService().getById(orderId)
+          : orderType === 'followUp'
+            ? null // follow-up invoices handled via order graduation
+            : await this.ordersService.getById(orderId);
+        if (order) {
+          await getFinanceService().ensureInvoiceForOrder({ order: order as never, actorId: approver.id });
+        }
+      } catch { /* invoice regeneration is best-effort */ }
+      // Surface the approval on the order timeline. For normal orders, the underlying
+      // `update` call writes a `QUANTITY_UPDATED` event when items change, but that
+      // doesn't tell the Sales rep (or auditor) that this was specifically an approval.
       const approvedTotal = Math.round(Number(totalAmount) * 100) / 100;
-      this.ordersService.writeTimelineEvent({
-        orderId,
-        eventType: 'LINE_PRICE_CHANGE_APPROVED',
-        actorId: approver.id,
-        actorName: approver.name ?? null,
-        description:
-          `${approver.name ?? 'Approver'} approved the line price change — ` +
-          `new total ₦${approvedTotal.toLocaleString('en-NG')}.`,
-        metadata: {
-          permissionRequestId: requestId,
-          approvedItems: items,
-          approvedTotalAmount: Number(totalAmount),
-          approvalReason: reason,
-        },
-      });
+      if (!orderType) {
+        // Only write timeline for normal orders — follow-up/cart have their own timeline
+        this.ordersService.writeTimelineEvent({
+          orderId,
+          eventType: 'LINE_PRICE_CHANGE_APPROVED',
+          actorId: approver.id,
+          actorName: approver.name ?? null,
+          description:
+            `${approver.name ?? 'Approver'} approved the line price change — ` +
+            `new total ₦${approvedTotal.toLocaleString('en-NG')}.`,
+          metadata: {
+            permissionRequestId: requestId,
+            approvedItems: items,
+            approvedTotalAmount: Number(totalAmount),
+            approvalReason: reason,
+          },
+        });
+      }
     } else if (req.type === 'ORDER_DELETION') {
       const payload = req.payload as { orderId?: string } | null;
       const orderId = payload?.orderId;

@@ -9,7 +9,7 @@ import type { NotificationsService } from '../../notifications/notifications.ser
 import type { BranchTeamsService } from '../../branches/branch-teams.service';
 import type { SettingsService } from '../../settings/settings.service';
 import { OVERRIDABLE_TEAM_SETTINGS } from '../../settings/settings.service';
-import { canMirror } from '../../common/authz';
+import { canMirror, isAdminLevel } from '../../common/authz';
 import { CacheService } from '../../common/cache/cache.service';
 
 // Service instances injected via factory pattern
@@ -120,7 +120,11 @@ export async function listBranchesForUser(user: {
   id: string;
   role: string;
   activeGroupId?: string | null;
-}): Promise<Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>> {
+  /** When true, skip the SEES_ALL_BRANCHES shortcut and query user_branches
+   *  memberships directly. Used by `listAll` for non-admin org-wide roles so
+   *  they only see branches they're explicitly assigned to (their group). */
+  memberOnly?: boolean;
+}): Promise<Array<{ id: string; name: string; code: string; status: string; groupId: string | null; groupName: string | null }>> {
   const db = getDb();
   // Org-wide roles see every branch even without explicit branch memberships:
   // SuperAdmin / Admin manage anything; HR creates / edits staff across the
@@ -136,7 +140,7 @@ export async function listBranchesForUser(user: {
     'HEAD_OF_LOGISTICS',
     'HEAD_OF_CS',
   ]);
-  const seesAll = SEES_ALL_BRANCHES_ROLES.has(user.role);
+  const seesAll = !user.memberOnly && SEES_ALL_BRANCHES_ROLES.has(user.role);
 
   // Explicit projection — `status` is threaded through so the header branch
   // switcher can tag a disabled (INACTIVE) branch instead of dropping it.
@@ -158,38 +162,51 @@ export async function listBranchesForUser(user: {
       );
 
   const fetchRows = async (): Promise<
-    Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>
+    Array<{ id: string; name: string; code: string; status: string; groupId: string | null; groupName: string | null }>
   > => {
+    let rows: Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>;
     if (seesAll) {
-      return db.select(branchCols).from(schema.branches).where(activeGroupCondition);
+      rows = await db.select(branchCols).from(schema.branches).where(activeGroupCondition);
+    } else {
+      const branchIds =
+        user.role === 'MEDIA_BUYER'
+          ? await mediaBuyerBranchScopeIds(user.id)
+          : (
+              await db
+                .select({ branchId: schema.userBranches.branchId })
+                .from(schema.userBranches)
+                .where(eq(schema.userBranches.userId, user.id))
+            ).map((m) => m.branchId);
+      if (branchIds.length === 0) return [];
+      rows = await db
+        .select(branchCols)
+        .from(schema.branches)
+        .where(
+          and(
+            branchIds.length === 1
+              ? eq(schema.branches.id, branchIds[0]!)
+              : inArray(schema.branches.id, branchIds),
+            activeGroupCondition,
+          ),
+        );
     }
-    const branchIds =
-      user.role === 'MEDIA_BUYER'
-        ? await mediaBuyerBranchScopeIds(user.id)
-        : (
-            await db
-              .select({ branchId: schema.userBranches.branchId })
-              .from(schema.userBranches)
-              .where(eq(schema.userBranches.userId, user.id))
-          ).map((m) => m.branchId);
-    if (branchIds.length === 0) return [];
-    return db
-      .select(branchCols)
-      .from(schema.branches)
-      .where(
-        and(
-          branchIds.length === 1
-            ? eq(schema.branches.id, branchIds[0]!)
-            : inArray(schema.branches.id, branchIds),
-          activeGroupCondition,
-        ),
-      );
+    // Resolve group names for multi-company display
+    const uniqueGroupIds = [...new Set(rows.map((r) => r.groupId).filter(Boolean))] as string[];
+    const groupNameMap = new Map<string, string>();
+    if (uniqueGroupIds.length > 0) {
+      const groupRows = await db
+        .select({ id: schema.branchGroups.id, name: schema.branchGroups.name })
+        .from(schema.branchGroups)
+        .where(inArray(schema.branchGroups.id, uniqueGroupIds));
+      for (const g of groupRows) groupNameMap.set(g.id, g.name);
+    }
+    return rows.map((r) => ({ ...r, groupName: r.groupId ? groupNameMap.get(r.groupId) ?? null : null }));
   };
 
   if (!branchesCacheService) return fetchRows();
   // Cache key includes `seesAll` (was `isAdmin`) so an HR Manager and a
   // Media Buyer can't share a cache entry — they get different rowsets.
-  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, seesAll, groupId: user.activeGroupId ?? null });
+  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, seesAll, groupId: user.activeGroupId ?? null, memberOnly: user.memberOnly ?? false });
   return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, fetchRows);
 }
 
@@ -338,7 +355,15 @@ export const branchesRouter = router({
    * show ALL groups/branches for navigation between companies.
    */
   listAll: authedProcedure.query(async ({ ctx }) => {
-    return listBranchesForUser({ id: ctx.user.id, role: ctx.user.role });
+    if (isAdminLevel(ctx.user)) {
+      // SuperAdmin/Admin see all groups for the header group switcher.
+      return listBranchesForUser({ id: ctx.user.id, role: ctx.user.role });
+    }
+    // Non-admin org-wide roles: show only branches they're members of.
+    // With the backfill migration (0217), these users have memberships in
+    // their group's branches. If they're in 2 groups, both groups' branches
+    // show up — enabling them to switch companies via the header.
+    return listBranchesForUser({ id: ctx.user.id, role: ctx.user.role, memberOnly: true });
   }),
 
   /**

@@ -1004,6 +1004,7 @@ export class NotificationsService {
     input: GetPushDeliveryLogInput,
     actorRole: string,
     actorId: string,
+    effectiveBranchIds?: string[] | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = [];
 
@@ -1012,6 +1013,18 @@ export class NotificationsService {
       conditions.push(eq(schema.pushDeliveryLog.userId, actorId));
     } else if (input.userId) {
       conditions.push(eq(schema.pushDeliveryLog.userId, input.userId));
+    }
+
+    // Company-group isolation: only show delivery logs for users in the active group's branches
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      const inList = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
+      conditions.push(
+        sql`EXISTS (
+          SELECT 1 FROM user_branches ub
+          WHERE ub.user_id = ${schema.pushDeliveryLog.userId}
+            AND ub.branch_id IN (${inList})
+        )`,
+      );
     }
 
     if (input.status) {

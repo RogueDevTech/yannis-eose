@@ -68,19 +68,6 @@ const COLUMN_SPECS: ColumnSpec[] = [
       'Extra branches the user can switch into. Comma- or semicolon-separated codes/names. The primary is auto-included.',
     examples: ['ABJ, PHC', 'Abuja; Port Harcourt'],
   },
-  {
-    header: 'probation',
-    required: false,
-    description: 'Mark the new user as probation. Empty / blank = no.',
-    examples: ['true', 'yes', 'false'],
-  },
-  {
-    header: 'probation_until',
-    required: false,
-    description:
-      'Probation review date when probation = true. ISO format. Defaults to 90 days from import.',
-    examples: ['2026-08-08'],
-  },
 ];
 
 function InfoCircleIcon({ className = 'w-[18px] h-[18px]' }: { className?: string }) {

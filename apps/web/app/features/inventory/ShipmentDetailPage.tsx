@@ -7,7 +7,6 @@ import {
   isOptimisticPatched,
   useOptimisticListPatches,
 } from '~/hooks/useOptimisticListPatches';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -327,13 +326,6 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
 
   return (
     <div className="space-y-4">
-      <Breadcrumb
-        items={[
-          { label: 'Shipments', to: '/admin/shipments' },
-          { label: shipment.referenceLabel },
-        ]}
-      />
-
       <PageHeader
         title={shipment.referenceLabel}
         backTo="/admin/shipments"

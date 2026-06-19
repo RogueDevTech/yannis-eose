@@ -4,6 +4,8 @@ export interface UserBranchMembership {
   branchCode: string;
   isPrimary: boolean;
   roleInBranch: string | null;
+  groupId?: string | null;
+  groupName?: string | null;
 }
 
 export interface User {
@@ -22,9 +24,6 @@ export interface User {
   payoutAccountName?: string | null;
   payoutAccountNumber?: string | null;
   payoutBankCode?: string | null;
-  /** Probation status — drives the Probation badge in user lists. */
-  isProbation?: boolean;
-  probationUntil?: string | null;
   /** "Is supervisor anywhere" — drives the Supervisor badge in user lists. */
   isTeamSupervisor?: boolean;
 }
@@ -177,17 +176,8 @@ export interface UserDetail {
   loginCount?: number;
   /** Most recent successful sign-in timestamp. */
   lastLoginAt?: string | null;
-  /** Probation status — full role permissions, but eligible for PII-scrub termination. */
-  isProbation?: boolean;
-  probationStartedAt?: string | null;
-  probationStartedBy?: string | null;
-  probationUntil?: string | null;
   /** "Is supervisor anywhere" — drives the Supervisor badge on the user-detail page. */
   isTeamSupervisor?: boolean;
-  /** Stamped only when this user was scrubbed via the probation termination flow. */
-  terminatedAt?: string | null;
-  terminatedBy?: string | null;
-  originalRole?: string | null;
   createdAt: string;
   updatedAt: string;
   branchMemberships?: UserBranchMembership[];

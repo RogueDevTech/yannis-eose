@@ -60,7 +60,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const productsResP = apiRequest<unknown>(`/trpc/products.options?input=${productsInput}`, { method: 'GET', cookie });
   const locationsResP = apiRequest<unknown>(`/trpc/logistics.locationOptions?input=${locationsInput}`, { method: 'GET', cookie });
   const plansResP = apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie });
-  const branchesResP = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie });
+  // SuperAdmin sees all branches (all groups) so they can reassign users across companies.
+  const isAdminViewer = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
+  const branchesEndpoint = isAdminViewer ? '/trpc/branches.listAll' : '/trpc/branches.list';
+  const branchesResP = apiRequest<unknown>(branchesEndpoint, { method: 'GET', cookie });
+  const branchGroupsResP = isAdminViewer
+    ? apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie })
+    : Promise.resolve({ ok: true, data: { result: { data: [] } } } as { ok: boolean; data: unknown });
   const activeHeadsResP = apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie });
   const templatesResP = apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie });
   const permissionCatalogResP = apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie });
@@ -131,12 +137,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Deferred picklists — the form chrome (current values + auth gate) renders
   // immediately above; only the dropdowns/sections driven by this data wait.
   const picklistsPromise: Promise<UserCreateLoaderData> = (async () => {
-    const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
+    const [productsRes, locationsRes, plansRes, branchesRes, branchGroupsRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
       await Promise.all([
         productsResP,
         locationsResP,
         plansResP,
         branchesResP,
+        branchGroupsResP,
         activeHeadsResP,
         templatesResP,
         permissionCatalogResP,
@@ -189,6 +196,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
       : []) ?? []) as UserCreateBranch[];
 
+    const branchGroups = ((branchGroupsRes.ok
+      ? (branchGroupsRes.data as { result?: { data?: unknown[] } })?.result?.data
+      : []) ?? []) as Array<{ id: string; name: string; status?: string }>;
+
     return {
       products: extractData(productsRes, 'products') as UserCreateProduct[],
       locations: (extractData(locationsRes, 'locations') as Array<{ id: string; name: string; address: string; providerName?: string | null }>).map(
@@ -196,6 +207,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ) as UserCreateLocation[],
       plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],
       branches,
+      branchGroups,
       activeHeads: ((activeHeadsRes.ok
         ? (activeHeadsRes.data as { result?: { data?: unknown[] } })?.result?.data
         : []) ?? []) as ActiveHeadUser[],
@@ -204,6 +216,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       templatePermissionsById,
       // Editing — no auto-fill default needed.
       defaultMembershipBranchId: null,
+      viewerRole: viewer.role,
     };
   })();
 

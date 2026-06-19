@@ -315,9 +315,14 @@ export class OrdersService {
   }
 
   /** PENDING permission_request for this order's line price change (if any). */
-  async findPendingOrderLinePriceRequestId(orderId: string): Promise<string | null> {
+  async findPendingOrderLinePriceRequest(orderId: string): Promise<{ id: string; payload: unknown; reason: string; requesterName: string | null } | null> {
     const [row] = await this.db
-      .select({ id: schema.permissionRequests.id })
+      .select({
+        id: schema.permissionRequests.id,
+        payload: schema.permissionRequests.payload,
+        reason: schema.permissionRequests.reason,
+        requesterId: schema.permissionRequests.requesterId,
+      })
       .from(schema.permissionRequests)
       .where(
         and(
@@ -327,7 +332,14 @@ export class OrdersService {
         ),
       )
       .limit(1);
-    return row?.id ?? null;
+    if (!row) return null;
+    // Resolve requester name
+    let requesterName: string | null = null;
+    if (row.requesterId) {
+      const [u] = await this.db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, row.requesterId)).limit(1);
+      requesterName = u?.name ?? null;
+    }
+    return { id: row.id, payload: row.payload, reason: row.reason, requesterName };
   }
 
   /** PENDING permission_request to archive (soft-delete) this order (if any). */
@@ -498,34 +510,72 @@ export class OrdersService {
   /**
    * CS (and others who cannot set prices directly) submit a permission_request; an approver applies `orders.update`.
    */
-  async requestLinePriceChangeApproval(input: RequestOrderLinePriceChangeInput, actor: SessionUser) {
-    const existingRows = await this.db
-      .select()
-      .from(schema.orders)
-      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
-      .limit(1);
-    const order = existingRows[0];
-    if (!order) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+  async requestLinePriceChangeApproval(
+    input: RequestOrderLinePriceChangeInput,
+    actor: SessionUser,
+    orderType?: 'followUp' | 'cart',
+  ) {
+    let orderBranchId: string | null = null;
+    let orderStatus: string = '';
+    let orderNumber: number | null = null;
+    let orderAssignedCsId: string | null = null;
+
+    if (orderType === 'followUp') {
+      const [fu] = await this.db
+        .select({ id: schema.followUpOrders.id, status: schema.followUpOrders.status, branchId: schema.followUpOrders.branchId, servicingBranchId: schema.followUpOrders.servicingBranchId, assignedCsId: schema.followUpOrders.assignedCsId, orderNumber: schema.followUpOrders.orderNumber })
+        .from(schema.followUpOrders)
+        .where(eq(schema.followUpOrders.id, input.orderId))
+        .limit(1);
+      if (!fu) throw new TRPCError({ code: 'NOT_FOUND', message: 'Follow-up order not found' });
+      orderBranchId = fu.servicingBranchId ?? fu.branchId ?? null;
+      orderStatus = fu.status;
+      orderNumber = fu.orderNumber;
+      orderAssignedCsId = fu.assignedCsId ?? null;
+    } else if (orderType === 'cart') {
+      const [co] = await this.db
+        .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, branchId: schema.cartOrders.branchId, servicingBranchId: schema.cartOrders.servicingBranchId, assignedCsId: schema.cartOrders.assignedCsId, orderNumber: schema.cartOrders.orderNumber })
+        .from(schema.cartOrders)
+        .where(eq(schema.cartOrders.id, input.orderId))
+        .limit(1);
+      if (!co) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+      orderBranchId = co.servicingBranchId ?? co.branchId ?? null;
+      orderStatus = co.status;
+      orderNumber = co.orderNumber;
+      orderAssignedCsId = co.assignedCsId ?? null;
+    } else {
+      const existingRows = await this.db
+        .select()
+        .from(schema.orders)
+        .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+        .limit(1);
+      const order = existingRows[0];
+      if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      orderBranchId = order.branchId ?? null;
+      orderStatus = order.status;
+      orderNumber = order.orderNumber ?? null;
+      orderAssignedCsId = order.assignedCsId ?? null;
     }
 
     const blockedStatuses = ['DELIVERED', 'REMITTED'];
-    if (blockedStatuses.includes(order.status)) {
+    if (blockedStatuses.includes(orderStatus)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Order items cannot be adjusted after delivery.',
       });
     }
 
-    await this.assertActorMayUpdateOrder(actor, {
-      branchId: order.branchId ?? null,
-      assignedCsId: order.assignedCsId ?? null,
-      status: order.status,
-    });
+    // Skip assertActorMayUpdateOrder for follow-up/cart — the permission procedure already gates access
+    if (!orderType) {
+      await this.assertActorMayUpdateOrder(actor, {
+        branchId: orderBranchId,
+        assignedCsId: orderAssignedCsId,
+        status: orderStatus,
+      });
+    }
 
     const mayEditPrices = await this.canActorEditOrderLinePrices(actor, {
-      branchId: order.branchId ?? null,
-      assignedCsId: order.assignedCsId ?? null,
+      branchId: orderBranchId,
+      assignedCsId: orderAssignedCsId,
     });
     if (mayEditPrices) {
       throw new TRPCError({
@@ -543,12 +593,15 @@ export class OrdersService {
       });
     }
 
-    const differs = await this.proposedLineItemPricingDiffersFromDatabase(input.orderId, input.items);
-    if (!differs) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'At least one item must differ (price, offer, or quantity) from the current order to submit an approval request.',
-      });
+    // proposedLineItemPricingDiffersFromDatabase only works for the main orders table
+    if (!orderType) {
+      const differs = await this.proposedLineItemPricingDiffersFromDatabase(input.orderId, input.items);
+      if (!differs) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'At least one item must differ (price, offer, or quantity) from the current order to submit an approval request.',
+        });
+      }
     }
 
     const [duplicate] = await this.db
@@ -571,7 +624,8 @@ export class OrdersService {
 
     const payload = {
       orderId: input.orderId,
-      orderNo: order.orderNumber ?? null,
+      orderNo: orderNumber ?? null,
+      ...(orderType ? { orderType } : {}),
       items: input.items,
       totalAmount: input.totalAmount,
     };
@@ -600,28 +654,31 @@ export class OrdersService {
     const proposedTotalForTimeline = Math.round(input.totalAmount * 100) / 100;
     const reasonSnippet =
       input.reason.length > 80 ? `${input.reason.slice(0, 77)}…` : input.reason;
-    void this.writeTimelineEvent({
-      orderId: input.orderId,
-      eventType: 'LINE_PRICE_CHANGE_REQUESTED',
-      actorId: actor.id,
-      actorName: actor.name ?? null,
-      description:
-        `${actor.name ?? 'Staff'} proposed a line price change pending approval — ` +
-        `new total ₦${proposedTotalForTimeline.toLocaleString('en-NG')}. Reason: "${reasonSnippet}"`,
-      metadata: {
-        permissionRequestId: req.id,
-        proposedItems: input.items,
-        proposedTotalAmount: input.totalAmount,
-        reason: input.reason,
-      },
-      branchId: order.branchId ?? null,
-    });
+    // Only write timeline event for normal orders — follow-up/cart have separate timeline tables
+    if (!orderType) {
+      void this.writeTimelineEvent({
+        orderId: input.orderId,
+        eventType: 'LINE_PRICE_CHANGE_REQUESTED',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description:
+          `${actor.name ?? 'Staff'} proposed a line price change pending approval — ` +
+          `new total ₦${proposedTotalForTimeline.toLocaleString('en-NG')}. Reason: "${reasonSnippet}"`,
+        metadata: {
+          permissionRequestId: req.id,
+          proposedItems: input.items,
+          proposedTotalAmount: input.totalAmount,
+          reason: input.reason,
+        },
+        branchId: orderBranchId,
+      });
+    }
 
     void this.notifyOrderLinePriceChangeApprovers({
       requestId: req.id,
       orderId: input.orderId,
-      branchId: order.branchId ?? null,
-      servicingBranchId: order.servicingBranchId ?? null,
+      branchId: orderBranchId,
+      servicingBranchId: orderBranchId,
       requesterName: actor.name ?? null,
       excludeUserId: actor.id,
     });
@@ -2390,7 +2447,7 @@ export class OrdersService {
     //   3) pending permission_request to archive (soft-delete) the order.
     // Previously these ran sequentially (3 RTTs); fanning out collapses them
     // to a single wall-clock round-trip on the cache-miss detail load.
-    const [remittanceRow, pendingOrderLinePriceRequestId, pendingOrderDeletionRequestId] =
+    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId] =
       await Promise.all([
         this.db
           .select({
@@ -2404,7 +2461,7 @@ export class OrdersService {
           )
           .where(eq(schema.deliveryRemittanceOrders.orderId, orderId))
           .limit(1),
-        this.findPendingOrderLinePriceRequestId(orderId),
+        this.findPendingOrderLinePriceRequest(orderId),
         this.findPendingOrderDeletionRequestId(orderId),
       ]);
 
@@ -2428,7 +2485,13 @@ export class OrdersService {
       lockedByName,
       remittanceStatus,
       remittanceId,
-      pendingOrderLinePriceRequestId,
+      pendingOrderLinePriceRequestId: pendingPriceRequest?.id ?? null,
+      pendingLinePriceChangeProposal: pendingPriceRequest ? {
+        items: ((pendingPriceRequest.payload as Record<string, unknown>)?.items ?? []) as Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>,
+        totalAmount: Number((pendingPriceRequest.payload as Record<string, unknown>)?.totalAmount ?? 0),
+        reason: pendingPriceRequest.reason,
+        requesterName: pendingPriceRequest.requesterName,
+      } : null,
       pendingOrderDeletionRequestId,
     };
   }
@@ -3890,7 +3953,8 @@ export class OrdersService {
       'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED',
     ];
     if (forwardStatuses.includes(newStatus) && newStatus !== currentStatus) {
-      const pendingPriceReqId = await this.findPendingOrderLinePriceRequestId(order.id);
+      const pendingPriceReq = await this.findPendingOrderLinePriceRequest(order.id);
+      const pendingPriceReqId = pendingPriceReq?.id ?? null;
       if (pendingPriceReqId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -8725,12 +8789,17 @@ export class OrdersService {
   }
 
   /** List all follow-up batches with summary stats. */
-  async listFollowUpBatches(input: { page: number; limit: number; startDate?: string; endDate?: string; includeReverted?: boolean }) {
+  async listFollowUpBatches(input: { page: number; limit: number; startDate?: string; endDate?: string; includeReverted?: boolean }, effectiveBranchIds?: string[] | null) {
     const offset = (input.page - 1) * input.limit;
     const conditions: SQL[] = [];
     if (!input.includeReverted) conditions.push(eq(schema.followUpBatches.status, 'ACTIVE'));
     if (input.startDate) conditions.push(gte(schema.followUpBatches.createdAt, new Date(`${input.startDate}T00:00:00+01:00`)));
     if (input.endDate) conditions.push(lte(schema.followUpBatches.createdAt, new Date(`${input.endDate}T23:59:59+01:00`)));
+
+    // Company-group isolation: filter batches by their branchId
+    const bCond = branchScopeCondition(schema.followUpBatches.branchId, null, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [batches, countRows] = await Promise.all([

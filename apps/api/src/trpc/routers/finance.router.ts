@@ -199,8 +199,8 @@ export const financeRouter = router({
 
   listApprovalRequests: permissionProcedure('finance.read')
     .input(listApprovalRequestsSchema)
-    .query(async ({ input }) => {
-      return getFinanceService().listApprovalRequests(input);
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().listApprovalRequests(input, ctx.effectiveBranchIds);
     }),
 
   // Budgets
@@ -211,13 +211,13 @@ export const financeRouter = router({
     }),
 
   listBudgets: permissionProcedure('finance.read')
-    .query(async () => {
-      return getFinanceService().listBudgets();
+    .query(async ({ ctx }) => {
+      return getFinanceService().listBudgets(ctx.activeGroupId);
     }),
 
   listBudgetsWithUtilization: permissionProcedure('finance.read')
-    .query(async () => {
-      return getFinanceService().listBudgetsWithUtilization();
+    .query(async ({ ctx }) => {
+      return getFinanceService().listBudgetsWithUtilization(ctx.activeGroupId);
     }),
 
   budgetUtilization: permissionProcedure('finance.read')
@@ -250,8 +250,8 @@ export const financeRouter = router({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }).optional())
-    .query(async ({ input }) => {
-      return getFinanceService().getFastProfitReport(input?.startDate, input?.endDate);
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().getFastProfitReport(input?.startDate, input?.endDate, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -296,7 +296,7 @@ export const financeRouter = router({
           .listMonthlyPayrolls({ status: 'PENDING_FINANCE' as const }, ctx.user)
           .catch(() => null),
         getFinanceService()
-          .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 })
+          .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 }, ctx.effectiveBranchIds)
           .catch(() => null),
         listBranchesForUser({ ...ctx.user, activeGroupId: ctx.activeGroupId }).catch(() => [] as Array<{ id: string; name: string }>),
         getUsersService()

@@ -21,11 +21,15 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
   if (data) {
     // Approval notifications with a requestId take priority over generic orderId links
     // so HoCS/HoL land on the Permission Requests page, not the order detail.
+    // Exception: order-linked approval notifications (line price, deletion) link to the
+    // order detail so closers see the context inline rather than the admin-only queue.
     if (data.requestId) {
       if (notif.type === 'approval:email_change' && data.userId)
         return { link: `/hr/users/${data.userId}`, label: 'Review email change' };
       if (notif.type === 'finance:approval_required')
         return { link: '/admin/finance/overview', label: 'Finance overview' };
+      if (notif.type.includes('approval') && data.orderId)
+        return { link: `/admin/orders/${data.orderId}`, label: 'View order' };
       if (notif.type.includes('approval')) return { link: '/admin/permission-requests', label: 'Review permission request' };
       if (notif.type === 'funding:approved') return { link: '/admin/marketing/funding', label: 'View receipt' };
       if (notif.type === 'funding:rejected') return { link: '/admin/marketing/funding', label: 'View funding' };

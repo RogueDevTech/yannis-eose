@@ -6,7 +6,6 @@ import { InlineNotification } from '~/components/ui/inline-notification';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Checkbox } from '~/components/ui/checkbox';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -26,8 +25,6 @@ import { PermissionMatrix } from './PermissionMatrix';
 // HoCS / HoM / HoLogistics + HR_MANAGER: existing ACTIVE+PENDING holders shown
 // as a soft warning only. Multiple holders are allowed; HR is company-wide too.
 import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
-import { isRoleProbationEligible } from '@yannis/shared';
-
 const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
 /** Roles where Marketing/CS squad placement on create is optional (org-first staff). */
@@ -533,18 +530,6 @@ export function UserCreatePage({
 
   return (
     <div className="w-full space-y-6">
-      <Breadcrumb
-        items={
-          isEditMode && editingUser
-            ? [
-                { label: 'Users', to: usersBasePath },
-                { label: editingUser.name, to: `${usersBasePath}/${editingUser.id}` },
-                { label: 'Edit' },
-              ]
-            : [{ label: 'Users', to: usersBasePath }, { label: 'Add User' }]
-        }
-      />
-
       <PageHeader
         title={isEditMode ? 'Edit user' : 'Add User'}
         backTo={usersBasePath}
@@ -610,7 +595,7 @@ export function UserCreatePage({
         <input
           type="hidden"
           name="branchIds"
-          value={roleNeedsBranch ? JSON.stringify(selectedBranchIds) : '[]'}
+          value={JSON.stringify(selectedBranchIds)}
         />
         <input
           type="hidden"
@@ -721,11 +706,66 @@ export function UserCreatePage({
               />
             </div>
 
-            {roleNeedsBranch ? (
+            {/* Show branch picker for branch-eligible roles, OR for admin-level on any role (company group scoping). */}
+            {(roleNeedsBranch || ((viewerRole === 'SUPER_ADMIN' || viewerRole === 'ADMIN') && selectedRole && !BRANCH_ELIGIBLE_ROLES.has(selectedRole))) ? (
             <div className="sm:col-span-2 space-y-3">
               <label className="block text-sm font-medium text-app-fg-muted">
-                Branch Memberships
+                {roleNeedsBranch ? 'Branch Memberships' : 'Company Group Access'}
               </label>
+              {/* Org-wide roles: show company group checkboxes (selecting a group = all its branches) */}
+              {!roleNeedsBranch && branchGroups && branchGroups.length > 0 ? (
+                <div className="border border-app-border rounded-lg overflow-hidden">
+                  <div className="max-h-48 overflow-y-auto">
+                    {branchGroups.map((group) => {
+                      const groupBranches = activeBranches.filter((b: UserCreateBranch) => b.groupId === group.id);
+                      if (groupBranches.length === 0) return null;
+                      const allGroupSelected = groupBranches.every((b: UserCreateBranch) => selectedBranchIds.includes(b.id));
+                      return (
+                        <label
+                          key={group.id}
+                          className="flex items-center gap-3 px-3 py-2.5 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                        >
+                          <Checkbox
+                            checked={allGroupSelected}
+                            onChange={() => {
+                              if (allGroupSelected) {
+                                // Deselect all branches in this group
+                                const groupIds = new Set(groupBranches.map((b: UserCreateBranch) => b.id));
+                                setSelectedBranchIds((prev) => prev.filter((id) => !groupIds.has(id)));
+                              } else {
+                                // Select all branches in this group
+                                const groupIds = groupBranches.map((b: UserCreateBranch) => b.id);
+                                setSelectedBranchIds((prev) => [...new Set([...prev, ...groupIds])]);
+                              }
+                            }}
+                          />
+                          <span className="text-sm font-medium text-app-fg">{group.name}</span>
+                          <span className="text-xs text-app-fg-muted ml-auto">{groupBranches.length} branch{groupBranches.length !== 1 ? 'es' : ''}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : !roleNeedsBranch ? (
+                <div className="border border-app-border rounded-lg overflow-hidden">
+                  <div className="max-h-48 overflow-y-auto">
+                    {activeBranches.map((branch: UserCreateBranch) => (
+                      <label
+                        key={branch.id}
+                        className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                      >
+                        <Checkbox
+                          checked={selectedBranchIds.includes(branch.id)}
+                          onChange={() => toggleBranch(branch.id)}
+                        />
+                        <span className="text-sm text-app-fg">{branch.name}</span>
+                        <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+              /* Branch-eligible roles: individual branch checkboxes with group headers */
               <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
                 {activeBranches.length > 0 ? (
                   <label className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border hover:bg-app-hover cursor-pointer shrink-0">
@@ -739,7 +779,6 @@ export function UserCreatePage({
                   </label>
                 ) : null}
                 <div className="max-h-48 overflow-y-auto">
-                  {/* Group branches by branch group when multiple groups exist and viewer is SuperAdmin or multi-group */}
                   {branchGroups && branchGroups.length > 1 && (viewerRole === 'SUPER_ADMIN' || new Set(activeBranches.map((b) => b.groupId).filter(Boolean)).size > 1) ? (
                     branchGroups.map((group) => {
                       const groupBranches = activeBranches.filter((b: UserCreateBranch) => b.groupId === group.id);
@@ -782,6 +821,8 @@ export function UserCreatePage({
                   )}
                 </div>
               </div>
+              )}
+              {roleNeedsBranch && (
               <SearchableSelect
                 id="primaryBranchId"
                 label="Primary Branch"
@@ -798,6 +839,7 @@ export function UserCreatePage({
                     description: branch.code,
                   }))}
               />
+              )}
               {selectedRole && COMPANY_WIDE_OPTIONAL_SQUAD_ROLES.has(selectedRole) ? (
                 <p className="text-xs text-app-fg-muted mt-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2">
                   Team and department placement is optional for this role — attach branches only when they need branch scope.
@@ -961,33 +1003,6 @@ export function UserCreatePage({
                 )}
               </div>
             )}
-          </div>
-        )}
-
-        {/* Section 2.5: Probation (create mode, eligible roles only) */}
-        {!isEditMode && selectedRole && isRoleProbationEligible(selectedRole) && (
-          <div className="card space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold text-app-fg">Probation</h2>
-              <p className="text-xs text-app-fg-muted mt-1">
-                Optional. Probation users carry every permission of their role but can be
-                terminated with a complete PII scrub if they don't meet expectations. Admin tier
-                roles cannot be on probation.
-              </p>
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <Checkbox name="isProbation" value="true" />
-              <span className="text-sm text-app-fg">Place this user on probation</span>
-            </label>
-            <TextInput
-              id="probationUntil"
-              name="probationUntil"
-              type="date"
-              label="Review date (optional)"
-              defaultValue={new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}
-              hint="Default is 90 days from today. HR will get a 7-day reminder before this date."
-              wrapperClassName="w-full sm:w-64"
-            />
           </div>
         )}
 

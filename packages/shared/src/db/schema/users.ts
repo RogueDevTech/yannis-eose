@@ -70,21 +70,6 @@ export const users = pgTable('users', {
   /** Most recent successful login timestamp. Paired with `loginCount` for audit. */
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   /**
-   * Probation flag — when true, this user has the full permissions of their role
-   * but can be terminated (PII-scrubbed) without affecting their transactional
-   * history. Eligibility: any non-admin role. Set/unset gated to HR_MANAGER + SUPER_ADMIN.
-   * See CLAUDE.md → "Probation user type" and migration 0126.
-   */
-  isProbation: boolean('is_probation').default(false).notNull(),
-  probationStartedAt: timestamp('probation_started_at', { withTimezone: true }),
-  probationStartedBy: uuid('probation_started_by'),
-  probationUntil: timestamp('probation_until', { withTimezone: true }),
-  /** Stamped only when the row was scrubbed via the probation termination flow. */
-  terminatedAt: timestamp('terminated_at', { withTimezone: true }),
-  terminatedBy: uuid('terminated_by'),
-  /** Role snapshot taken at termination so the row stays filterable post-scrub. */
-  originalRole: userRoleEnum('original_role'),
-  /**
    * Denormalised "is supervisor anywhere" flag — kept in sync by
    * `BranchTeamsService` whenever a user is granted/revoked supervisor on any
    * `branch_team_members` row. Source of truth is the team-membership rows;

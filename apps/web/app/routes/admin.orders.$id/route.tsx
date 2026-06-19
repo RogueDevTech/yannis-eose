@@ -83,6 +83,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         startedAt: (t.createdAt as string) ?? new Date().toISOString(),
       }));
 
+  // Shared helper: fetch products for the Adjust order items modal (product swap).
+  // Used by follow-up and cart order paths which don't go through the main orders loader.
+  const fetchProductsForAdjust = () =>
+    apiRequest<unknown>(
+      `/trpc/orders.listProductsForAdjust?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+      deferredOpt,
+    )
+      .then((res) => {
+        if (!res.ok) return [] as Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+        const d = res.data as { result?: { data?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } };
+        return d?.result?.data ?? [];
+      })
+      .catch(() => [] as Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>);
+
   const orderDetailPromise = (async (): Promise<OrderDetailLoaderResult> => {
     // When navigating from Cart Orders page, try cart_orders table first
     // to avoid hitting the stale graduated copy in the orders table.
@@ -127,6 +141,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             deliveryState: (coData.deliveryState as string) ?? null,
             preferredDeliveryDate: (coData.preferredDeliveryDate as string) ?? null,
             frozenForFollowUp: false,
+            pendingOrderLinePriceRequestId: (coData.pendingOrderLinePriceRequestId as string) ?? null,
+            pendingLinePriceChangeProposal: (coData.pendingLinePriceChangeProposal as OrderDetail['pendingLinePriceChangeProposal']) ?? null,
+            viewerCanEditOrderLinePrices: (coData.viewerCanEditOrderLinePrices as boolean) ?? false,
             logisticsLocationId: (coData.logisticsLocationId as string) ?? null,
             logisticsProviderId: (coData.logisticsProviderId as string) ?? null,
             riderId: (coData.riderId as string) ?? null,
@@ -165,6 +182,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             metadata: (t.metadata as Record<string, unknown>) ?? null,
             createdAt: t.createdAt as string,
           }));
+          const cartProductsForAdjust = await fetchProductsForAdjust();
           return {
             order,
             voipEnabled: false,
@@ -172,6 +190,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             latestCall: null as unknown as Promise<null>,
             timeline: timelineData as unknown as Promise<typeof timelineData>,
             itemOffers: [],
+            productsForAdjust: cartProductsForAdjust,
             callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
             isFollowUpOrder: false,
             isCartOrder: true,
@@ -237,6 +256,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               preferredDeliveryDate: (fuData.preferredDeliveryDate as string) ?? null,
               // orderSource not in OrderDetail type
               frozenForFollowUp: false,
+              pendingOrderLinePriceRequestId: (fuData.pendingOrderLinePriceRequestId as string) ?? null,
+              pendingLinePriceChangeProposal: (fuData.pendingLinePriceChangeProposal as OrderDetail['pendingLinePriceChangeProposal']) ?? null,
+              viewerCanEditOrderLinePrices: (fuData.viewerCanEditOrderLinePrices as boolean) ?? false,
               logisticsLocationId: (fuData.logisticsLocationId as string) ?? null,
               logisticsProviderId: (fuData.logisticsProviderId as string) ?? null,
               riderId: (fuData.riderId as string) ?? null,
@@ -283,6 +305,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 createdAt: t.createdAt as string,
               })) as unknown as Promise<typeof fuTimeline>,
               itemOffers: [],
+              productsForAdjust: await fetchProductsForAdjust(),
               callablePhone: fuPhone ? { phone: fuPhone, isDialable: true } : null,
               isFollowUpOrder: true,
             };
@@ -329,6 +352,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               deliveryState: (coData.deliveryState as string) ?? null,
               preferredDeliveryDate: (coData.preferredDeliveryDate as string) ?? null,
               frozenForFollowUp: false,
+              pendingOrderLinePriceRequestId: (coData.pendingOrderLinePriceRequestId as string) ?? null,
+              viewerCanEditOrderLinePrices: (coData.viewerCanEditOrderLinePrices as boolean) ?? false,
               logisticsLocationId: (coData.logisticsLocationId as string) ?? null,
               logisticsProviderId: (coData.logisticsProviderId as string) ?? null,
               riderId: (coData.riderId as string) ?? null,
@@ -373,6 +398,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 createdAt: t.createdAt as string,
               })) as unknown as Promise<typeof coTimeline>,
               itemOffers: [],
+              productsForAdjust: await fetchProductsForAdjust(),
               callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
               isFollowUpOrder: false,
               isCartOrder: true,
@@ -407,7 +433,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // latestCall is still loaded here (small + used for confirm gate UX). itemOffers powers the
     // Adjust order items offer picker — small + needed when the modal opens, fetched in parallel.
     // Timeline is loaded client-side after mount (resource route) to keep the main page fast.
-    const [latestCallValue, itemOffersValue, callablePhoneValue] = await Promise.all([
+    const [latestCallValue, itemOffersValue, callablePhoneValue, productsForAdjustValue] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
         deferredOpt,
@@ -458,6 +484,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             })
             .catch(() => null)
         : Promise.resolve(null),
+      // Products for product-swap in Adjust order items modal
+      apiRequest<unknown>(
+        `/trpc/orders.listProductsForAdjust?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+        deferredOpt,
+      )
+        .then((res) => {
+          if (!res.ok) {
+            logOrderDetailLoaderWarning(orderId, 'orders.listProductsForAdjust', `status ${res.status}`);
+            return [] as Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+          }
+          const d = res.data as { result?: { data?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } };
+          return d?.result?.data ?? [];
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'unknown';
+          logOrderDetailLoaderWarning(orderId, 'orders.listProductsForAdjust', msg);
+          return [] as Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+        }),
     ]);
 
     return {
@@ -469,6 +513,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       voipProviderDisplayName,
       itemOffers: itemOffersValue,
       callablePhone: callablePhoneValue,
+      productsForAdjust: productsForAdjustValue,
       isFollowUpOrder: false,
     };
   })();
@@ -1116,15 +1161,39 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (Number.isNaN(totalAmount) || totalAmount < 0) {
       return json({ error: 'Invalid total amount' }, { status: 400 });
     }
-    const res = await apiRequest<unknown>('/trpc/orders.update', {
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    const isCartOrder = formData.get('isCartOrder') === 'true';
+
+    let endpoint = '/trpc/orders.update';
+    let body: Record<string, unknown> = { orderId, items: parsedItems, totalAmount, ...branchIdFromForm(formData) };
+    if (isFollowUp) {
+      endpoint = '/trpc/orders.followUpOrdersAdjustItems';
+      body = { orderId, items: parsedItems, totalAmount };
+    } else if (isCartOrder) {
+      endpoint = '/trpc/cartOrders.adjustItems';
+      body = { orderId, items: parsedItems, totalAmount };
+    }
+
+    const res = await apiRequest<unknown>(endpoint, {
       method: 'POST',
       cookie,
-      body: { orderId, items: parsedItems, totalAmount, ...branchIdFromForm(formData) },
+      body,
     });
     if (!res.ok) {
       const err = extractApiErrorMessage(res.data, 'Failed to update order items');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
+    // Regenerate invoice after item changes — fire-and-forget
+    const invoiceEndpoint = isFollowUp
+      ? '/trpc/finance.ensureInvoiceByOrder'
+      : isCartOrder
+        ? '/trpc/cartOrders.ensureInvoice'
+        : '/trpc/finance.ensureInvoiceByOrder';
+    void apiRequest<unknown>(invoiceEndpoint, {
+      method: 'POST',
+      cookie,
+      body: { orderId },
+    }).catch(() => { /* invoice regeneration is best-effort */ });
     return json({ success: true });
   }
 
@@ -1185,16 +1254,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (Number.isNaN(totalAmount) || totalAmount < 0) {
       return json({ error: 'Invalid total amount' }, { status: 400 });
     }
+    const isFollowUp = formData.get('isFollowUpOrder') === 'true';
+    const isCartOrder = formData.get('isCartOrder') === 'true';
+
     const body: {
       orderId: string;
       items: typeof parsedItems;
       totalAmount: number;
       reason: string;
       branchId?: string;
+      orderType?: 'followUp' | 'cart';
     } = { orderId, items: parsedItems, totalAmount, reason };
     if (branchIdField) {
       body.branchId = branchIdField;
     }
+    if (isFollowUp) body.orderType = 'followUp';
+    if (isCartOrder) body.orderType = 'cart';
     const res = await apiRequest<unknown>('/trpc/orders.requestLinePriceChangeApproval', {
       method: 'POST',
       cookie,
@@ -1205,6 +1280,26 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
+  }
+
+  if (intent === 'withdrawLinePriceRequest') {
+    const requestId = formData.get('requestId')?.toString()?.trim();
+    if (!requestId) {
+      return json({ error: 'Request ID is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/permissionRequests.reject', {
+      method: 'POST',
+      cookie,
+      body: {
+        requestId,
+        reason: 'Withdrawn by requester',
+      },
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to withdraw request');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, intent: 'withdrawLinePriceRequest' });
   }
 
   if (intent === 'requestOrderDeletion') {
@@ -1552,6 +1647,7 @@ export default function OrderDetailRoute() {
       voipEnabled={(orderDetail as OrderDetailStreamData).voipEnabled}
       voipProviderDisplayName={(orderDetail as OrderDetailStreamData).voipProviderDisplayName}
       itemOffers={(orderDetail as OrderDetailStreamData).itemOffers}
+      productsForAdjust={(orderDetail as OrderDetailStreamData).productsForAdjust}
       callablePhone={(orderDetail as OrderDetailStreamData).callablePhone}
       isFollowUpOrder={(orderDetail as OrderDetailStreamData).isFollowUpOrder}
       isCartOrder={(orderDetail as { isCartOrder?: boolean }).isCartOrder}

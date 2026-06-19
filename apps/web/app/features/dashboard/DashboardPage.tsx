@@ -419,8 +419,8 @@ function CSDashboard({
           the selected date range from `marketing.metrics`. Per-status counts remain
           on `/admin/sales/orders` via the status filter pills. */}
 
-      <FollowUpDashboardStrip filters={dateFilters} />
-      <CartOrdersDashboardStrip filters={dateFilters} />
+      <FollowUpDashboardStrip showUnassigned={false} filters={dateFilters} />
+      <CartOrdersDashboardStrip showUnassigned={false} filters={dateFilters} />
 
       {showsTeamManagementCard && (
         <div className="card">

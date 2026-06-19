@@ -353,7 +353,6 @@ export class MarketingService {
       hasProductLine,
       lte(schema.orders.createdAt, now),
       sql`${schema.orders.status} != 'DELETED'`,
-      eq(schema.orders.isFollowUp, false),
     ];
     if (params.windowStartExclusive) {
       orderConditions.push(gt(schema.orders.createdAt, params.windowStartExclusive));
@@ -732,7 +731,6 @@ export class MarketingService {
       eq(schema.orders.campaignId, params.campaignId),
       lte(schema.orders.createdAt, now),
       sql`${schema.orders.status} != 'DELETED'`,
-      eq(schema.orders.isFollowUp, false),
     ];
     if (windowStartExclusive) {
       orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
@@ -788,7 +786,6 @@ export class MarketingService {
       gte(schema.orders.createdAt, rangeStart),
       lte(schema.orders.createdAt, rangeEnd),
       sql`${schema.orders.status} != 'DELETED'`,
-      eq(schema.orders.isFollowUp, false),
     ];
     if (params.branchId) {
       conditions.push(eq(schema.orders.branchId, params.branchId));
@@ -1000,11 +997,19 @@ export class MarketingService {
         amount: funding.amount,
         reason: input.disputeReason,
       });
+
+      // Look up the receiver's primary branch for notification group isolation
+      const [receiverBranch] = await this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(and(eq(schema.userBranches.userId, receiverId), eq(schema.userBranches.isPrimary, true)))
+        .limit(1);
+
       const disputedPayload = {
         type: 'funding:disputed' as const,
         title: 'Funding disputed',
         body: `A Media Buyer marked funding as Not Received. Requires resolution.`,
-        data: { fundingId: funding.id, amount: funding.amount },
+        data: { fundingId: funding.id, amount: funding.amount, branchId: receiverBranch?.branchId ?? null },
       };
       this.notifications.enqueueCreateForRole('SUPER_ADMIN', disputedPayload);
       this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', disputedPayload);
@@ -2403,13 +2408,20 @@ export class MarketingService {
       return row;
     });
 
+    // Look up the requester's primary branch for notification group isolation
+    const [requesterBranch] = await this.db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(and(eq(schema.userBranches.userId, existing.requesterId), eq(schema.userBranches.isPrimary, true)))
+      .limit(1);
+
     const amount = Number(existing.amount);
     this.notifications.enqueueCreate({
       userId: existing.requesterId,
       type: 'funding:rejected',
       title: 'Funding request not approved',
       body: `Your funding request of ₦${amount.toLocaleString()} was not approved.`,
-      data: { requestId: updated.id, amount },
+      data: { requestId: updated.id, amount, branchId: requesterBranch?.branchId ?? null },
     });
 
     return updated;
@@ -3130,7 +3142,6 @@ export class MarketingService {
     const conditions: SQL[] = [
       eq(schema.orders.mediaBuyerId, mediaBuyerId),
       sql`${schema.orders.status} != 'DELETED'`,
-      eq(schema.orders.isFollowUp, false),
       gte(schema.orders.createdAt, dayStart),
       lte(schema.orders.createdAt, dayEnd),
     ];
@@ -4102,10 +4113,9 @@ export class MarketingService {
       // Exclude DELETED orders (editorial) from all marketing metrics.
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
-      eq(schema.orders.isFollowUp, false),
       // Exclude offline orders — marketing metrics only count edge-form orders.
-      // Offline orders affect Sales metrics only (CEO 2026-06-05).
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
+      // Follow-up orders are included — MB spent to acquire the lead (CEO 2026-06-19).
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.isFollowUp} = true)`,
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4121,8 +4131,7 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      eq(schema.orders.isFollowUp, false),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.isFollowUp} = true)`,
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -4148,8 +4157,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
-      eq(schema.orders.isFollowUp, false),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.isFollowUp} = true)`,
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4337,6 +4345,8 @@ export class MarketingService {
       ...MarketingService.CONFIRMED_OR_BEYOND_STATUSES,
     ]);
 
+    // Follow-up orders count toward all MB metrics (CEO 2026-06-19) — the MB
+    // spent to acquire the lead even if it was later pulled into follow-up.
     const totalOrdersFilter =
       inCreatedPeriod.length > 0 ? (and(...inCreatedPeriod) ?? sql`true`) : sql`true`;
     const confirmedOrdersFilter =
@@ -4375,7 +4385,6 @@ export class MarketingService {
           and(
             inArray(schema.orders.mediaBuyerId, buyerIds),
             sql`${schema.orders.status} != 'DELETED'`,
-            eq(schema.orders.isFollowUp, false),
             branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
           ),
         )

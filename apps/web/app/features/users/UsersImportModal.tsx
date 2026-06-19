@@ -100,8 +100,6 @@ interface ParsedRow {
   phone: string;
   primaryBranchInput: string;
   additionalBranchesInput: string;
-  isProbation: boolean;
-  probationUntil: string;
 }
 
 interface ResolvedRow extends ParsedRow {
@@ -189,22 +187,6 @@ const COLUMN_SPECS: ColumnSpec[] = [
     description: 'Extra branches the user can switch into. Comma- or semicolon-separated codes/names. The primary is auto-included.',
     examples: ['ABJ, PHC', 'Abuja; Port Harcourt'],
   },
-  {
-    header: 'probation',
-    label: 'Probation',
-    alsoAccepts: ['Probation', 'PROBATION'],
-    required: false,
-    description: 'Mark the new user as probation. Empty / blank = no.',
-    examples: ['true', 'yes', 'false'],
-  },
-  {
-    header: 'probation_until',
-    label: 'Probation Until',
-    alsoAccepts: ['Probation Until', 'probation until', 'Probation-Until'],
-    required: false,
-    description: 'Probation review date when probation = true. ISO format. Defaults to 90 days from import.',
-    examples: ['2026-08-08'],
-  },
 ];
 
 function pickHeaderValue(row: Record<string, unknown>, header: string): string {
@@ -219,11 +201,6 @@ function pickHeaderValue(row: Record<string, unknown>, header: string): string {
     }
   }
   return '';
-}
-
-function parseTruthy(v: string): boolean {
-  const s = v.trim().toLowerCase();
-  return s === 'true' || s === 'yes' || s === '1' || s === 'y';
 }
 
 function resolveBranchId(input: string, branches: BranchInfo[]): string | null {
@@ -667,9 +644,6 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
       formData.set('primaryBranchId', row.primaryBranchId as string);
       const allBranches = [...new Set([row.primaryBranchId as string, ...row.additionalBranchIds])];
       formData.set('branchIds', JSON.stringify(allBranches));
-      formData.set('isProbation', String(row.isProbation));
-      if (row.probationUntil) formData.set('probationUntil', row.probationUntil);
-
       try {
         const res = await fetch('/hr/users?index', { method: 'POST', body: formData });
         const data = await res.json().catch(() => ({}));
@@ -716,11 +690,14 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
           name: pickHeaderValue(row, 'name'),
           email: pickHeaderValue(row, 'email').toLowerCase(),
           role: pickHeaderValue(row, 'role'),
-          phone: pickHeaderValue(row, 'phone'),
+          phone: (() => {
+            let v = pickHeaderValue(row, 'phone');
+            if (/^\d+(\.\d+)?[eE]\+?\d+$/i.test(v)) { const n = Number(v); if (Number.isFinite(n)) v = n.toFixed(0); }
+            if (/^234\d{10}$/.test(v)) v = `+${v}`;
+            return v;
+          })(),
           primaryBranchInput: pickHeaderValue(row, 'primary_branch'),
           additionalBranchesInput: pickHeaderValue(row, 'additional_branches'),
-          isProbation: parseTruthy(pickHeaderValue(row, 'probation')),
-          probationUntil: pickHeaderValue(row, 'probation_until'),
         }));
 
         setParsed(parsedRows);
