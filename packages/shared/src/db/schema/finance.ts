@@ -43,6 +43,8 @@ export const budgets = pgTable('budgets', {
   totalBudget: numeric('total_budget', { precision: 12, scale: 2 }).notNull(),
   periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
   periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  /** Branch group this budget belongs to. CEO directive 2026-06-10. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...temporalColumns,
   ...timestampColumns,

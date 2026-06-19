@@ -14,10 +14,6 @@ import {
   getRelevantNotificationTypesForRole,
   NOTIFICATION_TYPE_META,
   MANDATORY_EMAIL_TYPES,
-  setProbationSchema,
-  extendProbationSchema,
-  markProbationPermanentSchema,
-  terminateProbationSchema,
 } from '@yannis/shared';
 import type { UsersService } from '../../users/users.service';
 import type { SessionStoreService } from '../../auth/session-store.service';
@@ -100,8 +96,8 @@ export const usersRouter = router({
    */
   searchForPushTarget: permissionProcedure('notifications.broadcast', 'users.read')
     .input(searchUsersForPushTargetSchema)
-    .query(async ({ input }) => {
-      const users = await getUsersService().searchForPushTarget(input.q, input.limit, input.offset);
+    .query(async ({ input, ctx }) => {
+      const users = await getUsersService().searchForPushTarget(input.q, input.limit, input.offset, ctx.effectiveBranchIds);
       return { users };
     }),
 
@@ -116,8 +112,8 @@ export const usersRouter = router({
    * List active HEAD_OF_* users (with their primary branch) so the user
    * create/edit forms can warn about duplicate heads per branch.
    */
-  listActiveHeads: permissionProcedure('users.read', 'users.create', 'users.update').query(async () => {
-    return getUsersService().listActiveHeads();
+  listActiveHeads: permissionProcedure('users.read', 'users.create', 'users.update').query(async ({ ctx }) => {
+    return getUsersService().listActiveHeads(ctx.effectiveBranchIds);
   }),
 
   /**
@@ -126,7 +122,7 @@ export const usersRouter = router({
   getById: authedProcedure
     .input(z.object({ userId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      return getUsersService().getById(input.userId, ctx.user);
+      return getUsersService().getById(input.userId, ctx.user, ctx.effectiveBranchIds ?? undefined);
     }),
 
   /**
@@ -378,53 +374,4 @@ export const usersRouter = router({
       return getUsersService().resendInvite(input.userId, ctx.user);
     }),
 
-  // ─── Probation ────────────────────────────────────────────────
-  // Authority is HR_MANAGER + SUPER_ADMIN only — gated in the service layer
-  // (NOT in `permissionProcedure`) so HR doesn't need any extra permission code.
-  // ADMIN intentionally cannot manage probation (CEO directive 2026-05-08).
-
-  /**
-   * Live blockers snapshot for the Terminate Probation modal: open orders,
-   * scheduled callbacks, unpaid payouts. UI disables "Terminate" until
-   * `canTerminate` is true.
-   */
-  getTerminationBlockers: authedProcedure
-    .input(z.object({ userId: z.string().uuid() }))
-    .query(async ({ input, ctx }) => {
-      return getUsersService().getTerminationBlockers(input.userId, ctx.user);
-    }),
-
-  /** Place an existing user on probation. */
-  setProbation: authedProcedure
-    .input(setProbationSchema)
-    .mutation(async ({ input, ctx }) => {
-      const res = await getUsersService().setProbation(input, ctx.user);
-      await invalidatePermissionsUserMatrixCache();
-      return res;
-    }),
-
-  /** Move the probation review date. */
-  extendProbation: authedProcedure
-    .input(extendProbationSchema)
-    .mutation(async ({ input, ctx }) => {
-      return getUsersService().extendProbation(input, ctx.user);
-    }),
-
-  /** Graduate the user off probation — they become a permanent staff member. */
-  markProbationPermanent: authedProcedure
-    .input(markProbationPermanentSchema)
-    .mutation(async ({ input, ctx }) => {
-      const res = await getUsersService().markProbationPermanent(input, ctx.user);
-      await invalidatePermissionsUserMatrixCache();
-      return res;
-    }),
-
-  /** Terminate the user — scrubs PII (live + history) and kills sessions. Permanent. */
-  terminateProbation: authedProcedure
-    .input(terminateProbationSchema)
-    .mutation(async ({ input, ctx }) => {
-      const res = await getUsersService().terminateProbation(input, ctx.user);
-      await invalidatePermissionsUserMatrixCache();
-      return res;
-    }),
 });

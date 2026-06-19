@@ -4,7 +4,6 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -62,8 +61,6 @@ export function ProductCreatePage({ actionData, categoriesPromise = [], allProdu
 
   return (
     <div className="w-full space-y-6">
-      <Breadcrumb items={[{ label: 'Products', to: '/admin/products' }, { label: 'Add Product' }]} />
-
       <PageHeader
         title="Add Product"
         backTo="/admin/products"

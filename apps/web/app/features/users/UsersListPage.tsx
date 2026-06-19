@@ -24,7 +24,6 @@ import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
-import { ProbationBadge } from '~/components/ui/probation-badge';
 import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -331,20 +330,10 @@ export function UsersListPage({
     if (currentStatusParam !== 'ALL') n += 1;
     if (currentRoleParam !== 'ALL') n += 1;
     if ((searchParams.get('search') ?? '').trim().length > 0) n += 1;
-    if (searchParams.get('probationOnly') === '1') n += 1;
     if (searchParams.get('supervisorOnly') === '1') n += 1;
     if (currentBranchParam !== 'ALL') n += 1;
     return n;
   }, [currentStatusParam, currentRoleParam, searchParams, currentBranchParam]);
-
-  const probationOnly = searchParams.get('probationOnly') === '1';
-  const handleProbationOnlyToggle = (next: boolean) => {
-    const params = new URLSearchParams(searchParams);
-    if (next) params.set('probationOnly', '1');
-    else params.delete('probationOnly');
-    params.set('page', '1');
-    setSearchParams(params, { replace: true });
-  };
 
   const supervisorOnly = searchParams.get('supervisorOnly') === '1';
   const handleSupervisorOnlyToggle = (next: boolean) => {
@@ -355,7 +344,7 @@ export function UsersListPage({
     setSearchParams(params, { replace: true });
   };
 
-  // Status, role, search, probation-only, and supervisor-only are applied server-side (`users.list`).
+  // Status, role, search, and supervisor-only are applied server-side (`users.list`).
 
   const staffAccountsColumns: CompactTableColumn<User>[] = useMemo(
     () => [
@@ -477,7 +466,6 @@ export function UsersListPage({
           <span className="inline-flex items-center gap-1.5 flex-wrap">
             <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
             {user.isTeamSupervisor && <SupervisorBadge size="sm" />}
-            {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" showDaysRemaining={false} />}
           </span>
         ),
       },
@@ -979,17 +967,6 @@ export function UsersListPage({
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => handleProbationOnlyToggle(!probationOnly)}
-                    className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap transition-colors ${
-                      probationOnly
-                        ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
-                        : 'bg-app-surface border-app-border text-app-fg-muted hover:bg-app-hover'
-                    }`}
-                  >
-                    Probation only
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => handleSupervisorOnlyToggle(!supervisorOnly)}
                     className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap transition-colors ${
                       supervisorOnly
@@ -1062,13 +1039,6 @@ export function UsersListPage({
                   ) : null}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
-                      checked={probationOnly}
-                      onChange={(e) => handleProbationOnlyToggle(e.target.checked)}
-                    />
-                    <span className="text-sm text-app-fg">Show probation users only</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
                       checked={supervisorOnly}
                       onChange={(e) => handleSupervisorOnlyToggle(e.target.checked)}
                     />
@@ -1124,7 +1094,6 @@ export function UsersListPage({
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
                     {user.isTeamSupervisor && <SupervisorBadge size="sm" />}
-                    {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" showDaysRemaining={false} />}
                   </div>
                   <div className="text-xs text-app-fg-muted truncate">{user.email}</div>
                 </button>
@@ -1239,12 +1208,6 @@ export function UsersListPage({
                   <div className="flex justify-between">
                     <span className="text-app-fg-muted">Supervisor</span>
                     <SupervisorBadge size="sm" />
-                  </div>
-                )}
-                {u.isProbation && (
-                  <div className="flex justify-between">
-                    <span className="text-app-fg-muted">Probation</span>
-                    <ProbationBadge until={u.probationUntil ?? null} size="sm" showDaysRemaining />
                   </div>
                 )}
                 <div className="flex justify-between">

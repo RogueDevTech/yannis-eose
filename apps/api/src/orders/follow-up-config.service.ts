@@ -32,12 +32,61 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    // Delay 45s after boot, then run sync (CART_ABANDONMENT rules are skipped — see cart-orders module).
+    // One-time cleanup: purge follow-up orders that were created from cart-graduated source orders.
+    // These should never have been pulled into follow-up — cart orders have their own pipeline.
     setTimeout(() => {
-      this.runSync('cron').catch((err) =>
-        this.logger.error(`Boot sync failed: ${err instanceof Error ? err.message : err}`),
-      );
+      this.purgeCartOriginFollowUps()
+        .then(() => this.backfillFollowUpMbAttribution())
+        .then(() => this.runSync('cron'))
+        .catch((err) =>
+          this.logger.error(`Boot sync failed: ${err instanceof Error ? err.message : err}`),
+        );
     }, 45_000);
+  }
+
+  /** Hard-delete follow-up orders whose source order has a cartId (cart-graduated). */
+  private async purgeCartOriginFollowUps() {
+    // Find follow-up order IDs whose source order has a non-null cartId
+    const cartFollowUps = await this.db
+      .select({ id: schema.followUpOrders.id })
+      .from(schema.followUpOrders)
+      .innerJoin(schema.orders, eq(schema.followUpOrders.sourceOrderId, schema.orders.id))
+      .where(sql`${schema.orders.cartId} IS NOT NULL`);
+
+    if (cartFollowUps.length === 0) return;
+
+    const ids = cartFollowUps.map((r) => r.id);
+    this.logger.log(`Purging ${ids.length} cart-originated follow-up orders`);
+
+    // Delete children first (FK constraints), then the follow-up orders
+    await this.db.delete(schema.followUpOrderTimelineEvents).where(inArray(schema.followUpOrderTimelineEvents.followUpOrderId, ids));
+    await this.db.delete(schema.followUpOrderItems).where(inArray(schema.followUpOrderItems.followUpOrderId, ids));
+    await this.db.delete(schema.followUpOrders).where(inArray(schema.followUpOrders.id, ids));
+
+    this.logger.log(`Purged ${ids.length} cart-originated follow-up orders`);
+  }
+
+  /**
+   * Backfill mediaBuyerId + campaignId on graduated follow-up orders that were
+   * inserted with NULL (old code stripped MB for stale-order follow-ups).
+   * Pulls from the source order via followUpSourceOrderId.
+   */
+  private async backfillFollowUpMbAttribution() {
+    const result = await this.db.execute(sql`
+      UPDATE orders o
+      SET media_buyer_id = src.media_buyer_id,
+          campaign_id    = src.campaign_id
+      FROM orders src
+      WHERE o.is_follow_up = true
+        AND o.media_buyer_id IS NULL
+        AND o.follow_up_source_order_id IS NOT NULL
+        AND src.id = o.follow_up_source_order_id
+        AND src.media_buyer_id IS NOT NULL
+    `);
+    const count = (result as any)?.rowCount ?? (result as any)?.length ?? 0;
+    if (count > 0) {
+      this.logger.log(`Backfilled MB attribution on ${count} graduated follow-up orders`);
+    }
   }
 
   // ── Cron ───────────────────────────────────────────────────────────
@@ -55,17 +104,23 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   // Hourly cron removed — midnight + boot + manual sync is sufficient.
 
   /** Returns branches with an active CS department — for follow-up config dropdowns. */
-  async listActiveCsBranches(): Promise<Array<{ id: string; name: string }>> {
+  async listActiveCsBranches(effectiveBranchIds?: string[] | null): Promise<Array<{ id: string; name: string }>> {
+    const conditions = [
+      eq(schema.branchDepartments.department, 'CS'),
+      eq(schema.branchDepartments.status, 'ACTIVE'),
+      eq(schema.branches.status, 'ACTIVE'),
+      sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
+    ];
+
+    // Company-group isolation: only return branches within the active group
+    const bCond = branchScopeCondition(schema.branches.id, null, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+
     return this.db
       .select({ id: schema.branches.id, name: schema.branches.name })
       .from(schema.branchDepartments)
       .innerJoin(schema.branches, eq(schema.branches.id, schema.branchDepartments.branchId))
-      .where(and(
-        eq(schema.branchDepartments.department, 'CS'),
-        eq(schema.branchDepartments.status, 'ACTIVE'),
-        eq(schema.branches.status, 'ACTIVE'),
-        sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
-      ));
+      .where(and(...conditions));
   }
 
   /** Returns branch IDs that have an active CS department — used for follow-up distribution. */
@@ -400,6 +455,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       eq(schema.orders.frozenForFollowUp, false),
       eq(schema.orders.isFollowUp, false),
       isNull(schema.orders.deletedAt),
+      // Exclude cart-graduated orders — they have their own pipeline
+      isNull(schema.orders.cartId),
     ];
 
     // Optional upper age bound — only match orders newer than maxAgeDays
@@ -628,6 +685,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           eq(schema.orders.frozenForFollowUp, false),
           eq(schema.orders.isFollowUp, false),
           isNull(schema.orders.deletedAt),
+          // Exclude cart-graduated orders — they have their own pipeline
+          isNull(schema.orders.cartId),
         ];
         if (rule.maxAgeDays) {
           const maxCutoff = new Date();
@@ -1105,7 +1164,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Follow-up order not found' });
 
-    const [items, timeline] = await Promise.all([
+    const [items, timeline, pendingPriceReq] = await Promise.all([
       this.db
         .select({
           id: schema.followUpOrderItems.id,
@@ -1124,10 +1183,27 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         .from(schema.followUpOrderTimelineEvents)
         .where(eq(schema.followUpOrderTimelineEvents.followUpOrderId, id))
         .orderBy(desc(schema.followUpOrderTimelineEvents.createdAt)),
+      this.db
+        .select({
+          id: schema.permissionRequests.id,
+          payload: schema.permissionRequests.payload,
+          reason: schema.permissionRequests.reason,
+          requesterId: schema.permissionRequests.requesterId,
+        })
+        .from(schema.permissionRequests)
+        .where(
+          and(
+            eq(schema.permissionRequests.status, 'PENDING'),
+            sql`${schema.permissionRequests.type}::text = 'ORDER_LINE_PRICE_CHANGE'`,
+            sql`(${schema.permissionRequests.payload}->>'orderId') = ${id}`,
+          ),
+        )
+        .limit(1),
     ]);
 
     // Enrich with names
-    const userIds = [order.assignedCsId, order.mediaBuyerId, ...timeline.map((t) => t.actorId)].filter(Boolean) as string[];
+    const prReq = pendingPriceReq[0] ?? null;
+    const userIds = [order.assignedCsId, order.mediaBuyerId, prReq?.requesterId, ...timeline.map((t) => t.actorId)].filter(Boolean) as string[];
     const uniqueUserIds = [...new Set(userIds)];
     const userRows = uniqueUserIds.length > 0
       ? await this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, uniqueUserIds))
@@ -1138,6 +1214,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       ...order,
       assignedCsName: order.assignedCsId ? (userMap.get(order.assignedCsId) ?? null) : null,
       mediaBuyerName: order.mediaBuyerId ? (userMap.get(order.mediaBuyerId) ?? null) : null,
+      pendingOrderLinePriceRequestId: prReq?.id ?? null,
+      pendingLinePriceChangeProposal: prReq ? {
+        items: ((prReq.payload as Record<string, unknown>)?.items ?? []) as Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>,
+        totalAmount: Number((prReq.payload as Record<string, unknown>)?.totalAmount ?? 0),
+        reason: prReq.reason,
+        requesterName: prReq.requesterId ? (userMap.get(prReq.requesterId) ?? null) : null,
+      } : null,
       items,
       timeline: timeline.map((t) => ({
         ...t,
@@ -1191,7 +1274,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       const readableFields = changedFields.map((f) => fieldLabels[f] ?? f);
       await tx.insert(schema.followUpOrderTimelineEvents).values({
         followUpOrderId: orderId,
-        eventType: 'ORDER_DETAILS_UPDATED',
+        eventType: 'ADDRESS_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
         description: `Updated ${readableFields.join(', ')}.`,
@@ -1201,6 +1284,54 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     });
 
     return { success: true };
+  }
+
+  async adjustFollowUpOrderItems(
+    orderId: string,
+    items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>,
+    totalAmount: number,
+    actor: SessionUser,
+  ) {
+    const [order] = await this.db
+      .select({ id: schema.followUpOrders.id, status: schema.followUpOrders.status, servicingBranchId: schema.followUpOrders.servicingBranchId })
+      .from(schema.followUpOrders)
+      .where(eq(schema.followUpOrders.id, orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Follow-up order not found' });
+
+    const blockedStatuses = ['DELIVERED', 'REMITTED'];
+    if (blockedStatuses.includes(order.status)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Follow-up order items cannot be adjusted after delivery.' });
+    }
+
+    return withActor(this.db, actor, async (tx) => {
+      await tx.delete(schema.followUpOrderItems).where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+      for (const item of items) {
+        await tx.insert(schema.followUpOrderItems).values({
+          followUpOrderId: orderId,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: sql`${item.unitPrice}::numeric`,
+          offerLabel: item.offerLabel ?? null,
+        });
+      }
+      await tx
+        .update(schema.followUpOrders)
+        .set({ totalAmount: sql`${totalAmount}::numeric`, updatedAt: new Date() })
+        .where(eq(schema.followUpOrders.id, orderId));
+
+      await tx.insert(schema.followUpOrderTimelineEvents).values({
+        followUpOrderId: orderId,
+        eventType: 'QUANTITY_UPDATED',
+        actorId: actor.id,
+        actorName: actor.name,
+        description: `Adjusted order items — new total ₦${totalAmount.toLocaleString('en-NG')}.`,
+        metadata: { items, totalAmount },
+        branchId: order.servicingBranchId,
+      });
+
+      return { success: true };
+    });
   }
 
   async assignFollowUpOrder(orderId: string, closerId: string, actor: SessionUser, force = false) {
@@ -1549,22 +1680,22 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .from(schema.followUpOrderItems)
       .where(eq(schema.followUpOrderItems.followUpOrderId, followUpOrderId));
 
-    // Cart-origin follow-ups (cartId set, no sourceOrderId) keep full MB attribution.
-    // Stale-order follow-ups (sourceOrderId set) strip MB — the MB gets no credit
-    // for orders that were already in the pipeline and stalled.
     const isCartOrigin = !fuOrder.sourceOrderId && !!fuOrder.cartId;
 
-    // Resolve orderSource: cart-origin = 'online', stale-order = from source or 'follow-up'
+    // Resolve orderSource + original createdAt from the source order
     let resolvedOrderSource: string = 'follow-up';
+    let resolvedCreatedAt: Date = fuOrder.createdAt;
     if (isCartOrigin) {
       resolvedOrderSource = 'online';
+      // Cart-origin: follow-up's own createdAt is the best origin date
     } else if (fuOrder.sourceOrderId) {
       const [src] = await this.db
-        .select({ orderSource: schema.orders.orderSource })
+        .select({ orderSource: schema.orders.orderSource, createdAt: schema.orders.createdAt })
         .from(schema.orders)
         .where(eq(schema.orders.id, fuOrder.sourceOrderId))
         .limit(1);
       resolvedOrderSource = src?.orderSource ?? 'follow-up';
+      if (src?.createdAt) resolvedCreatedAt = src.createdAt;
     }
 
     const graduatedOrderId = await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
@@ -1572,9 +1703,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       const [graduated] = await tx
         .insert(schema.orders)
         .values({
-          // Cart-origin: preserve MB attribution. Stale-order: strip it.
-          campaignId: isCartOrigin ? fuOrder.campaignId : null,
-          mediaBuyerId: isCartOrigin ? fuOrder.mediaBuyerId : null,
+          // Always preserve MB attribution — follow-up delivered orders
+          // are credited to the original Media Buyer (CEO directive 2026-06-19).
+          campaignId: fuOrder.campaignId,
+          mediaBuyerId: fuOrder.mediaBuyerId,
           assignedCsId: fuOrder.assignedCsId,
           logisticsProviderId: fuOrder.logisticsProviderId,
           logisticsLocationId: fuOrder.logisticsLocationId,
@@ -1608,6 +1740,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           deliveryOtp: fuOrder.deliveryOtp,
           deliveryGpsLat: fuOrder.deliveryGpsLat,
           deliveryGpsLng: fuOrder.deliveryGpsLng,
+          createdAt: resolvedCreatedAt,
           isFollowUp: true,
           followUpSourceOrderId: fuOrder.sourceOrderId,
           confirmedAt: fuOrder.confirmedAt,

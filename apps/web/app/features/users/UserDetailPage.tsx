@@ -50,7 +50,6 @@ import type {
 } from './types';
 import { USER_STATUS_COLORS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
-import { ProbationBadge } from '~/components/ui/probation-badge';
 import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -1273,7 +1272,6 @@ export function UserDetailPage({
                     <div className="flex flex-wrap items-center gap-2">
                       <RoleBadge role={user.role} label={formatRole(user.role)} />
                       {user.isTeamSupervisor && <SupervisorBadge />}
-                      {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} />}
                       <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
                         <svg

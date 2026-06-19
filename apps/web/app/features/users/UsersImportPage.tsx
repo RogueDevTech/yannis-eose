@@ -28,7 +28,6 @@ import {
   type ParsedRow,
   type ResolvedRow,
   makeEmptyParsedRow,
-  parseTruthy,
   pickHeaderValue,
   resolveRow,
   SPREADSHEET_IMPORT_ROLE_REFERENCE,
@@ -47,6 +46,22 @@ function importSelectClass(errored: boolean): string {
       ? '!border-danger-400 focus:!border-danger-500 focus:!ring-danger-500'
       : '!border-app-border focus:!border-brand-500 focus:!ring-brand-500',
   ].join(' ');
+}
+
+/** Excel converts long phone numbers to scientific notation (e.g. 2.34802E+12).
+ *  Expand back to full integer string when possible. If precision was lost
+ *  (fractional part suggests truncation), keep as-is so validation catches it
+ *  and the user can correct manually in the preview table. */
+function normalizePhoneFromSheet(raw: string): string {
+  let v = raw;
+  if (/^\d+(\.\d+)?[eE]\+?\d+$/i.test(v)) {
+    const n = Number(v);
+    if (Number.isFinite(n)) {
+      v = n.toFixed(0);
+    }
+  }
+  if (/^234\d{10}$/.test(v)) v = `+${v}`;
+  return v;
 }
 
 export function UsersImportPage({ branches }: UsersImportPageProps) {
@@ -211,11 +226,9 @@ export function UsersImportPage({ branches }: UsersImportPageProps) {
         name: pickHeaderValue(row, 'name'),
         email: pickHeaderValue(row, 'email').toLowerCase(),
         role: pickHeaderValue(row, 'role'),
-        phone: pickHeaderValue(row, 'phone'),
+        phone: normalizePhoneFromSheet(pickHeaderValue(row, 'phone')),
         primaryBranchInput: pickHeaderValue(row, 'primary_branch'),
         additionalBranchesInput: pickHeaderValue(row, 'additional_branches'),
-        isProbation: parseTruthy(pickHeaderValue(row, 'probation')),
-        probationUntil: pickHeaderValue(row, 'probation_until'),
       })}
       resolveRow={(parsed) => resolveRow(parsed, branches)}
       makeEmptyRow={(sheetRowIndex) => makeEmptyParsedRow(sheetRowIndex)}
@@ -234,8 +247,6 @@ export function UsersImportPage({ branches }: UsersImportPageProps) {
           ];
           fd.set('branchIds', JSON.stringify(allBranches));
         }
-        fd.set('isProbation', String(row.isProbation));
-        if (row.probationUntil) fd.set('probationUntil', row.probationUntil);
         return fd;
       }}
       parseSuccessMeta={(data) =>

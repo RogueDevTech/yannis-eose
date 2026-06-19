@@ -150,6 +150,13 @@ export interface OrderDetail {
   viewerIsCsTeamSupervisor?: boolean;
   /** PENDING permission_request id for ORDER_LINE_PRICE_CHANGE, if any */
   pendingOrderLinePriceRequestId?: string | null;
+  /** Proposed item changes from a pending ORDER_LINE_PRICE_CHANGE request */
+  pendingLinePriceChangeProposal?: {
+    items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+    totalAmount: number;
+    reason: string;
+    requesterName: string | null;
+  } | null;
   /** PENDING permission_request id for ORDER_DELETION (archive), if any */
   pendingOrderDeletionRequestId?: string | null;
 }
@@ -213,6 +220,8 @@ export interface OrderDetailStreamData {
   voipProviderDisplayName?: string;
   /** Campaign-scoped offer tiers per product — powers the Adjust order items offer picker. */
   itemOffers: OrderItemOffers[];
+  /** All active products with offers — powers product-swap in the Adjust order items modal. */
+  productsForAdjust?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string | number; qty: number }> }>;
   /** Pre-loaded callable phone when VOIP is off and viewer is authorised — no separate reveal fetch. */
   callablePhone?: { phone: string; isDialable: boolean } | null;
   /** True when this is a follow-up order (lives in follow_up_orders, not orders). */

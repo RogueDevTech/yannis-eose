@@ -54,8 +54,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const phone = formData.get('phone')?.toString().trim() ?? '';
     const primaryBranchId = formData.get('primaryBranchId')?.toString().trim() ?? '';
     const branchIdsRaw = formData.get('branchIds')?.toString().trim() ?? '';
-    const isProbation = formData.get('isProbation')?.toString() === 'true';
-    const probationUntil = formData.get('probationUntil')?.toString().trim() || undefined;
     const roleNeedsBranch = BRANCH_ELIGIBLE_IMPORT_ROLES.has(role);
 
     if (!name || !email || !role || !phone) {
@@ -91,11 +89,6 @@ export async function action({ request }: ActionFunctionArgs) {
       body.primaryBranchId = primaryBranchId;
       body.branchIds = branchIds;
     }
-    if (isProbation) {
-      body.isProbation = true;
-      if (probationUntil) body.probationUntil = probationUntil;
-    }
-
     const res = await apiRequest<unknown>('/trpc/users.create', {
       method: 'POST',
       cookie,
@@ -158,7 +151,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const roleParam = url.searchParams.get('role') || undefined;
   const searchRaw = url.searchParams.get('search')?.trim() ?? '';
   const searchParam = searchRaw.length > 120 ? searchRaw.slice(0, 120) : searchRaw;
-  const probationOnlyParam = url.searchParams.get('probationOnly') === '1';
   const supervisorOnlyParam = url.searchParams.get('supervisorOnly') === '1';
   const branchIdRaw = url.searchParams.get('branchId')?.trim() ?? '';
   const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
@@ -175,7 +167,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (statusParam && statusParam !== 'ALL') input.status = statusParam;
   if (roleParam && roleParam !== 'ALL') input.role = roleParam;
   if (searchParam.length > 0) input.search = searchParam;
-  if (probationOnlyParam) input.probationOnly = true;
   if (supervisorOnlyParam) input.supervisorOnly = true;
   // When searching, skip branch scoping so org-wide users (heads / finance /
   // admin) are always discoverable regardless of which branch is selected.
@@ -187,7 +178,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (statusParam && statusParam !== 'ALL') summaryPayload.status = statusParam;
   if (roleParam && roleParam !== 'ALL') summaryPayload.role = roleParam;
   if (searchParam.length > 0) summaryPayload.search = searchParam;
-  if (probationOnlyParam) summaryPayload.probationOnly = true;
   if (supervisorOnlyParam) summaryPayload.supervisorOnly = true;
   if (searchParam.length === 0 && branchParam) summaryPayload.branchId = branchParam;
   const summaryEnc = encodeURIComponent(JSON.stringify(summaryPayload));

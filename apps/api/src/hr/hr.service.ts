@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray, sql } from 'drizzle-orm';
+import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -182,16 +182,29 @@ export class HrService {
   // Payouts
   // ============================================
 
-  async generatePayouts(input: GeneratePayoutsInput, actorId: string) {
+  async generatePayouts(input: GeneratePayoutsInput, actorId: string, effectiveBranchIds?: string[] | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
     const periodStart = new Date(input.periodStart);
     const periodEnd = new Date(input.periodEnd);
 
-    // Get all active staff members
+    // Get all active staff members, scoped to the active branch group when set
+    const staffConditions: Parameters<typeof and>[0][] = [eq(schema.users.status, 'ACTIVE')];
+    if (effectiveBranchIds?.length) {
+      staffConditions.push(
+        exists(
+          tx.select({ one: sql`1` })
+            .from(schema.userBranches)
+            .where(and(
+              eq(schema.userBranches.userId, schema.users.id),
+              inArray(schema.userBranches.branchId, effectiveBranchIds),
+            )),
+        ),
+      );
+    }
     const staff = await tx
       .select()
       .from(schema.users)
-      .where(eq(schema.users.status, 'ACTIVE'));
+      .where(and(...staffConditions));
 
     const payouts = [];
 
@@ -377,12 +390,21 @@ export class HrService {
     });
 
     if (input.status === 'APPROVED') {
+      // Look up the batch's branchId for notification group isolation
+      const [batchRow] = payout.batchId
+        ? await this.db
+            .select({ branchId: schema.payrollBatches.branchId })
+            .from(schema.payrollBatches)
+            .where(eq(schema.payrollBatches.id, payout.batchId))
+            .limit(1)
+        : [undefined];
+
       this.notifications.enqueueCreate({
         userId: payout.staffId,
         type: 'hr:payout_approved',
         title: 'Payout approved',
         body: `Your payout for the period has been approved.`,
-        data: { payoutId: payout.id, totalPayout: payout.totalPayout },
+        data: { payoutId: payout.id, totalPayout: payout.totalPayout, branchId: batchRow?.branchId ?? null },
       });
     }
 
@@ -734,12 +756,19 @@ export class HrService {
     // Notify staff when clawback/deduction is created (they need to know)
     const isDeduction = ['CLAWBACK', 'DEDUCTION'].includes(input.category) || Number(input.amount) < 0;
     if (isDeduction) {
+      // Look up the staff's primary branch for notification group isolation
+      const [staffBranch] = await this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(and(eq(schema.userBranches.userId, input.staffId), eq(schema.userBranches.isPrimary, true)))
+        .limit(1);
+
       this.notifications.enqueueCreate({
         userId: input.staffId,
         type: 'hr:deduction_created',
         title: 'Deduction added',
         body: 'A deduction has been added to your earnings. It will be applied to your next payout.',
-        data: { adjustmentId: adj.id, amount: input.amount, category: input.category },
+        data: { adjustmentId: adj.id, amount: input.amount, category: input.category, branchId: staffBranch?.branchId ?? null },
       });
     }
 
@@ -767,6 +796,13 @@ export class HrService {
 
     // Notify staff when add-on/bonus is approved (or clawback/deduction is applied)
     if (input.approved) {
+      // Look up the staff's primary branch for notification group isolation
+      const [staffBranch] = await this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(and(eq(schema.userBranches.userId, row.staffId), eq(schema.userBranches.isPrimary, true)))
+        .limit(1);
+
       const isDeduction = Number(row.amount) < 0 || ['CLAWBACK', 'DEDUCTION'].includes(row.category);
       this.notifications.enqueueCreate({
         userId: row.staffId,
@@ -775,20 +811,35 @@ export class HrService {
         body: isDeduction
           ? 'A deduction has been applied to your earnings.'
           : 'Your add-on earnings have been approved.',
-        data: { adjustmentId: row.id, amount: row.amount, category: row.category },
+        data: { adjustmentId: row.id, amount: row.amount, category: row.category, branchId: staffBranch?.branchId ?? null },
       });
     }
 
     return row;
   }
 
-  async listAdjustments(staffId?: string) {
-    const conditions = staffId ? eq(schema.earningsAdjustments.staffId, staffId) : undefined;
+  async listAdjustments(staffId?: string, effectiveBranchIds?: string[] | null) {
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (staffId) {
+      conditions.push(eq(schema.earningsAdjustments.staffId, staffId));
+    }
+    if (effectiveBranchIds?.length) {
+      conditions.push(
+        exists(
+          this.db.select({ one: sql`1` })
+            .from(schema.userBranches)
+            .where(and(
+              eq(schema.userBranches.userId, schema.earningsAdjustments.staffId),
+              inArray(schema.userBranches.branchId, effectiveBranchIds),
+            )),
+        ),
+      );
+    }
 
     const adjustments = await this.db
       .select()
       .from(schema.earningsAdjustments)
-      .where(conditions)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.earningsAdjustments.createdAt))
       .limit(50);
 

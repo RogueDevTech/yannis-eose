@@ -917,6 +917,7 @@ export function OrderDetailPage({
   logisticsDispatchTemplates = [],
   invoice,
   itemOffers = [],
+  productsForAdjust = [],
   callablePhone,
   isFollowUpOrder = false,
   isCartOrder = false,
@@ -931,6 +932,7 @@ export function OrderDetailPage({
   const invoiceFetcher = useFetcher<{ ok: boolean; invoice: OrderInvoice | null; error?: string }>();
   const timelineFetcher = useFetcher<{ ok: boolean; timeline: TimelineEvent[]; error?: string }>();
   const csCommentFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const withdrawRequestFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
 
@@ -1080,6 +1082,8 @@ export function OrderDetailPage({
   const [editDetailsModalOpen, setEditDetailsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number; offerLabel: string | null }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
+  const [withdrawConfirmOpen, setWithdrawConfirmOpen] = useState(false);
+  const [viewPendingRequestOpen, setViewPendingRequestOpen] = useState(false);
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
   const [allocateModalOpen, setAllocateModalOpen] = useState(false);
   const [allocateLocationId, setAllocateLocationId] = useState('');
@@ -1386,11 +1390,32 @@ export function OrderDetailPage({
   const hasPendingItemApproval = !!order.pendingOrderLinePriceRequestId;
   // Campaign-scoped offer tiers keyed by product — feeds the Adjust order items
   // offer picker so a discounted bundle can be applied in one selection.
+  // Also merges offers from productsForAdjust so product-swap shows the new product's offers.
   const offersByProduct = useMemo(() => {
     const m = new Map<string, Array<{ label: string; quantity: number; unitPrice: number }>>();
-    for (const entry of itemOffers) m.set(entry.productId, entry.offers);
+    // Campaign-scoped offers take priority (from listItemOffers) — but only if non-empty
+    for (const entry of itemOffers) {
+      if (entry.offers.length > 0) m.set(entry.productId, entry.offers);
+    }
+    // Fill in from productsForAdjust for products without campaign offers
+    for (const p of productsForAdjust) {
+      if (m.has(p.id)) continue;
+      if (p.offers && Array.isArray(p.offers) && p.offers.length > 0) {
+        m.set(p.id, p.offers.map((o) => ({
+          label: o.label,
+          quantity: typeof o.qty === 'number' ? o.qty : 1,
+          unitPrice: Number(o.price),
+        })));
+      }
+    }
     return m;
-  }, [itemOffers]);
+  }, [itemOffers, productsForAdjust]);
+  // Product options for the product-swap SearchableSelect in Adjust modal — only products with offers
+  const productOptionsForAdjust = useMemo(() => {
+    return productsForAdjust
+      .filter((p) => offersByProduct.has(p.id) && (offersByProduct.get(p.id)?.length ?? 0) > 0)
+      .map((p) => ({ value: p.id, label: p.name }));
+  }, [productsForAdjust, offersByProduct]);
   // Sales closer can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
@@ -1434,18 +1459,18 @@ export function OrderDetailPage({
     order.status === 'DISPATCHED' ||
     order.status === 'IN_TRANSIT';
 
+  // Detect ANY item change (product, offer, price, quantity) from the server state.
+  const itemsChanged = editedItems.some((row) => {
+    const srv = order.orderItems.find((o) => o.productId === row.productId);
+    if (!srv) return true;
+    if (Math.abs(Number(srv.unitPrice) - row.unitPrice) > 0.0001) return true;
+    if ((row.offerLabel ?? null) !== (srv.offerLabel ?? null)) return true;
+    if (row.quantity !== srv.quantity) return true;
+    return false;
+  });
   // CS closers who lack direct edit rights must go through approval for ANY
   // item change — price, offer tier, or quantity (CEO directive 2026-05-28).
-  const priceDriftProposing =
-    !canEditLinePrices &&
-    editedItems.some((row) => {
-      const srv = order.orderItems.find((o) => o.productId === row.productId);
-      if (!srv) return true;
-      if (Math.abs(Number(srv.unitPrice) - row.unitPrice) > 0.0001) return true;
-      if ((row.offerLabel ?? null) !== (srv.offerLabel ?? null)) return true;
-      if (row.quantity !== srv.quantity) return true;
-      return false;
-    });
+  const priceDriftProposing = !canEditLinePrices && itemsChanged;
 
   function canTransitionTo(newStatus: string): boolean {
     const allowed = order.allowedTransitions ?? [];
@@ -1666,6 +1691,11 @@ export function OrderDetailPage({
   useCloseOnFetcherSuccess(adjustItemsFetcher, handleAdjustItemsSuccess);
   useCloseOnFetcherSuccess(priceRequestFetcher, handleAdjustItemsSuccess);
 
+  const handleWithdrawSuccess = useCallback(() => {
+    setWithdrawConfirmOpen(false);
+  }, []);
+  useCloseOnFetcherSuccess(withdrawRequestFetcher, handleWithdrawSuccess, { intent: 'withdrawLinePriceRequest' });
+
   const handleCsCommentSuccess = useCallback(
     (_data: { success: true } & Record<string, unknown>) => {
       setAddCommentModalOpen(false);
@@ -1840,34 +1870,196 @@ export function OrderDetailPage({
       )}
 
       {canEditOrder && order.pendingOrderLinePriceRequestId && (
-        <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
-          <div className="flex items-start gap-2.5">
-            <svg
-              className="h-5 w-5 shrink-0 text-warning-600 dark:text-warning-400 mt-0.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              aria-hidden
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
-            <div className="text-sm text-warning-900 dark:text-warning-100">
-              <p className="font-semibold">Line price change pending approval</p>
-              <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
-                The order shows the original prices until a Head of CS, branch admin, or admin
-                approves the change. See the order timeline below for full context, or{' '}
-                <Link
-                  to="/admin/permission-requests"
-                  className="font-medium text-warning-900 dark:text-warning-100 underline underline-offset-2"
-                >
-                  open the request
-                </Link>
-                .
-              </p>
+        <>
+          <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <svg
+                className="h-5 w-5 shrink-0 text-warning-600 dark:text-warning-400 mt-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <div className="flex-1 min-w-0 text-sm text-warning-900 dark:text-warning-100">
+                <p className="font-semibold">Item change pending approval</p>
+                <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+                  Order actions are blocked until a Head of CS, branch admin, or admin approves the change.
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setViewPendingRequestOpen(true)}
+                  >
+                    View request
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setWithdrawConfirmOpen(true)}
+                  >
+                    Withdraw request
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+
+          {/* View pending request modal */}
+          {viewPendingRequestOpen && (
+            <Modal
+              open
+              onClose={() => setViewPendingRequestOpen(false)}
+              maxWidth="max-w-md"
+              contentClassName="p-0"
+            >
+              <div className="p-6 space-y-4">
+                <h2 className="text-lg font-semibold text-app-fg">Pending item change request</h2>
+                <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50/50 dark:bg-warning-900/10 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="inline-flex items-center rounded-full bg-warning-100 dark:bg-warning-800/40 px-2 py-0.5 text-xs font-medium text-warning-800 dark:text-warning-200">
+                      Pending
+                    </span>
+                    {order.pendingLinePriceChangeProposal?.requesterName && (
+                      <span className="text-xs text-app-fg-muted">
+                        by {order.pendingLinePriceChangeProposal.requesterName}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-app-fg-muted">
+                    Order progression is blocked until this request is approved or withdrawn.
+                  </p>
+                </div>
+
+                {/* Reason */}
+                {order.pendingLinePriceChangeProposal?.reason && (
+                  <div>
+                    <h3 className="text-sm font-medium text-app-fg mb-1">Reason</h3>
+                    <p className="text-sm text-app-fg-muted bg-app-hover rounded-lg px-3 py-2">
+                      {order.pendingLinePriceChangeProposal.reason}
+                    </p>
+                  </div>
+                )}
+
+                {/* Current items */}
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-app-fg">Current</h3>
+                  {order.orderItems.map((item) => (
+                    <div key={item.productId} className="rounded-lg border border-app-border bg-app-hover px-3 py-2 flex items-center justify-between">
+                      <div className="text-sm text-app-fg min-w-0">
+                        <span className="font-medium">{item.productName ?? 'Product'}</span>
+                        {item.offerLabel && <span className="text-app-fg-muted"> · {item.offerLabel}</span>}
+                        <span className="text-app-fg-muted"> · Qty {item.quantity}</span>
+                      </div>
+                      <span className="text-sm font-bold text-app-fg tabular-nums shrink-0 ml-2">
+                        <NairaPrice amount={Number(item.unitPrice)} />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Proposed items */}
+                {order.pendingLinePriceChangeProposal && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-medium text-brand-500">Proposed</h3>
+                    {order.pendingLinePriceChangeProposal.items.map((item, idx) => {
+                      const productName = productsForAdjust.find((p) => p.id === item.productId)?.name
+                        ?? order.orderItems.find((o) => o.productId === item.productId)?.productName
+                        ?? 'Product';
+                      return (
+                        <div key={`${item.productId}-${idx}`} className="rounded-lg border border-brand-300 dark:border-brand-700/60 bg-brand-50/10 dark:bg-brand-900/10 px-3 py-2 flex items-center justify-between">
+                          <div className="text-sm text-app-fg min-w-0">
+                            <span className="font-medium">{productName}</span>
+                            {item.offerLabel && <span className="text-app-fg-muted"> · {item.offerLabel}</span>}
+                            <span className="text-app-fg-muted"> · Qty {item.quantity}</span>
+                          </div>
+                          <span className="text-sm font-bold text-brand-500 tabular-nums shrink-0 ml-2">
+                            <NairaPrice amount={item.unitPrice} />
+                          </span>
+                        </div>
+                      );
+                    })}
+                    <p className="text-xs text-app-fg-muted">
+                      New total: <span className="font-semibold text-app-fg">&#8358;{order.pendingLinePriceChangeProposal.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="secondary" onClick={() => setViewPendingRequestOpen(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => {
+                      setViewPendingRequestOpen(false);
+                      setWithdrawConfirmOpen(true);
+                    }}
+                  >
+                    Withdraw request
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
+
+          {/* Withdraw confirmation modal */}
+          {withdrawConfirmOpen && (
+            <Modal
+              open
+              onClose={() => setWithdrawConfirmOpen(false)}
+              maxWidth="max-w-sm"
+              contentClassName="p-0"
+            >
+              <div className="p-6 space-y-4">
+                <h2 className="text-lg font-semibold text-app-fg">Withdraw change request?</h2>
+                <p className="text-sm text-app-fg-muted">
+                  The pending item change will be cancelled and the order will continue with
+                  its current product and pricing. Order actions will be unblocked.
+                </p>
+                <ModalFetcherInlineError message={
+                  withdrawRequestFetcher.data && !withdrawRequestFetcher.data.success
+                    ? (withdrawRequestFetcher.data as { error?: string }).error ?? 'Failed to withdraw'
+                    : undefined
+                } />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setWithdrawConfirmOpen(false)}
+                    disabled={withdrawRequestFetcher.state === 'submitting'}
+                  >
+                    Keep request
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    disabled={withdrawRequestFetcher.state === 'submitting'}
+                    loading={withdrawRequestFetcher.state === 'submitting'}
+                    loadingText="Withdrawing…"
+                    onClick={() => {
+                      withdrawRequestFetcher.submit(
+                        {
+                          intent: 'withdrawLinePriceRequest',
+                          requestId: order.pendingOrderLinePriceRequestId!,
+                        },
+                        { method: 'post' },
+                      );
+                    }}
+                  >
+                    Withdraw
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
+        </>
       )}
 
 
@@ -3885,8 +4077,8 @@ export function OrderDetailPage({
             </h2>
             <p className="text-sm text-app-fg-muted px-6 pb-4">
               {canEditLinePrices
-                ? 'Update quantities or unit prices. This changes the order details only, not the order status.'
-                : 'You can change quantities anytime. To change unit prices, enter the new prices and submit a request — a Head of CS, Head of Logistics, branch admin, or admin will approve or reject it.'}
+                ? 'Change the product, offer, or price. This updates the order details only, not the status.'
+                : 'Change the product or offer. Price or product changes require approval from a Head of CS, Head of Logistics, branch admin, or admin.'}
             </p>
             <div className="mx-6 mb-2 space-y-2">
               <ModalFetcherInlineError message={adjustItemsSurface.errorMatchingIntent('adjustOrderItems')} />
@@ -3896,110 +4088,181 @@ export function OrderDetailPage({
               {editedItems.map((item, index) => {
                 const productOffers = offersByProduct.get(item.productId) ?? [];
                 const offerLocked = item.offerLabel != null;
-                const offerSelectOptions = [
-                  { value: '__custom__', label: 'Custom — set quantity & price' },
-                  ...productOffers.map((o) => ({
-                    value: o.label,
-                    label: `${o.label} · Qty ${o.quantity} — ₦${o.unitPrice.toLocaleString()}`,
-                  })),
-                ];
-                // Preserve a saved offer label even if it is no longer an active tier.
-                if (item.offerLabel && !productOffers.some((o) => o.label === item.offerLabel)) {
-                  offerSelectOptions.push({
-                    value: item.offerLabel,
-                    label: `${item.offerLabel} (saved)`,
-                  });
-                }
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="rounded-lg border border-app-border p-3 space-y-2"
+                    className="rounded-lg border border-app-border p-3 space-y-3"
                   >
-                    <p className="font-medium text-app-fg text-sm line-clamp-2">
-                      {item.productName ?? item.productId.slice(0, 8) + '...'}
-                    </p>
-                    {productOffers.length > 0 && (
-                      <FormSelect
-                        label="Offer"
-                        controlSize="sm"
-                        wrapperClassName="max-w-xs"
-                        options={offerSelectOptions}
-                        value={item.offerLabel ?? '__custom__'}
-                        onChange={(e) => {
-                          const value = e.target.value;
+                    {/* Product selector */}
+                    {productOptionsForAdjust.length > 0 ? (
+                      <SearchableSelect
+                        id={`adjust-product-${index}`}
+                        label="Product"
+                        value={item.productId}
+                        onChange={(newProductId) => {
+                          if (newProductId === item.productId) return;
+                          const newProduct = productsForAdjust.find((p) => p.id === newProductId);
+                          const newOffers = offersByProduct.get(newProductId) ?? [];
+                          // Auto-select first offer if available, otherwise go to custom
+                          const firstOffer = newOffers[0];
                           setEditedItems((prev) =>
                             prev.map((p, i) => {
                               if (i !== index) return p;
-                              if (value === '__custom__') return { ...p, offerLabel: null };
-                              const picked = productOffers.find((o) => o.label === value);
-                              if (!picked) return { ...p, offerLabel: value };
+                              if (firstOffer) {
+                                return {
+                                  ...p,
+                                  productId: newProductId,
+                                  productName: newProduct?.name ?? null,
+                                  offerLabel: firstOffer.label,
+                                  quantity: firstOffer.quantity,
+                                  unitPrice: firstOffer.unitPrice,
+                                };
+                              }
                               return {
                                 ...p,
-                                quantity: picked.quantity,
-                                unitPrice: picked.unitPrice,
-                                offerLabel: picked.label,
+                                productId: newProductId,
+                                productName: newProduct?.name ?? null,
+                                offerLabel: null,
+                                quantity: 1,
+                                unitPrice: 0,
                               };
                             }),
                           );
                         }}
-                        aria-label={`Offer for ${item.productName ?? 'item'}`}
+                        options={productOptionsForAdjust}
+                        searchPlaceholder="Search products..."
+                        wrapperClassName="w-full"
+                        controlSize="sm"
                       />
-                    )}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs text-app-fg-muted mb-1">Quantity</label>
-                        <NumberInput
-                          min={1}
-                          fallbackValue={1}
-                          value={item.quantity}
-                          disabled={offerLocked}
-                          onValueChange={(v) =>
-                            setEditedItems((prev) =>
-                              prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
-                            )
-                          }
-                          aria-label={`Quantity for ${item.productName ?? 'item'}`}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-app-fg-muted mb-1">Unit price (&#8358;)</label>
-                        <NumberInput
-                          coerce="decimal"
-                          min={0}
-                          fallbackValue={0}
-                          useGrouping
-                          value={item.unitPrice}
-                          disabled={offerLocked}
-                          onValueChange={(v) =>
-                            setEditedItems((prev) =>
-                              prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
-                            )
-                          }
-                          aria-label={`Unit price for ${item.productName ?? 'item'}`}
-                        />
-                      </div>
-                    </div>
-                    {offerLocked ? (
-                      <p className="text-xs text-app-fg-muted">
-                        Price and quantity are locked to the selected offer.
-                        Choose <span className="font-medium">Custom</span> to override.
+                    ) : (
+                      <p className="font-medium text-app-fg text-sm line-clamp-2">
+                        {item.productName ?? item.productId.slice(0, 8) + '...'}
                       </p>
-                    ) : null}
-                    <p className="text-xs text-app-fg-muted">
-                      Line total:{' '}
-                      <span className="font-medium text-app-fg">
-                        &#8358;
-                        {item.unitPrice.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                        })}
+                    )}
+
+                    {/* Offer cards — like the order creation flow */}
+                    {productOffers.length > 0 && (
+                      <div>
+                        <label className="block text-xs font-medium text-app-fg-muted mb-2">
+                          Select offer
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {productOffers.map((offer) => {
+                            const isSelected = item.offerLabel === offer.label;
+                            return (
+                              <button
+                                key={offer.label}
+                                type="button"
+                                onClick={() => {
+                                  setEditedItems((prev) =>
+                                    prev.map((p, i) => {
+                                      if (i !== index) return p;
+                                      return {
+                                        ...p,
+                                        offerLabel: offer.label,
+                                        quantity: offer.quantity,
+                                        unitPrice: offer.unitPrice,
+                                      };
+                                    }),
+                                  );
+                                }}
+                                className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                                  isSelected
+                                    ? 'border-brand-500 bg-brand-50/10 dark:bg-brand-900/20'
+                                    : 'border-app-border bg-app-elevated hover:border-app-fg-muted'
+                                }`}
+                              >
+                                <p className="text-sm font-semibold text-app-fg">{offer.label}</p>
+                                <div className="flex items-center justify-between gap-2 mt-1">
+                                  <span className="text-xs text-app-fg-muted">Qty: {offer.quantity}</span>
+                                  <span className="text-sm font-bold text-app-fg tabular-nums">
+                                    <NairaPrice amount={offer.unitPrice} />
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                          {/* Custom option card */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditedItems((prev) =>
+                                prev.map((p, i) => {
+                                  if (i !== index) return p;
+                                  return { ...p, offerLabel: null };
+                                }),
+                              );
+                            }}
+                            className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                              !item.offerLabel
+                                ? 'border-brand-500 bg-brand-50/10 dark:bg-brand-900/20'
+                                : 'border-app-border bg-app-elevated hover:border-app-fg-muted'
+                            }`}
+                          >
+                            <p className="text-sm font-semibold text-app-fg">Custom</p>
+                            <p className="text-xs text-app-fg-muted mt-1">Set your own quantity & price — requires approval</p>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Quantity & price inputs — shown when Custom is selected or no offers exist */}
+                    {!offerLocked && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-app-fg-muted mb-1">Quantity</label>
+                          <NumberInput
+                            min={1}
+                            fallbackValue={1}
+                            value={item.quantity}
+                            onValueChange={(v) =>
+                              setEditedItems((prev) =>
+                                prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
+                              )
+                            }
+                            aria-label={`Quantity for ${item.productName ?? 'item'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-app-fg-muted mb-1">Price (&#8358;)</label>
+                          <NumberInput
+                            coerce="decimal"
+                            min={0}
+                            fallbackValue={0}
+                            useGrouping
+                            value={item.unitPrice}
+                            onValueChange={(v) =>
+                              setEditedItems((prev) =>
+                                prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
+                              )
+                            }
+                            aria-label={`Price for ${item.productName ?? 'item'}`}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Selected summary bar */}
+                    <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 flex items-center justify-between">
+                      <div className="text-sm text-app-fg min-w-0">
+                        <span className="font-medium truncate">{item.productName ?? 'Product'}</span>
+                        {item.offerLabel && (
+                          <span className="text-app-fg-muted"> · {item.offerLabel} · Qty {item.quantity}</span>
+                        )}
+                        {!item.offerLabel && (
+                          <span className="text-app-fg-muted"> · Custom · Qty {item.quantity}</span>
+                        )}
+                      </div>
+                      <span className="text-sm font-bold text-app-fg tabular-nums shrink-0 ml-2">
+                        <NairaPrice amount={item.unitPrice} />
                       </span>
-                    </p>
+                    </div>
                   </div>
                 );
               })}
             </div>
-            {!canEditLinePrices && priceDriftProposing && (
-              <div className="px-6 pb-2 space-y-2">
+            {itemsChanged && (
+              <div className="px-6 pt-3 pb-2 space-y-2">
                 <label htmlFor="price-approval-reason" className="block text-xs text-app-fg-muted font-medium">
                   Reason for change (required, min 10 characters)
                 </label>
@@ -4008,10 +4271,10 @@ export function OrderDetailPage({
                   rows={3}
                   value={priceApprovalReason}
                   onChange={(e) => setPriceApprovalReason(e.target.value)}
-                  placeholder="Explain why this order's items should be changed (offer, price, quantity)…"
+                  placeholder="Explain why this order's product or pricing should be changed…"
                   className="w-full"
                 />
-                {order.pendingOrderLinePriceRequestId && (
+                {!canEditLinePrices && order.pendingOrderLinePriceRequestId && (
                   <p className="text-xs text-warning-700 dark:text-warning-300">
                     A change request is already pending approval. Wait for a decision or withdraw it from Permission Requests.
                   </p>
@@ -4061,6 +4324,8 @@ export function OrderDetailPage({
                         totalAmount: String(totalAmount),
                         reason: priceApprovalReason.trim(),
                       };
+                      if (isFollowUpOrder) fd.isFollowUpOrder = 'true';
+                      if (isCartOrder) fd.isCartOrder = 'true';
                       ensureBranchForAction({
                         actionLabel: 'submitting the change request',
                         onProceed: (branchId) => {
@@ -4079,7 +4344,8 @@ export function OrderDetailPage({
                     disabled={
                       adjustItemsFetcher.state === 'submitting' ||
                       priceRequestFetcher.state === 'submitting' ||
-                      editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0)
+                      editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0) ||
+                      (itemsChanged && priceApprovalReason.trim().length < 10)
                     }
                     loading={adjustItemsFetcher.state === 'submitting'}
                     loadingText="Saving..."
@@ -4093,16 +4359,18 @@ export function OrderDetailPage({
                       const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.unitPrice, 0) * 100) / 100;
                       ensureBranchForAction({
                         actionLabel: 'updating order items',
-                        onProceed: (branchId) =>
-                          adjustItemsFetcher.submit(
-                            {
-                              intent: 'adjustOrderItems',
-                              items: JSON.stringify(payload),
-                              totalAmount: String(totalAmount),
-                              branchId: order.branchId || branchId,
-                            },
-                            { method: 'post' },
-                          ),
+                        onProceed: (branchId) => {
+                          const fd: Record<string, string> = {
+                            intent: 'adjustOrderItems',
+                            items: JSON.stringify(payload),
+                            totalAmount: String(totalAmount),
+                            branchId: order.branchId || branchId,
+                            reason: priceApprovalReason.trim(),
+                          };
+                          if (isFollowUpOrder) fd.isFollowUpOrder = 'true';
+                          if (isCartOrder) fd.isCartOrder = 'true';
+                          adjustItemsFetcher.submit(fd, { method: 'post' });
+                        },
                       });
                     }}
                   >

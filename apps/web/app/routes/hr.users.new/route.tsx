@@ -51,7 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiRequest<unknown>(`/trpc/products.options?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.locationOptions?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
+    apiRequest<unknown>(viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN' ? '/trpc/branches.listAll' : '/trpc/branches.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
@@ -198,11 +198,6 @@ export async function action({ request }: ActionFunctionArgs) {
   // Section 4: Contact
   const phone = formData.get('phone')?.toString() || undefined;
 
-  // Probation flag — server-side eligibility check (PROBATION_INELIGIBLE_ROLES) rejects
-  // ADMIN / SUPER_ADMIN. Default review window is 90 days.
-  const isProbation = formData.get('isProbation') === 'true';
-  const probationUntilStr = formData.get('probationUntil')?.toString().trim();
-
   const permissionOverridesRaw = formData.get('permissionOverrides')?.toString();
 
   // Build request body (password is auto-generated on the backend)
@@ -218,10 +213,6 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;
   if (logisticsLocationId) body.logisticsLocationId = logisticsLocationId;
-  if (isProbation) {
-    body.isProbation = true;
-    if (probationUntilStr) body.probationUntil = probationUntilStr;
-  }
   try {
     if (productIdsStr) body.productIds = JSON.parse(productIdsStr);
   } catch {

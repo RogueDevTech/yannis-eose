@@ -10,6 +10,7 @@ import {
 } from '@yannis/shared';
 import type { CartOrdersService } from '../../cart-orders/cart-orders.service';
 import { getFinanceService } from './finance.router';
+import { getOrdersService } from './orders.router';
 
 // ── Service Injection (NestJS → tRPC singleton bridge) ──────────────
 
@@ -53,14 +54,34 @@ export const cartOrdersRouter = router({
 
   getById: permissionProcedure('orders.read')
     .input(cartOrderDetailSchema)
-    .query(async ({ input }) => {
-      return getCartOrdersService().getById(input.id);
+    .query(async ({ input, ctx }) => {
+      const detail = await getCartOrdersService().getById(input.id);
+      const viewerCanEditOrderLinePrices = await getOrdersService().canActorEditOrderLinePrices(ctx.user, {
+        branchId: detail.servicingBranchId ?? detail.branchId ?? null,
+        assignedCsId: detail.assignedCsId ?? null,
+      });
+      return { ...detail, viewerCanEditOrderLinePrices };
     }),
 
   update: authedProcedure
     .input(updateCartOrderSchema)
     .mutation(async ({ input, ctx }) => {
       return getCartOrdersService().update(input, ctx.user);
+    }),
+
+  adjustItems: authedProcedure
+    .input(z.object({
+      orderId: z.string().uuid(),
+      items: z.array(z.object({
+        productId: z.string().uuid(),
+        quantity: z.number().int().min(1),
+        unitPrice: z.coerce.number().min(0),
+        offerLabel: z.string().max(100).optional(),
+      })).min(1),
+      totalAmount: z.coerce.number().min(0),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().adjustItems(input.orderId, input.items, input.totalAmount, ctx.user);
     }),
 
   assignToCS: permissionProcedure('orders.reassign')

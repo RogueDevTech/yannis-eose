@@ -578,6 +578,7 @@ export class CartOrdersService {
           deliveryOtp: co.deliveryOtp,
           deliveryGpsLat: co.deliveryGpsLat,
           deliveryGpsLng: co.deliveryGpsLng,
+          createdAt: co.createdAt,
           isFollowUp: false,
           confirmedAt: co.confirmedAt,
           allocatedAt: co.allocatedAt,
@@ -704,7 +705,7 @@ export class CartOrdersService {
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
 
-    const [items, timeline, userIds] = await Promise.all([
+    const [items, timeline, userIds, pendingPriceReq] = await Promise.all([
       this.db
         .select({
           id: schema.cartOrderItems.id,
@@ -723,10 +724,29 @@ export class CartOrdersService {
         .where(eq(schema.cartOrderTimelineEvents.cartOrderId, id))
         .orderBy(asc(schema.cartOrderTimelineEvents.createdAt)),
       Promise.resolve([order.assignedCsId, order.mediaBuyerId].filter(Boolean) as string[]),
+      this.db
+        .select({
+          id: schema.permissionRequests.id,
+          payload: schema.permissionRequests.payload,
+          reason: schema.permissionRequests.reason,
+          requesterId: schema.permissionRequests.requesterId,
+        })
+        .from(schema.permissionRequests)
+        .where(
+          and(
+            eq(schema.permissionRequests.status, 'PENDING'),
+            sql`${schema.permissionRequests.type}::text = 'ORDER_LINE_PRICE_CHANGE'`,
+            sql`(${schema.permissionRequests.payload}->>'orderId') = ${id}`,
+          ),
+        )
+        .limit(1),
     ]);
 
-    const userRows = userIds.length > 0
-      ? await this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, userIds))
+    const prReq = pendingPriceReq[0] ?? null;
+    const allUserIds = [...userIds, ...(prReq?.requesterId ? [prReq.requesterId] : [])];
+    const uniqueAllUserIds = [...new Set(allUserIds)];
+    const userRows = uniqueAllUserIds.length > 0
+      ? await this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, uniqueAllUserIds))
       : [];
     const userMap = new Map(userRows.map((u) => [u.id, u.name]));
 
@@ -738,6 +758,13 @@ export class CartOrdersService {
       ...order,
       assignedCsName: order.assignedCsId ? userMap.get(order.assignedCsId) ?? null : null,
       mediaBuyerName: order.mediaBuyerId ? userMap.get(order.mediaBuyerId) ?? null : null,
+      pendingOrderLinePriceRequestId: prReq?.id ?? null,
+      pendingLinePriceChangeProposal: prReq ? {
+        items: ((prReq.payload as Record<string, unknown>)?.items ?? []) as Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>,
+        totalAmount: Number((prReq.payload as Record<string, unknown>)?.totalAmount ?? 0),
+        reason: prReq.reason,
+        requesterName: prReq.requesterId ? (userMap.get(prReq.requesterId) ?? null) : null,
+      } : null,
       campaignName,
       orderItems: items,
       timeline,
@@ -780,11 +807,62 @@ export class CartOrdersService {
       const readableFields = changedFields.map((f) => fieldLabels[f] ?? f);
       await tx.insert(schema.cartOrderTimelineEvents).values({
         cartOrderId: input.orderId,
-        eventType: 'ORDER_DETAILS_UPDATED',
+        eventType: 'ADDRESS_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
         description: `Updated ${readableFields.join(', ')}.`,
         metadata: { changedFields },
+        branchId: order.servicingBranchId,
+      });
+
+      return { success: true };
+    });
+  }
+
+  // ── Adjust Items ──────────────────────────────────────────────────────
+  async adjustItems(
+    orderId: string,
+    items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>,
+    totalAmount: number,
+    actor: SessionUser,
+  ) {
+    const [order] = await this.db
+      .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, servicingBranchId: schema.cartOrders.servicingBranchId })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+
+    const blockedStatuses = ['DELIVERED', 'REMITTED'];
+    if (blockedStatuses.includes(order.status)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cart order items cannot be adjusted after delivery.' });
+    }
+
+    return withActor(this.db, actor, async (tx) => {
+      // Delete existing items and reinsert
+      await tx.delete(schema.cartOrderItems).where(eq(schema.cartOrderItems.cartOrderId, orderId));
+      for (const item of items) {
+        await tx.insert(schema.cartOrderItems).values({
+          cartOrderId: orderId,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: sql`${item.unitPrice}::numeric`,
+          offerLabel: item.offerLabel ?? null,
+        });
+      }
+      // Update totalAmount on the cart order
+      await tx
+        .update(schema.cartOrders)
+        .set({ totalAmount: sql`${totalAmount}::numeric`, items: items, updatedAt: new Date() })
+        .where(eq(schema.cartOrders.id, orderId));
+
+      await tx.insert(schema.cartOrderTimelineEvents).values({
+        cartOrderId: orderId,
+        eventType: 'QUANTITY_UPDATED',
+        actorId: actor.id,
+        actorName: actor.name,
+        description: `Adjusted order items — new total ₦${totalAmount.toLocaleString('en-NG')}.`,
+        metadata: { items, totalAmount },
         branchId: order.servicingBranchId,
       });
 

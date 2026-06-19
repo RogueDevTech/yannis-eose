@@ -170,6 +170,7 @@ export const notificationsRouter = router({
         input,
         ctx.user.role,
         ctx.user.id,
+        ctx.effectiveBranchIds,
       );
     }),
 

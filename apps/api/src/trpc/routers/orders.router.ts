@@ -593,6 +593,27 @@ export const ordersRouter = router({
     }),
 
   /**
+   * All active products with their offer tiers — powers the product-swap picker
+   * in the Adjust order items modal. Group-scoped so only the current company's
+   * catalog is shown. Lightweight: name + id + offers only, no inventory data.
+   */
+  listProductsForAdjust: permissionProcedure('orders.read')
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ ctx }) => {
+      const result = await getProductsService().list(
+        { page: 1, limit: 200, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
+        ctx.user.id,
+        ctx.user.role,
+        ctx.activeGroupId,
+      );
+      return (result?.products ?? []).map((p: { id: string; name: string; offers?: unknown }) => ({
+        id: p.id,
+        name: p.name,
+        offers: p.offers,
+      }));
+    }),
+
+  /**
    * Full-field plain-text order summary for clipboard (includes stored customer phone when present).
    * Same visibility as `orders.getById` — does not bypass Lead Fortress for hash-only intakes.
    */
@@ -795,10 +816,13 @@ export const ordersRouter = router({
    */
   requestLinePriceChangeApproval: authedProcedure
     .meta({ branchScopedMutation: true })
-    .input(requestOrderLinePriceChangeSchema.extend({ branchId: z.string().uuid().optional() }))
+    .input(requestOrderLinePriceChangeSchema.extend({
+      branchId: z.string().uuid().optional(),
+      orderType: z.enum(['followUp', 'cart']).optional(),
+    }))
     .mutation(async ({ input, ctx }) => {
-      const { branchId: _branchId, ...body } = input;
-      const res = await getOrdersService().requestLinePriceChangeApproval(body, ctx.user);
+      const { branchId: _branchId, orderType, ...body } = input;
+      const res = await getOrdersService().requestLinePriceChangeApproval(body, ctx.user, orderType);
       // The cached `pendingOrderLinePriceRequestId` flips after this — drop the
       // detail cache so the next viewer sees the new pending-request hint.
       await invalidateOrderDetailCache(input.orderId);
@@ -2133,8 +2157,8 @@ export const ordersRouter = router({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }))
-    .query(async ({ input }) => {
-      return getOrdersService().listFollowUpBatches(input);
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().listFollowUpBatches(input, ctx.effectiveBranchIds);
     }),
 
   getFollowUpBatchDetail: permissionProcedure('orders.followUp')
@@ -2335,8 +2359,8 @@ export const ordersRouter = router({
 
   /** Branches with an active CS department — for follow-up config dropdowns. */
   listActiveCsBranches: permissionProcedure('orders.followUp')
-    .query(async () => {
-      return getFollowUpConfigService().listActiveCsBranches();
+    .query(async ({ ctx }) => {
+      return getFollowUpConfigService().listActiveCsBranches(ctx.effectiveBranchIds);
     }),
 
   // ── Follow-Up Branches Summary ─────────────────────────────────────
@@ -2404,10 +2428,30 @@ export const ordersRouter = router({
       return getFollowUpConfigService().updateFollowUpOrder(orderId, updates, ctx.user);
     }),
 
+  followUpOrdersAdjustItems: permissionProcedure('orders.followUp')
+    .input(z.object({
+      orderId: z.string().uuid(),
+      items: z.array(z.object({
+        productId: z.string().uuid(),
+        quantity: z.number().int().min(1),
+        unitPrice: z.coerce.number().min(0),
+        offerLabel: z.string().max(100).optional(),
+      })).min(1),
+      totalAmount: z.coerce.number().min(0),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      return getFollowUpConfigService().adjustFollowUpOrderItems(input.orderId, input.items, input.totalAmount, ctx.user);
+    }),
+
   followUpOrdersDetail: permissionProcedure('orders.followUp')
     .input(followUpOrderDetailSchema)
-    .query(async ({ input }) => {
-      return getFollowUpConfigService().getFollowUpOrderDetail(input.id);
+    .query(async ({ input, ctx }) => {
+      const detail = await getFollowUpConfigService().getFollowUpOrderDetail(input.id);
+      const viewerCanEditOrderLinePrices = await getOrdersService().canActorEditOrderLinePrices(ctx.user, {
+        branchId: detail.servicingBranchId ?? detail.branchId ?? null,
+        assignedCsId: detail.assignedCsId ?? null,
+      });
+      return { ...detail, viewerCanEditOrderLinePrices };
     }),
 
   followUpOrdersAssign: permissionProcedure('orders.followUp')

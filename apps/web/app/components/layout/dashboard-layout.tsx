@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { NavLink, Outlet, useLocation, useNavigation } from '@remix-run/react';
 import { Sidebar, SidebarIcons, type SidebarGroup } from './sidebar';
 import { Header } from './header';
@@ -70,7 +70,7 @@ interface DashboardLayoutProps {
   /** Route action URL for notification mark-read (e.g. /admin or /hr). */
   notificationsActionUrl?: string;
   /** Available branches for the branch switcher. Only shown when length > 1. */
-  branches?: Array<{ id: string; name: string; code: string; groupId?: string | null }>;
+  branches?: Array<{ id: string; name: string; code: string; groupId?: string | null; groupName?: string | null }>;
   /** Branch groups for SuperAdmin header group switcher. */
   branchGroups?: Array<{ id: string; name: string; status?: string }>;
   /**
@@ -1027,6 +1027,18 @@ function DashboardLayoutInner({
     destFullPath != null && getFullLoaderEntry(destFullPath) !== null;
   const showTransitionSkeleton = isRouteLoading && !destHasCachedPayload;
 
+  // Filter the branches catalog to only the active company group.
+  // When selectedBranchIds is set (header group selection), page-level
+  // dropdowns should only show branches within that group.
+  const selectedBranchIds = (user as { selectedBranchIds?: string[] | null })?.selectedBranchIds;
+  const catalogBranches = useMemo(() => {
+    if (selectedBranchIds && selectedBranchIds.length > 0) {
+      const selectedSet = new Set(selectedBranchIds);
+      return (branches ?? []).filter((b) => selectedSet.has(b.id));
+    }
+    return branches ?? [];
+  }, [branches, selectedBranchIds]);
+
   const handleToggleCollapse = () => {
     const next = !collapsed;
     setCollapsed(next);
@@ -1303,7 +1315,7 @@ function DashboardLayoutInner({
             aria-busy={isRouteLoading}
             aria-live="polite"
           >
-            <BranchesCatalogProvider value={branches ?? []}>
+            <BranchesCatalogProvider value={catalogBranches}>
             <BranchGroupsCatalogProvider value={branchGroups ?? []}>
               {/* Cross-route nav swap — when the user clicks a sidebar link, render the
                   destination route's own loading shell (matched by pathname against the
