@@ -30,6 +30,8 @@ interface BranchInfo {
   status?: string;
   /** Branch group ("company") this branch belongs to. CEO directive 2026-06-10. */
   groupId?: string | null;
+  /** Resolved company group name for display. */
+  groupName?: string | null;
 }
 
 interface HeaderProps {
@@ -145,6 +147,7 @@ export function Header({
     : '/admin/notifications';
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
   const [isMobileBranchApplying, setIsMobileBranchApplying] = useState(false);
+  const [mobileExpandedGroups, setMobileExpandedGroups] = useState<Set<string>>(new Set());
   const isMobileBranchSwitching =
     isMobileBranchApplying || (navigation.state !== 'idle' && navigation.formAction?.includes('/admin/branches/switch'));
 
@@ -245,6 +248,11 @@ export function Header({
       setMobileChecked(new Set(defaultMobileBranchIdsKey.split(',').filter(Boolean)));
     }
   }, [currentBranchId, selectedBranchIds, defaultMobileBranchIdsKey]);
+
+  // Collapse all groups when mobile menu opens
+  useEffect(() => {
+    if (mobileUserMenuOpen) setMobileExpandedGroups(new Set());
+  }, [mobileUserMenuOpen]);
 
   const mobileAllChecked = mobileChecked.size === allMobileBranchIds.length && allMobileBranchIds.every((id) => mobileChecked.has(id));
   const mobileNoneChecked = mobileChecked.size === 0;
@@ -351,7 +359,7 @@ export function Header({
           !shouldShowHeaderBranchSwitcher(branches.length, user?.role ?? '') && (
             <div className="hidden lg:flex items-center shrink-0">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-app-border bg-app-bg-secondary px-3 py-1 text-xs font-medium text-app-fg-muted">
-                {branches[0].name}
+                {branches[0]?.name}
               </span>
             </div>
           )}
@@ -759,49 +767,147 @@ export function Header({
                         </label>
                       )}
 
-                      {branches.map((branch) => {
-                        const isInactive = branch.status != null && branch.status !== 'ACTIVE';
-                        const isBranchChecked = mobileChecked.has(branch.id);
-                        return (
-                          <label
-                            key={branch.id}
-                            className="w-full flex items-center gap-3 px-5 py-2 text-sm cursor-pointer select-none"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isBranchChecked}
-                              onChange={() => {
-                                setMobileChecked((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(branch.id)) {
-                                    next.delete(branch.id);
-                                  } else {
-                                    // Clear branches from other groups to prevent cross-company mixing
-                                    if (mobileHasMultipleGroups && branch.groupId) {
-                                      for (const id of prev) {
-                                        const b = (branches ?? []).find((br) => br.id === id);
-                                        if (b?.groupId && b.groupId !== branch.groupId) next.delete(id);
+                      {mobileHasMultipleGroups && mobileActiveGroups ? (
+                        // Grouped accordion view for multi-company
+                        mobileActiveGroups.map((group) => {
+                          const groupBranches = (branches ?? []).filter((b) => b.groupId === group.id);
+                          const groupAllChecked = groupBranches.length > 0 && groupBranches.every((b) => mobileChecked.has(b.id));
+                          const groupSomeChecked = groupBranches.some((b) => mobileChecked.has(b.id));
+                          const isExpanded = mobileExpandedGroups.has(group.id);
+                          return (
+                            <div key={group.id} className="mb-0.5">
+                              <div className="flex items-center gap-3 px-5 py-2.5">
+                                <input
+                                  type="checkbox"
+                                  checked={groupAllChecked}
+                                  ref={(el) => { if (el) el.indeterminate = groupSomeChecked && !groupAllChecked; }}
+                                  onChange={() => {
+                                    setMobileChecked((prev) => {
+                                      const next = new Set(prev);
+                                      if (groupAllChecked) {
+                                        groupBranches.forEach((b) => next.delete(b.id));
+                                      } else {
+                                        // Clear other groups first
+                                        for (const id of prev) {
+                                          const b = (branches ?? []).find((br) => br.id === id);
+                                          if (b?.groupId && b.groupId !== group.id) next.delete(id);
+                                        }
+                                        groupBranches.forEach((b) => next.add(b.id));
                                       }
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0 cursor-pointer"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMobileExpandedGroups((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(group.id)) next.delete(group.id);
+                                      else next.add(group.id);
+                                      return next;
+                                    });
+                                  }}
+                                  className="flex items-center gap-1.5 flex-1 min-w-0 select-none cursor-pointer"
+                                >
+                                  <svg
+                                    className={`w-3.5 h-3.5 text-app-fg-muted flex-shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2.5}
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                  </svg>
+                                  <span className="text-sm font-semibold text-app-fg truncate">{group.name}</span>
+                                  <span className="text-xs text-app-fg-muted flex-shrink-0">({groupBranches.length})</span>
+                                </button>
+                              </div>
+                              {isExpanded && groupBranches.map((branch) => {
+                                const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                                const isBranchChecked = mobileChecked.has(branch.id);
+                                return (
+                                  <label
+                                    key={branch.id}
+                                    className="w-full flex items-center gap-3 pl-10 pr-5 py-2 text-sm cursor-pointer select-none"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isBranchChecked}
+                                      onChange={() => {
+                                        setMobileChecked((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(branch.id)) {
+                                            next.delete(branch.id);
+                                          } else {
+                                            if (branch.groupId) {
+                                              for (const id of prev) {
+                                                const b = (branches ?? []).find((br) => br.id === id);
+                                                if (b?.groupId && b.groupId !== branch.groupId) next.delete(id);
+                                              }
+                                            }
+                                            next.add(branch.id);
+                                          }
+                                          return next;
+                                        });
+                                      }}
+                                      className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                                    />
+                                    <span className="inline-flex items-center justify-center w-5 h-5 rounded text-micro font-bold flex-shrink-0 bg-app-hover text-app-fg-muted">
+                                      {branch.code.slice(0, 2)}
+                                    </span>
+                                    <span className="truncate text-app-fg">{branch.name}</span>
+                                    {isInactive && (
+                                      <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded ml-auto flex-shrink-0">
+                                        Inactive
+                                      </span>
+                                    )}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        // Flat view for single-group
+                        branches.map((branch) => {
+                          const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                          const isBranchChecked = mobileChecked.has(branch.id);
+                          return (
+                            <label
+                              key={branch.id}
+                              className="w-full flex items-center gap-3 px-5 py-2 text-sm cursor-pointer select-none"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isBranchChecked}
+                                onChange={() => {
+                                  setMobileChecked((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(branch.id)) {
+                                      next.delete(branch.id);
+                                    } else {
+                                      next.add(branch.id);
                                     }
-                                    next.add(branch.id);
-                                  }
-                                  return next;
-                                });
-                              }}
-                              className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
-                            />
-                            <span className="truncate text-app-fg">{branch.name}</span>
-                            <span className="flex items-center gap-1.5 text-micro ml-auto">
-                              {isInactive && (
-                                <span className="font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded">
-                                  Inactive
-                                </span>
-                              )}
-                              <span className="font-mono text-app-fg-muted">{branch.code}</span>
-                            </span>
-                          </label>
-                        );
-                      })}
+                                    return next;
+                                  });
+                                }}
+                                className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                              />
+                              <span className="truncate text-app-fg">{branch.name}</span>
+                              <span className="flex items-center gap-1.5 text-micro ml-auto">
+                                {isInactive && (
+                                  <span className="font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded">
+                                    Inactive
+                                  </span>
+                                )}
+                                <span className="font-mono text-app-fg-muted">{branch.code}</span>
+                              </span>
+                            </label>
+                          );
+                        })
+                      )}
 
                       {/* Apply button */}
                       <div className="px-5 pt-2 pb-1">
@@ -906,6 +1012,9 @@ function HeaderBranchSwitcher({
   );
   const [open, setOpen] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  // Accordion state for grouped branch view — tracks which group IDs are expanded.
+  // Default: expand only the group that has checked branches (or the first group).
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const ref = useRef<HTMLDivElement>(null);
   const submit = useSubmit();
   const navigation = useNavigation();
@@ -914,9 +1023,33 @@ function HeaderBranchSwitcher({
   const canSeeAllBranches = canRoleSeeAllBranchesInHeader(userRole);
   const canSwitch = shouldShowHeaderBranchSwitcher(visibleBranches.length, userRole);
 
+  // Org-wide roles (non-branch-eligible, non-admin) see a simplified group-level
+  // switcher instead of individual branch checkboxes.
+  const BRANCH_ELIGIBLE_HEADER = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'CS_CLOSER', 'HEAD_OF_CS', 'BRANCH_ADMIN']);
+  const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT']);
+  const isOrgWideRole = !BRANCH_ELIGIBLE_HEADER.has(userRole) && !ADMIN_ROLES.has(userRole);
+
+  // Derive unique groups from the user's branches (for org-wide group switcher)
+  const derivedGroups = useMemo(() => {
+    if (!isOrgWideRole) return [];
+    const groupMap = new Map<string, { id: string; name: string; branchIds: string[] }>();
+    for (const b of visibleBranches) {
+      if (!b.groupId) continue;
+      const existing = groupMap.get(b.groupId);
+      if (existing) {
+        existing.branchIds.push(b.id);
+      } else {
+        // Use activeGroups for name if available, else fallback
+        const groupName = b.groupName ?? activeGroups?.find((g) => g.id === b.groupId)?.name ?? b.groupId;
+        groupMap.set(b.groupId, { id: b.groupId, name: groupName, branchIds: [b.id] });
+      }
+    }
+    return [...groupMap.values()];
+  }, [isOrgWideRole, visibleBranches, activeGroups]);
+
   // When multiple groups exist, toggling a branch must clear branches from other groups
   // to prevent cross-company data mixing.
-  const hasMultipleGroups = (activeGroups?.length ?? 0) > 1;
+  const hasMultipleGroups = (activeGroups?.length ?? 0) > 1 || derivedGroups.length > 1;
 
   // Multi-select state: checked branch IDs within the open dropdown.
   // Initialised from session state; defaults to all visible branches checked.
@@ -952,6 +1085,11 @@ function HeaderBranchSwitcher({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBranchId, selectedIdsKey, defaultBranchIdsKey]);
+
+  // Collapse all groups when the dropdown opens
+  useEffect(() => {
+    if (open) setExpandedGroups(new Set());
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -1067,7 +1205,12 @@ function HeaderBranchSwitcher({
     }
     return null;
   }, [isMultiBranch, hasMultipleGroups, activeGroups, visibleBranches, visibleSelectedIds]);
-  const triggerLabel = isAllBranches
+  const appliedSet = useMemo(() => new Set(visibleSelectedIds), [visibleSelectedIds]);
+  const triggerLabel = isOrgWideRole && derivedGroups.length === 1
+    ? derivedGroups[0]!.name
+    : isOrgWideRole && derivedGroups.length > 1
+      ? (derivedGroups.find((g) => g.branchIds.every((id) => appliedSet.has(id)))?.name ?? derivedGroups[0]!.name)
+    : isAllBranches
     ? 'All Branches'
     : isMultiBranch
       ? (selectedGroupLabel ?? `${visibleSelectedIds.length} Branches`)
@@ -1118,6 +1261,38 @@ function HeaderBranchSwitcher({
             Filter Branches
           </p>
 
+          {/* Org-wide roles: simplified group-level radio switcher */}
+          {isOrgWideRole && derivedGroups.length > 0 ? (
+            <div className="py-1 max-h-[320px] overflow-y-auto">
+              {derivedGroups.length === 1 ? (
+                <div className="px-3 py-2.5">
+                  <span className="text-xs font-semibold text-app-fg">{derivedGroups[0]!.name}</span>
+                </div>
+              ) : (
+                derivedGroups.map((group) => {
+                  const isSelected = group.branchIds.every((id) => checked.has(id));
+                  return (
+                    <label
+                      key={group.id}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-app-hover transition-colors duration-100 cursor-pointer select-none"
+                    >
+                      <input
+                        type="radio"
+                        name="orgwide-group"
+                        checked={isSelected}
+                        onChange={() => {
+                          setChecked(new Set(group.branchIds));
+                        }}
+                        className="w-4 h-4 border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border"
+                      />
+                      <span className="text-xs font-semibold text-app-fg">{group.name}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+          <>
           {/* Select All checkbox — shown when 2+ branches visible; hidden when multiple groups exist (group headers serve as select-all) */}
           {visibleBranches.length > 1 && !(activeGroups && activeGroups.length > 1) && (
             <>
@@ -1142,10 +1317,11 @@ function HeaderBranchSwitcher({
                 const groupBranches = visibleBranches.filter((b) => b.groupId === group.id);
                 const groupAllChecked = groupBranches.length > 0 && groupBranches.every((b) => checked.has(b.id));
                 const groupSomeChecked = groupBranches.some((b) => checked.has(b.id));
+                const isExpanded = expandedGroups.has(group.id);
                 return (
-                  <div key={group.id} className="mb-1">
-                    {/* Group header with toggle */}
-                    <label className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-app-hover transition-colors duration-100 cursor-pointer select-none">
+                  <div key={group.id} className="mb-0.5">
+                    {/* Group header row: checkbox + clickable accordion toggle */}
+                    <div className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-app-hover transition-colors duration-100">
                       <input
                         type="checkbox"
                         checked={groupAllChecked}
@@ -1156,7 +1332,6 @@ function HeaderBranchSwitcher({
                             if (groupAllChecked) {
                               groupBranches.forEach((b) => next.delete(b.id));
                             } else {
-                              // Clear branches from other groups first
                               if (hasMultipleGroups) {
                                 for (const id of prev) {
                                   const b = visibleBranches.find((br) => br.id === id);
@@ -1168,13 +1343,35 @@ function HeaderBranchSwitcher({
                             return next;
                           });
                         }}
-                        className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                        className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0 cursor-pointer"
                       />
-                      <span className="text-xs font-semibold text-app-fg">{group.name}</span>
-                      <span className="text-micro text-app-fg-muted">({groupBranches.length})</span>
-                    </label>
-                    {/* Individual branches indented under group */}
-                    {groupBranches.map((branch) => {
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedGroups((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(group.id)) next.delete(group.id);
+                            else next.add(group.id);
+                            return next;
+                          });
+                        }}
+                        className="flex items-center gap-1.5 flex-1 min-w-0 select-none cursor-pointer"
+                      >
+                        <svg
+                          className={`w-3 h-3 text-app-fg-muted flex-shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2.5}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span className="text-xs font-semibold text-app-fg truncate">{group.name}</span>
+                        <span className="text-micro text-app-fg-muted flex-shrink-0">({groupBranches.length})</span>
+                      </button>
+                    </div>
+                    {/* Individual branches — collapsible */}
+                    {isExpanded && groupBranches.map((branch) => {
                       const isInactive = branch.status != null && branch.status !== 'ACTIVE';
                       const isChecked = checked.has(branch.id);
                       return (
@@ -1239,6 +1436,8 @@ function HeaderBranchSwitcher({
               })
             )}
           </div>
+          </>
+          )}
 
           {/* Apply button */}
           <div className="border-t border-app-border px-3 py-2">

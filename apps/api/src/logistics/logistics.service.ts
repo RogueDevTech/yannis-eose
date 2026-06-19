@@ -843,9 +843,28 @@ export class LogisticsService {
    * Find all completed transfers where quantityReceived < quantitySent
    * and status is DISPUTED — indicates shrinkage/loss during transit.
    */
-  async getShrinkageAlerts() {
+  async getShrinkageAlerts(effectiveBranchIds?: string[] | null) {
     const fromLocation = alias(schema.logisticsLocations, 'from_loc');
     const toLocation = alias(schema.logisticsLocations, 'to_loc');
+
+    const conditions: SQL[] = [
+      eq(schema.stockTransfers.transferStatus, 'DISPUTED'),
+      isNotNull(schema.stockTransfers.quantityReceived),
+    ];
+
+    // Stock transfers have no branch column; scope via the initiator's branches
+    // when effectiveBranchIds is set (non-global user).
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(
+        inArray(
+          schema.stockTransfers.initiatedBy,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
+      );
+    }
 
     const alerts = await this.db
       .select({
@@ -866,12 +885,7 @@ export class LogisticsService {
       .innerJoin(schema.products, eq(schema.stockTransfers.productId, schema.products.id))
       .innerJoin(fromLocation, eq(schema.stockTransfers.fromLocationId, fromLocation.id))
       .innerJoin(toLocation, eq(schema.stockTransfers.toLocationId, toLocation.id))
-      .where(
-        and(
-          eq(schema.stockTransfers.transferStatus, 'DISPUTED'),
-          isNotNull(schema.stockTransfers.quantityReceived),
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(desc(schema.stockTransfers.createdAt));
 
     return alerts.map((a) => ({
@@ -884,8 +898,15 @@ export class LogisticsService {
    * Find orders stuck in DISPATCHED or IN_TRANSIT for more than
    * the given threshold hours — indicates delivery issues.
    */
-  async getStuckOrders(thresholdHours: number) {
+  async getStuckOrders(thresholdHours: number, effectiveBranchIds?: string[] | null) {
     const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
+
+    const conditions: SQL[] = [
+      inArray(schema.orders.status, ['DISPATCHED', 'IN_TRANSIT']),
+      lt(schema.orders.updatedAt, cutoff),
+    ];
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
 
     const stuckOrders = await this.db
       .select({
@@ -901,12 +922,7 @@ export class LogisticsService {
       })
       .from(schema.orders)
       .leftJoin(schema.users, eq(schema.orders.riderId, schema.users.id))
-      .where(
-        and(
-          inArray(schema.orders.status, ['DISPATCHED', 'IN_TRANSIT']),
-          lt(schema.orders.updatedAt, cutoff),
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(schema.orders.updatedAt);
 
     return stuckOrders.map((o) => {
@@ -923,11 +939,30 @@ export class LogisticsService {
    * Find stock transfers in IN_TRANSIT status where createdAt is older
    * than the threshold hours — indicates delayed transfers.
    */
-  async getTransferDelays(thresholdHours: number) {
+  async getTransferDelays(thresholdHours: number, effectiveBranchIds?: string[] | null) {
     const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
 
     const fromLocation = alias(schema.logisticsLocations, 'from_loc');
     const toLocation = alias(schema.logisticsLocations, 'to_loc');
+
+    const conditions: SQL[] = [
+      eq(schema.stockTransfers.transferStatus, 'IN_TRANSIT'),
+      lt(schema.stockTransfers.createdAt, cutoff),
+    ];
+
+    // Stock transfers have no branch column; scope via the initiator's branches
+    // when effectiveBranchIds is set (non-global user).
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(
+        inArray(
+          schema.stockTransfers.initiatedBy,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
+      );
+    }
 
     const delayedTransfers = await this.db
       .select({
@@ -945,12 +980,7 @@ export class LogisticsService {
       .innerJoin(schema.products, eq(schema.stockTransfers.productId, schema.products.id))
       .innerJoin(fromLocation, eq(schema.stockTransfers.fromLocationId, fromLocation.id))
       .innerJoin(toLocation, eq(schema.stockTransfers.toLocationId, toLocation.id))
-      .where(
-        and(
-          eq(schema.stockTransfers.transferStatus, 'IN_TRANSIT'),
-          lt(schema.stockTransfers.createdAt, cutoff),
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(schema.stockTransfers.createdAt);
 
     return delayedTransfers.map((t) => {
@@ -967,11 +997,11 @@ export class LogisticsService {
    * Aggregated logistics health dashboard combining shrinkage alerts,
    * stuck orders (>24h), and transfer delays (>48h).
    */
-  async getLogisticsHealthDashboard() {
+  async getLogisticsHealthDashboard(effectiveBranchIds?: string[] | null) {
     const [shrinkageAlerts, stuckOrders, transferDelays] = await Promise.all([
-      this.getShrinkageAlerts(),
-      this.getStuckOrders(24),
-      this.getTransferDelays(48),
+      this.getShrinkageAlerts(effectiveBranchIds),
+      this.getStuckOrders(24, effectiveBranchIds),
+      this.getTransferDelays(48, effectiveBranchIds),
     ]);
 
     return {
@@ -989,7 +1019,27 @@ export class LogisticsService {
    * List riders (TPL_RIDER users) for dispatch dropdowns.
    * Returns id, name, logisticsLocationId. Gated by logistics.read.
    */
-  async listRiders(): Promise<Array<{ id: string; name: string; logisticsLocationId: string | null }>> {
+  async listRiders(
+    effectiveBranchIds?: string[] | null,
+  ): Promise<Array<{ id: string; name: string; logisticsLocationId: string | null }>> {
+    const conditions: SQL[] = [
+      eq(schema.users.role, 'TPL_RIDER'),
+      eq(schema.users.status, 'ACTIVE'),
+    ];
+
+    // Scope riders to branches the caller can see
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+        ),
+      );
+    }
+
     const rows = await this.db
       .select({
         id: schema.users.id,
@@ -997,7 +1047,7 @@ export class LogisticsService {
         logisticsLocationId: schema.users.logisticsLocationId,
       })
       .from(schema.users)
-      .where(and(eq(schema.users.role, 'TPL_RIDER'), eq(schema.users.status, 'ACTIVE')))
+      .where(and(...conditions))
       .orderBy(schema.users.name);
 
     return rows.map((r) => ({
@@ -2453,7 +2503,11 @@ export class LogisticsService {
     return request;
   }
 
-  async listDeliveryConfirmationRequests(input: ListDeliveryConfirmationRequestsInput, actor: SessionUser) {
+  async listDeliveryConfirmationRequests(
+    input: ListDeliveryConfirmationRequestsInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     const isOrgWide =
       actor.role === 'SUPER_ADMIN' ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global');
@@ -2465,10 +2519,25 @@ export class LogisticsService {
       });
     }
 
-    const conditions = [];
+    const conditions: SQL[] = [];
     if (input.status) {
       conditions.push(eq(schema.deliveryConfirmationRequests.status, input.status));
     }
+
+    // Branch-scope via the related order's servicingBranchId (subquery avoids join shape change)
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
+    if (bCond) {
+      conditions.push(
+        inArray(
+          schema.deliveryConfirmationRequests.orderId,
+          this.db
+            .select({ id: schema.orders.id })
+            .from(schema.orders)
+            .where(bCond),
+        ),
+      );
+    }
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 

@@ -14,6 +14,8 @@ export interface UserBranchBadgeItem {
   branchName: string;
   branchCode: string;
   isPrimary?: boolean;
+  groupId?: string | null;
+  groupName?: string | null;
 }
 
 /** Primary first — keeps the most relevant branch at the start of the row (compact tables). */
@@ -194,6 +196,32 @@ export function UserBranchBadges({
 
   if (compact) {
     return <CompactBranchBadgeRow listForPills={listForPills} pills={pills} />;
+  }
+
+  // Group by company when branches span multiple groups
+  const uniqueGroups = new Set(branches.map((b) => b.groupId).filter(Boolean));
+  if (uniqueGroups.size > 1) {
+    const groupMap = new Map<string, { name: string; pills: React.ReactNode[] }>();
+    for (let i = 0; i < listForPills.length; i++) {
+      const b = listForPills[i]!;
+      const gid = b.groupId ?? '__ungrouped__';
+      const existing = groupMap.get(gid);
+      if (existing) {
+        existing.pills.push(pills[i]);
+      } else {
+        groupMap.set(gid, { name: b.groupName ?? 'Other', pills: [pills[i]] });
+      }
+    }
+    return (
+      <div className="space-y-1.5">
+        {[...groupMap.entries()].map(([gid, { name, pills: groupPills }]) => (
+          <div key={gid}>
+            <span className="text-micro font-semibold text-app-fg-muted uppercase tracking-wide mr-1.5">{name}</span>
+            <span className="inline-flex flex-wrap items-center gap-1">{groupPills}</span>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return <div className="flex flex-wrap items-center gap-1.5">{pills}</div>;

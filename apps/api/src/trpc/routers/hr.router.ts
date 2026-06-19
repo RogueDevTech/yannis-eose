@@ -91,7 +91,7 @@ export const hrRouter = router({
   generatePayouts: permissionProcedure('hr.write')
     .input(generatePayoutsSchema)
     .mutation(async ({ input, ctx }) => {
-      return getHrService().generatePayouts(input, ctx.user.id);
+      return getHrService().generatePayouts(input, ctx.user.id, ctx.effectiveBranchIds);
     }),
 
   approvePayout: permissionProcedure('hr.write')
@@ -125,8 +125,8 @@ export const hrRouter = router({
     }),
 
   payoutSummary: permissionProcedure('hr.read')
-    .query(async () => {
-      return getHrService().getPayoutSummary();
+    .query(async ({ ctx }) => {
+      return getHrService().getPayoutSummary(ctx.effectiveBranchIds);
     }),
 
   // Clawback
@@ -178,8 +178,8 @@ export const hrRouter = router({
 
   listAdjustments: authedProcedure
     .input(z.object({ staffId: z.string().uuid().optional() }))
-    .query(async ({ input }) => {
-      return getHrService().listAdjustments(input.staffId);
+    .query(async ({ input, ctx }) => {
+      return getHrService().listAdjustments(input.staffId, ctx.effectiveBranchIds);
     }),
 
   // Settlement Window Config

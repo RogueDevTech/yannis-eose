@@ -757,11 +757,18 @@ export class FinanceService {
       return inserted;
     });
 
+    // Look up the actor's primary branch for notification group isolation
+    const [actorBranch] = await this.db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(and(eq(schema.userBranches.userId, actorId), eq(schema.userBranches.isPrimary, true)))
+      .limit(1);
+
     const approverPayload = {
       type: 'finance:approval_required' as const,
       title: 'Approval request pending',
       body: `A ${input.type} approval request for ${input.amount} requires your review.`,
-      data: { requestId: request.id, type: input.type, amount: input.amount },
+      data: { requestId: request.id, type: input.type, amount: input.amount, branchId: actorBranch?.branchId ?? null },
     };
     this.notifications.enqueueCreateForRole('FINANCE_OFFICER', approverPayload);
     this.notifications.enqueueCreateForRole(
@@ -850,30 +857,56 @@ export class FinanceService {
     return row?.count ?? 0;
   }
 
-  async listApprovalRequests(input: ListApprovalRequestsInput) {
-    const conditions = [];
+  async listApprovalRequests(input: ListApprovalRequestsInput, effectiveBranchIds?: string[] | null) {
+    const conditions: SQL[] = [];
     if (input.status) {
       conditions.push(eq(schema.approvalRequests.status, input.status));
     }
     if (input.approverId) {
       conditions.push(eq(schema.approvalRequests.approverId, input.approverId));
     }
+
+    // Branch-group isolation: approval_requests has no branchId column, so we
+    // scope via the requester's branch membership. When effectiveBranchIds is
+    // set, only show requests from users who belong to one of those branches.
+    const bCond = branchScopeCondition(schema.userBranches.branchId, null, effectiveBranchIds);
+    const needsBranchJoin = !!bCond;
+    if (bCond) conditions.push(bCond);
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
-    const [requests, totalRows] = await Promise.all([
-      this.db
-        .select()
-        .from(schema.approvalRequests)
+    const baseFrom = needsBranchJoin
+      ? this.db.select().from(schema.approvalRequests)
+          .innerJoin(schema.userBranches, eq(schema.approvalRequests.requesterId, schema.userBranches.userId))
+      : this.db.select().from(schema.approvalRequests);
+    const countFrom = needsBranchJoin
+      ? this.db.select({ count: count() }).from(schema.approvalRequests)
+          .innerJoin(schema.userBranches, eq(schema.approvalRequests.requesterId, schema.userBranches.userId))
+      : this.db.select({ count: count() }).from(schema.approvalRequests);
+
+    const [rawRows, totalRows] = await Promise.all([
+      baseFrom
         .where(whereClause)
         .orderBy(desc(schema.approvalRequests.createdAt))
         .limit(input.limit)
         .offset(offset),
-      this.db
-        .select({ count: count() })
-        .from(schema.approvalRequests)
-        .where(whereClause),
+      countFrom.where(whereClause),
     ]);
+
+    // When we join user_branches, the result shape nests under
+    // `approval_requests` + `user_branches`. Normalise back to flat rows and
+    // deduplicate (a requester in multiple branches produces duplicate rows).
+    const seen = new Set<string>();
+    const requests = [];
+    for (const row of rawRows) {
+      const ar = needsBranchJoin
+        ? (row as Record<string, unknown>)['approval_requests'] as typeof schema.approvalRequests.$inferSelect
+        : row as typeof schema.approvalRequests.$inferSelect;
+      if (seen.has(ar.id)) continue;
+      seen.add(ar.id);
+      requests.push(ar);
+    }
 
     return {
       requests,
@@ -912,10 +945,14 @@ export class FinanceService {
     });
   }
 
-  async listBudgets() {
+  async listBudgets(groupId?: string | null) {
+    const conditions: SQL[] = [];
+    if (groupId) conditions.push(eq(schema.budgets.groupId, groupId));
+
     return this.db
       .select()
       .from(schema.budgets)
+      .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(desc(schema.budgets.createdAt));
   }
 
@@ -923,10 +960,14 @@ export class FinanceService {
    * List all budgets together with their approved/committed/remaining totals so the
    * finance overview can render utilization without N+1 lookups.
    */
-  async listBudgetsWithUtilization() {
+  async listBudgetsWithUtilization(groupId?: string | null) {
+    const conditions: SQL[] = [];
+    if (groupId) conditions.push(eq(schema.budgets.groupId, groupId));
+
     const budgets = await this.db
       .select()
       .from(schema.budgets)
+      .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(desc(schema.budgets.createdAt));
 
     if (budgets.length === 0) return [];
@@ -1083,7 +1124,17 @@ export class FinanceService {
    * Fast profit report using materialized views.
    * Falls back to full query if views don't exist.
    */
-  async getFastProfitReport(startDate?: string, endDate?: string) {
+  // TODO: Materialized views (mv_profit_summary, mv_ad_spend_summary, etc.) do
+  // not carry branch/group columns. When effectiveBranchIds is set, fall back to
+  // the branch-aware full query. Once servicing_branch_id is added to the MV
+  // definitions, the raw SQL path below can be branch-filtered directly.
+  async getFastProfitReport(startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null) {
+    // Fall back to the branch-aware full query when a company-group scope is active
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      const report = await this.getProfitReport({ groupBy: 'product' as const, startDate, endDate }, effectiveBranchIds);
+      return { ...report, statusCounts: {} as Record<string, number>, source: 'direct_query' as const };
+    }
+
     try {
       let profitRows: Array<Record<string, unknown>>;
       if (startDate && endDate) {

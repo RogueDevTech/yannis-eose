@@ -33,7 +33,7 @@ export const SPREADSHEET_IMPORT_ROLE_REFERENCE = [
   { enum: 'HEAD_OF_MARKETING', acceptedLabels: 'Head of Marketing' },
   { enum: 'MEDIA_BUYER', acceptedLabels: 'Media Buyer' },
   { enum: 'HEAD_OF_CS', acceptedLabels: 'Head of CS' },
-  { enum: 'CS_CLOSER', acceptedLabels: 'Sales Closer' },
+  { enum: 'CS_CLOSER', acceptedLabels: 'Sales Closer, CS Closer' },
   { enum: 'FINANCE_OFFICER', acceptedLabels: 'Finance Officer' },
   { enum: 'HEAD_OF_LOGISTICS', acceptedLabels: 'Head of Logistics' },
   { enum: 'STOCK_MANAGER', acceptedLabels: 'Stock Manager' },
@@ -52,6 +52,7 @@ const ROLE_LABEL_LOOKUP: Record<string, string> = {
   'media buyer': 'MEDIA_BUYER',
   'head of cs': 'HEAD_OF_CS',
   'cs closer': 'CS_CLOSER',
+  'sales closer': 'CS_CLOSER',
   // Legacy alias — pre-2026-05-10 sheets still import cleanly.
   'cs agent': 'CS_CLOSER',
   'finance officer': 'FINANCE_OFFICER',
@@ -84,8 +85,6 @@ export interface ParsedRow {
   phone: string;
   primaryBranchInput: string;
   additionalBranchesInput: string;
-  isProbation: boolean;
-  probationUntil: string;
 }
 
 export interface ResolvedRow extends ParsedRow {
@@ -142,7 +141,12 @@ export function resolveRow(parsed: ParsedRow, branches: BranchInfo[]): ResolvedR
     errors.push('Email is invalid.');
   }
   if (!NIGERIAN_PHONE.test(parsed.phone)) {
-    errors.push('Phone must be a Nigerian number (08031234567 or +2348031234567).');
+    const looksCorrupted = /^\+?\d{12,}0{3,}$/.test(parsed.phone) || /[eE]\+/.test(parsed.phone);
+    errors.push(
+      looksCorrupted
+        ? 'Phone was corrupted by Excel (scientific notation). Format the Phone column as Text in your spreadsheet and re-enter the number.'
+        : 'Phone must be a Nigerian number (08031234567 or +2348031234567).',
+    );
   }
   const resolvedRole = parsed.role ? normalizeRole(parsed.role) : null;
   if (!resolvedRole) {
@@ -194,7 +198,5 @@ export function makeEmptyParsedRow(rowIndex: number): ParsedRow {
     phone: '',
     primaryBranchInput: '',
     additionalBranchesInput: '',
-    isProbation: false,
-    probationUntil: '',
   };
 }

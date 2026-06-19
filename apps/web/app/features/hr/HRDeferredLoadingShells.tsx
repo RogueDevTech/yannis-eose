@@ -5,7 +5,6 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -369,15 +368,9 @@ export function UserCreateEditLoadingShell({ mode }: { mode: 'create' | 'edit' }
   const sectionHeading = 'text-lg font-semibold text-app-fg';
   return (
     <div className="w-full space-y-6" aria-busy="true" aria-live="polite">
-      <Breadcrumb
-        items={
-          mode === 'edit'
-            ? [{ label: 'Users', to: '/hr/users' }, { label: 'Edit' }]
-            : [{ label: 'Users', to: '/hr/users' }, { label: 'Add User' }]
-        }
-      />
       <PageHeader
         title={mode === 'edit' ? 'Edit user' : 'Add User'}
+        backTo="/hr/users"
         description={
           mode === 'edit'
             ? 'Update account, branch memberships, permissions, and role settings.'

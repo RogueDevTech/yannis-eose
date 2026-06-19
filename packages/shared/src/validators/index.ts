@@ -95,14 +95,6 @@ export {
   searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
-  PROBATION_INELIGIBLE_ROLES,
-  isRoleProbationEligible,
-  DEFAULT_PROBATION_DAYS,
-  defaultProbationUntilFromNow,
-  setProbationSchema,
-  extendProbationSchema,
-  markProbationPermanentSchema,
-  terminateProbationSchema,
 } from './users';
 
 export type {
@@ -115,10 +107,6 @@ export type {
   SearchUsersForPushTargetInput,
   ResetPasswordInput,
   ProcessEmailChangeInput,
-  SetProbationInput,
-  ExtendProbationInput,
-  MarkProbationPermanentInput,
-  TerminateProbationInput,
 } from './users';
 
 // Product validators
