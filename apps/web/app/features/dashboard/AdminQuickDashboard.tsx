@@ -73,8 +73,8 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
   const statusCounts = data.statusCounts ?? {};
   const offlineCount = data.offlineCount ?? 0;
 
-  /** Build a Sales Orders URL carrying the current date filter context. */
-  function salesLink(extra?: Record<string, string>): string {
+  /** Build a link with current date filter context. */
+  function buildLink(base: string, extra?: Record<string, string>): string {
     const params = new URLSearchParams();
     if (filters?.periodAllTime) {
       params.set('period', 'all_time');
@@ -86,7 +86,15 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
       for (const [k, v] of Object.entries(extra)) params.set(k, v);
     }
     const qs = params.toString();
-    return qs ? `/admin/sales/orders?${qs}` : '/admin/sales/orders';
+    return qs ? `${base}?${qs}` : base;
+  }
+  /** Funnel stats link to marketing orders. */
+  function marketingLink(extra?: Record<string, string>): string {
+    return buildLink('/admin/marketing/orders', extra);
+  }
+  /** Offline + CS-specific links go to sales orders. */
+  function salesLink(extra?: Record<string, string>): string {
+    return buildLink('/admin/sales/orders', extra);
   }
 
   // Mirror the Sales Orders page stat strip (CEO six-bucket pipeline).
@@ -114,7 +122,7 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
   const delivered = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
   const deliveryRate = total > 0 ? (delivered / total) * 100 : 0;
 
-  const pipelineItems = PIPELINE_KEYS.map((status) => {
+  const csPipelineItems = PIPELINE_KEYS.map((status) => {
     let value = statusCounts[status] ?? 0;
     if (status === 'DELIVERED') {
       value += statusCounts['REMITTED'] ?? 0;
@@ -127,6 +135,22 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
       value,
       valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
       to: salesLink({ status }),
+    };
+  });
+
+  const pipelineItems = PIPELINE_KEYS.map((status) => {
+    let value = statusCounts[status] ?? 0;
+    if (status === 'DELIVERED') {
+      value += statusCounts['REMITTED'] ?? 0;
+    }
+    if (status === 'CONFIRMED' && confirmedAbsorbsSubstages) {
+      for (const sub of CONFIRMED_SUBSTAGES) value += statusCounts[sub] ?? 0;
+    }
+    return {
+      label: STATUS_LABELS[status] ?? formatStatus(status),
+      value,
+      valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+      to: marketingLink({ status }),
     };
   });
 
@@ -144,10 +168,50 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
         }
       />
 
-      {/* Orders stat strip — mirrors /admin/sales/orders. Each pill links to that page. */}
+      {/* Marketing Order Funnel */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Orders today</h2>
+          <h2 className="text-base font-semibold text-app-fg">Marketing Order Funnel</h2>
+          <Link
+            to={marketingLink()}
+            prefetch="intent"
+            className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            View all →
+          </Link>
+        </div>
+        <OverviewStatStrip
+          mobileGrid
+          embedded
+          showScrollControls={false}
+          items={[
+            {
+              label: 'Total',
+              value: total,
+              valueClassName: 'text-app-fg',
+              to: marketingLink(),
+            },
+            ...pipelineItems,
+            {
+              label: 'CR',
+              value: `${confirmationRate.toFixed(1)}%`,
+              valueClassName: confirmationRateColorClass(confirmationRate),
+              title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
+            },
+            {
+              label: 'DR',
+              value: `${deliveryRate.toFixed(1)}%`,
+              valueClassName: deliveryRateColorClass(deliveryRate),
+              title: 'Delivery Rate — delivered / total orders',
+            },
+          ]}
+        />
+      </div>
+
+      {/* CS Order Funnel */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold text-app-fg">CS Order Funnel</h2>
           <Link
             to={salesLink()}
             prefetch="intent"
@@ -167,14 +231,7 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
               valueClassName: 'text-app-fg',
               to: salesLink(),
             },
-            {
-              label: 'Offline',
-              value: offlineCount,
-              valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
-              title: 'Orders created manually via offline order',
-              to: salesLink({ orderSource: 'offline' }),
-            },
-            ...pipelineItems,
+            ...csPipelineItems,
             {
               label: 'CR',
               value: `${confirmationRate.toFixed(1)}%`,
@@ -186,6 +243,13 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
               value: `${deliveryRate.toFixed(1)}%`,
               valueClassName: deliveryRateColorClass(deliveryRate),
               title: 'Delivery Rate — delivered / total orders',
+            },
+            {
+              label: 'Offline',
+              value: offlineCount,
+              valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+              title: 'Orders created manually via offline order',
+              to: salesLink({ orderSource: 'offline' }),
             },
           ]}
         />
