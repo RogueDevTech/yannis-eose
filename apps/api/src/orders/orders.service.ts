@@ -4450,9 +4450,11 @@ export class OrdersService {
       }
 
       if (workingInput.items) {
-        await tx
+        const deletedItems = await tx
           .delete(schema.orderItems)
-          .where(eq(schema.orderItems.orderId, input.orderId));
+          .where(eq(schema.orderItems.orderId, input.orderId))
+          .returning({ id: schema.orderItems.id });
+        this.logger.log(`orders.update: deleted ${deletedItems.length} existing items for ${input.orderId}`);
 
         await tx.insert(schema.orderItems).values(
           workingInput.items.map((item) => ({
@@ -4465,6 +4467,7 @@ export class OrdersService {
               : {}),
           })),
         );
+        this.logger.log(`orders.update: inserted ${workingInput.items.length} new items for ${input.orderId}`);
       }
       return row;
     });

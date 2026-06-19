@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, inArray, isNull, lte, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput } from '@yannis/shared';
@@ -116,7 +116,20 @@ export class CartOrdersService {
     if (input.mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, input.mediaBuyerId));
     if (input.unassignedOnly) conditions.push(isNull(schema.cartOrders.assignedCsId));
     if (input.search) {
-      conditions.push(sql`${schema.cartOrders.customerName} ILIKE ${'%' + input.search + '%'}`);
+      const trimmed = input.search.trim();
+      if (trimmed.length > 0) {
+        const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
+        const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+        if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
+          const combined = or(
+            eq(schema.cartOrders.orderNumber, parsedOrderNum),
+            ilike(schema.cartOrders.customerName, `%${trimmed}%`),
+          );
+          if (combined) conditions.push(combined);
+        } else {
+          conditions.push(ilike(schema.cartOrders.customerName, `%${trimmed}%`));
+        }
+      }
     }
     if (input.assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, input.assignedCsId));
     {
@@ -839,18 +852,26 @@ export class CartOrdersService {
     }
 
     return withActor(this.db, actor, async (tx) => {
-      // Delete existing items and reinsert
-      await tx.delete(schema.cartOrderItems).where(eq(schema.cartOrderItems.cartOrderId, orderId));
+      // Delete existing items and reinsert — use returning() to verify rows removed
+      const deleted = await tx.delete(schema.cartOrderItems)
+        .where(eq(schema.cartOrderItems.cartOrderId, orderId))
+        .returning({ id: schema.cartOrderItems.id });
+      this.logger.log(`adjustItems: deleted ${deleted.length} existing items for cart order ${orderId}`);
+
+      const inserted = [];
       for (const item of items) {
-        await tx.insert(schema.cartOrderItems).values({
+        const [row] = await tx.insert(schema.cartOrderItems).values({
           cartOrderId: orderId,
           productId: item.productId,
           quantity: item.quantity,
           unitPrice: sql`${item.unitPrice}::numeric`,
           offerLabel: item.offerLabel ?? null,
-        });
+        }).returning({ id: schema.cartOrderItems.id });
+        inserted.push(row);
       }
-      // Update totalAmount on the cart order
+      this.logger.log(`adjustItems: inserted ${inserted.length} new items for cart order ${orderId}`);
+
+      // Update totalAmount + jsonb items on the cart order
       await tx
         .update(schema.cartOrders)
         .set({ totalAmount: sql`${totalAmount}::numeric`, items: items, updatedAt: new Date() })

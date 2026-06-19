@@ -85,8 +85,9 @@ export class PermissionRequestsService {
 
     // Step 2 — order-domain contextual check.
     if (req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') {
-      const payload = req.payload as { orderId?: string } | null;
+      const payload = req.payload as { orderId?: string; orderType?: 'followUp' | 'cart' } | null;
       const orderId = payload?.orderId;
+      const orderType = payload?.orderType;
       if (!orderId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -96,20 +97,41 @@ export class PermissionRequestsService {
               : 'Invalid price-change request payload.',
         });
       }
-      const [order] = await this.db
-        .select()
-        .from(schema.orders)
-        .where(eq(schema.orders.id, orderId))
-        .limit(1);
-      if (!order) {
+
+      // Resolve the order from the correct table based on orderType
+      let orderRef: { branchId: string | null; assignedCsId: string | null; deletedAt: Date | null } | null = null;
+      if (orderType === 'followUp') {
+        const [fu] = await this.db
+          .select({ branchId: schema.followUpOrders.servicingBranchId, assignedCsId: schema.followUpOrders.assignedCsId, deletedAt: schema.followUpOrders.deletedAt })
+          .from(schema.followUpOrders)
+          .where(eq(schema.followUpOrders.id, orderId))
+          .limit(1);
+        orderRef = fu ?? null;
+      } else if (orderType === 'cart') {
+        const [co] = await this.db
+          .select({ branchId: schema.cartOrders.servicingBranchId, assignedCsId: schema.cartOrders.assignedCsId, deletedAt: schema.cartOrders.deletedAt })
+          .from(schema.cartOrders)
+          .where(eq(schema.cartOrders.id, orderId))
+          .limit(1);
+        orderRef = co ?? null;
+      } else {
+        const [order] = await this.db
+          .select({ branchId: schema.orders.branchId, assignedCsId: schema.orders.assignedCsId, deletedAt: schema.orders.deletedAt })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, orderId))
+          .limit(1);
+        orderRef = order ?? null;
+      }
+
+      if (!orderRef) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Order referenced by this request was not found.' });
       }
-      if (order.deletedAt) {
+      if (orderRef.deletedAt) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'This order has already been archived.' });
       }
       const allowed = await this.ordersService.canActorEditOrderLinePrices(approver, {
-        branchId: order.branchId ?? null,
-        assignedCsId: order.assignedCsId ?? null,
+        branchId: orderRef.branchId ?? null,
+        assignedCsId: orderRef.assignedCsId ?? null,
       });
       if (!allowed) {
         throw new TRPCError({
