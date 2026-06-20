@@ -12,9 +12,18 @@ docker restart yannis-eose-api-1
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
-docker exec yannis-eose-api-1 sh -c 'node -e "const r=require(\"ioredis\");const c=new r(process.env.REDIS_URL);c.keys(\"cache:orders:aggregates:*\").then(k=>k.length?c.del(...k).then(n=>console.log(\"Busted\",n,\"keys\")):console.log(\"No keys\")).then(()=>c.quit())"' 
 
 
+ PGPASSWORD='586686586686' pg_dump -h 34.105.212.253 -U postgres -d postgres -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql 
+
+
+
+pg_dump "postgresql://postgres:586686586686@34.105.212.253:5432/postgres?sslmode=require" -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql
+
+
+
+
+DATABASE_URL=postgresql://yannis_app: @34.39.26.2:5432/yannis?sslmode=require
 
 pnpm --filter @yannis/api dev
 START NEW DB

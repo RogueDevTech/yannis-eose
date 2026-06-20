@@ -32,38 +32,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    // One-time cleanup: purge follow-up orders that were created from cart-graduated source orders.
-    // These should never have been pulled into follow-up — cart orders have their own pipeline.
     setTimeout(() => {
-      this.purgeCartOriginFollowUps()
-        .then(() => this.backfillFollowUpMbAttribution())
+      this.backfillFollowUpMbAttribution()
         .then(() => this.runSync('cron'))
         .catch((err) =>
           this.logger.error(`Boot sync failed: ${err instanceof Error ? err.message : err}`),
         );
     }, 45_000);
-  }
-
-  /** Hard-delete follow-up orders whose source order has a cartId (cart-graduated). */
-  private async purgeCartOriginFollowUps() {
-    // Find follow-up order IDs whose source order has a non-null cartId
-    const cartFollowUps = await this.db
-      .select({ id: schema.followUpOrders.id })
-      .from(schema.followUpOrders)
-      .innerJoin(schema.orders, eq(schema.followUpOrders.sourceOrderId, schema.orders.id))
-      .where(sql`${schema.orders.cartId} IS NOT NULL`);
-
-    if (cartFollowUps.length === 0) return;
-
-    const ids = cartFollowUps.map((r) => r.id);
-    this.logger.log(`Purging ${ids.length} cart-originated follow-up orders`);
-
-    // Delete children first (FK constraints), then the follow-up orders
-    await this.db.delete(schema.followUpOrderTimelineEvents).where(inArray(schema.followUpOrderTimelineEvents.followUpOrderId, ids));
-    await this.db.delete(schema.followUpOrderItems).where(inArray(schema.followUpOrderItems.followUpOrderId, ids));
-    await this.db.delete(schema.followUpOrders).where(inArray(schema.followUpOrders.id, ids));
-
-    this.logger.log(`Purged ${ids.length} cart-originated follow-up orders`);
   }
 
   /**
@@ -455,8 +430,6 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       eq(schema.orders.frozenForFollowUp, false),
       eq(schema.orders.isFollowUp, false),
       isNull(schema.orders.deletedAt),
-      // Exclude cart-graduated orders — they have their own pipeline
-      isNull(schema.orders.cartId),
     ];
 
     // Optional upper age bound — only match orders newer than maxAgeDays
@@ -685,8 +658,6 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           eq(schema.orders.frozenForFollowUp, false),
           eq(schema.orders.isFollowUp, false),
           isNull(schema.orders.deletedAt),
-          // Exclude cart-graduated orders — they have their own pipeline
-          isNull(schema.orders.cartId),
         ];
         if (rule.maxAgeDays) {
           const maxCutoff = new Date();
