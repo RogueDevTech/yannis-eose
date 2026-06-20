@@ -102,6 +102,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     total: data?.orderPipeline?.total ?? 0,
     statusCounts: data?.orderPipeline?.statusCounts ?? {},
     offlineCount: data?.orderPipeline?.offlineCount ?? 0,
+    csStatusCounts: (data?.orderPipeline as Record<string, unknown> | undefined)?.csStatusCounts as Record<string, number> ?? {},
   };
   // Deliveries per Brand + Stock Available per Product removed 2026-05-19 per
   // CEO directive; backend still returns them but this view no longer renders.
@@ -254,78 +255,97 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 ]}
               />
             </div>
-            <div>
-              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-                CS Order Funnel
-              </h2>
-              <OverviewStatStrip
-                mobileGrid
-                tileClassName="!py-2.5"
-                items={[
-                  {
-                    label: 'Total',
-                    value: ordersTotal,
-                    valueClassName: 'text-app-fg',
-                    to: salesLink(),
-                  },
-                  {
-                    label: 'Unassigned',
-                    value: unassigned,
-                    valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-                    to: salesLink({ status: 'UNPROCESSED' }),
-                  },
-                  {
-                    label: 'Assigned',
-                    value: assigned,
-                    valueClassName: 'text-info-600 dark:text-info-400',
-                    to: salesLink({ status: 'CS_ASSIGNED' }),
-                  },
-                  {
-                    label: 'Unconfirmed',
-                    value: unconfirmed,
-                    valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                    to: salesLink({ status: 'CS_ENGAGED' }),
-                  },
-                  {
-                    label: 'Confirmed',
-                    value: confirmed,
-                    valueClassName: 'text-brand-600 dark:text-brand-400',
-                    to: salesLink({ status: 'CONFIRMED' }),
-                  },
-                  {
-                    label: 'Delivered',
-                    value: delivered,
-                    valueClassName: 'text-success-600 dark:text-success-400',
-                    to: salesLink({ status: 'DELIVERED' }),
-                  },
-                  {
-                    label: 'CR',
-                    value: pct(confirmationRate),
-                    valueClassName: confirmationRateColorClass(confirmationRate),
-                    title: 'Confirmation Rate — confirmed-or-beyond / total',
-                  },
-                  {
-                    label: 'DR',
-                    value: pct(deliveryRate),
-                    valueClassName: deliveryRateColorClass(deliveryRate),
-                    title: 'Delivery Rate — delivered / total',
-                  },
-                  {
-                    label: 'Deleted',
-                    value: deleted,
-                    valueClassName: 'text-danger-600 dark:text-danger-400',
-                    to: salesLink({ status: 'DELETED' }),
-                  },
-                  {
-                    label: 'Offline',
-                    value: offlineCount,
-                    valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
-                    title: 'Orders created manually via offline order',
-                    to: salesLink({ orderSource: 'offline' }),
-                  },
-                ]}
-              />
-            </div>
+            {(() => {
+              const csSc = orderPipeline.csStatusCounts;
+              const csTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
+              const csUnassigned = csSc['UNPROCESSED'] ?? 0;
+              const csAssigned = csSc['CS_ASSIGNED'] ?? 0;
+              const csUnconfirmed = csSc['CS_ENGAGED'] ?? 0;
+              const csConfirmed =
+                (csSc['CONFIRMED'] ?? 0) +
+                (csSc['AGENT_ASSIGNED'] ?? 0) +
+                (csSc['DISPATCHED'] ?? 0) +
+                (csSc['IN_TRANSIT'] ?? 0);
+              const csDelivered = (csSc['DELIVERED'] ?? 0) + (csSc['REMITTED'] ?? 0);
+              const csDeleted = csSc['DELETED'] ?? 0;
+              const csConfirmedAndBeyond = csConfirmed + csDelivered;
+              const csCR = csTotal > 0 ? (csConfirmedAndBeyond / csTotal) * 100 : 0;
+              const csDR = csTotal > 0 ? (csDelivered / csTotal) * 100 : 0;
+              return (
+                <div>
+                  <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                    CS Order Funnel
+                  </h2>
+                  <OverviewStatStrip
+                    mobileGrid
+                    tileClassName="!py-2.5"
+                    items={[
+                      {
+                        label: 'Total',
+                        value: csTotal,
+                        valueClassName: 'text-app-fg',
+                        to: salesLink(),
+                      },
+                      {
+                        label: 'Unassigned',
+                        value: csUnassigned,
+                        valueClassName: csUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                        to: salesLink({ status: 'UNPROCESSED' }),
+                      },
+                      {
+                        label: 'Assigned',
+                        value: csAssigned,
+                        valueClassName: 'text-info-600 dark:text-info-400',
+                        to: salesLink({ status: 'CS_ASSIGNED' }),
+                      },
+                      {
+                        label: 'Unconfirmed',
+                        value: csUnconfirmed,
+                        valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                        to: salesLink({ status: 'CS_ENGAGED' }),
+                      },
+                      {
+                        label: 'Confirmed',
+                        value: csConfirmed,
+                        valueClassName: 'text-brand-600 dark:text-brand-400',
+                        to: salesLink({ status: 'CONFIRMED' }),
+                      },
+                      {
+                        label: 'Delivered',
+                        value: csDelivered,
+                        valueClassName: 'text-success-600 dark:text-success-400',
+                        to: salesLink({ status: 'DELIVERED' }),
+                      },
+                      {
+                        label: 'CR',
+                        value: pct(csCR),
+                        valueClassName: confirmationRateColorClass(csCR),
+                        title: 'Confirmation Rate — confirmed-or-beyond / total (includes offline)',
+                      },
+                      {
+                        label: 'DR',
+                        value: pct(csDR),
+                        valueClassName: deliveryRateColorClass(csDR),
+                        title: 'Delivery Rate — delivered / total (includes offline)',
+                      },
+                      {
+                        label: 'Deleted',
+                        value: csDeleted,
+                        valueClassName: 'text-danger-600 dark:text-danger-400',
+                        to: salesLink({ status: 'DELETED' }),
+                      },
+                      {
+                        label: 'Offline',
+                        value: offlineCount,
+                        valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+                        title: 'Orders created manually via offline order',
+                        to: salesLink({ orderSource: 'offline' }),
+                      },
+                    ]}
+                  />
+                </div>
+              );
+            })()}
           </div>
         );
       })()}

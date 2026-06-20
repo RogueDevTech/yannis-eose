@@ -62,6 +62,7 @@ async function _ceoOverviewFetch(params: {
   const [
     fastProfitResult,
     statusCountsWhenDated,
+    csStatusCountsResult,
     supplementaryCounts,
     invoiceSummary,
     marketingMetrics,
@@ -76,8 +77,10 @@ async function _ceoOverviewFetch(params: {
       ? Promise.resolve(null)
       : financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
     (hasDateRange || isBranchScoped)
-      ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false).catch(logErr('statusCounts'))
+      ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true).catch(logErr('statusCounts'))
       : Promise.resolve(undefined),
+    // CS funnel: servicing branch scope, includes offline orders, excludes follow-up
+    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false).catch(logErr('csStatusCounts')),
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
     financeService!.getInvoiceSummary(effectiveBranchIds).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
@@ -123,14 +126,15 @@ async function _ceoOverviewFetch(params: {
     };
   }
 
-  // Status counts: when date range or branch-scoped use explicit query; when all-time global use fast path MVs
+  // Status counts: always use live query with excludeOffline=true so the
+  // Marketing Order Funnel matches the Marketing Orders page exactly.
+  // The MV fast path (mv_order_pipeline) includes offline orders and cannot
+  // be used here without a migration to add an order_source filter.
   let statusCounts: Record<string, number>;
-  if (hasDateRange) {
+  if (hasDateRange || isBranchScoped) {
     statusCounts = (statusCountsWhenDated ?? {}) as Record<string, number>;
-  } else if (!branchId && fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
-    statusCounts = fastProfitResult.statusCounts as Record<string, number>;
   } else {
-    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false).catch(logErr('statusCounts'));
+    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true).catch(logErr('statusCounts'));
     statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
   }
 
@@ -198,6 +202,8 @@ async function _ceoOverviewFetch(params: {
       returned: returnedOrders,
       statusCounts,
       offlineCount: supplementaryCounts.offlineCount,
+      // CS funnel: includes offline orders, scoped by servicing branch
+      csStatusCounts: (csStatusCountsResult ?? {}) as Record<string, number>,
     },
     marketing: {
       totalSpend: safeMarketingMetrics.totalSpend ?? 0,
