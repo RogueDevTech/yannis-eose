@@ -1,22 +1,25 @@
 -- Expense category enum + column on ad_spend_logs
 -- Only AD_SPEND rows feed into CPA/ROAS; other categories deduct from balance only.
 
-CREATE TYPE "expense_category" AS ENUM (
-  'AD_SPEND',
-  'AD_ACCOUNT',
-  'RECRUITMENT_AD',
-  'WHATSAPP_CAMPAIGN',
-  'UGC_PRODUCTION'
-);
+DO $$ BEGIN
+  CREATE TYPE "expense_category" AS ENUM (
+    'AD_SPEND',
+    'AD_ACCOUNT',
+    'RECRUITMENT_AD',
+    'WHATSAPP_CAMPAIGN',
+    'UGC_PRODUCTION'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 ALTER TABLE "ad_spend_logs"
-  ADD COLUMN "category" "expense_category" NOT NULL DEFAULT 'AD_SPEND',
-  ADD COLUMN "description" text;
+  ADD COLUMN IF NOT EXISTS "category" "expense_category" NOT NULL DEFAULT 'AD_SPEND',
+  ADD COLUMN IF NOT EXISTS "description" text;
 
 -- Sync history table
 ALTER TABLE "ad_spend_logs_history"
-  ADD COLUMN "category" "expense_category",
-  ADD COLUMN "description" text;
+  ADD COLUMN IF NOT EXISTS "category" "expense_category",
+  ADD COLUMN IF NOT EXISTS "description" text;
 
 -- Recreate MV to only include AD_SPEND category in CPA/profit calculations
 DROP MATERIALIZED VIEW IF EXISTS mv_ad_spend_summary;

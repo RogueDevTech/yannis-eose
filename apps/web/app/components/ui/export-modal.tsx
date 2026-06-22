@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import jsPDF from 'jspdf';
 import { Button } from './button';
@@ -108,7 +108,12 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
   const [exportMinRate, setExportMinRate] = useState('');
   const [inventoryStatus, setInventoryStatus] = useState('');
   const [inventoryMaxAvailable, setInventoryMaxAvailable] = useState('');
+  const [exportDuplicateType, setExportDuplicateType] = useState('');
+  const [exportSearch, setExportSearch] = useState('');
   const lastHandledFetcherData = useRef<unknown>(null);
+
+  // Preview state — null = config step, data = preview step
+  const [preview, setPreview] = useState<{ filename: string; csvContent: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -130,8 +135,14 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     setExportMinRate('');
     setInventoryStatus('');
     setInventoryMaxAvailable('');
-    lastHandledFetcherData.current = null;
-  }, [open, config.defaultColumns, config.reportKey]);
+    setExportDuplicateType('');
+    setExportSearch('');
+    setPreview(null);
+    // Mark any stale fetcher.data as already handled so re-opening the modal
+    // doesn't re-trigger a download from a previous export.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    lastHandledFetcherData.current = fetcher.data ?? null;
+  }, [open, config.defaultColumns, config.reportKey]); // intentionally excludes fetcher.data
 
   const columnsJson = useMemo(() => JSON.stringify(selectedColumns), [selectedColumns]);
 
@@ -152,6 +163,13 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
       if (exportProductId) base.productId = exportProductId;
       if (exportCampaignId) base.campaignId = exportCampaignId;
       if (exportMediaBuyerId) base.mediaBuyerId = exportMediaBuyerId;
+    }
+    if (config.reportKey === 'cross_funnel') {
+      if (exportProductId) base.productId = exportProductId;
+      if (exportCampaignId) base.campaignId = exportCampaignId;
+      if (exportMediaBuyerId) base.mediaBuyerId = exportMediaBuyerId;
+      if (exportDuplicateType) base.duplicateType = exportDuplicateType;
+      if (exportSearch) base.search = exportSearch;
     }
     if (config.reportKey === 'logistics_partners') {
       if (exportProductId) base.productId = exportProductId;
@@ -178,30 +196,69 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     exportMinRate,
     inventoryStatus,
     inventoryMaxAvailable,
+    exportDuplicateType,
+    exportSearch,
   ]);
 
   const isExporting = fetcher.state === 'submitting' || fetcher.state === 'loading';
 
+  // Simulated progress — smoothly fills while the server generates the report.
+  const [simulatedPct, setSimulatedPct] = useState(0);
+  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clearProgressInterval = useCallback(() => {
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isExporting) {
+      setSimulatedPct(0);
+      clearProgressInterval();
+      progressInterval.current = setInterval(() => {
+        setSimulatedPct((prev) => {
+          // Fast to 60%, slow to 85%, crawl to 95% — never reaches 100% until server responds
+          if (prev < 60) return prev + 3;
+          if (prev < 85) return prev + 1;
+          if (prev < 95) return prev + 0.3;
+          return prev;
+        });
+      }, 200);
+    } else {
+      clearProgressInterval();
+      if (simulatedPct > 0) setSimulatedPct(100);
+    }
+    return clearProgressInterval;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExporting, clearProgressInterval]);
+
+  // When fetcher returns data, show preview instead of auto-downloading
   useEffect(() => {
     if (fetcher.state !== 'idle' || !fetcher.data) return;
     if (fetcher.data === lastHandledFetcherData.current) return;
     lastHandledFetcherData.current = fetcher.data;
     const d = fetcher.data;
     if (d.ok) {
-      if (format === 'csv') {
-        triggerCsvDownload(d.filename, d.csvContent);
-      } else if (format === 'pdf') {
-        toPdfFromCsv(d.filename, d.csvContent);
-      } else {
-        toXlsxFromCsv(d.filename, d.csvContent).catch(() => {
-          toast.error('Export failed', 'Could not generate XLSX file');
-        });
-      }
-      onClose();
+      setPreview({ filename: d.filename, csvContent: d.csvContent });
     } else if (!open) {
       toast.error('Export failed', d.error);
     }
-  }, [fetcher.state, fetcher.data, format, onClose, toast, open]);
+  }, [fetcher.state, fetcher.data, toast, open]);
+
+  const handleDownload = () => {
+    if (!preview) return;
+    if (format === 'csv') {
+      triggerCsvDownload(preview.filename, preview.csvContent);
+    } else if (format === 'pdf') {
+      toPdfFromCsv(preview.filename, preview.csvContent);
+    } else {
+      toXlsxFromCsv(preview.filename, preview.csvContent).catch(() => {
+        toast.error('Export failed', 'Could not generate XLSX file');
+      });
+    }
+    onClose();
+  };
 
   const mediaBuyerOptions = useMemo(() => {
     if (!picklists?.mediaBuyers) return [];
@@ -228,8 +285,62 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     return [{ value: '', label: 'Use page filter / all' }, ...picklists.recipients.map((r) => ({ value: r.id, label: r.name }))];
   }, [picklists?.recipients]);
 
+  // Preview step — compact summary
+  if (preview) {
+    const totalRows = preview.csvContent.split('\n').filter((l) => l.trim()).length - 1;
+    const columnCount = selectedColumns.length;
+    const fileSizeKb = Math.round(new Blob([preview.csvContent]).size / 1024);
+    return (
+      <Modal open={open} onClose={onClose} maxWidth="max-w-sm" contentClassName="p-6 space-y-5">
+        <div className="text-center space-y-2">
+          <div className="mx-auto w-12 h-12 rounded-full bg-success-100 dark:bg-success-900/30 flex items-center justify-center">
+            <svg className="w-6 h-6 text-success-600 dark:text-success-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-app-fg">Report Ready</h3>
+          <p className="text-sm text-app-fg-muted">{preview.filename}</p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-lg border border-app-border bg-app-hover/40 p-3 text-center">
+            <p className="text-lg font-bold tabular-nums text-app-fg">{totalRows.toLocaleString()}</p>
+            <p className="text-micro font-medium uppercase tracking-wider text-app-fg-muted mt-0.5">Rows</p>
+          </div>
+          <div className="rounded-lg border border-app-border bg-app-hover/40 p-3 text-center">
+            <p className="text-lg font-bold tabular-nums text-app-fg">{columnCount}</p>
+            <p className="text-micro font-medium uppercase tracking-wider text-app-fg-muted mt-0.5">Columns</p>
+          </div>
+          <div className="rounded-lg border border-app-border bg-app-hover/40 p-3 text-center">
+            <p className="text-lg font-bold tabular-nums text-app-fg">{fileSizeKb < 1 ? '<1' : fileSizeKb}</p>
+            <p className="text-micro font-medium uppercase tracking-wider text-app-fg-muted mt-0.5">KB</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <Button type="button" variant="secondary" size="sm" onClick={() => setPreview(null)}>
+            ← Back
+          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleDownload}
+              className="bg-gradient-to-r from-brand-600 to-brand-500 border border-brand-700/30 shadow-md shadow-brand-900/20 hover:from-brand-500 hover:to-brand-400"
+            >
+              Download {format.toUpperCase()}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal open={open} onClose={onClose} maxWidth="max-w-lg" contentClassName="p-6 space-y-4">
+    <Modal open={open} onClose={onClose} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 max-h-[85dvh] overflow-y-auto">
       <div>
         <h3 className="text-lg font-semibold text-app-fg">{config.title}</h3>
         <p className="text-sm text-app-fg-muted mt-1">{config.description}</p>
@@ -254,6 +365,31 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
               { value: 'xlsx', label: 'XLSX (Excel)' },
             ]}
           />
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Date range</p>
+          <FormSelect
+            value={preset}
+            onChange={(e) => setPreset(e.target.value as (typeof EXPORT_DATE_PRESET_OPTIONS)[number]['value'])}
+            options={EXPORT_DATE_PRESET_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          />
+          {preset === 'custom' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <TextInput
+                type="date"
+                label="Start date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <TextInput
+                type="date"
+                label="End date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+          )}
         </div>
 
         {config.reportKey === 'cs_orders' && (
@@ -331,6 +467,53 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
               onChange={(e) => setExportMinAmount(e.target.value)}
               placeholder="Leave blank for no minimum"
             />
+          </div>
+        )}
+
+        {config.reportKey === 'cross_funnel' && (
+          <div className="space-y-3 rounded-md border border-app-border bg-app-hover/40 p-3">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Filters (optional)</p>
+            <FormSelect
+              label="Duplicate type"
+              value={exportDuplicateType}
+              onChange={(e) => setExportDuplicateType(e.target.value)}
+              options={[
+                { value: '', label: 'All types' },
+                { value: 'resubmission', label: 'Resubmission' },
+                { value: 'same-mb', label: 'Same MB' },
+                { value: 'cross-funnel', label: 'Cross-funnel' },
+              ]}
+            />
+            {mediaBuyerOptions.length > 0 && (
+              <SearchableSelect
+                label="Media buyer"
+                value={exportMediaBuyerId}
+                onChange={setExportMediaBuyerId}
+                options={mediaBuyerOptions}
+                placeholder="All media buyers"
+                controlSize="sm"
+              />
+            )}
+            {productOptions.length > 0 && (
+              <SearchableSelect
+                label="Product"
+                value={exportProductId}
+                onChange={setExportProductId}
+                options={productOptions}
+                placeholder="All products"
+                controlSize="sm"
+              />
+            )}
+            {campaignOptions.length > 0 && (
+              <SearchableSelect
+                label="Form"
+                value={exportCampaignId}
+                onChange={setExportCampaignId}
+                options={campaignOptions}
+                placeholder="All forms"
+                controlSize="sm"
+              />
+            )}
           </div>
         )}
 
@@ -529,33 +712,9 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
           </div>
         </div>
 
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Date range</p>
-          <FormSelect
-            value={preset}
-            onChange={(e) => setPreset(e.target.value as (typeof EXPORT_DATE_PRESET_OPTIONS)[number]['value'])}
-            options={EXPORT_DATE_PRESET_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-          />
-          {preset === 'custom' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <TextInput
-                type="date"
-                label="Start date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-              <TextInput
-                type="date"
-                label="End date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-          )}
-          <input type="hidden" name="datePreset" value={preset} />
-          <input type="hidden" name="startDate" value={startDate} />
-          <input type="hidden" name="endDate" value={endDate} />
-        </div>
+        <input type="hidden" name="datePreset" value={preset} />
+        <input type="hidden" name="startDate" value={startDate} />
+        <input type="hidden" name="endDate" value={endDate} />
 
         <label className="flex items-center gap-2 cursor-pointer">
           <Checkbox checked={includeCurrentFilters} onChange={() => setIncludeCurrentFilters((v) => !v)} />
@@ -563,11 +722,20 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
         </label>
 
         {isExporting && (
-          <div className="space-y-1.5">
-            <p className="text-xs text-app-fg-muted">Generating file…</p>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-border">
-              <div className="h-full w-full max-w-[40%] animate-pulse rounded-full bg-brand-500" />
+          <div className="space-y-2 rounded-md border border-brand-200 bg-brand-50/50 p-3 dark:border-brand-800 dark:bg-brand-900/20">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-app-fg">Generating report…</p>
+              <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
+                Processing
+              </span>
             </div>
+            <div className="h-2.5 w-full rounded-full bg-app-hover overflow-hidden">
+              <div
+                className="h-full rounded-full bg-brand-500 transition-all duration-300 ease-out"
+                style={{ width: `${Math.round(simulatedPct)}%` }}
+              />
+            </div>
+            <p className="text-xs text-app-fg-muted text-right tabular-nums">{Math.round(simulatedPct)}%</p>
           </div>
         )}
 
