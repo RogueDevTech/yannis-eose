@@ -4207,8 +4207,11 @@ export class MarketingService {
       deliveredRevenue,
       confirmedOrders,
       confirmationRate,
-      cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
-      trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
+      // CPA uses approved spend only — pending spend is unverified and would
+      // inflate the metric, confusing the overview strip where "Ad Spend" shows
+      // approved-only next to CPA.
+      cpa: totalOrders > 0 ? approvedSpend / totalOrders : 0,
+      trueRoas: approvedSpend > 0 ? deliveredRevenue / approvedSpend : 0,
       // DR = delivered cohort / total cohort (DELETED-excluded) — same
       // denominator as CR so the two read as a funnel: of every N orders
       // taken in period, X% reached confirmed-or-beyond and Y% delivered.

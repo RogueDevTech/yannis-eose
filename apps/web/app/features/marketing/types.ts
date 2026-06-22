@@ -35,6 +35,8 @@ export interface FundingBalanceRow {
   confirmedOrders?: number;
   /** Orders delivered + remitted */
   deliveredOrders?: number;
+  /** AD_SPEND-only total (drives CPA/ROAS), when merged from leaderboard */
+  adSpend?: number;
   /** Ad spend / total orders (period), when merged from leaderboard */
   cpa?: number;
   trueRoas?: number;

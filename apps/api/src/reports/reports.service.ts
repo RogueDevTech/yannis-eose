@@ -132,6 +132,8 @@ export class ReportsService {
         return this.exportMarketingOrders(input as Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user, currentBranchId, date, effectiveBranchIds);
       case 'marketing_team':
         return this.exportMarketingTeam(input as Extract<ExportReportInput, { reportKey: 'marketing_team' }>, user, currentBranchId, date, effectiveBranchIds);
+      case 'cross_funnel':
+        return this.exportCrossFunnel(input as Extract<ExportReportInput, { reportKey: 'cross_funnel' }>, user, currentBranchId, date, effectiveBranchIds);
       case 'disbursements':
         return this.exportDisbursements(input as Extract<ExportReportInput, { reportKey: 'disbursements' }>, user, currentBranchId, date);
       case 'inventory':
@@ -451,6 +453,102 @@ export class ReportsService {
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `marketing-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
+  }
+
+  private async exportCrossFunnel(
+    input: Extract<ExportReportInput, { reportKey: 'cross_funnel' }>,
+    user: SessionUser,
+    currentBranchId: string | null,
+    date: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    this.ensureExportPermission(user, 'marketing.read', 'marketing.export');
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+
+    const allRows: Array<{
+      customerName: string;
+      duplicateType: string;
+      mediaBuyer: string;
+      originalMediaBuyer: string;
+      product: string;
+      campaign: string;
+      originalCampaign: string;
+      originalOrderId: string;
+      originalOrderStatus: string;
+      originalOrderAmount: string;
+      attemptedAt: string;
+      originalOrderCreatedAt: string;
+    }> = [];
+
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const result = await this.marketingService.listMyCrossFunnelAttempts(
+        user,
+        {
+          page,
+          limit: EXPORT_PAGE_LIMIT,
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+          ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
+          ...(input.filters?.campaignId ? { campaignId: input.filters.campaignId } : {}),
+          ...(input.filters?.mediaBuyerId ? { mediaBuyerId: input.filters.mediaBuyerId } : {}),
+          ...(input.filters?.search ? { search: input.filters.search } : {}),
+          ...(input.filters?.duplicateType ? { duplicateType: input.filters.duplicateType } : {}),
+        },
+        currentBranchId,
+        effectiveBranchIds,
+      );
+      const batch = result.rows ?? [];
+
+      for (const r of batch) {
+        // Determine duplicate type using same logic as the frontend
+        let duplicateType = 'Cross-funnel';
+        if (r.campaignId && r.originalCampaignId && r.campaignId === r.originalCampaignId) {
+          duplicateType = 'Resubmission';
+        } else if (r.originalMediaBuyerId && r.mediaBuyerId === r.originalMediaBuyerId) {
+          duplicateType = 'Same MB';
+        }
+
+        allRows.push({
+          customerName: r.customerName ?? '',
+          duplicateType,
+          mediaBuyer: r.mediaBuyerName ?? '—',
+          originalMediaBuyer: r.originalMediaBuyerName ?? '—',
+          product: r.productName ?? '—',
+          campaign: r.campaignName ?? '—',
+          originalCampaign: r.originalCampaignName ?? '—',
+          originalOrderId: r.originalOrderId ?? '—',
+          originalOrderStatus: r.originalOrderStatus ?? '—',
+          originalOrderAmount: r.originalOrderAmount ? String(r.originalOrderAmount) : '—',
+          attemptedAt: r.attemptedAt ? new Date(r.attemptedAt).toLocaleString() : '—',
+          originalOrderCreatedAt: r.originalOrderCreatedAt ? new Date(r.originalOrderCreatedAt).toLocaleString() : '—',
+        });
+      }
+
+      if (batch.length < EXPORT_PAGE_LIMIT) break;
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Export is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} rows. Narrow your filters and try again.`,
+        });
+      }
+    }
+
+    const columns = [
+      { key: 'customerName', label: 'Customer' },
+      { key: 'duplicateType', label: 'Duplicate Type' },
+      { key: 'mediaBuyer', label: 'Media Buyer (attempt)' },
+      { key: 'originalMediaBuyer', label: 'Media Buyer (original)' },
+      { key: 'product', label: 'Product' },
+      { key: 'campaign', label: 'Form (attempt)' },
+      { key: 'originalCampaign', label: 'Form (original)' },
+      { key: 'originalOrderId', label: 'Original Order ID' },
+      { key: 'originalOrderStatus', label: 'Original Status' },
+      { key: 'originalOrderAmount', label: 'Original Amount' },
+      { key: 'attemptedAt', label: 'Attempted At' },
+      { key: 'originalOrderCreatedAt', label: 'Original Order Date' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+
+    return { filename: `cross-funnel-duplicates-${date}.csv`, csvContent: toCsv(allRows, columns) };
   }
 
   private async exportDisbursements(input: Extract<ExportReportInput, { reportKey: 'disbursements' }>, user: SessionUser, currentBranchId: string | null, date: string) {

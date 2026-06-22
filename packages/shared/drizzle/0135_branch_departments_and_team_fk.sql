@@ -2,7 +2,7 @@
 -- teamless department roster via branch_department_members.
 
 CREATE TABLE branch_departments (
-  id uuid PRIMARY KEY NOT NULL DEFAULT uuidv7(),
+  id uuid PRIMARY KEY NOT NULL DEFAULT gen_random_uuid(),
   branch_id uuid NOT NULL REFERENCES branches (id) ON DELETE CASCADE,
   department branch_team_department NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),

@@ -25,6 +25,8 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { ExportModal } from '~/components/ui/export-modal';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { orderDetailHref } from '~/lib/order-detail-return';
 
 export interface CrossFunnelAttemptRow {
@@ -72,6 +74,7 @@ interface PageProps {
   campaignsForFilter?: Array<{ id: string; name: string }>;
   mediaBuyersForFilter?: Array<{ id: string; name: string }>;
   showMbFilter?: boolean;
+  canExport?: boolean;
 }
 
 type DuplicateKind = 'resubmission' | 'same-mb' | 'cross-funnel';
@@ -138,11 +141,13 @@ export function MarketingCrossFunnelPage({
   list, secondary, filters,
   productsForFilter = [], campaignsForFilter = [], mediaBuyersForFilter = [],
   showMbFilter = false,
+  canExport = false,
 }: PageProps) {
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(filters.search || '');
   const [compareRow, setCompareRow] = useState<CrossFunnelAttemptRow | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -277,7 +282,7 @@ export function MarketingCrossFunnelPage({
               ? [{
                   key: 'view-order',
                   kind: 'link' as const,
-                  label: 'View original order',
+                  label: 'Original Order',
                   to: orderDetailHref('/admin/orders', row.originalOrderId, 'marketing'),
                 }]
               : []),
@@ -302,6 +307,11 @@ export function MarketingCrossFunnelPage({
               <>
                 <PageRefreshButton />
                 <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime} chrome="pill" />
+                {canExport && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Generate report
+                  </Button>
+                )}
               </>
             }
             filters={
@@ -383,9 +393,48 @@ export function MarketingCrossFunnelPage({
                 )}
               </>
             }
+            sheet={canExport ? ({ closeSheet }) => (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-12 w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  setShowExportModal(true);
+                }}
+              >
+                Generate report
+              </Button>
+            ) : undefined}
           />
         }
       />
+
+      {canExport && (
+        <ExportModal
+          open={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          config={EXPORT_CONFIGS.cross_funnel}
+          initialFilters={{
+            ...(filters.periodAllTime
+              ? { periodAllTime: true as const }
+              : filters.startDate && filters.endDate
+                ? { startDate: filters.startDate, endDate: filters.endDate }
+                : {}),
+            ...(filters.productId ? { productId: filters.productId } : {}),
+            ...(filters.campaignId ? { campaignId: filters.campaignId } : {}),
+            ...(filters.mediaBuyerId ? { mediaBuyerId: filters.mediaBuyerId } : {}),
+            ...(filters.search ? { search: filters.search } : {}),
+            ...(filters.duplicateType ? { duplicateType: filters.duplicateType } : {}),
+          }}
+          picklists={{
+            mediaBuyers: mediaBuyersForFilter,
+            products: productsForFilter,
+            campaigns: campaignsForFilter,
+          }}
+        />
+      )}
 
       <MobileDateFilterRow
         startDate={filters.startDate}
@@ -795,7 +844,7 @@ function DuplicateCompareOverlay({
                 className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
                 onClick={onClose}
               >
-                View original order →
+                Original Order →
               </Link>
             </p>
           )}

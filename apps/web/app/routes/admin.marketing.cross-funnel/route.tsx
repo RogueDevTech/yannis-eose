@@ -2,8 +2,9 @@ import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
+import { handleExportReportAction } from '~/lib/export-report.server';
 import { MarketingCrossFunnelPage } from '~/features/marketing/MarketingCrossFunnelPage';
 import { MarketingCrossFunnelLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type {
@@ -109,7 +110,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'HEAD_OF_MARKETING' ||
     (user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true);
 
-  const crossFunnelShell = { filters, showMbFilter };
+  // Export is restricted to HoM + SuperAdmin/Admin (CEO directive)
+  const canExport =
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' ||
+    user.role === 'HEAD_OF_MARKETING' ||
+    (user.permissions ?? []).includes('marketing.export');
+
+  const crossFunnelShell = { filters, showMbFilter, canExport };
 
   const listData = (async () => {
     const [listRes, productsRes, campaignsRes, buyersRes] = await Promise.all([
@@ -173,6 +180,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
+export async function action({ request }: ActionFunctionArgs) {
+  const exportResponse = await handleExportReportAction(request);
+  if (exportResponse) return exportResponse;
+  return { ok: false, error: 'Unknown action' };
+}
+
 export default function CrossFunnelRoute() {
   const { crossFunnelShell, listData, statsPromise } = useLoaderData<typeof loader>();
   useMultiDeferredCacheSync({
@@ -190,6 +203,7 @@ export default function CrossFunnelRoute() {
           campaignsForFilter={d.campaignsForFilter}
           mediaBuyersForFilter={d.mediaBuyersForFilter}
           showMbFilter={d.showMbFilter}
+          canExport={crossFunnelShell.canExport}
         />
       )}
     </CachedAwait>
