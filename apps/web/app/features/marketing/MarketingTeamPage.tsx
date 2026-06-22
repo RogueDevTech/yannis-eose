@@ -134,27 +134,31 @@ function MarketingTeamMemberCard({
           valueClassName={balanceToneClass}
         />
         <MarketingTeamCompactStat label="Received" value={formatNaira(Number(member.totalReceived))} />
-        <MarketingTeamCompactStat label="Spent" value={formatNaira(Number(member.totalSpend))} />
+        <MarketingTeamCompactStat label="Total Spent" value={formatNaira(Number(member.totalSpend))} />
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         <MarketingTeamCompactStat
-          label="Orders"
-          value={member.totalOrders != null ? member.totalOrders.toLocaleString() : '—'}
-          valueClassName="text-brand-600 dark:text-brand-400"
+          label="Ad Spend"
+          value={member.adSpend != null ? formatNaira(member.adSpend) : '—'}
         />
         <MarketingTeamCompactStat
           label="CPA"
           value={member.cpa != null ? formatNaira(member.cpa) : '—'}
         />
         <MarketingTeamCompactStat
+          label="Orders"
+          value={member.totalOrders != null ? member.totalOrders.toLocaleString() : '—'}
+          valueClassName="text-brand-600 dark:text-brand-400"
+        />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <MarketingTeamCompactStat
           label="Profitability"
           value={member.profitabilityScore != null ? member.profitabilityScore.toFixed(1) : '—'}
           valueClassName={profitabilityToneClass}
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
         <MarketingTeamCompactStat
           label="Conf. rate"
           value={member.confirmationRate != null ? `${Math.round(member.confirmationRate)}%` : '—'}
@@ -237,8 +241,16 @@ const TEAM_SORT_MENU_OPTIONS = [
   },
   {
     value: 'spent',
-    label: 'Ad spend',
-    description: 'Approved ad spend in the period.',
+    label: 'Total Spent',
+    description: 'All expense categories (ad spend + operational).',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'adSpend',
+    label: 'Ad Spend',
+    description: 'Approved ad spend only (drives CPA).',
     ascLabel: 'Lowest first',
     descLabel: 'Highest first',
     defaultDir: 'desc' as const,
@@ -394,10 +406,17 @@ export function MarketingTeamPage({
       },
       {
         key: 'spent',
-        header: 'Spent',
+        header: 'Total Spent',
         align: 'right',
         nowrap: true,
         render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalSpend))}</span>,
+      },
+      {
+        key: 'adSpend',
+        header: 'Ad Spend',
+        align: 'right',
+        nowrap: true,
+        render: (m) => m.adSpend != null ? <span className="text-app-fg-muted">{formatNaira(m.adSpend)}</span> : '\u2014',
       },
       {
         key: 'cpa',
@@ -428,12 +447,16 @@ export function MarketingTeamPage({
         header: 'Confirmed',
         align: 'right',
         nowrap: true,
-        // confirmedOrders from the API is "confirmed or beyond" (includes delivered).
-        // Display only the in-pipeline portion so the column doesn't overlap with Delivered.
         render: (m) => {
-          if (m.confirmedOrders == null) return '\u2014';
-          const inPipeline = m.confirmedOrders - (m.deliveredOrders ?? 0);
-          return <span className="tabular-nums text-brand-600 dark:text-brand-400">{Math.max(0, inPipeline).toLocaleString()}</span>;
+          if (m.confirmedOrders == null && m.confirmationRate == null) return '\u2014';
+          const inPipeline = m.confirmedOrders != null ? m.confirmedOrders - (m.deliveredOrders ?? 0) : null;
+          return (
+            <span className="tabular-nums">
+              {inPipeline != null && <span className="text-brand-600 dark:text-brand-400">{Math.max(0, inPipeline).toLocaleString()}</span>}
+              {inPipeline != null && m.confirmationRate != null && <span className="text-app-fg-muted mx-0.5">·</span>}
+              {m.confirmationRate != null && <span className={confirmationRateColorClass(m.confirmationRate)}>{Math.round(m.confirmationRate)}%</span>}
+            </span>
+          );
         },
       },
       {
@@ -441,12 +464,16 @@ export function MarketingTeamPage({
         header: 'Delivered',
         align: 'right',
         nowrap: true,
-        render: (m) =>
-          m.deliveredOrders != null ? (
-            <span className="tabular-nums text-success-600 dark:text-success-400">{m.deliveredOrders.toLocaleString()}</span>
-          ) : (
-            '\u2014'
-          ),
+        render: (m) => {
+          if (m.deliveredOrders == null && m.deliveryRate == null) return '\u2014';
+          return (
+            <span className="tabular-nums">
+              {m.deliveredOrders != null && <span className="text-success-600 dark:text-success-400">{m.deliveredOrders.toLocaleString()}</span>}
+              {m.deliveredOrders != null && m.deliveryRate != null && <span className="text-app-fg-muted mx-0.5">·</span>}
+              {m.deliveryRate != null && <span className={deliveryRateColorClass(m.deliveryRate)}>{Math.round(m.deliveryRate)}%</span>}
+            </span>
+          );
+        },
       },
       {
         key: 'profitability',
@@ -459,22 +486,6 @@ export function MarketingTeamPage({
             ? `True ROAS ${m.trueRoas.toFixed(2)}x · target ${profitabilityConfig.targetRoas}x · green ≥ ${greenThreshold}x`
             : undefined,
         render: (m) => (m.profitabilityScore != null ? m.profitabilityScore.toFixed(1) : '\u2014'),
-      },
-      {
-        key: 'confirm',
-        header: 'Confirm %',
-        align: 'right',
-        nowrap: true,
-        cellClassName: (m) => confirmationRateColorClass(m.confirmationRate),
-        render: (m) => (m.confirmationRate != null ? `${Math.round(m.confirmationRate)}%` : '\u2014'),
-      },
-      {
-        key: 'delivery',
-        header: 'Delivery %',
-        align: 'right',
-        nowrap: true,
-        cellClassName: (m) => deliveryRateColorClass(m.deliveryRate),
-        render: (m) => (m.deliveryRate != null ? `${Math.round(m.deliveryRate)}%` : '\u2014'),
       },
       {
         key: 'actions',

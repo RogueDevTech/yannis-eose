@@ -989,7 +989,7 @@ export function MarketingAdSpendPage({
             mobileGrid
             items={[
               {
-                label: `Ad Spend (${metrics?.totalOrders ?? '—'})`,
+                label: `Ad Spend (${selectedCategory === 'AD_SPEND' ? (statusCounts?.APPROVED ?? '—') : '—'})`,
                 value: loading ? skeleton : <>{'\u20A6'}{Math.round(metrics?.approvedSpend ?? 0).toLocaleString()}</>,
                 valueClassName: (metrics?.approvedSpend ?? 0) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
                 onClick: () => handleOverviewClick('AD_SPEND', 'APPROVED'),
@@ -1003,7 +1003,7 @@ export function MarketingAdSpendPage({
                 active: selectedCategory === 'AD_SPEND' && selectedStatus === 'PENDING',
               },
               {
-                label: 'CPA',
+                label: `CPA (${metrics?.totalOrders ?? '—'} orders)`,
                 value: loading ? skeleton : (metrics?.cpa ?? 0) > 0 ? <>{'\u20A6'}{Math.round(metrics!.cpa).toLocaleString()}</> : '\u2014',
                 valueClassName: (metrics?.cpa ?? 0) > 0 ? cpaColorClass(metrics!.cpa) : 'text-app-fg',
                 onClick: () => handleOverviewClick('AD_SPEND', 'ALL'),

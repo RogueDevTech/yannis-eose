@@ -3815,6 +3815,31 @@ export class OrdersService {
     const sameBranchAsOrder =
       !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
 
+    // Retrack guard: backward transitions (e.g. CONFIRMED → CS_ENGAGED) are
+    // restricted to HoCS, HoLogistics, Admin, SuperAdmin, Support. A regular
+    // CS_CLOSER must not be able to roll an order back — only forward or engage.
+    const RETRACK_LIFECYCLE: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const isBackward =
+      (RETRACK_LIFECYCLE[currentStatus] ?? -1) > (RETRACK_LIFECYCLE[newStatus] ?? -1) &&
+      newStatus !== 'UNPROCESSED'; // DELETED→UNPROCESSED is a restore, handled separately
+    if (isBackward) {
+      const canRetrack =
+        actor.role === 'SUPER_ADMIN' ||
+        actor.role === 'ADMIN' ||
+        actor.role === 'SUPPORT' ||
+        actor.role === 'HEAD_OF_CS' ||
+        actor.role === 'HEAD_OF_LOGISTICS';
+      if (!canRetrack) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only Head of CS, Head of Logistics, or an Admin can retrack an order to an earlier status.',
+        });
+      }
+    }
+
     // CS-only transitions (engagement, confirm): assigned Sales closer, anyone with
     // Sales scope (`cs.scope.global`), or branch admin (`branches.manage` + same-branch).
     const csOnlyTransitions =

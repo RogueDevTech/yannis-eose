@@ -7,7 +7,7 @@
 
 @layer base {
   :root {
-    --sidebar-width: 230px;
+    --sidebar-width: 256px;
     --sidebar-collapsed-width: 72px;
     --header-height: 56px;
     --bottom-nav-height: 4.5rem;

@@ -15,7 +15,7 @@
 -- resolver can swap a row in any layer without coercion.
 
 CREATE TABLE IF NOT EXISTS branch_team_settings (
-  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   team_id uuid NOT NULL REFERENCES branch_teams(id) ON DELETE CASCADE,
   key text NOT NULL,
   value jsonb NOT NULL,

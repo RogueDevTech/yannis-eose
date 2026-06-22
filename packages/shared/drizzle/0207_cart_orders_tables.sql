@@ -92,37 +92,43 @@ CREATE TABLE IF NOT EXISTS cart_orders_history (LIKE cart_orders INCLUDING ALL);
 CREATE TABLE IF NOT EXISTS cart_order_items_history (LIKE cart_order_items INCLUDING ALL);
 
 -- Temporal triggers (capture history on update/delete)
+DROP TRIGGER IF EXISTS trg_cart_orders_capture_history ON cart_orders;
 CREATE TRIGGER trg_cart_orders_capture_history
   BEFORE UPDATE OR DELETE ON cart_orders
   FOR EACH ROW EXECUTE FUNCTION yannis_capture_history();
 
+DROP TRIGGER IF EXISTS trg_cart_order_items_capture_history ON cart_order_items;
 CREATE TRIGGER trg_cart_order_items_capture_history
   BEFORE UPDATE OR DELETE ON cart_order_items
   FOR EACH ROW EXECUTE FUNCTION yannis_capture_history();
 
 -- History table immutability triggers
+DROP TRIGGER IF EXISTS trg_cart_orders_history_immutable ON cart_orders_history;
 CREATE TRIGGER trg_cart_orders_history_immutable
   BEFORE UPDATE OR DELETE ON cart_orders_history
   FOR EACH ROW EXECUTE FUNCTION yannis_history_immutable();
 
+DROP TRIGGER IF EXISTS trg_cart_order_items_history_immutable ON cart_order_items_history;
 CREATE TRIGGER trg_cart_order_items_history_immutable
   BEFORE UPDATE OR DELETE ON cart_order_items_history
   FOR EACH ROW EXECUTE FUNCTION yannis_history_immutable();
 
 -- Actor stamp triggers
+DROP TRIGGER IF EXISTS trg_cart_orders_stamp_actor ON cart_orders;
 CREATE TRIGGER trg_cart_orders_stamp_actor
   BEFORE INSERT OR UPDATE ON cart_orders
   FOR EACH ROW EXECUTE FUNCTION yannis_stamp_actor();
 
+DROP TRIGGER IF EXISTS trg_cart_order_items_stamp_actor ON cart_order_items;
 CREATE TRIGGER trg_cart_order_items_stamp_actor
   BEFORE INSERT OR UPDATE ON cart_order_items
   FOR EACH ROW EXECUTE FUNCTION yannis_stamp_actor();
 
 -- Indexes
-CREATE INDEX idx_cart_orders_status ON cart_orders(status);
-CREATE INDEX idx_cart_orders_assigned_cs_id ON cart_orders(assigned_cs_id);
-CREATE INDEX idx_cart_orders_servicing_branch_id ON cart_orders(servicing_branch_id);
-CREATE INDEX idx_cart_orders_source_cart_id ON cart_orders(source_cart_id);
-CREATE INDEX idx_cart_orders_created_at ON cart_orders(created_at);
-CREATE INDEX idx_cart_order_items_cart_order_id ON cart_order_items(cart_order_id);
-CREATE INDEX idx_cart_order_timeline_events_cart_order_id ON cart_order_timeline_events(cart_order_id);
+CREATE INDEX IF NOT EXISTS idx_cart_orders_status ON cart_orders(status);
+CREATE INDEX IF NOT EXISTS idx_cart_orders_assigned_cs_id ON cart_orders(assigned_cs_id);
+CREATE INDEX IF NOT EXISTS idx_cart_orders_servicing_branch_id ON cart_orders(servicing_branch_id);
+CREATE INDEX IF NOT EXISTS idx_cart_orders_source_cart_id ON cart_orders(source_cart_id);
+CREATE INDEX IF NOT EXISTS idx_cart_orders_created_at ON cart_orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_cart_order_items_cart_order_id ON cart_order_items(cart_order_id);
+CREATE INDEX IF NOT EXISTS idx_cart_order_timeline_events_cart_order_id ON cart_order_timeline_events(cart_order_id);
