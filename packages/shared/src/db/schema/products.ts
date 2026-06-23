@@ -30,7 +30,12 @@ export const products = pgTable('products', {
   galleryImageUrls: jsonb('gallery_image_urls').notNull().default([]),
   offers: jsonb('offers').notNull().default([]),
   baseSalePrice: numeric('base_sale_price', { precision: 12, scale: 2 }).notNull(),
-  costPrice: numeric('cost_price', { precision: 12, scale: 2 }).notNull(),
+  /**
+   * Optional reference cost — NOT used for COGS/profit (those come from FIFO
+   * landed cost on shipment lines). Nullable as of migration 0223; the product
+   * form no longer collects it.
+   */
+  costPrice: numeric('cost_price', { precision: 12, scale: 2 }),
   category: text('category'),
   categoryId: uuid('category_id').references(() => productCategories.id),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),

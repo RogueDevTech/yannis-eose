@@ -487,6 +487,7 @@ export interface FundingLedgerLoaderData {
   total: number;
   page: number;
   totalPages: number;
+  limit: number;
   summary: {
     totalCredits: string;
     totalDebits: string;

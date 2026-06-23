@@ -301,19 +301,17 @@ export async function action({ request }: ActionFunctionArgs) {
     const categoryId = formData.get('categoryId')?.toString().trim() ?? '';
     const galleryImageUrlsRaw = formData.get('galleryImageUrls')?.toString() ?? '';
 
-    if (!name || !basePriceRaw || !costPriceRaw) {
-      return json(
-        { error: 'name, base price, and cost price are required.', rowIndex },
-        { status: 400 },
-      );
+    if (!name) {
+      return json({ error: 'name is required.', rowIndex }, { status: 400 });
     }
 
-    const basePrice = Number(basePriceRaw);
-    const costPrice = Number(costPriceRaw);
+    // Base price defaults to 0 (auto-syncs to cheapest offer); cost is optional.
+    const basePrice = basePriceRaw ? Number(basePriceRaw) : 0;
+    const costPrice = costPriceRaw ? Number(costPriceRaw) : null;
     if (!Number.isFinite(basePrice) || basePrice < 0) {
       return json({ error: 'Base price must be a number ≥ 0.', rowIndex }, { status: 400 });
     }
-    if (!Number.isFinite(costPrice) || costPrice < 0) {
+    if (costPrice != null && (!Number.isFinite(costPrice) || costPrice < 0)) {
       return json({ error: 'Cost price must be a number ≥ 0.', rowIndex }, { status: 400 });
     }
 
@@ -330,9 +328,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const body: Record<string, unknown> = {
       name,
       baseSalePrice: basePrice,
-      costPrice,
       galleryImageUrls,
     };
+    if (costPrice != null) body.costPrice = costPrice;
     if (description) body.description = description;
     if (categoryId) body.categoryId = categoryId;
     if (categoryName) body.category = categoryName;

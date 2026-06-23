@@ -123,6 +123,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const [deleteRuleTarget, setDeleteRuleTarget] = useState<Rule | null>(null);
   const [viewRule, setViewRule] = useState<Rule | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(50);
   const [breakdownLog, setBreakdownLog] = useState<SyncLog | null>(null);
   const [syncErrorModal, setSyncErrorModal] = useState<string | null>(null);
   const [syncPreview, setSyncPreview] = useState<Array<{ ruleId: string; ruleName: string; eligible: number }> | null>(null);
@@ -285,9 +286,8 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
     : historyFilter === 'with_data'
       ? allLogs.filter((l) => l.totalPulled > 0 || l.errorMessage)
       : allLogs.filter((l) => l.totalPulled === 0 && !l.errorMessage);
-  const HISTORY_PER_PAGE = 50;
-  const historyTotalPages = Math.max(1, Math.ceil(visibleLogs.length / HISTORY_PER_PAGE));
-  const paginatedLogs = visibleLogs.slice((historyPage - 1) * HISTORY_PER_PAGE, historyPage * HISTORY_PER_PAGE);
+  const historyTotalPages = Math.max(1, Math.ceil(visibleLogs.length / historyPageSize));
+  const paginatedLogs = visibleLogs.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
 
   return (
     <div className="space-y-4">
@@ -606,6 +606,8 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                   page={historyPage}
                   totalPages={historyTotalPages}
                   onPageChange={setHistoryPage}
+                  pageSize={historyPageSize}
+                  onPageSizeChange={(s) => { setHistoryPageSize(s); setHistoryPage(1); }}
                 />
               )}
             </>

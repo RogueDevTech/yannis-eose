@@ -214,7 +214,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [filterProviderHasStock, setFilterProviderHasStock] = useState('');
   const [locPage, setLocPage] = useState(1);
   const [provPage, setProvPage] = useState(1);
-  const [perPage, setPerPage] = useState(25);
+  const [perPage, setPerPage] = useState(100);
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
@@ -766,7 +766,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       <ExportModal
         open={showExport}
         onClose={() => setShowExport(false)}
-        config={EXPORT_CONFIGS.logistics_partners}
+        config={activeTab === 'locations' ? EXPORT_CONFIGS.logistics_locations : EXPORT_CONFIGS.logistics_partners}
       />
 
       {actionError && !dismissedError && !mutationModalOpen && (
@@ -1604,16 +1604,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               );
             }}
           />
-          {provTotalPages > 1 && (
-            <Pagination
-              page={provPage}
-              totalPages={provTotalPages}
-              onPageChange={setProvPage}
-              pageSizeOptions={[25, 50, 100]}
-              pageSize={perPage}
-              onPageSizeChange={(s) => { setPerPage(s); setProvPage(1); }}
-            />
-          )}
+          <Pagination
+            page={provPage}
+            totalPages={provTotalPages}
+            onPageChange={setProvPage}
+            pageSizeOptions={[25, 50, 100, 200]}
+            pageSize={perPage}
+            onPageSizeChange={(s) => { setPerPage(s); setProvPage(1); }}
+            showWhenSinglePage
+          />
         </>
       )}
 
@@ -1679,16 +1678,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               );
             }}
           />
-          {locTotalPages > 1 && (
-            <Pagination
-              page={locPage}
-              totalPages={locTotalPages}
-              onPageChange={setLocPage}
-              pageSizeOptions={[25, 50, 100]}
-              pageSize={perPage}
-              onPageSizeChange={(s) => { setPerPage(s); setLocPage(1); }}
-            />
-          )}
+          <Pagination
+            page={locPage}
+            totalPages={locTotalPages}
+            onPageChange={setLocPage}
+            pageSizeOptions={[25, 50, 100, 200]}
+            pageSize={perPage}
+            onPageSizeChange={(s) => { setPerPage(s); setLocPage(1); }}
+            showWhenSinglePage
+          />
         </>
       )}
 

@@ -378,7 +378,7 @@ export function NotificationsDeliveryLogPanel({
           <p className="text-sm text-app-fg-muted">
             Showing {((currentPage - 1) * pagination.limit) + 1}&ndash;{Math.min(currentPage * pagination.limit, pagination.total)} of {pagination.total} entries
           </p>
-          <Pagination page={currentPage} totalPages={pagination.totalPages} pageParam="logPage" />
+          <Pagination page={currentPage} totalPages={pagination.totalPages} pageParam="logPage" pageSize={pagination.limit} pageSizeParam="logPerPage" />
         </div>
       )}
 

@@ -889,6 +889,7 @@ export function LogisticsProviderDetailPage({
                 totalPages={movementsData.totalPages}
                 pageParam="movementsPage"
                 pageSize={movementsData.limit}
+                pageSizeParam="movementsPerPage"
               />
             </div>
           )}

@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, asc, ilike, count, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, desc, asc, ilike, count, sql, inArray, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { withActor } from '../common/db/with-actor';
 import { db as schema } from '@yannis/shared';
@@ -264,8 +264,9 @@ export class ProductsService {
               description: input.description ?? null,
               galleryImageUrls: input.galleryImageUrls ?? [],
               offers: [] as unknown,
-              baseSalePrice: sql`${baseSalePrice}::numeric`,
-              costPrice: sql`${input.costPrice}::numeric`,
+              baseSalePrice: sql`${baseSalePrice ?? 0}::numeric`,
+              costPrice:
+                input.costPrice != null ? sql`${input.costPrice}::numeric` : null,
               category: input.category ?? null,
               categoryId: input.categoryId ?? null,
               groupId: groupId ?? null,
@@ -291,7 +292,7 @@ export class ProductsService {
               productId: product.id,
               locationId,
               quantity: qty,
-              factoryCost: input.costPrice,
+              factoryCost: input.costPrice ?? 0,
               landingCost: 0,
             },
             actor,
@@ -675,16 +676,20 @@ export class ProductsService {
   /**
    * Get distinct categories for filter dropdowns.
    */
-  async getCategories(viewerId: string, viewerRole: string) {
+  async getCategories(viewerId: string, viewerRole: string, groupId?: string | null) {
     const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
     if (allowedProductIds !== null && allowedProductIds.length === 0) {
       return [];
     }
 
-    const scopeClause =
-      allowedProductIds !== null
-        ? and(eq(schema.products.status, 'ACTIVE'), inArray(schema.products.id, allowedProductIds))
-        : eq(schema.products.status, 'ACTIVE');
+    const conditions = [eq(schema.products.status, 'ACTIVE')];
+    if (allowedProductIds !== null) {
+      conditions.push(inArray(schema.products.id, allowedProductIds));
+    }
+    if (groupId) {
+      conditions.push(or(eq(schema.products.groupId, groupId), isNull(schema.products.groupId))!);
+    }
+    const scopeClause = and(...conditions);
 
     const rows = await this.db
       .selectDistinct({ category: schema.products.category })

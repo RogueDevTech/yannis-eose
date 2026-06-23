@@ -99,13 +99,11 @@ export function WarehousesPage({
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
-  const [coordinates, setCoordinates] = useState('');
 
   // Edit modal — `editTarget` is the warehouse row being edited (null = closed).
   const [editTarget, setEditTarget] = useState<WarehouseRow | null>(null);
   const [editName, setEditName] = useState('');
   const [editAddress, setEditAddress] = useState('');
-  const [editCoordinates, setEditCoordinates] = useState('');
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Warehouse saved',
@@ -121,7 +119,6 @@ export function WarehousesPage({
     setShowCreate(false);
     setName('');
     setAddress('');
-    setCoordinates('');
     setEditTarget(null);
   });
 
@@ -135,7 +132,7 @@ export function WarehousesPage({
         id: optimisticId('warehouse'),
         name: draftName,
         address: draftAddress,
-        coordinates: fd.get('coordinates')?.toString().trim() || null,
+        coordinates: null,
         dispatchLocked: false,
         status: 'ACTIVE',
         createdAt: new Date().toISOString(),
@@ -159,7 +156,6 @@ export function WarehousesPage({
         patch: {
           name: draftName,
           address: draftAddress,
-          coordinates: fd.get('coordinates')?.toString().trim() || null,
         },
       },
     ];
@@ -182,7 +178,6 @@ export function WarehousesPage({
     fd.set('intent', 'createWarehouse');
     fd.set('name', name.trim());
     fd.set('address', address.trim());
-    fd.set('coordinates', coordinates.trim());
     fetcher.submit(fd, { method: 'post', action: '/admin/inventory/warehouses' });
   };
 
@@ -190,7 +185,6 @@ export function WarehousesPage({
     setEditTarget(w);
     setEditName(w.name);
     setEditAddress(w.address);
-    setEditCoordinates(w.coordinates ?? '');
   };
 
   const submitEdit = () => {
@@ -200,7 +194,6 @@ export function WarehousesPage({
     fd.set('warehouseId', editTarget.id);
     fd.set('name', editName.trim());
     fd.set('address', editAddress.trim());
-    fd.set('coordinates', editCoordinates.trim());
     fetcher.submit(fd, { method: 'post', action: '/admin/inventory/warehouses' });
   };
 
@@ -211,9 +204,6 @@ export function WarehousesPage({
       render: (w) => (
         <div className="flex flex-col min-w-0">
           <span className="font-medium text-app-fg truncate">{w.name}</span>
-          {w.coordinates ? (
-            <span className="text-xs text-app-fg-muted truncate">{w.coordinates}</span>
-          ) : null}
         </div>
       ),
     },
@@ -312,70 +302,67 @@ export function WarehousesPage({
     const sortIsDefault = sortBy === 'createdAt' && sortDir === 'desc';
     return (
       <ToolbarFiltersCollapsible
+        className="!border-0 !px-0 md:!px-4"
         searchRow={
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
-            <Form method="get" replace className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <SearchInput
-                name="search"
-                defaultValue={search}
-                placeholder="Search by warehouse name…"
-                className="sm:max-w-xs"
-                aria-label="Search warehouses"
-                withSubmitButton
-                wrapperClassName="w-full sm:max-w-xs"
+          <Form method="get" replace className="min-w-0 flex-1">
+            <SearchInput
+              name="search"
+              defaultValue={search}
+              placeholder="Search by warehouse name…"
+              aria-label="Search warehouses"
+              withSubmitButton
+              wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
+            />
+            <input type="hidden" name="page" value="1" />
+          </Form>
+        }
+        desktopInlineFilters={
+          <div className="relative">
+            {!sortIsDefault && (
+              <FilterDismiss
+                onClear={() => updateWarehouseSort('createdAt', 'desc')}
               />
-              <input type="hidden" name="page" value="1" />
-            </Form>
-            <div className="hidden md:inline-flex">
-              <div className="relative">
-                {!sortIsDefault && (
-                  <FilterDismiss
-                    onClear={() => updateWarehouseSort('createdAt', 'desc')}
-                  />
-                )}
-                <SortMenu
-                  value={{ sortBy, sortDir }}
-                  onChange={(next) =>
-                    updateWarehouseSort(
-                      next.sortBy as 'createdAt' | 'name' | 'available',
-                      next.sortDir,
-                    )
-                  }
-                  defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
-                  options={[
-                    {
-                      value: 'createdAt',
-                      label: 'Recently added',
-                      description: 'When the warehouse was created.',
-                      ascLabel: 'Oldest first',
-                      descLabel: 'Newest first',
-                      defaultDir: 'desc',
-                    },
-                    {
-                      value: 'name',
-                      label: 'Name',
-                      description: 'Alphabetical.',
-                      ascLabel: 'A → Z',
-                      descLabel: 'Z → A',
-                      defaultDir: 'asc',
-                    },
-                    {
-                      value: 'available',
-                      label: 'Available units',
-                      description: 'Stock count minus reserved units across the warehouse.',
-                      ascLabel: 'Lowest first',
-                      descLabel: 'Highest first',
-                      defaultDir: 'desc',
-                    },
-                  ]}
-                />
-              </div>
-            </div>
+            )}
+            <SortMenu
+              value={{ sortBy, sortDir }}
+              onChange={(next) =>
+                updateWarehouseSort(
+                  next.sortBy as 'createdAt' | 'name' | 'available',
+                  next.sortDir,
+                )
+              }
+              defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+              options={[
+                {
+                  value: 'createdAt',
+                  label: 'Recently added',
+                  description: 'When the warehouse was created.',
+                  ascLabel: 'Oldest first',
+                  descLabel: 'Newest first',
+                  defaultDir: 'desc',
+                },
+                {
+                  value: 'name',
+                  label: 'Name',
+                  description: 'Alphabetical.',
+                  ascLabel: 'A → Z',
+                  descLabel: 'Z → A',
+                  defaultDir: 'asc',
+                },
+                {
+                  value: 'available',
+                  label: 'Available units',
+                  description: 'Stock count minus reserved units across the warehouse.',
+                  ascLabel: 'Lowest first',
+                  descLabel: 'Highest first',
+                  defaultDir: 'desc',
+                },
+              ]}
+            />
           </div>
         }
-        desktopInlineFilters={<div />}
         hideMobileSheet
-        sheetFilterBody={null}
+        sheetFilterBody={<div />}
         badgeCount={sortIsDefault ? 0 : 1}
         sheetTitle="Actions"
       />
@@ -476,7 +463,7 @@ export function WarehousesPage({
 
       {/* Card chrome hidden on mobile — listing goes edge-to-edge. Desktop keeps the card wrapper. */}
       <div className="md:card md:p-4">
-        <div className="mb-4">{toolbar}</div>
+        <div className="list-panel mb-4">{toolbar}</div>
         <div>
           <TableLoadingOverlay show={isRefetching} minHeightClassName={display.length === 0 ? 'min-h-[14rem]' : 'min-h-[12rem]'}>
             {display.length === 0 ? (
@@ -572,7 +559,7 @@ export function WarehousesPage({
                   ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, totalWarehouses)} of ${totalWarehouses} warehouses`
                   : 'No warehouses'}
               </p>
-              <Pagination page={page} totalPages={totalPages} pageSize={limit} />
+              <Pagination page={page} totalPages={totalPages} pageSize={limit} pageSizeParam="perPage" />
             </div>
           </div>
         ) : null}
@@ -598,12 +585,6 @@ export function WarehousesPage({
                 <div>
                   <dt className="text-xs font-medium text-app-fg-muted">Address</dt>
                   <dd className="mt-0.5 text-app-fg">{previewWarehouse.address}</dd>
-                </div>
-              ) : null}
-              {previewWarehouse.coordinates ? (
-                <div>
-                  <dt className="text-xs font-medium text-app-fg-muted">Coordinates</dt>
-                  <dd className="mt-0.5 text-app-fg">{previewWarehouse.coordinates}</dd>
                 </div>
               ) : null}
               <div>
@@ -690,14 +671,6 @@ export function WarehousesPage({
               rows={2}
             />
           </FormField>
-          <FormField label="Coordinates" hint="Optional — lat,lng">
-            <TextInput
-              value={coordinates}
-              onChange={(e) => setCoordinates(e.target.value)}
-              maxLength={100}
-              placeholder="6.5244, 3.3792"
-            />
-          </FormField>
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"
@@ -734,7 +707,7 @@ export function WarehousesPage({
             Edit warehouse
           </h3>
           <p className="text-sm text-app-fg-muted">
-            Update the name, address, or coordinates of this company-owned warehouse.
+            Update the name or address of this company-owned warehouse.
           </p>
           <FormField label="Name" hint="e.g. Lagos main warehouse">
             <TextInput
@@ -750,14 +723,6 @@ export function WarehousesPage({
               onChange={(e) => setEditAddress(e.target.value)}
               maxLength={500}
               rows={2}
-            />
-          </FormField>
-          <FormField label="Coordinates" hint="Optional — lat,lng">
-            <TextInput
-              value={editCoordinates}
-              onChange={(e) => setEditCoordinates(e.target.value)}
-              maxLength={100}
-              placeholder="6.5244, 3.3792"
             />
           </FormField>
           <div className="flex justify-end gap-2 pt-1">

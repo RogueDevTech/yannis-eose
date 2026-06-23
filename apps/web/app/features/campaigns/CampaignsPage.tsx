@@ -13,6 +13,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
 function isOptionOn(value: boolean | string | undefined): boolean {
@@ -354,43 +355,65 @@ export function FormsPage({
         }
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <form className="w-full sm:w-72" onSubmit={(e) => e.preventDefault()}>
-          <SearchInput
-            value={searchQuery}
-            onChange={applySearch}
-            placeholder="Search by name or ID…"
-            wrapperClassName="w-full"
-          />
-        </form>
-        {products.length > 0 ? (
-          <div className="w-full sm:w-72">
-            <SearchableSelect
-              id="forms-product-filter"
-              value={productFilter}
-              onChange={applyProductFilter}
-              options={[
-                { value: '', label: 'All products' },
-                ...products.map((p) => ({ value: p.id, label: p.name })),
-              ]}
-              placeholder="Filter by product"
-              searchPlaceholder="Search products…"
-            />
-          </div>
-        ) : null}
-        {productFilter || searchQuery ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              applyProductFilter('');
-              applySearch('');
-            }}
-          >
-            Clear
-          </Button>
-        ) : null}
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0 !px-0 md:!px-4"
+          hideMobileSheet
+          badgeCount={(productFilter ? 1 : 0) + (searchQuery ? 1 : 0)}
+          onClearAll={
+            productFilter || searchQuery
+              ? () => { applyProductFilter(''); applySearch(''); }
+              : undefined
+          }
+          searchRow={
+            <form
+              className="min-w-0 flex-1"
+              onSubmit={(e) => e.preventDefault()}
+            >
+              <SearchInput
+                value={searchQuery}
+                onChange={applySearch}
+                placeholder="Search by name or ID…"
+                withSubmitButton
+                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
+              />
+            </form>
+          }
+          desktopInlineFilters={
+            products.length > 0 ? (
+              <SearchableSelect
+                id="forms-product-filter"
+                value={productFilter}
+                onChange={applyProductFilter}
+                options={[
+                  { value: '', label: 'All products' },
+                  ...products.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                placeholder="All products"
+                searchPlaceholder="Search products…"
+                wrapperClassName="w-full min-w-0 sm:w-48"
+              />
+            ) : null
+          }
+          sheetFilterBody={
+            products.length > 0 ? (
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                <SearchableSelect
+                  id="forms-product-filter-mobile"
+                  value={productFilter}
+                  onChange={applyProductFilter}
+                  options={[
+                    { value: '', label: 'All products' },
+                    ...products.map((p) => ({ value: p.id, label: p.name })),
+                  ]}
+                  placeholder="All products"
+                  searchPlaceholder="Search products…"
+                />
+              </div>
+            ) : <div />
+          }
+        />
       </div>
 
       <div className="relative">

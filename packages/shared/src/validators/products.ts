@@ -40,9 +40,15 @@ export const galleryImageUrlsSchema = z
 export const createProductSchema = z.object({
   name: z.string().min(2, 'Product name is required'),
   description: z.string().optional(),
-  /** Public list / sort price (“from” price) — merchandising tiers live in `offer_templates`. */
-  baseSalePrice: z.coerce.number().min(0).multipleOf(0.01),
-  costPrice: z.coerce.number().min(0).multipleOf(0.01),
+  /**
+   * Public list / sort price (“from” price) — merchandising tiers live in
+   * `offer_templates`. Optional: products are sold via offer tiers, so this
+   * defaults to 0 and is auto-synced down to the cheapest offer when tiers
+   * change on a Marketing form.
+   */
+  baseSalePrice: z.coerce.number().min(0).multipleOf(0.01).optional().default(0),
+  /** Optional reference cost. Real COGS is FIFO landed cost from shipment lines. */
+  costPrice: z.coerce.number().min(0).multipleOf(0.01).optional(),
   galleryImageUrls: galleryImageUrlsSchema,
   category: z.string().optional(),
   categoryId: z.string().uuid().nullable().optional(),

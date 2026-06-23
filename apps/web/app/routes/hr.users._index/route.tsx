@@ -156,7 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
-  const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
+  const { perPage, pageSizeOptions } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
   const input: Record<string, unknown> = {
     page,
     limit: perPage,

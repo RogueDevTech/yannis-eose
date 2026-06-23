@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { eq, and, desc, count, inArray, or, gte, lte, lt, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import sgMail from '@sendgrid/mail';
 import { db as schema } from '@yannis/shared';
@@ -545,26 +546,51 @@ export class NotificationsService {
     return `cache:notif:${userId}:p${input.page}:l${input.limit}:u${input.unreadOnly ? '1' : '0'}`;
   }
 
-  async list(userId: string, input: ListNotificationsInput, effectiveBranchIds?: string[] | null) {
+  /**
+   * Company-group isolation predicates for the notification feed.
+   * - branchId: notifications tied to a branch must fall within the active
+   *   group's branches (or carry no branchId).
+   * - groupId: notifications about group-owned resources (inventory/logistics
+   *   alerts) must match the active group (or carry no groupId). Gated on
+   *   activeGroupId independently, since a SuperAdmin browsing a group may have
+   *   no branch assignments, leaving effectiveBranchIds empty.
+   */
+  private groupIsolationClauses(
+    effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
+  ): SQL[] {
+    const clauses: SQL[] = [];
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      const inList = sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `);
+      clauses.push(
+        sql`(${schema.notifications.data}->>'branchId' IS NULL OR ${schema.notifications.data}->>'branchId' IN (${inList}))`,
+      );
+    }
+    if (activeGroupId) {
+      clauses.push(
+        sql`(${schema.notifications.data}->>'groupId' IS NULL OR ${schema.notifications.data}->>'groupId' = ${activeGroupId})`,
+      );
+    }
+    return clauses;
+  }
+
+  async list(userId: string, input: ListNotificationsInput, effectiveBranchIds?: string[] | null, activeGroupId?: string | null) {
     const eKey = effectiveBranchIds?.length ? effectiveBranchIds.sort().join(',') : null;
-    const cacheKey = this.notifListCacheKey(userId, input) + (eKey ? `:g:${eKey}` : '');
+    const cacheKey = this.notifListCacheKey(userId, input) + (eKey ? `:g:${eKey}` : '') + (activeGroupId ? `:grp:${activeGroupId}` : '');
     const TTL = 15; // seconds
 
     return this.cache.getOrSet(cacheKey, TTL, async () => {
+      // Company-group isolation clauses, shared by the list and unread-count
+      // queries below so the visible rows and the "X unread" header agree.
+      const isolation = this.groupIsolationClauses(effectiveBranchIds, activeGroupId);
+
       const conditions = [eq(schema.notifications.userId, userId)];
 
       if (input.unreadOnly) {
         conditions.push(eq(schema.notifications.read, false));
       }
 
-      // Company-group isolation: only show notifications whose data->branchId
-      // is in the active group's branches (or notifications without branchId).
-      if (effectiveBranchIds && effectiveBranchIds.length > 0) {
-        const inList = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
-        conditions.push(
-          sql`(${schema.notifications.data}->>'branchId' IS NULL OR ${schema.notifications.data}->>'branchId' IN (${inList}))`,
-        );
-      }
+      conditions.push(...isolation);
 
       const whereClause = and(...conditions);
       const offset = (input.page - 1) * input.limit;
@@ -597,6 +623,7 @@ export class NotificationsService {
             and(
               eq(schema.notifications.userId, userId),
               eq(schema.notifications.read, false),
+              ...isolation,
             ),
           ),
       ]);
@@ -625,22 +652,16 @@ export class NotificationsService {
    * namespace, so the existing invalidations in `create` / `markAsRead` /
    * `markAllAsRead` already cover it — no extra wiring needed.
    */
-  async getUnreadCount(userId: string, effectiveBranchIds?: string[] | null) {
+  async getUnreadCount(userId: string, effectiveBranchIds?: string[] | null, activeGroupId?: string | null) {
     const eKey = effectiveBranchIds?.length ? effectiveBranchIds.sort().join(',') : null;
-    const cacheKey = `cache:notif:${userId}:unreadCount` + (eKey ? `:g:${eKey}` : '');
+    const cacheKey = `cache:notif:${userId}:unreadCount` + (eKey ? `:g:${eKey}` : '') + (activeGroupId ? `:grp:${activeGroupId}` : '');
     const TTL = 15; // seconds — matches the list cache
     return this.cache.getOrSet(cacheKey, TTL, async () => {
       const conditions = [
         eq(schema.notifications.userId, userId),
         eq(schema.notifications.read, false),
+        ...this.groupIsolationClauses(effectiveBranchIds, activeGroupId),
       ];
-
-      if (effectiveBranchIds && effectiveBranchIds.length > 0) {
-        const inList = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
-        conditions.push(
-          sql`(${schema.notifications.data}->>'branchId' IS NULL OR ${schema.notifications.data}->>'branchId' IN (${inList}))`,
-        );
-      }
 
       const rows = await this.db
         .select({ count: count() })
@@ -934,7 +955,14 @@ export class NotificationsService {
     actorId: string,
     branchId: string | null,
     input: BroadcastPushInput,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ recipientCount: number; pushDeliveryCount: number }> {
+    // Company-group isolation: when effectiveBranchIds is set (a group is
+    // selected by a non-admin), ROLE/ALL targets are scoped to users who belong
+    // to one of those branches. USER targets are explicit and not re-scoped.
+    const restrictToBranches =
+      effectiveBranchIds && effectiveBranchIds.length > 0 ? effectiveBranchIds : null;
+
     // Resolve target users
     let targetUserIds: string[] = [];
 
@@ -948,6 +976,15 @@ export class NotificationsService {
           and(
             eq(schema.users.role, input.targetRole as (typeof schema.users.$inferSelect)['role']),
             eq(schema.users.status, 'ACTIVE'),
+            restrictToBranches
+              ? inArray(
+                  schema.users.id,
+                  this.db
+                    .select({ userId: schema.userBranches.userId })
+                    .from(schema.userBranches)
+                    .where(inArray(schema.userBranches.branchId, restrictToBranches)),
+                )
+              : undefined,
           ),
         );
       targetUserIds = roleRows.map((r) => r.id);
@@ -955,7 +992,20 @@ export class NotificationsService {
       const allRows = await this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(eq(schema.users.status, 'ACTIVE'));
+        .where(
+          and(
+            eq(schema.users.status, 'ACTIVE'),
+            restrictToBranches
+              ? inArray(
+                  schema.users.id,
+                  this.db
+                    .select({ userId: schema.userBranches.userId })
+                    .from(schema.userBranches)
+                    .where(inArray(schema.userBranches.branchId, restrictToBranches)),
+                )
+              : undefined,
+          ),
+        );
       targetUserIds = allRows.map((r) => r.id);
     }
 

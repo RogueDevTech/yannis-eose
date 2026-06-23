@@ -374,7 +374,7 @@ export function PermissionRequestsPage({
               ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} ${total === 1 ? 'request' : 'requests'}`
               : 'No requests'}
           </p>
-          <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+          <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} pageSizeParam="perPage" />
         </div>
       )}
 

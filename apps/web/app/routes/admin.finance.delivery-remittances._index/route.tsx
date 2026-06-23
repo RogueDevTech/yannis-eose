@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -12,7 +12,6 @@ import { DeliveryRemittancesLoadingShell } from '~/features/finance/FinanceDefer
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
 
-const REMITTANCES_PAGE_SIZE = 50;
 const ELIGIBLE_PAGE_SIZE = 50;
 
 export const meta: MetaFunction = () => [
@@ -46,6 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageParam = parseInt(url.searchParams.get('page') ?? '1', 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
+  const { perPage: remittancesPageSize } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
   const statusFilter = url.searchParams.get('status') ?? undefined;
   const locationFilter = url.searchParams.get('location') ?? undefined;
   const sentByFilter = url.searchParams.get('sentBy') ?? undefined;
@@ -65,7 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const listInput: Record<string, unknown> = {
     page,
-    limit: REMITTANCES_PAGE_SIZE,
+    limit: remittancesPageSize,
   };
   if (statusFilter && ['SENT', 'RECEIVED', 'DISPUTED'].includes(statusFilter)) {
     listInput.status = statusFilter;
@@ -149,7 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const remittances = listData?.records ?? [];
   const total = listData?.pagination?.total ?? 0;
   const totalPages =
-    listData?.pagination?.totalPages ?? (Math.ceil(total / REMITTANCES_PAGE_SIZE) || 1);
+    listData?.pagination?.totalPages ?? (Math.ceil(total / remittancesPageSize) || 1);
   const summary = listData?.summary ?? {
     awaitingAmount: '0',
     awaitingCount: '0',
@@ -201,7 +201,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     remittances,
-    pagination: { total, totalPages, page, pageSize: REMITTANCES_PAGE_SIZE },
+    pagination: { total, totalPages, page, pageSize: remittancesPageSize },
     locations,
     filters: {
       status: statusFilter ?? '',

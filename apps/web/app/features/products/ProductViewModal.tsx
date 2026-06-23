@@ -109,15 +109,6 @@ export function ProductViewModal({ product, canEditProduct, onClose, canInstantA
             </dl>
           </div>
 
-          {/* Cost (if visible) */}
-          {product.costPrice != null && product.costPrice !== '' && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-app-fg">Cost</h3>
-              <p className="text-sm text-app-fg">
-                &#8358;{Number(product.costPrice).toLocaleString()} per unit
-              </p>
-            </div>
-          )}
         </div>
 
         {/* Footer */}

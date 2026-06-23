@@ -72,7 +72,7 @@ export const hrRouter = router({
   createPlan: authedProcedure
     .input(createCommissionPlanSchema)
     .mutation(async ({ input, ctx }) => {
-      return getHrService().createCommissionPlan(input, ctx.user);
+      return getHrService().createCommissionPlan(input, ctx.user, ctx.activeGroupId);
     }),
 
   updatePlan: authedProcedure
@@ -121,7 +121,7 @@ export const hrRouter = router({
           });
         }
       }
-      return getHrService().listPayouts(input, actor);
+      return getHrService().listPayouts(input, actor, ctx.effectiveBranchIds);
     }),
 
   payoutSummary: permissionProcedure('hr.read')
@@ -186,17 +186,17 @@ export const hrRouter = router({
   setSettlementConfig: permissionProcedure('hr.write')
     .input(setSettlementConfigSchema)
     .mutation(async ({ input, ctx }) => {
-      return getHrService().setSettlementConfig(input, ctx.user.id);
+      return getHrService().setSettlementConfig(input, ctx.user.id, ctx.activeGroupId);
     }),
 
   getActiveSettlementConfig: permissionProcedure('hr.read')
-    .query(async () => {
-      return getHrService().getActiveSettlementConfig();
+    .query(async ({ ctx }) => {
+      return getHrService().getActiveSettlementConfig(ctx.activeGroupId);
     }),
 
   listSettlementConfigs: permissionProcedure('hr.read')
-    .query(async () => {
-      return getHrService().listSettlementConfigs();
+    .query(async ({ ctx }) => {
+      return getHrService().listSettlementConfigs(ctx.activeGroupId);
     }),
 
   getCurrentSettlementPeriod: permissionProcedure('hr.read')
@@ -218,7 +218,7 @@ export const hrRouter = router({
   listMonthlyPayrolls: authedProcedure
     .input(listMonthlyPayrollsSchema)
     .query(async ({ input, ctx }) => {
-      return getPayrollBatchService().listMonthlyPayrolls(input, ctx.user);
+      return getPayrollBatchService().listMonthlyPayrolls(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   payrollPrepareAccess: authedProcedure

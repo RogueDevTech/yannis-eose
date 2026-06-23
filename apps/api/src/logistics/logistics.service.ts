@@ -13,7 +13,9 @@ import {
   lte,
   inArray,
   isNotNull,
+  isNull,
   notExists,
+  or,
   sql,
   type SQL,
 } from 'drizzle-orm';
@@ -148,7 +150,7 @@ export class LogisticsService {
       conditions.push(eq(schema.logisticsProviders.kind, input.kind));
     }
     if (groupId) {
-      conditions.push(eq(schema.logisticsProviders.groupId, groupId));
+      conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -318,7 +320,7 @@ export class LogisticsService {
       conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
     }
     if (groupId) {
-      conditions.push(eq(schema.logisticsProviders.groupId, groupId));
+      conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -389,7 +391,7 @@ export class LogisticsService {
     const conditions = [];
     if (input.status) conditions.push(eq(schema.logisticsProviders.status, input.status));
     if (input.kind) conditions.push(eq(schema.logisticsProviders.kind, input.kind));
-    if (input.groupId) conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
+    if (input.groupId) conditions.push(or(eq(schema.logisticsProviders.groupId, input.groupId), isNull(schema.logisticsProviders.groupId))!);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     return this.db
@@ -425,7 +427,7 @@ export class LogisticsService {
     const conditions = [];
     if (input.status) conditions.push(eq(schema.logisticsLocations.status, input.status));
     if (input.providerKind) conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
-    if (input.groupId) conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
+    if (input.groupId) conditions.push(or(eq(schema.logisticsProviders.groupId, input.groupId), isNull(schema.logisticsProviders.groupId))!);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const rows = await this.db
@@ -464,11 +466,13 @@ export class LogisticsService {
    * Auto-created the first time a warehouse is added; survives subsequent calls
    * via `ON CONFLICT DO NOTHING`-style lookup-then-insert.
    */
-  private async getOrCreateOurWarehouseProvider(actorId: string): Promise<string> {
+  private async getOrCreateOurWarehouseProvider(actorId: string, groupId?: string | null): Promise<string> {
+    const conditions: SQL[] = [eq(schema.logisticsProviders.kind, 'WAREHOUSE')];
+    if (groupId) conditions.push(eq(schema.logisticsProviders.groupId, groupId));
     const existing = await this.db
       .select({ id: schema.logisticsProviders.id })
       .from(schema.logisticsProviders)
-      .where(eq(schema.logisticsProviders.kind, 'WAREHOUSE'))
+      .where(and(...conditions))
       .orderBy(desc(schema.logisticsProviders.createdAt))
       .limit(1);
     if (existing[0]) return existing[0].id;
@@ -478,7 +482,7 @@ export class LogisticsService {
       const recheck = await tx
         .select({ id: schema.logisticsProviders.id })
         .from(schema.logisticsProviders)
-        .where(eq(schema.logisticsProviders.kind, 'WAREHOUSE'))
+        .where(and(...conditions))
         .limit(1);
       if (recheck[0]) return recheck[0].id;
       const inserted = await tx
@@ -489,6 +493,7 @@ export class LogisticsService {
           coverageArea: null,
           kind: 'WAREHOUSE',
           status: 'ACTIVE',
+          ...(groupId ? { groupId } : {}),
         })
         .returning({ id: schema.logisticsProviders.id });
       const id = inserted[0]?.id;
@@ -505,8 +510,9 @@ export class LogisticsService {
   async createWarehouse(
     input: { name: string; address: string; coordinates?: string },
     actorId: string,
+    groupId?: string | null,
   ) {
-    const providerId = await this.getOrCreateOurWarehouseProvider(actorId);
+    const providerId = await this.getOrCreateOurWarehouseProvider(actorId, groupId);
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .insert(schema.logisticsLocations)
@@ -596,7 +602,14 @@ export class LogisticsService {
       conditions.push(ilike(schema.logisticsLocations.name, `%${input.search}%`));
     }
     if (input.groupId) {
-      conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
+      // Include providers in the active group OR legacy providers with NULL groupId
+      // (pre-multi-company warehouses that haven't been backfilled yet).
+      conditions.push(
+        or(
+          eq(schema.logisticsProviders.groupId, input.groupId),
+          isNull(schema.logisticsProviders.groupId),
+        )!,
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -708,7 +721,12 @@ export class LogisticsService {
       conditions.push(eq(schema.logisticsLocations.status, input.status));
     }
     if (input?.groupId) {
-      conditions.push(eq(schema.logisticsProviders.groupId, input.groupId));
+      conditions.push(
+        or(
+          eq(schema.logisticsProviders.groupId, input.groupId),
+          isNull(schema.logisticsProviders.groupId),
+        )!,
+      );
     }
     const whereClause = and(...conditions);
 
@@ -1563,7 +1581,7 @@ export class LogisticsService {
         sql`${schema.deliveryRemittances.logisticsLocationId} IN (
           SELECT ll.id FROM logistics_locations ll
           JOIN logistics_providers lp ON lp.id = ll.provider_id
-          WHERE lp.group_id = ${groupId}
+          WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
         )`,
       );
     }
@@ -1662,7 +1680,7 @@ export class LogisticsService {
         sql`${schema.deliveryRemittances.logisticsLocationId} IN (
           SELECT ll.id FROM logistics_locations ll
           JOIN logistics_providers lp ON lp.id = ll.provider_id
-          WHERE lp.group_id = ${groupId}
+          WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
         )`,
       );
     }
@@ -1726,7 +1744,7 @@ export class LogisticsService {
         sql`${schema.orders.logisticsLocationId} IN (
           SELECT ll.id FROM logistics_locations ll
           JOIN logistics_providers lp ON lp.id = ll.provider_id
-          WHERE lp.group_id = ${groupId}
+          WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
         )`,
       );
     }
@@ -2742,6 +2760,8 @@ export class LogisticsService {
     productId?: string,
     /** When true, include all providers even those with zero activity (for exports). */
     includeInactive?: boolean,
+    /** Company-group isolation — when set, only providers in this group are listed. */
+    activeGroupId?: string | null,
   ): Promise<
     Array<{
       providerId: string;
@@ -2849,6 +2869,9 @@ export class LogisticsService {
     }
 
     // ── Pass 3: list providers (always, including zero-order ones) ─────────
+    // Company-group isolation: only providers in the active group are listed,
+    // mirroring listProviders. Without this the report leaks providers (and
+    // their stock) from other companies.
     const providers = await this.db
       .select({
         id: schema.logisticsProviders.id,
@@ -2857,7 +2880,8 @@ export class LogisticsService {
         contactInfo: schema.logisticsProviders.contactInfo,
         coverageArea: schema.logisticsProviders.coverageArea,
       })
-      .from(schema.logisticsProviders);
+      .from(schema.logisticsProviders)
+      .where(activeGroupId ? or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))! : undefined);
 
     // ── Pass 4: per-provider remittance amounts ────────────────────────────
     // Same period filter as orders so the cell aligns with the
@@ -3093,10 +3117,11 @@ export class LogisticsService {
       };
     });
 
-    // When group-scoped (and not exporting all), hide providers with zero activity
-    // in the selected group. They belong to other companies and are just noise.
+    // When group-scoped (and not exporting all), hide providers with zero ORDER
+    // activity in the selected group. Stock alone should not cause a provider from
+    // another company group to appear — stock is location-level, not branch-scoped.
     const filtered = effectiveBranchIds?.length && !includeInactive
-      ? result.filter((p) => p.totalAssigned > 0 || p.availableStock > 0 || p.reservedStock > 0)
+      ? result.filter((p) => p.totalAssigned > 0)
       : result;
 
     // Sort: highest delivery rate first, then largest volume — providers with no
@@ -3120,6 +3145,8 @@ export class LogisticsService {
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
     productId?: string,
+    /** Company-group isolation — when set, only locations of providers in this group are listed. */
+    activeGroupId?: string | null,
   ) {
     let effectiveStart: Date | null = null;
     let effectiveEnd: Date | null = null;
@@ -3132,7 +3159,9 @@ export class LogisticsService {
       effectiveEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
     }
 
-    // All locations with their provider
+    // All locations with their provider. Company-group isolation: only
+    // locations whose provider is in the active group (locations inherit group
+    // via their provider). Without this the report leaks other companies' depots.
     const locations = await this.db
       .select({
         id: schema.logisticsLocations.id,
@@ -3142,7 +3171,8 @@ export class LogisticsService {
         status: schema.logisticsLocations.status,
       })
       .from(schema.logisticsLocations)
-      .innerJoin(schema.logisticsProviders, eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId));
+      .innerJoin(schema.logisticsProviders, eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId))
+      .where(activeGroupId ? or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))! : undefined);
 
     if (locations.length === 0) return [];
 
@@ -3255,7 +3285,9 @@ export class LogisticsService {
       const returned = get('RETURNED');
       const partiallyDelivered = get('PARTIALLY_DELIVERED');
       const writtenOff = get('WRITTEN_OFF');
-      const totalAssigned = delivered + returned + partiallyDelivered + writtenOff + get('CANCELLED') + get('IN_TRANSIT') + get('DISPATCHED') + get('AGENT_ASSIGNED') + get('RESTOCKED');
+      const inTransit = get('IN_TRANSIT');
+      const dispatched = get('DISPATCHED');
+      const totalAssigned = delivered + returned + partiallyDelivered + writtenOff + get('CANCELLED') + inTransit + dispatched + get('AGENT_ASSIGNED') + get('RESTOCKED');
       const deliveryRate = totalAssigned > 0 ? (delivered / totalAssigned) * 100 : 0;
       const delinquencyRate = totalAssigned > 0 ? ((returned + partiallyDelivered + writtenOff) / totalAssigned) * 100 : 0;
       const stock = stockByLoc.get(loc.id);
@@ -3269,6 +3301,8 @@ export class LogisticsService {
         status: loc.status ?? 'ACTIVE',
         totalAssigned,
         delivered,
+        inTransit,
+        dispatched,
         returned,
         partiallyDelivered,
         writtenOff,
@@ -3288,9 +3322,10 @@ export class LogisticsService {
       };
     });
 
-    // When group-scoped, hide locations with zero activity in the selected group.
+    // When group-scoped, hide locations with zero ORDER activity in the selected group.
+    // Stock alone doesn't qualify — it's location-level, not branch-scoped.
     const filtered = effectiveBranchIds?.length
-      ? result.filter((l) => l.totalAssigned > 0 || l.availableStock > 0 || l.reservedStock > 0)
+      ? result.filter((l) => l.totalAssigned > 0)
       : result;
 
     filtered.sort((a, b) => {

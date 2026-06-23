@@ -76,7 +76,7 @@ interface Props {
 const formatNaira = (n: number) =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50;
 
 export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = false, isCloser = false, userId }: Props) {
   const showSkeleton = deferredLoading;
@@ -112,6 +112,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [assignmentFilter, setAssignmentFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   // Closers only see their own assigned orders
   const allItems = useMemo(() => {
@@ -155,9 +156,9 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
   }, [allItems, search, statusFilter, assignmentFilter]);
 
   // Paginate
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const paginatedItems = filteredItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const paginatedItems = filteredItems.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const toggleItem = useCallback((id: string) => {
     setSelectedItemIds((prev) => {
@@ -513,12 +514,14 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
       {totalPages > 1 && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-sm text-app-fg-muted">
-            Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredItems.length)} of {filteredItems.length} orders
+            Showing {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, filteredItems.length)} of {filteredItems.length} orders
           </p>
           <Pagination
             page={safePage}
             totalPages={totalPages}
             onPageChange={setPage}
+            pageSize={pageSize}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
           />
         </div>
       )}

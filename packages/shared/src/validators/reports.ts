@@ -86,6 +86,31 @@ export const reportColumnsByKey = {
   disbursements: ['id', 'sender', 'receiver', 'amount', 'status', 'receipt', 'date', 'verifiedAt'] as const,
   inventory: ['product', 'location', 'stock', 'reserved', 'available', 'status', 'updated'] as const,
   finance_invoices: ['reference', 'orderId', 'amount', 'status', 'dueDate'] as const,
+  logistics_locations: [
+    'locationName',
+    'providerName',
+    'contactInfo',
+    'address',
+    'whatsappGroupLink',
+    'coverageArea',
+    'status',
+    'totalAssigned',
+    'delivered',
+    'inTransit',
+    'dispatched',
+    'returned',
+    'deliveryRate',
+    'delinquencyRate',
+    'remittedAmount',
+    'pendingRemittanceAmount',
+    'unitsDelivered',
+    'availableStock',
+    'reservedStock',
+    'stockReceived',
+    'stockSold',
+    'stockTransferredOut',
+    'stockAdjusted',
+  ] as const,
   logistics_partners: [
     'providerName',
     'contactInfo',
@@ -120,6 +145,7 @@ const reportColumnsSchema = z.object({
   disbursements: z.array(z.enum(reportColumnsByKey.disbursements)).min(1),
   inventory: z.array(z.enum(reportColumnsByKey.inventory)).min(1),
   finance_invoices: z.array(z.enum(reportColumnsByKey.finance_invoices)).min(1),
+  logistics_locations: z.array(z.enum(reportColumnsByKey.logistics_locations)).min(1),
   logistics_partners: z.array(z.enum(reportColumnsByKey.logistics_partners)).min(1),
 });
 
@@ -244,6 +270,17 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         status: z.string().optional(),
         minAmount: z.number().nonnegative().optional(),
         maxAmount: z.number().nonnegative().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('logistics_locations'),
+    columns: reportColumnsSchema.shape.logistics_locations,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        providerId: z.string().uuid().optional(),
+        status: z.string().optional(),
       })
       .optional(),
   }),

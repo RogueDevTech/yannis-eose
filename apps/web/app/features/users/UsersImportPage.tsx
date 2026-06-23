@@ -220,6 +220,7 @@ export function UsersImportPage({ branches }: UsersImportPageProps) {
       actionPath="/hr/users?index"
       actionIntent="importUser"
       maxRows={500}
+      redirectOnComplete
       columns={columns}
       parseSheetRow={(row, sheetRowIndex) => ({
         rowIndex: sheetRowIndex,
