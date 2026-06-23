@@ -340,10 +340,17 @@ export function MarketingOverviewPage({
     : 0;
   const statItems: OverviewStatStripItem[] = [
     {
-      label: 'Total Spend',
+      label: 'Ad Spend',
       value: formatNaira(Math.round(metrics.totalSpend)),
       valueClassName: 'text-app-fg',
     },
+    ...((metrics.otherExpenses ?? 0) > 0
+      ? [{
+          label: 'Other Expenses',
+          value: formatNaira(Math.round(metrics.otherExpenses ?? 0)),
+          valueClassName: 'text-app-fg-muted',
+        }]
+      : []),
     {
       label: 'Total Orders',
       value: metrics.totalOrders.toString(),

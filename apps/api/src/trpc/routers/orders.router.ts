@@ -2351,10 +2351,46 @@ export const ordersRouter = router({
       return { succeeded: result.succeeded, failed: result.failed, total: result.total };
     }),
 
-  unfreezeOrder: permissionProcedure('orders.followUpConfig')
+  unfreezeOrder: permissionProcedure('orders.freeze')
     .input(z.object({ orderId: z.string().uuid(), reason: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getFollowUpConfigService().unfreezeOrder(input.orderId, ctx.user, input.reason);
+    }),
+
+  /**
+   * Bulk freeze orders — blocks all status transitions, assignments, and edits.
+   * CEO directive 2026-06-23: permission-based, CS group, SuperAdmin default.
+   */
+  bulkFreezeOrders: permissionProcedure('orders.freeze')
+    .input(z.object({
+      orderIds: z.array(z.string().uuid()).min(1).max(2000),
+      reason: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getFollowUpConfigService().bulkFreezeOrders(input.orderIds, ctx.user, input.reason);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
+    }),
+
+  /**
+   * Bulk unfreeze orders — clears frozen flag; follow-up copies continue independently.
+   * CEO directive 2026-06-23.
+   */
+  bulkUnfreezeOrders: permissionProcedure('orders.freeze')
+    .input(z.object({
+      orderIds: z.array(z.string().uuid()).min(1).max(2000),
+      reason: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getFollowUpConfigService().bulkUnfreezeOrders(input.orderIds, ctx.user, input.reason);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
     }),
 
   /** Branches with an active CS department — for follow-up config dropdowns. */

@@ -4045,12 +4045,18 @@ export class MarketingService {
       eq(schema.adSpendLogs.status, 'PENDING'),
       eq(schema.adSpendLogs.category, 'AD_SPEND'),
     ];
+    // Other expenses (non-AD_SPEND) — separate line item on the stat strip.
+    const otherExpenseConditions: Parameters<typeof and>[0][] = [
+      inArray(schema.adSpendLogs.status, ['APPROVED', 'PENDING']),
+      sql`${schema.adSpendLogs.category} != 'AD_SPEND'`,
+    ];
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return {
         totalSpend: 0,
         pendingSpend: 0,
         approvedSpend: 0,
+        otherExpenses: 0,
         totalOrders: 0,
         deliveredOrders: 0,
         deliveredRevenue: 0,
@@ -4061,18 +4067,66 @@ export class MarketingService {
         deliveryRate: 0,
       };
     }
-    // Helper: push the same scope condition into both spend arrays.
+    // Helper: push the same scope condition into all spend arrays.
     const pushSpendScope = (cond: Parameters<typeof and>[0]) => {
       spendConditions.push(cond);
       pendingSpendConditions.push(cond);
+      otherExpenseConditions.push(cond);
     };
     if (mediaBuyerId) pushSpendScope(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
     if (branchCampaignIds) {
-      const branchOrDailySpend = or(
-        inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
-        isNull(schema.adSpendLogs.campaignId),
-      );
-      if (branchOrDailySpend) pushSpendScope(branchOrDailySpend);
+      // Daily-flow spend rows (campaignId IS NULL) lack a branch FK, so they
+      // must be scoped by the media buyer's branch membership.  Without this,
+      // an HoM viewing their branch inadvertently aggregates daily spend from
+      // every branch.
+      const needsBranchMbScope =
+        !mediaBuyerId &&
+        !(supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0);
+
+      if (needsBranchMbScope) {
+        // Resolve the MBs in this branch to scope daily spend rows.
+        const branchIds = branchId
+          ? [branchId]
+          : (effectiveBranchIds && effectiveBranchIds.length > 0 ? effectiveBranchIds : null);
+        let branchMbIds: string[] | null = null;
+        if (branchIds) {
+          const mbRows = await this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .innerJoin(schema.users, eq(schema.users.id, schema.userBranches.userId))
+            .where(
+              and(
+                branchIds.length === 1
+                  ? eq(schema.userBranches.branchId, branchIds[0]!)
+                  : inArray(schema.userBranches.branchId, branchIds),
+                inArray(schema.users.role, ['MEDIA_BUYER', 'HEAD_OF_MARKETING']),
+              ),
+            );
+          branchMbIds = mbRows.map((r) => r.userId);
+        }
+
+        if (branchMbIds && branchMbIds.length > 0) {
+          const branchOrDailySpend = or(
+            inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+            and(
+              isNull(schema.adSpendLogs.campaignId),
+              inArray(schema.adSpendLogs.mediaBuyerId, branchMbIds),
+            ),
+          );
+          if (branchOrDailySpend) pushSpendScope(branchOrDailySpend);
+        } else {
+          // No MBs in branch — only campaign-scoped spend.
+          pushSpendScope(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+        }
+      } else {
+        // Already scoped by mediaBuyerId or supervisorScope — safe to include
+        // daily spend rows (the MB filter handles the branch boundary).
+        const branchOrDailySpend = or(
+          inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+          isNull(schema.adSpendLogs.campaignId),
+        );
+        if (branchOrDailySpend) pushSpendScope(branchOrDailySpend);
+      }
     }
     if (
       supervisorScope &&
@@ -4090,6 +4144,7 @@ export class MarketingService {
     }
     const spendWhere = and(...spendConditions);
     const pendingSpendWhere = and(...pendingSpendConditions);
+    const otherExpenseWhere = and(...otherExpenseConditions);
 
     /** Same ownership semantics as `orders.list` / `getStatusCounts` (supervisor OR replaces single-ID filters). */
     const appendMetricsOrderScope = (conditions: Parameters<typeof and>[0][]) => {
@@ -4115,7 +4170,7 @@ export class MarketingService {
       sql`${schema.orders.status} != 'DELETED'`,
       // Exclude offline orders — marketing metrics only count edge-form orders.
       // Follow-up orders are included — MB spent to acquire the lead (CEO 2026-06-19).
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.isFollowUp} = true)`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`,
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4131,7 +4186,7 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.isFollowUp} = true)`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`,
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -4157,7 +4212,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.isFollowUp} = true)`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`,
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4167,6 +4222,7 @@ export class MarketingService {
     const [
       totalSpendRows,
       pendingSpendRows,
+      otherExpenseRows,
       totalOrdersRows,
       deliveredOrdersRows,
       deliveredRevenueRows,
@@ -4180,6 +4236,10 @@ export class MarketingService {
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
         .from(schema.adSpendLogs)
         .where(pendingSpendWhere),
+      this.db
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(otherExpenseWhere),
       this.db.select({ count: count() }).from(schema.orders).where(orderWhere),
       this.db.select({ count: count() }).from(schema.orders).where(deliveredWhere),
       this.db
@@ -4191,6 +4251,7 @@ export class MarketingService {
 
     const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
     const pendingSpend = Number(pendingSpendRows[0]?.total ?? 0);
+    const otherExpenses = Number(otherExpenseRows[0]?.total ?? 0);
     const totalSpend = approvedSpend + pendingSpend;
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
     const deliveredOrders = deliveredOrdersRows[0]?.count ?? 0;
@@ -4202,6 +4263,7 @@ export class MarketingService {
       totalSpend,
       pendingSpend,
       approvedSpend,
+      otherExpenses,
       totalOrders,
       deliveredOrders,
       deliveredRevenue,

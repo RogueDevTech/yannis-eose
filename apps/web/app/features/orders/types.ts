@@ -34,6 +34,8 @@ export interface Order {
   cartId?: string | null;
   /** Duplicate flag: FLAGGED | POSSIBLY_DUPLICATE | MERGED | DISMISSED | null */
   isDuplicate?: string | null;
+  /** When true, order is frozen — no status transitions, assignments, or edits allowed. */
+  frozenForFollowUp?: boolean;
   /** Last CS comment left on the order — shown as an icon + tooltip on the list. */
   lastCsComment?: { comment: string; actorName: string | null; at: string } | null;
 }

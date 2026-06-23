@@ -147,6 +147,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'finance.cashRemittance.create', resource: 'finance.cash_remittance', action: 'create', description: 'Record a cash remittance (accountant-led close-out of delivered orders)' },
   { code: 'finance.cashRemittance.markReceived', resource: 'finance.cash_remittance', action: 'mark_received', description: 'Mark a cash remittance Received and cascade orders to COMPLETED' },
   { code: 'orders.createOffline', resource: 'orders', action: 'createOffline', description: 'Create an offline order (Sales manual entry)' },
+  { code: 'orders.freeze', resource: 'orders', action: 'freeze', description: 'Freeze or unfreeze orders (blocks all status transitions / edits). CS group but SuperAdmin-only by default. CEO directive 2026-06-23.' },
   { code: 'messaging.templates.create', resource: 'messaging.templates', action: 'create', description: 'Create Sales message templates (SMS / WhatsApp / WhatsApp group)' },
   { code: 'messaging.templates.update', resource: 'messaging.templates', action: 'update', description: 'Update or archive Sales message templates' },
   { code: 'logistics.transferRemittance.markReceived', resource: 'logistics.transfer_remittance', action: 'mark_received', description: 'Mark a 3PL→warehouse stock transfer remittance as received (HoLogistics)' },

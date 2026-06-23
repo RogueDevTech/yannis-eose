@@ -88,7 +88,7 @@ export function MarketingOverviewLoadingShell({
   };
 
   const statLabels = [
-    'Total Spend',
+    'Ad Spend',
     'Total Orders',
     'Delivered',
     'Confirmed',

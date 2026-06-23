@@ -534,7 +534,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
           title: 'Captured carts not yet recovered (browsing + dropped off)',
           to: q('/admin/marketing/orders?fromCart=1'),
         },
-        { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
+        { label: 'Ad Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
       ]}
     />
   );
