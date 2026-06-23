@@ -341,7 +341,8 @@ export function TransfersPage({
   const getLocationName = (id: string): ReactNode => {
     const loc = locations.find((l: Location) => l.id === id);
     if (!loc) return id.slice(0, 8) + '...';
-    return loc.providerName
+    const showProvider = loc.providerName && loc.providerName !== 'Our warehouses';
+    return showProvider
       ? <>{loc.name}<DotSeparator />{loc.providerName}</>
       : loc.name;
   };
@@ -349,7 +350,8 @@ export function TransfersPage({
   const getLocationLabel = (id: string): string => {
     const loc = locations.find((l: Location) => l.id === id);
     if (!loc) return id.slice(0, 8) + '...';
-    return loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name;
+    const showProvider = loc.providerName && loc.providerName !== 'Our warehouses';
+    return showProvider ? `${loc.name} ● ${loc.providerName}` : loc.name;
   };
 
   const activeLocations = locations.filter((l: Location) => l.status === 'ACTIVE');

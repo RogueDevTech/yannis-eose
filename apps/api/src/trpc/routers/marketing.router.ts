@@ -698,25 +698,6 @@ export const marketingRouter = router({
         );
       }
 
-      // HEAD_OF_CS: apply the same supervisor scope so the dashboard funnel
-      // matches the Sales Orders page (team-scoped, not branch-wide).
-      if (ctx.user.role === 'HEAD_OF_CS') {
-        const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, ctx.currentBranchId, {
-          startDate: input.startDate,
-          endDate: input.endDate,
-        });
-        return getMarketingService().getPerformanceMetrics(
-          narrowed.mediaBuyerId,
-          input.startDate && input.endDate ? 'this_month' : 'all_time',
-          input.startDate,
-          input.endDate,
-          ctx.currentBranchId,
-          narrowed.assignedCsId,
-          narrowed.supervisorScope,
-          ctx.effectiveBranchIds,
-        );
-      }
-
       return getMarketingService().getPerformanceMetrics(
         mediaBuyerId,
         input.startDate && input.endDate ? 'this_month' : 'all_time',

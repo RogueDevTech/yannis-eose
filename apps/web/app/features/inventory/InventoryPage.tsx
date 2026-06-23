@@ -302,7 +302,7 @@ export function InventoryPage(props: InventoryStreamData) {
     if (!id) return '—';
     const loc = displayLocations.find((l) => l.id === id) ?? locations.find((l) => l.id === id);
     if (!loc) return 'Unknown location';
-    return loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name;
+    return loc.providerName && loc.providerName !== 'Our warehouses' ? `${loc.name} • ${loc.providerName}` : loc.name;
   };
 
   const locationLabelParts = (
@@ -1708,7 +1708,7 @@ function TransfersTab({
   const locationName = (id: string) => {
     const loc = locations.find((l) => l.id === id);
     if (!loc) return 'Unknown location';
-    return loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name;
+    return loc.providerName && loc.providerName !== 'Our warehouses' ? `${loc.name} ● ${loc.providerName}` : loc.name;
   };
   const formatRecordedAt = (dateIso: string) =>
     new Date(dateIso).toLocaleDateString('en-NG', {
