@@ -7,6 +7,7 @@ import type { ListCartOrdersInput, UpdateCartOrderInput } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 /** Valid values for the order_timeline_events.event_type enum.
@@ -144,12 +145,17 @@ export class CartOrdersService {
         conditions.push(bCond);
       }
     }
-    if (input.startDate) conditions.push(gte(schema.cartOrders.createdAt, new Date(input.startDate)));
-    if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.cartOrders.createdAt, end));
-    }
+    // Status-aware date column: when filtering by a terminal status, use the
+    // milestone timestamp so "delivered this month" shows orders delivered in
+    // the period, not just created in it.
+    const dateCol =
+      input.status === 'DELIVERED' || input.status === 'REMITTED'
+        ? schema.cartOrders.deliveredAt
+        : input.status === 'CONFIRMED' || input.status === 'AGENT_ASSIGNED' || input.status === 'DISPATCHED' || input.status === 'IN_TRANSIT'
+          ? schema.cartOrders.confirmedAt
+          : schema.cartOrders.createdAt;
+    if (input.startDate) conditions.push(gte(dateCol, nigeriaDayStart(input.startDate)));
+    if (input.endDate) conditions.push(lte(dateCol, nigeriaDayEnd(input.endDate)));
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = ((input.page ?? 1) - 1) * (input.limit ?? 50);
@@ -251,12 +257,9 @@ export class CartOrdersService {
         conditions.push(bCond);
       }
     }
-    if (startDate) conditions.push(gte(schema.cartOrders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.cartOrders.createdAt, end));
-    }
+    // Date filter — counts must match the list so the pills agree with the rows.
+    if (startDate) conditions.push(gte(schema.cartOrders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.cartOrders.createdAt, nigeriaDayEnd(endDate)));
 
     const rows = await this.db
       .select({
@@ -278,12 +281,6 @@ export class CartOrdersService {
     }
     if (assignedCsId) deletedConditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerId) deletedConditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
-    if (startDate) deletedConditions.push(gte(schema.cartOrders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const endDel = new Date(endDate);
-      endDel.setHours(23, 59, 59, 999);
-      deletedConditions.push(lte(schema.cartOrders.createdAt, endDel));
-    }
 
     const [deletedRow] = await this.db
       .select({ count: sql<number>`COUNT(*)::int` })

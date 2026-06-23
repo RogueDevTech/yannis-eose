@@ -237,6 +237,8 @@ export interface OrdersListPageProps {
   productsForFilter?: Array<{ id: string; name: string }>;
   /** Active frozen filter from URL: 'frozen' | 'active' | undefined. */
   frozenFilter?: string;
+  /** Permission-driven (orders.freeze) — controls Freeze / Unfreeze bulk action visibility. */
+  canFreeze?: boolean;
   /** When true, show "Create offline order" button (CS_CLOSER / HEAD_OF_CS). */
   canCreateOffline?: boolean;
   /**
@@ -327,6 +329,7 @@ function OrdersListPageImpl({
   campaignFilter,
   productFilter,
   frozenFilter: frozenFilterProp,
+  canFreeze = false,
   campaignsForFilter,
   productsForFilter,
   csClosersForFilter,
@@ -741,6 +744,7 @@ function OrdersListPageImpl({
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Customer not picking');
+  const [freezeModalOpen, setFreezeModalOpen] = useState<'freeze' | 'unfreeze' | null>(null);
 
   const clearSelection = () => {
     setSelectedIds(new Set());
@@ -915,20 +919,31 @@ function OrdersListPageImpl({
 
   const isSubmitting = fetcher.state !== 'idle';
 
-  // Handle fetcher response
-  if (fetcher.data && !bulkResult) {
-    const data = fetcher.data as { success?: boolean; succeeded?: number; failed?: number; results?: Array<{ orderId: string; success: boolean; error?: string }> };
-    if (data.success !== undefined) {
-      const errors = (data.results ?? [])
-        .filter((r) => !r.success)
-        .map((r) => `${r.orderId.slice(0, 8)}...: ${r.error ?? 'Unknown'}`);
-      setBulkResult({
-        succeeded: data.succeeded ?? 0,
-        failed: data.failed ?? 0,
-        errors,
-      });
+  // Handle fetcher response — set result banner + revalidate on success
+  const prevFetcherRef = useRef<string>('idle');
+  useEffect(() => {
+    const prev = prevFetcherRef.current;
+    prevFetcherRef.current = fetcher.state;
+    if (prev !== 'idle' && fetcher.state === 'idle' && fetcher.data) {
+      const data = fetcher.data as { success?: boolean; succeeded?: number; failed?: number; results?: Array<{ orderId: string; success: boolean; error?: string }> };
+      if (data.success !== undefined) {
+        const errors = (data.results ?? [])
+          .filter((r) => !r.success)
+          .map((r) => `${r.orderId.slice(0, 8)}...: ${r.error ?? 'Unknown'}`);
+        setBulkResult({
+          succeeded: data.succeeded ?? 0,
+          failed: data.failed ?? 0,
+          errors,
+        });
+        // Clear selection + revalidate so the page reflects the change
+        if (data.succeeded && data.succeeded > 0) {
+          setSelectedIds(new Set());
+          setSelectAllMatchingActive(false);
+          revalidate();
+        }
+      }
     }
-  }
+  }, [fetcher.state, fetcher.data, revalidate]);
 
   useEffect(() => {
     const err = (fetcher.data as { error?: string } | undefined)?.error;
@@ -1016,11 +1031,44 @@ function OrdersListPageImpl({
     logisticsLocationsForBulk.length > 0 &&
     selectedOrders.every((o) => o.status === 'CONFIRMED');
 
+  // Freeze/Unfreeze eligibility — selection must be uniformly frozen or unfrozen.
+  const allSelectedFrozen =
+    canFreeze &&
+    selectedOrders.length > 0 &&
+    selectedOrders.every((o) => o.frozenForFollowUp);
+  const allSelectedUnfrozen =
+    canFreeze &&
+    selectedOrders.length > 0 &&
+    selectedOrders.every((o) => !o.frozenForFollowUp);
+  const frozenSelectionMixed =
+    canFreeze &&
+    selectedOrders.length > 0 &&
+    !allSelectedFrozen &&
+    !allSelectedUnfrozen;
+
   const assignCloserOptions = (csClosersForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName }));
   const allocateLocationOptions = logisticsLocationsForBulk.map((loc) => ({
     value: loc.id,
     label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
   }));
+
+  const submitBulkFreeze = () => {
+    setFreezeModalOpen('freeze');
+  };
+
+  const submitBulkUnfreeze = () => {
+    setFreezeModalOpen('unfreeze');
+  };
+
+  const confirmBulkFreeze = () => {
+    const intent = freezeModalOpen === 'unfreeze' ? 'bulkUnfreeze' : 'bulkFreeze';
+    setFreezeModalOpen(null);
+    setBulkResult(null);
+    fetcher.submit(
+      { intent, orderIds: JSON.stringify([...selectedIds]) },
+      { method: 'post' },
+    );
+  };
 
   /** Derive branch from selected orders — avoids the branch-picker modal for
    *  org-wide heads when all selected orders share a single branch. */
@@ -1154,13 +1202,13 @@ function OrdersListPageImpl({
           const tags: TagInfo[] = [];
           const isFollowUpSurface = orderDetailFrom === 'followup';
           if ((order as { isFollowUp?: boolean }).isFollowUp) tags.push({ label: 'Follow Up', colorClass: 'bg-info-500', hex: '#3b82f6' });
-          if ((order as { frozenForFollowUp?: boolean }).frozenForFollowUp) tags.push({ label: 'Frozen', colorClass: 'bg-slate-400', hex: '#94a3b8' });
+          if (order.frozenForFollowUp) tags.push({ label: 'Frozen', colorClass: 'bg-slate-400', hex: '#94a3b8' });
           // Suppress stale delivery/callback tags on the follow-up surface — these dates
           // carry over from source orders and don't apply to the fresh follow-up engagement.
           if (!isFollowUpSurface && isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery due today', colorClass: 'bg-warning-500', hex: '#f59e0b', textClass: 'text-black' });
           if (!isFollowUpSurface && isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status)) tags.push({ label: 'Delivery overdue', colorClass: 'bg-danger-500', hex: '#ef4444' });
           if (!isFollowUpSurface && isCallbackDue(order.callbackScheduledAt, order.status)) tags.push({ label: 'Callback due', colorClass: 'bg-purple-500', hex: '#a855f7' });
-          const isFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
+          const isFrozen = !!order.frozenForFollowUp;
           return (
             <div className="group/cust relative flex min-w-0 items-center gap-2">
               <span className={`min-w-0 truncate font-medium ${isFrozen ? 'text-app-fg/60' : 'text-app-fg'}`}>
@@ -1249,7 +1297,7 @@ function OrdersListPageImpl({
         key: 'status',
         header: 'Status',
         render: (order) => {
-          const frozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
+          const frozen = !!order.frozenForFollowUp;
           return order.status === 'CART' ? (
             <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
               Cart
@@ -1354,7 +1402,7 @@ function OrdersListPageImpl({
         isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ||
         isCallbackDue(order.callbackScheduledAt, order.status)
       );
-      const mobileFrozen = !!(order as { frozenForFollowUp?: boolean }).frozenForFollowUp;
+      const mobileFrozen = !!order.frozenForFollowUp;
       const body = (
         <>
           <div className="flex items-center justify-between gap-2">
@@ -1967,7 +2015,12 @@ function OrdersListPageImpl({
 
       {/* Bulk Action Toolbar */}
       {selectedIds.size > 0 && canBulkAction && (
-        <div className="card bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-700/50">
+        <div className="card bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-700/50 relative overflow-hidden">
+          {isSubmitting && (
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-brand-200 dark:bg-brand-800 overflow-hidden">
+              <div className="h-full w-1/3 bg-brand-500 dark:bg-brand-400 animate-[indeterminateProgress_1.5s_ease-in-out_infinite]" />
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
@@ -2048,6 +2101,32 @@ function OrdersListPageImpl({
                   Export Selected
                 </Button>
               )}
+              {/* Freeze — all selected must be unfrozen */}
+              {allSelectedUnfrozen && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={submitBulkFreeze}
+                  disabled={isSubmitting}
+                  loading={isSubmitting}
+                  loadingText="Freezing..."
+                >
+                  Freeze
+                </Button>
+              )}
+              {/* Unfreeze — all selected must be frozen */}
+              {allSelectedFrozen && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={submitBulkUnfreeze}
+                  disabled={isSubmitting}
+                  loading={isSubmitting}
+                  loadingText="Unfreezing..."
+                >
+                  Unfreeze
+                </Button>
+              )}
               {/* Move to branch — Admin / HoCS only, when branches are available. */}
               {(userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS') && branchesForMove && branchesForMove.length > 0 && (
                 <Button variant="secondary" size="sm" onClick={() => setMoveBranchModalOpen(true)} disabled={isSubmitting}>
@@ -2058,7 +2137,7 @@ function OrdersListPageImpl({
           </div>
           {/* Helper notes — kept on their own lines so they don't wedge between
               the action buttons and make the toolbar look scattered. */}
-          {(bulkCloserSelectionMixed || selectedStatuses.length > 1) && (
+          {(bulkCloserSelectionMixed || selectedStatuses.length > 1 || frozenSelectionMixed) && (
             <div className="mt-2 space-y-1 border-t border-brand-200/60 dark:border-brand-700/40 pt-2">
               {bulkCloserSelectionMixed && (
                 <p className="text-xs text-app-fg-muted">
@@ -2069,6 +2148,11 @@ function OrdersListPageImpl({
               {selectedStatuses.length > 1 && (
                 <p className="text-xs text-app-fg-muted italic">
                   Select orders with same status for bulk transition.
+                </p>
+              )}
+              {frozenSelectionMixed && (
+                <p className="text-xs text-app-fg-muted italic">
+                  Select only frozen or only unfrozen orders to use Freeze / Unfreeze.
                 </p>
               )}
             </div>
@@ -2766,6 +2850,28 @@ function OrdersListPageImpl({
                 Delete {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
               </Button>
             </div>
+        </Modal>
+      )}
+
+      {/* Freeze / Unfreeze confirmation modal */}
+      {freezeModalOpen && (
+        <Modal open onClose={() => setFreezeModalOpen(null)} maxWidth="max-w-sm" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            {freezeModalOpen === 'freeze' ? 'Freeze' : 'Unfreeze'} {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}?
+          </h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            {freezeModalOpen === 'freeze'
+              ? 'Frozen orders are excluded from follow-up batches and will not be re-engaged automatically.'
+              : 'These orders will become eligible for follow-up batches again.'}
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button type="button" variant="secondary" onClick={() => setFreezeModalOpen(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="primary" onClick={confirmBulkFreeze}>
+              {freezeModalOpen === 'freeze' ? 'Freeze' : 'Unfreeze'}
+            </Button>
+          </div>
         </Modal>
       )}
 

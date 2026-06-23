@@ -153,6 +153,7 @@ export interface Metrics {
   totalSpend: number;
   pendingSpend: number;
   approvedSpend: number;
+  otherExpenses?: number;
   totalOrders: number;
   deliveredOrders: number;
   deliveredRevenue: number;

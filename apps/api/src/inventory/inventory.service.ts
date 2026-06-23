@@ -2151,13 +2151,17 @@ export class InventoryService {
       qtyPending: number;
       amountRemitted: string;
       amountPending: string;
+      qtyAwaitingRemittance: number;
+      amountAwaitingRemittance: string;
     }>(sql`
       SELECT
         o.logistics_location_id AS "locationId",
-        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyRemitted",
-        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyPending",
-        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountRemitted",
-        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountPending"
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'RECEIVED' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyRemitted",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'SENT' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyPending",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'RECEIVED' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountRemitted",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'SENT' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountPending",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NULL THEN oi.quantity ELSE 0 END), 0)::int AS "qtyAwaitingRemittance",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NULL THEN oi.unit_price ELSE 0 END), 0)::text AS "amountAwaitingRemittance"
       FROM order_items oi
       INNER JOIN orders o ON o.id = oi.order_id
       LEFT JOIN delivery_remittance_orders dro ON dro.order_id = o.id
@@ -2166,7 +2170,7 @@ export class InventoryService {
         AND o.status IN ('DELIVERED', 'REMITTED')
       GROUP BY o.logistics_location_id
     `);
-    const remitMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }>();
+    const remitMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string; qtyAwaitingRemittance: number; amountAwaitingRemittance: string }>();
     for (const r of remitRows) remitMap.set(r.locationId, r);
 
     return locRows.map((l) => {
@@ -2187,6 +2191,8 @@ export class InventoryService {
         qtyPending: rm?.qtyPending ?? 0,
         amountRemitted: rm?.amountRemitted ?? '0',
         amountPending: rm?.amountPending ?? '0',
+        qtyAwaitingRemittance: rm?.qtyAwaitingRemittance ?? 0,
+        amountAwaitingRemittance: rm?.amountAwaitingRemittance ?? '0',
       };
     });
   }
@@ -2302,13 +2308,17 @@ export class InventoryService {
       qtyPending: number;
       amountRemitted: string;
       amountPending: string;
+      qtyAwaitingRemittance: number;
+      amountAwaitingRemittance: string;
     }>(sql`
       SELECT
         oi.product_id AS "productId",
-        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyRemitted",
-        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyPending",
-        COALESCE(SUM(CASE WHEN dr.status = 'RECEIVED' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountRemitted",
-        COALESCE(SUM(CASE WHEN dr.status IS NULL OR dr.status = 'SENT' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountPending"
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'RECEIVED' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyRemitted",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'SENT' THEN oi.quantity ELSE 0 END), 0)::int AS "qtyPending",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'RECEIVED' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountRemitted",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NOT NULL AND dr.status = 'SENT' THEN oi.unit_price ELSE 0 END), 0)::text AS "amountPending",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NULL THEN oi.quantity ELSE 0 END), 0)::int AS "qtyAwaitingRemittance",
+        COALESCE(SUM(CASE WHEN dro.order_id IS NULL THEN oi.unit_price ELSE 0 END), 0)::text AS "amountAwaitingRemittance"
       FROM order_items oi
       INNER JOIN orders o ON o.id = oi.order_id
       LEFT JOIN delivery_remittance_orders dro ON dro.order_id = o.id
@@ -2318,7 +2328,7 @@ export class InventoryService {
       GROUP BY oi.product_id
     `);
 
-    const revenueMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }>();
+    const revenueMap = new Map<string, { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string; qtyAwaitingRemittance: number; amountAwaitingRemittance: string }>();
     for (const r of revenueRows) {
       revenueMap.set(r.productId, r);
     }
@@ -2341,6 +2351,8 @@ export class InventoryService {
         qtyPending: rv?.qtyPending ?? 0,
         amountRemitted: rv?.amountRemitted ?? '0',
         amountPending: rv?.amountPending ?? '0',
+        qtyAwaitingRemittance: rv?.qtyAwaitingRemittance ?? 0,
+        amountAwaitingRemittance: rv?.amountAwaitingRemittance ?? '0',
       };
     });
   }

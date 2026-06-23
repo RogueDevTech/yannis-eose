@@ -159,6 +159,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'SUPPORT' ||
     (userPerms.includes(canonicalPermissionCode('orders.bulkAssign')) &&
       userPerms.includes(canonicalPermissionCode('orders.reassign')));
+  const canFreeze =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    user.role === 'SUPPORT' ||
+    userPerms.includes(canonicalPermissionCode('orders.freeze'));
 
   // Schedule heat + list both key off callback / preferred delivery dates. The default
   // "this month" strip filters createdAt — that would hide e.g. an April-created order
@@ -249,6 +254,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateOffline,
     canExport,
     canBulkPick,
+    canFreeze,
     page,
     limit: ORDERS_PER_PAGE,
     statusFilter: status,
@@ -274,6 +280,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'canCreateOffline'
       | 'canExport'
       | 'canBulkPick'
+      | 'canFreeze'
       | 'bulkSelectAllMatchingInput'
       | 'deferredSecondary'
       | 'branchesForMove'
@@ -448,6 +455,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateOffline,
     canExport,
     canBulkPick,
+    canFreeze,
     productFilter: productIdParam,
     frozenFilter: frozenParam,
     branchesForMove,
@@ -763,6 +771,36 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, deleted: data?.deleted ?? 0, skipped: data?.skipped ?? 0 });
   }
 
+  if (intent === 'bulkFreeze') {
+    await requirePermission(request, 'orders.freeze');
+    const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
+    const reason = form.get('reason')?.toString() || undefined;
+    const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number } } }>(
+      '/trpc/orders.bulkFreezeOrders',
+      { method: 'POST', cookie, body: { orderIds, reason }, timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS },
+    );
+    if (!res.ok) {
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Bulk freeze failed'), succeeded: 0, failed: orderIds.length });
+    }
+    const data = res.data?.result?.data;
+    return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
+  }
+
+  if (intent === 'bulkUnfreeze') {
+    await requirePermission(request, 'orders.freeze');
+    const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
+    const reason = form.get('reason')?.toString() || undefined;
+    const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number } } }>(
+      '/trpc/orders.bulkUnfreezeOrders',
+      { method: 'POST', cookie, body: { orderIds, reason }, timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS },
+    );
+    if (!res.ok) {
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Bulk unfreeze failed'), succeeded: 0, failed: orderIds.length });
+    }
+    const data = res.data?.result?.data;
+    return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
+  }
+
   return json({ success: false, error: 'Unknown intent' });
 }
 
@@ -776,6 +814,7 @@ export default function CSOrdersRoute() {
       canAssignDirectly: boolean;
       currentUserId: string;
       canCreateOffline: boolean;
+      canFreeze: boolean;
       page: number;
       limit: number;
       statusFilter?: string;
@@ -798,6 +837,7 @@ export default function CSOrdersRoute() {
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
+        | 'canFreeze'
         | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'
         | 'branchesForMove'

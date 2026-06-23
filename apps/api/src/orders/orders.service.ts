@@ -3289,7 +3289,8 @@ export class OrdersService {
     if (input.orderSource) {
       if (input.orderSource === 'edge-form') {
         // edge-form includes legacy orders with NULL orderSource (pre-migration)
-        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`);
+        // plus cart-graduated orders ('online') so recovered carts appear on Marketing Orders.
+        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
       } else {
         conditions.push(eq(schema.orders.orderSource, input.orderSource));
       }
@@ -3791,9 +3792,9 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    // Frozen orders cannot be transitioned (pulled for follow-up config).
+    // Frozen orders cannot be transitioned (follow-up config or manual freeze).
     if (order.frozenForFollowUp) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'This order is frozen for follow-up. No further changes allowed.' });
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This order is frozen. No further changes allowed.' });
     }
 
     const currentStatus = order.status as OrderStatus;
@@ -5392,8 +5393,9 @@ export class OrdersService {
     }
     if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
-      // sales form (NULL = legacy pre-migration, 'edge-form' = explicit).
-      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`);
+      // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus
+      // cart-graduated orders ('online') so recovered carts count for the MB.
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
     }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId,
