@@ -1302,7 +1302,7 @@ export function OrderDetailPage({
     successMessage: 'Price change request submitted',
     skipErrorToast: adjustItemsModalOpen,
   });
-  useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated', skipErrorToast: true });
+  useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated' });
   useFetcherToast(csCommentFetcher.data, {
     successMessage: 'Comment added',
     skipErrorToast: addCommentModalOpen,

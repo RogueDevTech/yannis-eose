@@ -1563,8 +1563,8 @@ export const branchesRouter = router({
 
   /* ── Branch Groups (multi-company) ─────────────────────────────── */
 
-  /** List all branch groups with their member branch count. SuperAdmin only. */
-  listGroups: permissionProcedure('branches.manage')
+  /** List all branch groups with their member branch count. */
+  listGroups: authedProcedure
     .query(async () => {
       const db = getDb();
       const groups = await db

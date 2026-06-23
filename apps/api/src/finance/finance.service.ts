@@ -196,29 +196,53 @@ export class FinanceService {
     );
 
     return withActor(this.db, { id: params.actorId }, async (tx) => {
-      const [row] = await tx
-        .insert(schema.invoices)
-        .values({
-          orderId: params.order.id,
-          recipientInfo: {
-            name: params.order.customerName,
-            address: params.order.customerAddress ?? undefined,
-          },
-          lineItems,
-          taxRate: null,
-          totalAmount: totalAmount.toFixed(2),
-          dueDate: null,
-          status: 'DRAFT',
-        })
-        .returning();
+      // Insert via raw SQL so we can explicitly set reference_number to
+      // MAX+1, bypassing the serial sequence entirely. This avoids the
+      // "duplicate key" error that occurs when the serial sequence is out
+      // of sync (e.g. after data import/restore).
+      const [row] = await tx.execute<{
+        id: string;
+        reference_number: number;
+        order_id: string | null;
+        recipient_info: unknown;
+        line_items: unknown;
+        tax_rate: string | null;
+        total_amount: string;
+        status: string;
+        due_date: string | null;
+        created_at: string;
+      }>(sql`
+        INSERT INTO invoices (id, reference_number, order_id, recipient_info, line_items, tax_rate, total_amount, status, due_date)
+        VALUES (
+          gen_random_uuid(),
+          COALESCE((SELECT MAX(reference_number) FROM invoices), 0) + 1,
+          ${params.order.id},
+          ${JSON.stringify({ name: params.order.customerName, address: params.order.customerAddress ?? undefined })}::jsonb,
+          ${JSON.stringify(lineItems)}::jsonb,
+          NULL,
+          ${totalAmount.toFixed(2)}::numeric,
+          'DRAFT',
+          NULL
+        )
+        RETURNING *
+      `);
 
       if (!row) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create invoice' });
       }
 
       return {
-        ...row,
-        referenceFormatted: this.formatReference(row.referenceNumber),
+        id: row.id,
+        referenceNumber: row.reference_number,
+        orderId: row.order_id,
+        recipientInfo: row.recipient_info,
+        lineItems: row.line_items,
+        taxRate: row.tax_rate,
+        totalAmount: row.total_amount,
+        status: row.status,
+        dueDate: row.due_date,
+        createdAt: row.created_at,
+        referenceFormatted: this.formatReference(row.reference_number),
       };
     });
   }
