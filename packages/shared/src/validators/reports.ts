@@ -88,8 +88,10 @@ export const reportColumnsByKey = {
   finance_invoices: ['reference', 'orderId', 'amount', 'status', 'dueDate'] as const,
   logistics_partners: [
     'providerName',
+    'contactInfo',
+    'coverageArea',
     'status',
-    'locationCount',
+    'locations',
     'totalAssigned',
     'delivered',
     'inTransit',
