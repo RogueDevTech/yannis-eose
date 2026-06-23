@@ -92,10 +92,10 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
   const { toast } = useToast();
   const [format, setFormat] = useState<'csv' | 'pdf' | 'xlsx'>('csv');
   const [selectedColumns, setSelectedColumns] = useState<string[]>(config.defaultColumns);
-  const [preset, setPreset] = useState<(typeof EXPORT_DATE_PRESET_OPTIONS)[number]['value']>('this_month');
+  const [preset, setPreset] = useState<(typeof EXPORT_DATE_PRESET_OPTIONS)[number]['value']>('all_time');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [includeCurrentFilters, setIncludeCurrentFilters] = useState(true);
+  const [includeCurrentFilters, setIncludeCurrentFilters] = useState(false);
   const [exportMediaBuyerId, setExportMediaBuyerId] = useState('');
   const [exportProductId, setExportProductId] = useState('');
   const [exportCampaignId, setExportCampaignId] = useState('');
@@ -119,10 +119,10 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     if (!open) return;
     setFormat('csv');
     setSelectedColumns(config.defaultColumns);
-    setPreset('this_month');
+    setPreset('all_time');
     setStartDate('');
     setEndDate('');
-    setIncludeCurrentFilters(true);
+    setIncludeCurrentFilters(false);
     setExportMediaBuyerId('');
     setExportProductId('');
     setExportCampaignId('');
