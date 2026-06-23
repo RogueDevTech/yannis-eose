@@ -332,11 +332,11 @@ function CSDashboard({
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
-                { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
-                { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
-                { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400' },
-                { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
-                { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
+                { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
+                { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
+                { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
+                { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
                 {
                   label: 'CR',
                   value: `${metrics.confirmationRate.toFixed(1)}%`,
@@ -389,14 +389,14 @@ function CSDashboard({
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
-              { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
-              { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400' },
-              { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+              { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
+              { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
+              { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
               // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live
               // `counts['CONFIRMED']` only counts orders sitting in CONFIRMED right
               // now — almost always 0 once they advance to AGENT_ASSIGNED → DELIVERED.
-              { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400' },
-              { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+              { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
+              { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
               {
                 label: 'CR',
                 value: `${metrics.confirmationRate.toFixed(1)}%`,

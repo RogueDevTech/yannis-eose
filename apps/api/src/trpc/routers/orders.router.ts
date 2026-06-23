@@ -327,6 +327,9 @@ export async function applySupervisorScope<T extends SupervisorScopeListInput>(
     perms.includes('logistics.scope.global');
   if (hasOrgWideScope) return input;
   if (isAdminLevel(ctx.user)) return input;
+  // Department heads see all branch orders — they are org-wide, not team-scoped.
+  const role = ctx.user.role;
+  if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_MARKETING' || role === 'HEAD_OF_LOGISTICS') return input;
   // Trust the session flag first — it's set by `attachTeamSupervisorSessionFlags`
   // which checks supervisor STATUS (not supervisee count) so a fresh supervisor
   // of an empty team still gets scope = [self]. Without this, the call below
