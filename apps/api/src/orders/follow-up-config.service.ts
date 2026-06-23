@@ -13,6 +13,7 @@ import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { CacheService } from '../common/cache/cache.service';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { randomUUID } from 'node:crypto';
@@ -846,12 +847,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, input.branchId, input.effectiveBranchIds);
       if (bCond) conditions.push(bCond);
     }
-    if (input.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(input.startDate)));
-    if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.followUpOrders.createdAt, end));
-    }
+    if (input.startDate) conditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) conditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(input.endDate)));
 
     const confirmedStatuses = ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED'];
     const deliveredStatuses = ['DELIVERED', 'REMITTED'];
@@ -934,12 +931,18 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         conditions.push(bCond);
       }
     }
-    if (input.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(input.startDate)));
-    if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.followUpOrders.createdAt, end));
-    }
+    // Date filter: use the timestamp column that matches the status filter.
+    // When filtering by DELIVERED/REMITTED the user wants "delivered this month",
+    // not "created this month" — follow-up orders may have been created months
+    // before delivery.  Fall back to createdAt for pipeline statuses.
+    const dateCol =
+      input.status === 'DELIVERED' || input.status === 'REMITTED'
+        ? schema.followUpOrders.deliveredAt
+        : input.status === 'CONFIRMED' || input.status === 'AGENT_ASSIGNED' || input.status === 'DISPATCHED' || input.status === 'IN_TRANSIT'
+          ? schema.followUpOrders.confirmedAt
+          : schema.followUpOrders.createdAt;
+    if (input.startDate) conditions.push(gte(dateCol, nigeriaDayStart(input.startDate)));
+    if (input.endDate) conditions.push(lte(dateCol, nigeriaDayEnd(input.endDate)));
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = ((input.page ?? 1) - 1) * (input.limit ?? 50);
@@ -1044,7 +1047,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     };
   }
 
-  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
+  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, _startDate?: string, _endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
     {
@@ -1056,12 +1059,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         conditions.push(bCond);
       }
     }
-    if (startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.followUpOrders.createdAt, end));
-    }
+    // Status counts: no date filter applied. The stat strip should always
+    // reflect the full pipeline for the branch/CS scope so that the pills
+    // remain accurate regardless of which status the user is viewing.
+    // The date filter is status-aware in the list query (listFollowUpOrders)
+    // but the pills show the full picture.
 
     const rows = await this.db
       .select({
@@ -1086,12 +1088,6 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       } else if (bCond) {
         deletedConditions.push(bCond);
       }
-    }
-    if (startDate) deletedConditions.push(gte(schema.followUpOrders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const endDel = new Date(endDate);
-      endDel.setHours(23, 59, 59, 999);
-      deletedConditions.push(lte(schema.followUpOrders.createdAt, endDel));
     }
     const [deletedRow] = await this.db
       .select({ count: count() })
@@ -1118,12 +1114,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           conditions.push(bCond);
         }
       }
-      if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, new Date(opts.startDate)));
-      if (opts?.endDate) {
-        const end = new Date(opts.endDate);
-        end.setHours(23, 59, 59, 999);
-        conditions.push(lte(schema.followUpOrders.createdAt, end));
-      }
+      if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(opts.startDate)));
+      if (opts?.endDate) conditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(opts.endDate)));
 
       const rows = await this.db
         .select({
@@ -2091,8 +2083,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   /**
    * Unfreeze a source order so CS can resume working on it.
-   * Soft-deletes the follow-up copy (if still unworked) and clears the frozen flag.
-   * HoCS / SuperAdmin / Admin only.
+   * CEO directive 2026-06-23: follow-up copies are NO LONGER deleted on unfreeze.
+   * Both the original order and the follow-up continue independently — "both CS working on them".
    */
   async unfreezeOrder(orderId: string, actor: SessionUser, reason?: string) {
     const [order] = await this.db
@@ -2103,39 +2095,176 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     if (!order.frozenForFollowUp) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order is not frozen' });
 
+    // Check if a follow-up copy exists for this order
+    const [followUpCopy] = await this.db
+      .select({ id: schema.followUpOrders.id })
+      .from(schema.followUpOrders)
+      .where(eq(schema.followUpOrders.sourceOrderId, orderId))
+      .limit(1);
+    const hasFollowUp = !!followUpCopy;
+
     await withActor(this.db, actor, async (tx) => {
-      // Unfreeze the source order
+      // Unfreeze the source order — follow-up copies continue independently.
       await tx
         .update(schema.orders)
         .set({ frozenForFollowUp: false, updatedAt: new Date() })
         .where(eq(schema.orders.id, orderId));
 
-      // Soft-delete ALL follow-up copies — the original is now the single source of truth.
-      // Admin provided a reason via the confirmation modal; any work on the follow-up
-      // is superseded by resuming the original order.
-      await tx
-        .update(schema.followUpOrders)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(schema.followUpOrders.sourceOrderId, orderId),
-            isNull(schema.followUpOrders.deletedAt),
-          ),
-        );
-
-      // Timeline event
+      // Timeline event — only mention follow-up if a copy actually exists
+      const defaultMsg = hasFollowUp
+        ? 'Order unfrozen — CS can resume. Follow-up copy continues independently.'
+        : 'Order unfrozen — CS can resume.';
       await tx.insert(schema.orderTimelineEvents).values({
         orderId,
         eventType: 'ORDER_UNFROZEN',
         actorId: actor.id,
         actorName: actor.name,
-        description: reason ? `Order unfrozen: ${reason}` : 'Order unfrozen — removed from follow-up. CS can resume.',
-        metadata: { unfrozenBy: actor.id, ...(reason ? { reason } : {}) },
+        description: reason ? `Order unfrozen: ${reason}` : defaultMsg,
+        metadata: { unfrozenBy: actor.id, ...(reason ? { reason } : {}), hasFollowUp },
         branchId: null,
       });
     });
 
     return { success: true };
+  }
+
+  // ── Bulk Freeze / Unfreeze (CEO directive 2026-06-23) ─────────────
+
+  /**
+   * Freeze multiple orders. Blocks all status transitions, assignments, and edits.
+   * Permission-gated: `orders.freeze` (CS group, SuperAdmin default).
+   */
+  async bulkFreezeOrders(orderIds: string[], actor: SessionUser, reason?: string) {
+    if (orderIds.length === 0) return { results: [], succeeded: 0, failed: 0, total: 0 };
+
+    // Batch-fetch all orders in one query
+    const orders = await this.db
+      .select({ id: schema.orders.id, frozenForFollowUp: schema.orders.frozenForFollowUp })
+      .from(schema.orders)
+      .where(inArray(schema.orders.id, orderIds));
+    const orderMap = new Map(orders.map((o) => [o.id, o]));
+
+    const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
+    const eligibleIds: string[] = [];
+
+    for (const orderId of orderIds) {
+      const order = orderMap.get(orderId);
+      if (!order) {
+        results.push({ orderId, success: false, error: 'Order not found' });
+      } else if (order.frozenForFollowUp) {
+        results.push({ orderId, success: false, error: 'Order is already frozen' });
+      } else {
+        eligibleIds.push(orderId);
+      }
+    }
+
+    if (eligibleIds.length > 0) {
+      // Single transaction for all eligible orders
+      await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.orders)
+          .set({ frozenForFollowUp: true, updatedAt: new Date() })
+          .where(inArray(schema.orders.id, eligibleIds));
+
+        await tx.insert(schema.orderTimelineEvents).values(
+          eligibleIds.map((orderId) => ({
+            orderId,
+            eventType: 'ORDER_FROZEN' as const,
+            actorId: actor.id,
+            actorName: actor.name,
+            description: reason ? `Order frozen: ${reason}` : 'Order manually frozen by admin.',
+            metadata: { frozenBy: actor.id, source: 'manual', ...(reason ? { reason } : {}) },
+            branchId: null,
+          })),
+        );
+      });
+
+      for (const orderId of eligibleIds) {
+        results.push({ orderId, success: true });
+      }
+    }
+
+    return {
+      results,
+      succeeded: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      total: results.length,
+    };
+  }
+
+  /**
+   * Unfreeze multiple orders. Clears the frozen flag; follow-up copies (if any) continue independently.
+   * Permission-gated: `orders.freeze`.
+   */
+  async bulkUnfreezeOrders(orderIds: string[], actor: SessionUser, reason?: string) {
+    if (orderIds.length === 0) return { results: [], succeeded: 0, failed: 0, total: 0 };
+
+    // Batch-fetch all orders + follow-up existence in parallel
+    const [orders, followUpRows] = await Promise.all([
+      this.db
+        .select({ id: schema.orders.id, frozenForFollowUp: schema.orders.frozenForFollowUp })
+        .from(schema.orders)
+        .where(inArray(schema.orders.id, orderIds)),
+      this.db
+        .select({ sourceOrderId: schema.followUpOrders.sourceOrderId })
+        .from(schema.followUpOrders)
+        .where(inArray(schema.followUpOrders.sourceOrderId, orderIds)),
+    ]);
+    const orderMap = new Map(orders.map((o) => [o.id, o]));
+    const hasFollowUpSet = new Set(followUpRows.map((r) => r.sourceOrderId).filter(Boolean));
+
+    const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
+    const eligibleIds: string[] = [];
+
+    for (const orderId of orderIds) {
+      const order = orderMap.get(orderId);
+      if (!order) {
+        results.push({ orderId, success: false, error: 'Order not found' });
+      } else if (!order.frozenForFollowUp) {
+        results.push({ orderId, success: false, error: 'Order is not frozen' });
+      } else {
+        eligibleIds.push(orderId);
+      }
+    }
+
+    if (eligibleIds.length > 0) {
+      // Single transaction for all eligible orders
+      await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.orders)
+          .set({ frozenForFollowUp: false, updatedAt: new Date() })
+          .where(inArray(schema.orders.id, eligibleIds));
+
+        await tx.insert(schema.orderTimelineEvents).values(
+          eligibleIds.map((orderId) => {
+            const hasFollowUp = hasFollowUpSet.has(orderId);
+            const defaultMsg = hasFollowUp
+              ? 'Order unfrozen — CS can resume. Follow-up copy continues independently.'
+              : 'Order unfrozen — CS can resume.';
+            return {
+              orderId,
+              eventType: 'ORDER_UNFROZEN' as const,
+              actorId: actor.id,
+              actorName: actor.name,
+              description: reason ? `Order unfrozen: ${reason}` : defaultMsg,
+              metadata: { unfrozenBy: actor.id, ...(reason ? { reason } : {}), hasFollowUp },
+              branchId: null,
+            };
+          }),
+        );
+      });
+
+      for (const orderId of eligibleIds) {
+        results.push({ orderId, success: true });
+      }
+    }
+
+    return {
+      results,
+      succeeded: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      total: results.length,
+    };
   }
 
   // ── Frozen Guard (used by OrdersService) ───────────────────────────
@@ -2144,7 +2273,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (order.frozenForFollowUp) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'This order is frozen for follow-up. No further changes allowed.',
+        message: 'This order is frozen. No further changes allowed.',
       });
     }
   }

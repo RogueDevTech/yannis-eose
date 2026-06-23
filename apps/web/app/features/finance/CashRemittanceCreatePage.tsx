@@ -30,11 +30,12 @@ export function CashRemittanceCreatePage({
   const navigate = useNavigate();
   const [markReceivedNow, setMarkReceivedNow] = useState(false);
   const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
-  const [commitmentFees, setCommitmentFees] = useState<Record<string, string>>({});
-  const [posFees, setPosFees] = useState<Record<string, string>>({});
-  const [failedDeliveryCosts, setFailedDeliveryCosts] = useState<Record<string, string>>({});
-  const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
-  const [expandedCosts, setExpandedCosts] = useState<Set<string>>(() => new Set());
+  // Batch-level extra costs (single input for the whole remittance)
+  const [commitmentFee, setCommitmentFee] = useState('');
+  const [posFee, setPosFee] = useState('');
+  const [failedDeliveryCost, setFailedDeliveryCost] = useState('');
+  const [batchNote, setBatchNote] = useState('');
+  const [showExtraCosts, setShowExtraCosts] = useState(true);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,19 +85,10 @@ export function CashRemittanceCreatePage({
     [selectedOrders, deliveryFees],
   );
 
-  const totalCommitmentFees = useMemo(
-    () => selectedOrders.reduce((acc, o) => acc + (parseFloat(commitmentFees[o.id] ?? '0') || 0), 0),
-    [selectedOrders, commitmentFees],
-  );
-  const totalPosFees = useMemo(
-    () => selectedOrders.reduce((acc, o) => acc + (parseFloat(posFees[o.id] ?? '0') || 0), 0),
-    [selectedOrders, posFees],
-  );
-  const totalFailedDeliveryCosts = useMemo(
-    () => selectedOrders.reduce((acc, o) => acc + (parseFloat(failedDeliveryCosts[o.id] ?? '0') || 0), 0),
-    [selectedOrders, failedDeliveryCosts],
-  );
-  const totalExtraCosts = totalCommitmentFees + totalPosFees + totalFailedDeliveryCosts;
+  const totalCommitmentFee = parseFloat(commitmentFee) || 0;
+  const totalPosFee = parseFloat(posFee) || 0;
+  const totalFailedDeliveryCost = parseFloat(failedDeliveryCost) || 0;
+  const totalExtraCosts = totalCommitmentFee + totalPosFee + totalFailedDeliveryCost;
   const totalAmount = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
   const submitting = fetcher.state !== 'idle';
@@ -120,18 +112,10 @@ export function CashRemittanceCreatePage({
     if (Object.keys(feesMap).length > 0) {
       fd.set('deliveryFees', JSON.stringify(feesMap));
     }
-    if (totalCommitmentFees > 0) fd.set('commitmentFee', totalCommitmentFees.toFixed(2));
-    if (totalPosFees > 0) fd.set('posFee', totalPosFees.toFixed(2));
-    if (totalFailedDeliveryCosts > 0) fd.set('failedDeliveryCost', totalFailedDeliveryCosts.toFixed(2));
-    // Combine per-order notes into the remittance description
-    const allNotes = selectedOrders
-      .map((o) => {
-        const n = orderNotes[o.id]?.trim();
-        return n ? `${o.invoice?.referenceFormatted ?? o.customerName}: ${n}` : '';
-      })
-      .filter(Boolean)
-      .join('; ');
-    if (allNotes) fd.set('notes', allNotes);
+    if (totalCommitmentFee > 0) fd.set('commitmentFee', totalCommitmentFee.toFixed(2));
+    if (totalPosFee > 0) fd.set('posFee', totalPosFee.toFixed(2));
+    if (totalFailedDeliveryCost > 0) fd.set('failedDeliveryCost', totalFailedDeliveryCost.toFixed(2));
+    if (batchNote.trim()) fd.set('notes', batchNote.trim());
     fetcher.submit(fd, { method: 'POST' });
   };
 
@@ -193,15 +177,7 @@ export function CashRemittanceCreatePage({
             ) : (
               <ul className="space-y-3 px-4 pb-4">
                 {selectedOrders.map((o) => {
-                  const deliveryFee = parseFloat(deliveryFees[o.id] ?? '0') || 0;
-                  const commitment = parseFloat(commitmentFees[o.id] ?? '0') || 0;
-                  const pos = parseFloat(posFees[o.id] ?? '0') || 0;
-                  const failed = parseFloat(failedDeliveryCosts[o.id] ?? '0') || 0;
                   const orderAmt = lineAmount(o);
-                  const lineCosts = deliveryFee + commitment + pos + failed;
-                  const lineTotal = orderAmt - lineCosts;
-                  const isExpanded = expandedCosts.has(o.id);
-
                   return (
                     <li key={o.id} className="rounded-xl border border-app-border bg-app-elevated p-4 shadow-sm space-y-2">
                       <div className="flex items-center justify-between gap-3">
@@ -226,82 +202,79 @@ export function CashRemittanceCreatePage({
                           className="input w-full text-sm"
                         />
                       </div>
-
-                      {!isExpanded ? (
-                        <button
-                          type="button"
-                          onClick={() => setExpandedCosts((prev) => { const next = new Set(prev); next.add(o.id); return next; })}
-                          className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                        >
-                          + Add more costs
-                        </button>
-                      ) : (
-                        <>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="block text-xs text-app-fg-muted mb-1">Commitment fee</label>
-                              <AmountInput
-                                placeholder="0"
-                                value={commitmentFees[o.id] ?? ''}
-                                onChange={(raw) => setCommitmentFees((prev) => ({ ...prev, [o.id]: raw }))}
-                                prefix="₦"
-                                className="input w-full text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-app-fg-muted mb-1">POS fee</label>
-                              <AmountInput
-                                placeholder="0"
-                                value={posFees[o.id] ?? ''}
-                                onChange={(raw) => setPosFees((prev) => ({ ...prev, [o.id]: raw }))}
-                                prefix="₦"
-                                className="input w-full text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-app-fg-muted mb-1">Failed delivery</label>
-                              <AmountInput
-                                placeholder="0"
-                                value={failedDeliveryCosts[o.id] ?? ''}
-                                onChange={(raw) => setFailedDeliveryCosts((prev) => ({ ...prev, [o.id]: raw }))}
-                                prefix="₦"
-                                className="input w-full text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-app-fg-muted mb-1">Note (optional)</label>
-                              <input
-                                type="text"
-                                value={orderNotes[o.id] ?? ''}
-                                onChange={(e) => setOrderNotes((prev) => ({ ...prev, [o.id]: e.target.value }))}
-                                placeholder="e.g. POS charge"
-                                maxLength={500}
-                                className="input w-full text-sm"
-                              />
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setExpandedCosts((prev) => { const next = new Set(prev); next.delete(o.id); return next; })}
-                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                          >
-                            − Hide extra costs
-                          </button>
-                        </>
-                      )}
-
-                      {lineCosts > 0 && (
-                        <div className="flex items-center justify-between gap-3 pt-1 border-t border-app-border/50">
-                          <span className="text-xs text-app-fg-muted">Net remittance</span>
-                          <span className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">
-                            {lineTotal > 0 ? <NairaPrice amount={lineTotal} /> : '—'}
-                          </span>
-                        </div>
-                      )}
                     </li>
                   );
                 })}
               </ul>
+            )}
+          </div>
+
+          {/* Batch-level extra costs */}
+          <div className="rounded-xl border border-app-border bg-app-elevated shadow-sm overflow-hidden">
+            {!showExtraCosts ? (
+              <button
+                type="button"
+                onClick={() => setShowExtraCosts(true)}
+                className="w-full px-4 py-3 text-left text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-app-hover transition-colors"
+              >
+                + Add extra costs
+              </button>
+            ) : (
+              <div className="px-4 py-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-app-fg">Extra costs</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowExtraCosts(false)}
+                    className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                  >
+                    Hide
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-app-fg-muted mb-1">Commitment fee</label>
+                    <AmountInput
+                      placeholder="0"
+                      value={commitmentFee}
+                      onChange={setCommitmentFee}
+                      prefix="₦"
+                      className="input w-full text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-app-fg-muted mb-1">POS fee</label>
+                    <AmountInput
+                      placeholder="0"
+                      value={posFee}
+                      onChange={setPosFee}
+                      prefix="₦"
+                      className="input w-full text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-app-fg-muted mb-1">Failed delivery</label>
+                    <AmountInput
+                      placeholder="0"
+                      value={failedDeliveryCost}
+                      onChange={setFailedDeliveryCost}
+                      prefix="₦"
+                      className="input w-full text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-app-fg-muted mb-1">Note (optional)</label>
+                    <input
+                      type="text"
+                      value={batchNote}
+                      onChange={(e) => setBatchNote(e.target.value)}
+                      placeholder="e.g. POS charge"
+                      maxLength={1000}
+                      className="input w-full text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -330,27 +303,27 @@ export function CashRemittanceCreatePage({
                     </span>
                   </div>
                 )}
-                {totalCommitmentFees > 0 && (
+                {totalCommitmentFee > 0 && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-app-fg-muted">Commitment fees</span>
+                    <span className="text-sm text-app-fg-muted">Commitment fee</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalCommitmentFees} />
+                      -<NairaPrice amount={totalCommitmentFee} />
                     </span>
                   </div>
                 )}
-                {totalPosFees > 0 && (
+                {totalPosFee > 0 && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-app-fg-muted">POS fees</span>
+                    <span className="text-sm text-app-fg-muted">POS fee</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalPosFees} />
+                      -<NairaPrice amount={totalPosFee} />
                     </span>
                   </div>
                 )}
-                {totalFailedDeliveryCosts > 0 && (
+                {totalFailedDeliveryCost > 0 && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">Failed delivery</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalFailedDeliveryCosts} />
+                      -<NairaPrice amount={totalFailedDeliveryCost} />
                     </span>
                   </div>
                 )}
