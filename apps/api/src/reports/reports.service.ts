@@ -27,6 +27,11 @@ const EXPORT_MAX_PAGES = 50;
 function escapeField(value: unknown): string {
   if (value === null || value === undefined) return '';
   const str = String(value);
+  // Force text format for long digit strings (phone numbers) so Excel
+  // doesn't mangle them into scientific notation like 2.34707E+12.
+  if (/^\+?\d{7,}$/.test(str.trim())) {
+    return `="${str.trim()}"`;
+  }
   if (str.includes(',') || str.includes('"') || str.includes('\n')) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -717,12 +722,16 @@ export class ReportsService {
   ) {
     this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
+    // "All time" resolves to no dates, but the performance method defaults to
+    // month-to-date when no range is given. Pass an epoch start to override.
+    const effectiveStart = startDate ?? '2020-01-01';
     const performance = await this.logisticsService.getLogisticsProviderPerformance(
-      startDate,
+      effectiveStart,
       endDate,
       currentBranchId,
       effectiveBranchIds,
       input.filters?.productId,
+      true, // includeInactive — export should list all providers
     );
 
     let data = performance;
@@ -733,10 +742,31 @@ export class ReportsService {
       data = data.filter((p) => p.status === input.filters!.status);
     }
 
+    // Fetch location names per provider for the "Locations" column
+    const providerIds = data.map((p) => p.providerId);
+    const locationRows = providerIds.length > 0
+      ? await this.db
+          .select({
+            providerId: schema.logisticsLocations.providerId,
+            name: schema.logisticsLocations.name,
+          })
+          .from(schema.logisticsLocations)
+          .where(inArray(schema.logisticsLocations.providerId, providerIds))
+      : [];
+    const locationNamesByProvider = new Map<string, string[]>();
+    for (const row of locationRows) {
+      if (!row.providerId) continue;
+      const list = locationNamesByProvider.get(row.providerId) ?? [];
+      list.push(row.name);
+      locationNamesByProvider.set(row.providerId, list);
+    }
+
     const rows = data.map((p) => ({
       providerName: p.providerName,
+      contactInfo: p.contactInfo,
+      coverageArea: p.coverageArea,
       status: p.status,
-      locationCount: p.locationCount,
+      locations: (locationNamesByProvider.get(p.providerId) ?? []).join(', '),
       totalAssigned: p.totalAssigned,
       delivered: p.delivered,
       inTransit: p.inTransit,
@@ -757,8 +787,10 @@ export class ReportsService {
 
     const columns = [
       { key: 'providerName', label: 'Company' },
+      { key: 'contactInfo', label: 'Phone / Contact' },
+      { key: 'coverageArea', label: 'Coverage Area' },
       { key: 'status', label: 'Status' },
-      { key: 'locationCount', label: 'Locations' },
+      { key: 'locations', label: 'Locations' },
       { key: 'totalAssigned', label: 'Orders Assigned' },
       { key: 'delivered', label: 'Delivered' },
       { key: 'inTransit', label: 'In Transit' },

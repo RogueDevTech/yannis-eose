@@ -2740,10 +2740,14 @@ export class LogisticsService {
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
     productId?: string,
+    /** When true, include all providers even those with zero activity (for exports). */
+    includeInactive?: boolean,
   ): Promise<
     Array<{
       providerId: string;
       providerName: string;
+      contactInfo: string;
+      coverageArea: string;
       status: string;
       locationCount: number;
       totalAssigned: number;
@@ -2850,6 +2854,8 @@ export class LogisticsService {
         id: schema.logisticsProviders.id,
         name: schema.logisticsProviders.name,
         status: schema.logisticsProviders.status,
+        contactInfo: schema.logisticsProviders.contactInfo,
+        coverageArea: schema.logisticsProviders.coverageArea,
       })
       .from(schema.logisticsProviders);
 
@@ -3056,6 +3062,8 @@ export class LogisticsService {
       return {
         providerId: p.id,
         providerName: p.name,
+        contactInfo: p.contactInfo ?? '',
+        coverageArea: p.coverageArea ?? '',
         status: p.status,
         locationCount: locationCountByProvider.get(p.id) ?? 0,
         totalAssigned,
@@ -3085,9 +3093,9 @@ export class LogisticsService {
       };
     });
 
-    // When group-scoped, hide providers with zero activity in the selected group.
-    // They belong to other companies and are just noise.
-    const filtered = effectiveBranchIds?.length
+    // When group-scoped (and not exporting all), hide providers with zero activity
+    // in the selected group. They belong to other companies and are just noise.
+    const filtered = effectiveBranchIds?.length && !includeInactive
       ? result.filter((p) => p.totalAssigned > 0 || p.availableStock > 0 || p.reservedStock > 0)
       : result;
 
