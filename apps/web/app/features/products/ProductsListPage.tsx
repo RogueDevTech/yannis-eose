@@ -226,17 +226,6 @@ export function ProductsListPage({
         header: 'Category',
         render: (product) => <span className="text-sm text-app-fg-muted">{getDisplayCategory(product)}</span>,
       },
-      {
-        key: 'baseSalePrice',
-        header: 'Base Price',
-        align: 'right',
-        mobileAlign: 'left',
-        render: (product) => (
-          <span className="font-medium tabular-nums">
-            <NairaPrice amount={Number(product.baseSalePrice)} />
-          </span>
-        ),
-      },
     ];
     if (showCostColumn) {
       cols.push({
@@ -402,9 +391,6 @@ export function ProductsListPage({
             </div>
             <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
               <span className="truncate">{getDisplayCategory(product)}</span>
-              <span className="font-medium tabular-nums text-app-fg shrink-0">
-                <NairaPrice amount={Number(product.baseSalePrice)} />
-              </span>
             </div>
             <div className="flex items-center gap-3 text-xs text-app-fg-muted">
               <span className={`tabular-nums ${(product.totalStock ?? 0) <= 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>

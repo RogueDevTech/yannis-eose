@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, ne, and, desc, gte, lte, count, sum, sql, inArray, isNotNull, type SQL } from 'drizzle-orm';
+import { eq, ne, and, or, desc, gte, lte, count, sum, sql, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -922,7 +922,7 @@ export class FinanceService {
   // Budgets
   // ============================================
 
-  async setBudget(input: SetBudgetInput, actorId: string) {
+  async setBudget(input: SetBudgetInput, actorId: string, groupId?: string | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .insert(schema.budgets)
@@ -933,6 +933,7 @@ export class FinanceService {
           periodStart: new Date(input.periodStart),
           periodEnd: new Date(input.periodEnd),
           createdBy: actorId,
+          groupId: groupId ?? null,
         })
         .returning();
 
@@ -947,7 +948,7 @@ export class FinanceService {
 
   async listBudgets(groupId?: string | null) {
     const conditions: SQL[] = [];
-    if (groupId) conditions.push(eq(schema.budgets.groupId, groupId));
+    if (groupId) conditions.push(or(eq(schema.budgets.groupId, groupId), isNull(schema.budgets.groupId))!);
 
     return this.db
       .select()
@@ -962,7 +963,7 @@ export class FinanceService {
    */
   async listBudgetsWithUtilization(groupId?: string | null) {
     const conditions: SQL[] = [];
-    if (groupId) conditions.push(eq(schema.budgets.groupId, groupId));
+    if (groupId) conditions.push(or(eq(schema.budgets.groupId, groupId), isNull(schema.budgets.groupId))!);
 
     const budgets = await this.db
       .select()

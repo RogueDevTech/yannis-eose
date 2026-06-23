@@ -42,8 +42,8 @@ export const productCategoriesRouter = router({
   /**
    * Get all active categories for dropdown selectors.
    */
-  listActive: authedProcedure.query(async () => {
-    return getService().listActive();
+  listActive: authedProcedure.query(async ({ ctx }) => {
+    return getService().listActive(ctx.activeGroupId ?? undefined);
   }),
 
   /**

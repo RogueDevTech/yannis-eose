@@ -1158,7 +1158,7 @@ export function MarketingOrdersPage({
                   : `No ${noun}`;
               })()}
             </p>
-            <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+            <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} pageSizeParam="perPage" />
           </>
         )}
       </div>

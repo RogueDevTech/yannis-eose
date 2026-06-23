@@ -130,7 +130,7 @@ export const productsRouter = router({
    * Get distinct product categories.
    */
   categories: authedProcedure.query(async ({ ctx }) => {
-    return getProductsService().getCategories(ctx.user.id, ctx.user.role);
+    return getProductsService().getCategories(ctx.user.id, ctx.user.role, ctx.activeGroupId);
   }),
 
   /**

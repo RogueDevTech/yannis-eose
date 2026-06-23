@@ -58,6 +58,9 @@ clientLoader.hydrate = false;
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const name = formData.get('name')?.toString() ?? '';
+  // Cost price and base/list price are no longer collected on the form — cost is
+  // a reference value only (real COGS is FIFO landed cost on shipments) and base
+  // price auto-syncs to the cheapest offer. Both remain optional for imports.
   const costPrice = formData.get('costPrice')?.toString() ?? '';
   const baseSalePriceRaw = formData.get('baseSalePrice')?.toString() ?? '';
   const description = formData.get('description')?.toString() || undefined;
@@ -76,8 +79,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const baseSalePrice = parseCurrencyToNumber(baseSalePriceRaw);
 
-  if (!name || !costPrice || baseSalePrice == null) {
-    return json({ error: 'Name, list price, and cost price are required' }, { status: 400 });
+  if (!name) {
+    return json({ error: 'Product name is required' }, { status: 400 });
   }
 
   const cookie = getSessionCookie(request);
@@ -87,8 +90,10 @@ export async function action({ request }: ActionFunctionArgs) {
     cookie,
     body: {
       name,
-      baseSalePrice,
-      costPrice,
+      // Only forward prices when actually provided (e.g. via import); the create
+      // form omits them. Base price defaults to 0 server-side; cost stays null.
+      ...(baseSalePrice != null ? { baseSalePrice } : {}),
+      ...(costPrice ? { costPrice } : {}),
       galleryImageUrls,
       description,
       category,

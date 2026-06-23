@@ -197,6 +197,7 @@ export function NotificationsPage({
                 totalPages={pagination.totalPages}
                 pageParam="page"
                 pageSize={pagination.limit}
+                pageSizeParam="perPage"
               />
             </div>
           </div>

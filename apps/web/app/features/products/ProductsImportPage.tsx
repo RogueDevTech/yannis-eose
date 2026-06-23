@@ -188,8 +188,9 @@ export function ProductsImportPage({ categories }: ProductsImportPageProps) {
       buildFormData={(row) => {
         const fd = new FormData();
         fd.set('name', row.name);
-        fd.set('basePrice', String(row.basePrice as number));
-        fd.set('costPrice', String(row.costPrice as number));
+        fd.set('basePrice', String((row.basePrice as number | null) ?? 0));
+        // Cost is optional — only send when the sheet actually provided one.
+        if (row.costPrice != null) fd.set('costPrice', String(row.costPrice));
         if (row.description) fd.set('description', row.description);
         if (row.categoryId) fd.set('categoryId', row.categoryId);
         if (row.categoryName) fd.set('category', row.categoryName);

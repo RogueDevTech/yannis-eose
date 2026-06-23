@@ -184,8 +184,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const baseParsed = parseCurrencyToNumber(baseSalePriceRaw);
-  if (!name || !costPrice || baseParsed == null) {
-    return json({ error: 'Name, list price, and cost price are required' }, { status: 400 });
+  if (!name) {
+    return json({ error: 'Product name is required' }, { status: 400 });
   }
 
   const res = await apiRequest<unknown>('/trpc/products.update', {
@@ -194,8 +194,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     body: {
       productId,
       name,
-      baseSalePrice: baseParsed,
-      costPrice,
+      // Price fields are no longer on the edit form — only send them when the
+      // submission actually carries a value so existing prices are preserved.
+      ...(baseParsed != null ? { baseSalePrice: baseParsed } : {}),
+      ...(costPrice ? { costPrice } : {}),
       galleryImageUrls,
       description: description ?? null,
       category: category ?? null,

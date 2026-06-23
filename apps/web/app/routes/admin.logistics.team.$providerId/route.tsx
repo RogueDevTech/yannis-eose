@@ -8,6 +8,7 @@ import {
   getSessionCookie,
   requirePermissionOrRoles,
   redirectIfUnauthorized,
+  parsePerPage,
 } from '~/lib/api.server';
 import { LogisticsProviderDetailPage } from '~/features/logistics/LogisticsProviderDetailPage';
 import { LogisticsProviderDetailLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
@@ -128,6 +129,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const pageData = (async () => {
     const movementsPage = Math.max(1, Number(url.searchParams.get('movementsPage') ?? '1') || 1);
+    const { perPage: movementsPerPage } = parsePerPage(url.searchParams, { param: 'movementsPerPage' });
     const productFilter = url.searchParams.get('productId') ?? undefined;
     const locationFilter = url.searchParams.get('locationId') ?? undefined;
     const shipmentFilter = url.searchParams.get('shipmentId') ?? undefined;
@@ -150,7 +152,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       JSON.stringify({
         providerId,
         page: movementsPage,
-        limit: 40,
+        limit: movementsPerPage,
         ...(productFilter ? { productId: productFilter } : {}),
         ...(locationFilter ? { locationId: locationFilter } : {}),
         ...(periodAllTime ? {} : {

@@ -50,6 +50,7 @@ export function FundingLedgerPage({
   total,
   page,
   totalPages,
+  limit,
   summary,
   selectedUserId,
   selectedUserName,
@@ -288,7 +289,7 @@ export function FundingLedgerPage({
               <p className="text-sm text-app-fg-muted">
                 Showing {entries.length} of {total} transactions
               </p>
-              <Pagination page={page} totalPages={totalPages} pageParam="page" />
+              <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} pageSizeParam="perPage" />
             </div>
           )}
         </>

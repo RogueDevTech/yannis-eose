@@ -278,9 +278,8 @@ export function MarketingFormCreatePage({
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
 
             <div className="card space-y-3">
-              <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <TextInput name="name" required placeholder="Form name" className="sm:col-span-2" />
+                <TextInput name="name" label="Form name" required placeholder="Form name" className="sm:col-span-2" />
                 <div className="sm:col-span-2">
                   <SearchableSelect
                     id="marketing-form-offer-group"

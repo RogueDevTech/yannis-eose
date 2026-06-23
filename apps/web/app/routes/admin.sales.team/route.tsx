@@ -221,17 +221,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const avgCallDuration =
       teamTotals.callsMade > 0 ? Math.round(teamTotals.totalCallDuration / teamTotals.callsMade) : null;
 
-    const PAGE_SIZE = 20;
-    const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
     const unfilteredCount = teamMembers.length;
     const totalCount = filteredMembers.length;
-    const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-    const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
-    const start = (page - 1) * PAGE_SIZE;
-    const pagedMembers = filteredMembers.slice(start, start + PAGE_SIZE);
 
     return {
-      teamMembers: pagedMembers,
+      teamMembers: filteredMembers,
       summary: {
         agentCount: totalCount,
         totalPending,
@@ -244,8 +238,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         confirmationRate,
         deliveryRate,
       },
-      page,
-      totalPages,
+      page: 1,
+      totalPages: 1,
       totalCount,
       unfilteredCount,
       q,

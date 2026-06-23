@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, parsePerPage } from '~/lib/api.server';
 import { isAdminLevel } from '~/lib/rbac';
 import { FundingLedgerPage } from '~/features/marketing/FundingLedgerPage';
 import type { FundingLedgerLoaderData, FundingLedgerEntry } from '~/features/marketing/types';
@@ -18,6 +18,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const userId = url.searchParams.get('userId') || (user.role === 'MEDIA_BUYER' ? user.id : '');
   const entryTypeFilter = url.searchParams.get('entryType') || 'all';
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  const { perPage } = parsePerPage(url.searchParams);
 
   // Fetch MB list for the picker (admin/HoM only)
   const isAdmin = isAdminLevel(user) || user.role === 'HEAD_OF_MARKETING' || user.role === 'FINANCE_OFFICER';
@@ -44,6 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       total: 0,
       page: 1,
       totalPages: 1,
+      limit: perPage,
       summary: { totalCredits: '0', totalDebits: '0', closingBalance: '0' },
       selectedUserId: '',
       selectedUserName: '',
@@ -61,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     userId,
     entryType: entryTypeFilter,
     page,
-    limit: 50,
+    limit: perPage,
   };
   if (!periodAllTime) {
     if (startDate) ledgerInput.startDate = startDate;
@@ -93,6 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const data: FundingLedgerLoaderData = {
     ...ledger,
+    limit: perPage,
     selectedUserId: userId,
     selectedUserName,
     mediaBuyers,

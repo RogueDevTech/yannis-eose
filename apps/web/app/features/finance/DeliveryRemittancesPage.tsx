@@ -870,14 +870,15 @@ export function DeliveryRemittancesPage({
               page,
               totalPages,
               pageParam: 'page',
+              pageSize,
               showWhenSinglePage: true,
               wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
               controlsClassName: 'sm:justify-end',
               summary: (
                 <span className="text-app-fg-muted">
                   {pagination.total === 0
-                    ? `0 remittances · ${pageSize} per page`
-                    : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, pagination.total)} of ${pagination.total} · ${pageSize} per page`}
+                    ? `0 remittances`
+                    : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, pagination.total)} of ${pagination.total}`}
                 </span>
               ),
             }}

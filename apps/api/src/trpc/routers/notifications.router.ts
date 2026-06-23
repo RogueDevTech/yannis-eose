@@ -62,14 +62,14 @@ export const notificationsRouter = router({
   list: authedProcedure
     .input(listNotificationsSchema)
     .query(async ({ input, ctx }) => {
-      return getNotificationsService().list(ctx.user.id, input, ctx.effectiveBranchIds);
+      return getNotificationsService().list(ctx.user.id, input, ctx.effectiveBranchIds, ctx.activeGroupId);
     }),
 
   /**
    * Get unread notification count.
    */
   unreadCount: authedProcedure.query(async ({ ctx }) => {
-    const count = await getNotificationsService().getUnreadCount(ctx.user.id, ctx.effectiveBranchIds);
+    const count = await getNotificationsService().getUnreadCount(ctx.user.id, ctx.effectiveBranchIds, ctx.activeGroupId);
     return { count };
   }),
 
@@ -152,7 +152,7 @@ export const notificationsRouter = router({
       const branchId =
         (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') ? null : (ctx.user.currentBranchId ?? null);
 
-      return getNotificationsService().broadcastPush(ctx.user.id, branchId, input);
+      return getNotificationsService().broadcastPush(ctx.user.id, branchId, input, ctx.effectiveBranchIds);
     }),
 
   // ----------------------------------------------------------

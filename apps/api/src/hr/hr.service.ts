@@ -126,7 +126,7 @@ export class HrService {
 
     // Group isolation — only show plans from the active branch group.
     if (groupId) {
-      conditions.push(eq(schema.commissionPlans.groupId, groupId));
+      conditions.push(or(eq(schema.commissionPlans.groupId, groupId), isNull(schema.commissionPlans.groupId))!);
     }
 
     // Auto-scope by viewer: Heads only see plans for their dept; admins/HR see everything.
@@ -411,10 +411,19 @@ export class HrService {
     return payout;
   }
 
-  async listPayouts(input: ListPayoutsInput, viewer?: SessionUser) {
+  async listPayouts(input: ListPayoutsInput, viewer?: SessionUser, effectiveBranchIds?: string[] | null) {
     const conditions = [];
     if (input.staffId) {
       conditions.push(eq(schema.payoutRecords.staffId, input.staffId));
+    }
+
+    // Company-group isolation: scope to payouts whose staff belong to a branch
+    // in the active group. Mirrors getPayoutSummary — without this, a
+    // group-scoped viewer sees payouts from every company. (Pillar 2/4.)
+    if (effectiveBranchIds?.length) {
+      conditions.push(
+        sql`${schema.payoutRecords.staffId} IN (SELECT user_id FROM user_branches WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)}))`,
+      );
     }
     if (input.status) {
       conditions.push(eq(schema.payoutRecords.status, input.status as typeof schema.payoutRecords.$inferSelect['status']));
@@ -871,7 +880,7 @@ export class HrService {
   }
 
   async getActiveSettlementConfig(groupId?: string | null) {
-    const conditions = groupId ? [eq(schema.settlementConfigs.groupId, groupId)] : [];
+    const conditions = groupId ? [or(eq(schema.settlementConfigs.groupId, groupId), isNull(schema.settlementConfigs.groupId))!] : [];
     const rows = await this.db
       .select()
       .from(schema.settlementConfigs)
@@ -883,7 +892,7 @@ export class HrService {
   }
 
   async listSettlementConfigs(groupId?: string | null) {
-    const conditions = groupId ? [eq(schema.settlementConfigs.groupId, groupId)] : [];
+    const conditions = groupId ? [or(eq(schema.settlementConfigs.groupId, groupId), isNull(schema.settlementConfigs.groupId))!] : [];
     return this.db
       .select()
       .from(schema.settlementConfigs)

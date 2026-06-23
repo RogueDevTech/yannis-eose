@@ -188,7 +188,11 @@ export class ProductCategoriesService {
   /**
    * Get all active categories for dropdown selectors.
    */
-  async listActive() {
+  async listActive(groupId?: string) {
+    const conditions = [eq(schema.productCategories.status, 'ACTIVE')];
+    if (groupId) {
+      conditions.push(eq(schema.productCategories.groupId, groupId));
+    }
     return this.db
       .select({
         id: schema.productCategories.id,
@@ -196,7 +200,7 @@ export class ProductCategoriesService {
         brandName: schema.productCategories.brandName,
       })
       .from(schema.productCategories)
-      .where(eq(schema.productCategories.status, 'ACTIVE'))
+      .where(and(...conditions))
       .orderBy(schema.productCategories.name);
   }
 }

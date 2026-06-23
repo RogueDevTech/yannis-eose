@@ -1323,7 +1323,7 @@ export function MarketingAdSpendPage({
             ? `Showing ${(page - 1) * limit + 1}\u2013${Math.min(page * limit, totalAdSpend)} of ${totalAdSpend} entries`
             : 'No entries'}
         </p>
-        <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+        <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} pageSizeParam="perPage" />
       </div>
 
       {adSpendDetailModal && (

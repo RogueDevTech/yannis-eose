@@ -839,28 +839,56 @@ export class AuthService {
       }
     }
 
-    // When a group is active and no explicit branch subset was selected,
-    // resolve the group's branch IDs so effectiveBranchIds is correctly scoped
-    // (user.branchIds may span multiple groups for SuperAdmin).
-    // BUT: only do this when the user is viewing the group level (branchId is
-    // null).  When a specific branch is selected, selectedBranchIds must stay
-    // null so that queries scope to currentBranchId alone.
-    let groupBranchIds = resolvedSelectedIds;
-    if (!groupBranchIds && activeGroupId && !branchId) {
+    // Resolve the set of branch IDs this user is permitted to view within the
+    // active group. For truly global users (SuperAdmin/Admin/scopeGlobal) that
+    // is every branch in the group; everyone else — including HoM/HoCS/HoL — is
+    // constrained to their assigned branches within the group.
+    //
+    // This permitted set is the TRUST BOUNDARY for effectiveBranchIds: a
+    // client-supplied selectedBranchIds is never stored verbatim, it is always
+    // intersected with this set. Otherwise a forged POST could widen the
+    // session's effectiveBranchIds to branches in another company group and
+    // bypass every downstream query scope. (Pillar 2/4.)
+    let allGroupIds: string[] = [];
+    let permittedGroupIds: string[] | null = null;
+    if (activeGroupId) {
       const groupBranches = await this.db
         .select({ id: schema.branches.id })
         .from(schema.branches)
         .where(eq(schema.branches.groupId, activeGroupId));
-      const allGroupIds = groupBranches.map((b) => b.id);
-      // Only truly global users (SuperAdmin/Admin/scopeGlobal) see all
-      // group branches. Everyone else — including HoM/HoCS/HoL — is
-      // scoped to their assigned branches within the group.
-      groupBranchIds = (isAdminLevel(user) || user.scopeGlobal)
+      allGroupIds = groupBranches.map((b) => b.id);
+      const scoped = (isAdminLevel(user) || user.scopeGlobal)
         ? allGroupIds
         : user.branchIds?.length
           ? allGroupIds.filter((id) => user.branchIds!.includes(id))
           : allGroupIds;
-      if (groupBranchIds.length === 0) groupBranchIds = allGroupIds;
+      // Never collapse to empty for a group view — fall back to the whole
+      // group rather than accidentally going global.
+      permittedGroupIds = scoped.length > 0 ? scoped : allGroupIds;
+    }
+
+    // The permitted allow-list to filter any client selection against. Global
+    // users with no active group (SuperAdmin spanning groups) have no list —
+    // they already see everything, so narrowing to their own selection is safe.
+    const allowList = permittedGroupIds
+      ?? ((isAdminLevel(user) || user.scopeGlobal) ? null : (user.branchIds ?? []));
+
+    let groupBranchIds: string[] | null;
+    if (resolvedSelectedIds) {
+      // Client-supplied multi-branch selection — strip anything outside the
+      // permitted set (foreign-group or non-member branches).
+      const sanitized = allowList
+        ? resolvedSelectedIds.filter((id) => allowList.includes(id))
+        : resolvedSelectedIds;
+      groupBranchIds = sanitized.length > 0 ? sanitized : null;
+    } else if (permittedGroupIds && !branchId) {
+      // Group-level view ("All Branches" within the active group). Scope to the
+      // permitted set so effectiveBranchIds is correctly bounded.
+      groupBranchIds = permittedGroupIds;
+    } else {
+      // A specific branch is selected — selectedBranchIds stays null so queries
+      // scope to currentBranchId alone.
+      groupBranchIds = null;
     }
 
     const updated: SessionUser = {

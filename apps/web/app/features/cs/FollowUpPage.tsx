@@ -62,6 +62,7 @@ export interface FollowUpPageData {
   }>;
   total: number;
   totalPages: number;
+  limit?: number;
   closers: Array<{ agentId: string; agentName: string }>;
   statusCounts: Record<string, number>;
   products: Array<{ id: string; name: string }>;
@@ -112,6 +113,7 @@ export function FollowUpPage({
   orders = [],
   total = 0,
   totalPages = 1,
+  limit,
   closers = [],
   statusCounts = {},
   products = [],
@@ -1003,7 +1005,7 @@ export function FollowUpPage({
           <p className="text-sm text-app-fg-muted">
             Showing {viewItems.length} of {viewTotal} {isCartView ? 'carts' : 'orders'}
           </p>
-          <Pagination page={filters.page} totalPages={viewTotalPages} pageParam="page" />
+          <Pagination page={filters.page} totalPages={viewTotalPages} pageParam="page" pageSize={limit} pageSizeParam="perPage" />
         </div>
       )}
 
