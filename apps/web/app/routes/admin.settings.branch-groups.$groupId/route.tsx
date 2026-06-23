@@ -95,6 +95,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'updateBranch') {
+    const branchId = form.get('branchId')?.toString();
+    const name = form.get('name')?.toString()?.trim();
+    const code = form.get('code')?.toString()?.trim().toUpperCase();
+    if (!branchId) return json({ error: 'Branch ID is required' }, { status: 400 });
+    if (!name && !code) return json({ error: 'Name or code is required' }, { status: 400 });
+    const body: Record<string, string> = { branchId };
+    if (name) body.name = name;
+    if (code) body.code = code;
+    const res = await apiRequest('/trpc/branches.update', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to update branch') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
   if (intent === 'createBranch') {
     const name = form.get('name')?.toString()?.trim() ?? '';
     const code = form.get('code')?.toString()?.trim().toUpperCase() ?? '';
@@ -184,13 +202,16 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
   const [toggleConfirmOpen, setToggleConfirmOpen] = useState(false);
   const [branchCode, setBranchCode] = useState('');
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
+  const [editBranch, setEditBranch] = useState<GroupBranch | null>(null);
 
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const branchFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const toggleFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const editBranchFetcher = useFetcher<{ success?: boolean; error?: string }>();
 
   const editSurface = useFetcherActionSurface(editFetcher);
   const branchSurface = useFetcherActionSurface(branchFetcher);
+  const editBranchSurface = useFetcherActionSurface(editBranchFetcher);
 
   useFetcherToast(editFetcher.data, {
     successMessage: 'Group updated',
@@ -203,13 +224,19 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
   useFetcherToast(toggleFetcher.data, {
     successMessage: group.status === 'ACTIVE' ? 'Group deactivated' : 'Group activated',
   });
+  useFetcherToast(editBranchFetcher.data, {
+    successMessage: 'Branch updated',
+    skipErrorToast: !!editBranch,
+  });
   useCloseOnFetcherSuccess(toggleFetcher, useCallback(() => setToggleConfirmOpen(false), []));
 
   useCloseOnFetcherSuccess(editFetcher, useCallback(() => setEditOpen(false), []));
   useCloseOnFetcherSuccess(branchFetcher, useCallback(() => { setCreateBranchOpen(false); setBranchCode(''); setCodeManuallyEdited(false); }, []));
+  useCloseOnFetcherSuccess(editBranchFetcher, useCallback(() => setEditBranch(null), []));
 
   const isEditSubmitting = editFetcher.state !== 'idle';
   const isBranchSubmitting = branchFetcher.state !== 'idle';
+  const isEditBranchSubmitting = editBranchFetcher.state !== 'idle';
 
   const stats: OverviewStatStripItem[] = [
     { label: 'Branches', value: group.totals.branches },
@@ -259,9 +286,14 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
       header: '',
       align: 'right',
       render: (b) => (
-        <TableActionButton to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`} variant="primary">
-          View
-        </TableActionButton>
+        <span className="inline-flex items-center gap-1.5">
+          <TableActionButton onClick={() => setEditBranch(b)}>
+            Edit
+          </TableActionButton>
+          <TableActionButton to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`} variant="primary">
+            View
+          </TableActionButton>
+        </span>
       ),
     },
   ], []);
@@ -494,6 +526,77 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
               </Button>
             </div>
           </branchFetcher.Form>
+        </Modal>
+      )}
+
+      {/* Edit Branch Modal */}
+      {editBranch && (
+        <Modal
+          open
+          onClose={() => setEditBranch(null)}
+          maxWidth="max-w-md"
+          role="dialog"
+          aria-labelledby="branch-edit-title"
+          contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <div>
+              <h3 id="branch-edit-title" className="text-lg font-semibold text-app-fg">
+                Edit branch
+              </h3>
+              <p className="text-sm text-app-fg-muted mt-0.5">
+                <span className="font-mono">{editBranch.code}</span> — {editBranch.name}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditBranch(null)}
+              disabled={isEditBranchSubmitting}
+              className="text-app-fg-muted hover:text-app-fg shrink-0"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <editBranchFetcher.Form
+            method="post"
+            className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]"
+          >
+            <input type="hidden" name="intent" value="updateBranch" />
+            <input type="hidden" name="branchId" value={editBranch.id} />
+            <TextInput
+              label="Branch name"
+              id="edit-branch-name"
+              name="name"
+              type="text"
+              required
+              minLength={2}
+              maxLength={100}
+              defaultValue={editBranch.name}
+            />
+            <TextInput
+              label="Code"
+              id="edit-branch-code"
+              name="code"
+              type="text"
+              required
+              minLength={2}
+              maxLength={20}
+              className="uppercase"
+              defaultValue={editBranch.code}
+            />
+            <ModalFetcherInlineError message={editBranchSurface.errorMatchingIntent('updateBranch')} />
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditBranch(null)} disabled={isEditBranchSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" size="sm" disabled={isEditBranchSubmitting} loading={isEditBranchSubmitting} loadingText="Saving...">
+                Save
+              </Button>
+            </div>
+          </editBranchFetcher.Form>
         </Modal>
       )}
 

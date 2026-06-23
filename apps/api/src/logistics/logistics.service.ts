@@ -3255,7 +3255,9 @@ export class LogisticsService {
       const returned = get('RETURNED');
       const partiallyDelivered = get('PARTIALLY_DELIVERED');
       const writtenOff = get('WRITTEN_OFF');
-      const totalAssigned = delivered + returned + partiallyDelivered + writtenOff + get('CANCELLED') + get('IN_TRANSIT') + get('DISPATCHED') + get('AGENT_ASSIGNED') + get('RESTOCKED');
+      const inTransit = get('IN_TRANSIT');
+      const dispatched = get('DISPATCHED');
+      const totalAssigned = delivered + returned + partiallyDelivered + writtenOff + get('CANCELLED') + inTransit + dispatched + get('AGENT_ASSIGNED') + get('RESTOCKED');
       const deliveryRate = totalAssigned > 0 ? (delivered / totalAssigned) * 100 : 0;
       const delinquencyRate = totalAssigned > 0 ? ((returned + partiallyDelivered + writtenOff) / totalAssigned) * 100 : 0;
       const stock = stockByLoc.get(loc.id);
@@ -3269,6 +3271,8 @@ export class LogisticsService {
         status: loc.status ?? 'ACTIVE',
         totalAssigned,
         delivered,
+        inTransit,
+        dispatched,
         returned,
         partiallyDelivered,
         writtenOff,

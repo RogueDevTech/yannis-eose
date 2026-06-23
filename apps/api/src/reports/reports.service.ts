@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -145,6 +145,8 @@ export class ReportsService {
         return this.exportInventory(input as Extract<ExportReportInput, { reportKey: 'inventory' }>, user, date);
       case 'finance_invoices':
         return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date, effectiveBranchIds);
+      case 'logistics_locations':
+        return this.exportLogisticsLocations(input as Extract<ExportReportInput, { reportKey: 'logistics_locations' }>, user, date);
       case 'logistics_partners':
         return this.exportLogisticsPartners(input as Extract<ExportReportInput, { reportKey: 'logistics_partners' }>, user, currentBranchId, date, effectiveBranchIds);
       default:
@@ -711,6 +713,100 @@ export class ReportsService {
       { key: 'dueDate', label: 'Due Date' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `invoices-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
+  }
+
+  private async exportLogisticsLocations(
+    input: Extract<ExportReportInput, { reportKey: 'logistics_locations' }>,
+    user: SessionUser,
+    date: string,
+  ) {
+    this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
+    const { startDate, endDate } = resolveDateRange(input.dateRange);
+    const effectiveStart = startDate ?? '2020-01-01';
+
+    // Per-location performance (orders, stock, remittance)
+    const performance = await this.logisticsService.getLogisticsLocationPerformance(
+      effectiveStart,
+      endDate,
+    );
+
+    // Enrich with location detail (address, whatsapp) and provider contact info
+    const locationDetails = await this.db
+      .select({
+        id: schema.logisticsLocations.id,
+        address: schema.logisticsLocations.address,
+        whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
+        contactInfo: schema.logisticsProviders.contactInfo,
+        coverageArea: schema.logisticsProviders.coverageArea,
+      })
+      .from(schema.logisticsLocations)
+      .innerJoin(schema.logisticsProviders, eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId));
+    const detailMap = new Map(locationDetails.map((d) => [d.id, d]));
+
+    let data = performance;
+    if (input.filters?.providerId) {
+      data = data.filter((l) => l.providerId === input.filters!.providerId);
+    }
+    if (input.filters?.status) {
+      data = data.filter((l) => l.status === input.filters!.status);
+    }
+
+    const rows = data.map((l) => {
+      const detail = detailMap.get(l.locationId);
+      return {
+        locationName: l.locationName,
+        providerName: l.providerName ?? '',
+        contactInfo: detail?.contactInfo ?? '',
+        address: detail?.address ?? '',
+        whatsappGroupLink: detail?.whatsappGroupLink ?? '',
+        coverageArea: detail?.coverageArea ?? '',
+        status: l.status,
+        totalAssigned: l.totalAssigned,
+        delivered: l.delivered,
+        inTransit: l.inTransit,
+        dispatched: l.dispatched,
+        returned: l.returned,
+        deliveryRate: `${l.deliveryRate.toFixed(2)}%`,
+        delinquencyRate: `${l.delinquencyRate.toFixed(2)}%`,
+        remittedAmount: l.remittedAmount,
+        pendingRemittanceAmount: l.pendingRemittanceAmount,
+        unitsDelivered: l.unitsDelivered,
+        availableStock: l.availableStock,
+        reservedStock: l.reservedStock,
+        stockReceived: l.stockReceived,
+        stockSold: l.stockSold,
+        stockTransferredOut: l.stockTransferredOut,
+        stockAdjusted: l.stockAdjusted,
+      };
+    });
+
+    const columns = [
+      { key: 'locationName', label: 'Location' },
+      { key: 'providerName', label: 'Company' },
+      { key: 'contactInfo', label: 'Phone / Contact' },
+      { key: 'address', label: 'Address' },
+      { key: 'whatsappGroupLink', label: 'WhatsApp Group' },
+      { key: 'coverageArea', label: 'Coverage Area' },
+      { key: 'status', label: 'Status' },
+      { key: 'totalAssigned', label: 'Orders Assigned' },
+      { key: 'delivered', label: 'Delivered' },
+      { key: 'inTransit', label: 'In Transit' },
+      { key: 'dispatched', label: 'Dispatched' },
+      { key: 'returned', label: 'Returned' },
+      { key: 'deliveryRate', label: 'Delivery %' },
+      { key: 'delinquencyRate', label: 'Delinquency %' },
+      { key: 'remittedAmount', label: 'Cash Remitted (₦)' },
+      { key: 'pendingRemittanceAmount', label: 'Pending Remittance (₦)' },
+      { key: 'unitsDelivered', label: 'Units Delivered' },
+      { key: 'availableStock', label: 'Available Stock' },
+      { key: 'reservedStock', label: 'Reserved Stock' },
+      { key: 'stockReceived', label: 'Stock Received' },
+      { key: 'stockSold', label: 'Stock Sold' },
+      { key: 'stockTransferredOut', label: 'Transferred Out' },
+      { key: 'stockAdjusted', label: 'Reconciled' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+
+    return { filename: `logistics-locations-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 
   private async exportLogisticsPartners(

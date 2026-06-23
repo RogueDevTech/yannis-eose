@@ -766,7 +766,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       <ExportModal
         open={showExport}
         onClose={() => setShowExport(false)}
-        config={EXPORT_CONFIGS.logistics_partners}
+        config={activeTab === 'locations' ? EXPORT_CONFIGS.logistics_locations : EXPORT_CONFIGS.logistics_partners}
       />
 
       {actionError && !dismissedError && !mutationModalOpen && (
