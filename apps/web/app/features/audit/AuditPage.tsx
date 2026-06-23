@@ -1497,6 +1497,7 @@ export function AuditPage({
           totalPages={totalPages}
           pageParam="page"
           pageSize={filters.limit}
+          pageSizeParam="perPage"
           pageSizeOptions={[20, 50, 100]}
           showWhenSinglePage
         />

@@ -165,6 +165,133 @@ const EMPTY_USER_PICKLISTS: UserCreateLoaderData = {
   defaultMembershipBranchId: null,
 };
 
+/** Accordion-style branch membership picker, grouped by company, collapsed by default. */
+function BranchMembershipAccordion({
+  branchGroups,
+  activeBranches,
+  selectedBranchIds,
+  toggleBranch,
+  toggleGroupBranches,
+  allBranchesSelected,
+  toggleSelectAllBranches,
+  selectAllBranchesRef,
+  viewerRole,
+}: {
+  branchGroups: Array<{ id: string; name: string }> | undefined;
+  activeBranches: UserCreateBranch[];
+  selectedBranchIds: string[];
+  toggleBranch: (id: string) => void;
+  toggleGroupBranches: (groupBranches: UserCreateBranch[], allSelected: boolean) => void;
+  allBranchesSelected: boolean;
+  toggleSelectAllBranches: () => void;
+  selectAllBranchesRef: React.RefObject<HTMLInputElement | null>;
+  viewerRole?: string;
+}) {
+  const hasMultipleGroups = branchGroups && branchGroups.length > 1
+    && (viewerRole === 'SUPER_ADMIN' || new Set(activeBranches.map((b) => b.groupId).filter(Boolean)).size > 1);
+
+  // Expand every group by default so all branches are visible up front; the
+  // chevron still lets the user collapse a group. (A blank initial set hid
+  // every group's branches behind a collapsed header — easy to miss.)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set((branchGroups ?? []).map((g) => g.id)),
+  );
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
+
+  return (
+    <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
+      {activeBranches.length > 0 && (
+        <label className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border hover:bg-app-hover cursor-pointer shrink-0">
+          <Checkbox
+            ref={selectAllBranchesRef}
+            checked={allBranchesSelected}
+            onChange={toggleSelectAllBranches}
+            aria-label="Select all branches"
+          />
+          <span className="text-sm font-medium text-app-fg">Select all branches</span>
+        </label>
+      )}
+      <div className="max-h-64 overflow-y-auto">
+        {hasMultipleGroups ? (
+          branchGroups!.map((group) => {
+            const groupBranches = activeBranches.filter((b) => b.groupId === group.id);
+            if (groupBranches.length === 0) return null;
+            const isExpanded = expandedGroups.has(group.id);
+            const selectedCount = groupBranches.filter((b) => selectedBranchIds.includes(b.id)).length;
+            const allGroupSelected = selectedCount === groupBranches.length;
+            return (
+              <div key={group.id} className="border-b border-app-border last:border-b-0">
+                <div className="flex items-center gap-2 px-3 py-2 bg-app-hover/40 hover:bg-app-hover/60 transition-colors">
+                  <Checkbox
+                    checked={allGroupSelected}
+                    onChange={() => {
+                      toggleGroupBranches(groupBranches, allGroupSelected);
+                      if (!isExpanded) toggleGroup(group.id);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                  >
+                    <svg
+                      className={`w-3.5 h-3.5 text-app-fg-muted shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">{group.name}</span>
+                    <span className="text-[10px] text-app-fg-muted ml-auto tabular-nums">
+                      ({groupBranches.length}){selectedCount > 0 && <span className="text-brand-600 dark:text-brand-400 ml-1">{selectedCount} selected</span>}
+                    </span>
+                  </button>
+                </div>
+                {isExpanded && groupBranches.map((branch) => (
+                  <label
+                    key={branch.id}
+                    className="flex items-center gap-3 px-3 pl-8 py-2 hover:bg-app-hover/50 cursor-pointer border-t border-app-border/50"
+                  >
+                    <Checkbox
+                      checked={selectedBranchIds.includes(branch.id)}
+                      onChange={() => toggleBranch(branch.id)}
+                    />
+                    <span className="text-sm text-app-fg">{branch.name}</span>
+                    <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+                  </label>
+                ))}
+              </div>
+            );
+          })
+        ) : (
+          activeBranches.map((branch) => (
+            <label
+              key={branch.id}
+              className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+            >
+              <Checkbox
+                checked={selectedBranchIds.includes(branch.id)}
+                onChange={() => toggleBranch(branch.id)}
+              />
+              <span className="text-sm text-app-fg">{branch.name}</span>
+              <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function UserCreatePage({
   picklistsPromise,
   usersBasePath = '/hr/users',
@@ -491,6 +618,29 @@ export function UserCreatePage({
     });
   };
 
+  // Toggle every branch in a company group at once. When the group is fully
+  // selected, clicking clears it; otherwise it selects all of the group's
+  // branches (keeping any already-selected branches from other groups).
+  const toggleGroupBranches = (groupBranches: UserCreateBranch[], allSelected: boolean) => {
+    const groupIds = groupBranches.map((b) => b.id);
+    if (allSelected) {
+      const groupIdSet = new Set(groupIds);
+      setSelectedBranchIds((prev) => {
+        const next = prev.filter((id) => !groupIdSet.has(id));
+        if (selectedBranchId && groupIdSet.has(selectedBranchId)) {
+          setSelectedBranchId(next[0] ?? '');
+        }
+        return next;
+      });
+      return;
+    }
+    setSelectedBranchIds((prev) => {
+      const next = [...new Set([...prev, ...groupIds])];
+      if (!selectedBranchId) setSelectedBranchId(groupIds[0] ?? '');
+      return next;
+    });
+  };
+
   const avatarGradient =
     selectedRole && ROLE_AVATAR_GRADIENTS[selectedRole]
       ? ROLE_AVATAR_GRADIENTS[selectedRole]
@@ -765,62 +915,18 @@ export function UserCreatePage({
                   </div>
                 </div>
               ) : (
-              /* Branch-eligible roles: individual branch checkboxes with group headers */
-              <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
-                {activeBranches.length > 0 ? (
-                  <label className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border hover:bg-app-hover cursor-pointer shrink-0">
-                    <Checkbox
-                      ref={selectAllBranchesRef}
-                      checked={allBranchesSelected}
-                      onChange={toggleSelectAllBranches}
-                      aria-label="Select all branches"
-                    />
-                    <span className="text-sm font-medium text-app-fg">Select all branches</span>
-                  </label>
-                ) : null}
-                <div className="max-h-48 overflow-y-auto">
-                  {branchGroups && branchGroups.length > 1 && (viewerRole === 'SUPER_ADMIN' || new Set(activeBranches.map((b) => b.groupId).filter(Boolean)).size > 1) ? (
-                    branchGroups.map((group) => {
-                      const groupBranches = activeBranches.filter((b: UserCreateBranch) => b.groupId === group.id);
-                      if (groupBranches.length === 0) return null;
-                      return (
-                        <div key={group.id}>
-                          <div className="px-3 py-1.5 bg-app-hover/40 border-b border-app-border">
-                            <span className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">{group.name}</span>
-                          </div>
-                          {groupBranches.map((branch: UserCreateBranch) => (
-                            <label
-                              key={branch.id}
-                              className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
-                            >
-                              <Checkbox
-                                checked={selectedBranchIds.includes(branch.id)}
-                                onChange={() => toggleBranch(branch.id)}
-                              />
-                              <span className="text-sm text-app-fg">{branch.name}</span>
-                              <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
-                            </label>
-                          ))}
-                        </div>
-                      );
-                    })
-                  ) : (
-                    activeBranches.map((branch: UserCreateBranch) => (
-                      <label
-                        key={branch.id}
-                        className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
-                      >
-                        <Checkbox
-                          checked={selectedBranchIds.includes(branch.id)}
-                          onChange={() => toggleBranch(branch.id)}
-                        />
-                        <span className="text-sm text-app-fg">{branch.name}</span>
-                        <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-              </div>
+              /* Branch-eligible roles: accordion grouped by company, collapsed by default */
+              <BranchMembershipAccordion
+                branchGroups={branchGroups}
+                activeBranches={activeBranches}
+                selectedBranchIds={selectedBranchIds}
+                toggleBranch={toggleBranch}
+                toggleGroupBranches={toggleGroupBranches}
+                allBranchesSelected={allBranchesSelected}
+                toggleSelectAllBranches={toggleSelectAllBranches}
+                selectAllBranchesRef={selectAllBranchesRef}
+                viewerRole={viewerRole}
+              />
               )}
               {roleNeedsBranch && (
               <SearchableSelect

@@ -1654,7 +1654,7 @@ export function InventoryPage(props: InventoryStreamData) {
                 ? `Showing ${(levelsPage - 1) * levelsLimit + 1}–${Math.min(levelsPage * levelsLimit, totalLevels)} of ${totalLevels} rows`
                 : 'No rows'}
             </p>
-            <Pagination page={levelsPage} totalPages={levelsTotalPages} pageParam="page" pageSize={levelsLimit} />
+            <Pagination page={levelsPage} totalPages={levelsTotalPages} pageParam="page" pageSize={levelsLimit} pageSizeParam="perPage" />
           </div>
         )}
         </>

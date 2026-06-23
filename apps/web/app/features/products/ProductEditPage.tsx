@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Form, useNavigation, Link, useFetcher } from '@remix-run/react';
-import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
@@ -11,7 +10,6 @@ import { Textarea } from '~/components/ui/textarea';
 import { NumberInput } from '~/components/ui/number-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { FormField } from '~/components/ui/form-field';
 import { RadioGroup } from '~/components/ui/radio-group';
 import { StatusBadge } from '~/components/ui/status-badge';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
@@ -211,18 +209,6 @@ export function ProductEditPage({
                 { value: 'ARCHIVED', label: 'Archived' },
               ]}
             />
-
-            <FormField label="Base price (&#8358;)" htmlFor="baseSalePrice" hint='Public “from” price for sorts and dashboards. Marketing offer tiers may sync the minimum when tiers change on a form.'>
-              <AmountInput
-                id="baseSalePrice"
-                name="baseSalePrice"
-                required
-                className="input"
-                placeholder="0.00"
-                defaultValue={product.baseSalePrice}
-                disabled={product.status === 'ARCHIVED'}
-              />
-            </FormField>
           </div>
 
           <div className="card space-y-3">
@@ -235,28 +221,6 @@ export function ProductEditPage({
               onChange={setGalleryImageUrls}
               disabled={isSaving || product.status === 'ARCHIVED'}
               onUploadStateChange={setGalleryUploadState}
-            />
-          </div>
-
-          <div className="card space-y-4">
-            <h2 className="text-lg font-semibold text-app-fg">Cost & Stock</h2>
-
-            <FormField label="Cost Price per Unit (&#8358;)" htmlFor="costPrice">
-              <AmountInput
-                id="costPrice"
-                name="costPrice"
-                required
-                className="input"
-                placeholder="0.00"
-                defaultValue={product.costPrice ?? ''}
-                disabled={product.status === 'ARCHIVED'}
-              />
-              <p className="text-xs text-app-fg-muted mt-1">Only visible to Finance and SuperAdmin roles.</p>
-            </FormField>
-            <InlineNotification
-              variant="info"
-              message="Add stock via Inventory → Shipments → Receive Shipment."
-              action={{ label: 'Inventory', href: '/admin/inventory' }}
             />
           </div>
 

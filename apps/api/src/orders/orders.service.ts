@@ -1439,9 +1439,24 @@ export class OrdersService {
     const insertOrder = async (
       dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
     ) => {
+      // Explicitly compute order_number instead of relying on DEFAULT nextval().
+      // After backfills/restores the sequence can fall behind existing rows, causing
+      // permanent collisions. This picks MAX(order_number)+1 across all three tables
+      // and also advances the sequence so follow_up_orders/cart_orders stay in sync.
+      const [{ next_num }] = await dbOrTx.execute<{ next_num: number }>(sql`
+        SELECT setval('order_number_seq',
+          GREATEST(
+            nextval('order_number_seq'),
+            COALESCE((SELECT MAX(order_number) FROM orders), 0) + 1,
+            COALESCE((SELECT MAX(order_number) FROM follow_up_orders), 0) + 1,
+            COALESCE((SELECT MAX(order_number) FROM cart_orders), 0) + 1
+          )) AS next_num
+      `) as unknown as [{ next_num: number }];
+
       const rows = await dbOrTx
         .insert(schema.orders)
         .values({
+          orderNumber: next_num,
           campaignId: orderInput.campaignId ?? null,
           mediaBuyerId: orderInput.mediaBuyerId ?? null,
           branchId: branchId ?? null,
@@ -1489,9 +1504,23 @@ export class OrdersService {
       return created;
     };
 
-    order = actorId
-      ? await withActor(this.db, { id: actorId }, insertOrder)
-      : await insertOrder(this.db);
+    // Retry up to 3 times on order_number sequence collision (rare under
+    // concurrency when multiple edge-form submissions hit simultaneously).
+    const MAX_ORDER_NUMBER_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_ORDER_NUMBER_RETRIES; attempt++) {
+      try {
+        order = actorId
+          ? await withActor(this.db, { id: actorId }, insertOrder)
+          : await insertOrder(this.db);
+        break; // success
+      } catch (err: unknown) {
+        const isSeqCollision =
+          err instanceof Error &&
+          err.message?.includes('orders_order_number_unique');
+        if (!isSeqCollision || attempt === MAX_ORDER_NUMBER_RETRIES - 1) throw err;
+        this.logger.warn(`order_number collision — retry ${attempt + 1}/${MAX_ORDER_NUMBER_RETRIES}`);
+      }
+    }
     } finally {
       // Release advisory lock now that the order row is committed. Concurrent
       // requests for the same phone hash will now see it via findRecentIdenticalOrder.

@@ -357,6 +357,8 @@ export const logisticsRouter = router({
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
         input.productId,
+        false,
+        ctx.activeGroupId,
       );
     }),
 
@@ -377,6 +379,7 @@ export const logisticsRouter = router({
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
         input.productId,
+        ctx.activeGroupId,
       );
     }),
 });

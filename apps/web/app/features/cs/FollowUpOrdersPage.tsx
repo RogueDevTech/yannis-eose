@@ -60,6 +60,7 @@ interface Props {
   statusCounts: Record<string, number>;
   closers: Closer[];
   page: number;
+  limit?: number;
   isCloser: boolean;
   statusFilter: string;
   searchFilter: string;
@@ -98,6 +99,7 @@ export function FollowUpOrdersPage({
   statusCounts = {},
   closers = [],
   page = 1,
+  limit: limitProp,
   isCloser = false,
   statusFilter = '',
   searchFilter = '',
@@ -115,7 +117,8 @@ export function FollowUpOrdersPage({
     setSelectedOrderIds(new Set());
   });
 
-  const totalPages = Math.ceil(total / 50) || 1;
+  const perPageSize = limitProp ?? 50;
+  const totalPages = Math.ceil(total / perPageSize) || 1;
 
   const countEntries = Object.entries(statusCounts).sort(([a], [b]) => {
     const order = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED'];
@@ -349,7 +352,7 @@ export function FollowUpOrdersPage({
             <p className="text-sm text-app-fg-muted">
               Showing {orders.length} of {total}
             </p>
-            <Pagination page={page} totalPages={totalPages} pageParam="page" />
+            <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={perPageSize} pageSizeParam="perPage" />
           </div>
         </>
       )}

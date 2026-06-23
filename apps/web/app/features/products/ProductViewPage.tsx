@@ -152,24 +152,6 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
         </div>
       ) : null}
 
-      {/* Cost & Stock */}
-      {product.costPrice != null && product.costPrice !== '' && (
-        <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-app-fg">Cost & Stock</h2>
-          <dl className="space-y-3 text-sm">
-            <div>
-              <dt className="text-app-fg-muted">Cost Price per Unit (&#8358;)</dt>
-              <dd className="text-app-fg mt-0.5">
-                &#8358;{Number(product.costPrice).toLocaleString()}
-              </dd>
-            </div>
-          </dl>
-          <p className="text-xs text-app-fg-muted">
-            Add stock via Inventory → Shipments → Receive Shipment (verify to post).
-          </p>
-        </div>
-      )}
-
       {/* Actions */}
       <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
         <Link to="/admin/products" className="btn-secondary w-full sm:w-auto">

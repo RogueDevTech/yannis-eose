@@ -939,7 +939,7 @@ export class PayrollBatchService {
    *   - Finance: all batches on their currentBranchId (UI usually filters to PENDING_FINANCE+)
    *   - Head of Dept: their dept — on currentBranchId, or all branches when session branch is null (org-wide heads)
    */
-  async listMonthlyPayrolls(input: ListMonthlyPayrollsInput, viewer: SessionUser) {
+  async listMonthlyPayrolls(input: ListMonthlyPayrollsInput, viewer: SessionUser, effectiveBranchIds?: string[] | null) {
     const conditions = [] as ReturnType<typeof and>[] | unknown[];
 
     // Viewer scoping. Cross-branch view is granted to SuperAdmin and anyone holding hr.write
@@ -950,6 +950,12 @@ export class PayrollBatchService {
       ((viewer.permissions ?? []).includes('hr.write') && viewer.currentBranchId == null);
     const orgWideHeadNullSession =
       isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null;
+
+    // Company group isolation: even cross-branch / org-wide viewers must be scoped
+    // to their effective branch set when a company group is active.
+    if (effectiveBranchIds?.length) {
+      conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+    }
 
     if (!cross) {
       if (!viewer.currentBranchId && !orgWideHeadNullSession) return { batches: [], byMonth: [] };

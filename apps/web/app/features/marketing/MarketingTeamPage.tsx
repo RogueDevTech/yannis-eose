@@ -818,7 +818,7 @@ export function MarketingTeamPage({
                     ? `Showing ${(page - 1) * (limit ?? 0) + 1}–${Math.min(page * (limit ?? totalCount), totalCount)} of ${totalCount} ${totalCount === 1 ? 'member' : 'members'}`
                     : 'No members'}
                 </p>
-                <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+                <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} pageSizeParam="perPage" />
               </div>
             )}
           </>

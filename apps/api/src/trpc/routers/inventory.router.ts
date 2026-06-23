@@ -662,6 +662,7 @@ export const inventoryRouter = router({
         return getLogisticsServiceForInventory().createWarehouse(
           { name: input.name, address: input.address, coordinates: input.coordinates },
           ctx.user.id,
+          ctx.activeGroupId,
         );
       }),
 

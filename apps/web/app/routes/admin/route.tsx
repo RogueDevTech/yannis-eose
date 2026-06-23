@@ -7,6 +7,7 @@ import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
 import { normalizeRouteErrorData } from '~/lib/network-error';
+import { ALL_BRANCHES_ROLES } from '~/components/layout/header-branch-scope';
 
 interface Notification {
   id: string;
@@ -90,7 +91,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Fetch branch groups for the header switcher (non-blocking).
   // Any role that sees all branches needs group headers to avoid cross-company mixing.
   type BranchGroupEntry = { id: string; name: string; status?: string };
-  const ALL_BRANCHES_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS']);
   const branchGroupsPromise = ALL_BRANCHES_ROLES.has(user?.role ?? '')
     ? apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie })
         .then((res) => {

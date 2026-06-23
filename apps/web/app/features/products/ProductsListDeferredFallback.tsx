@@ -4,7 +4,6 @@ import type { Product } from './types';
 const skeletonColumns: CompactTableColumn<Product>[] = [
   { key: 'product', header: 'Product', minWidth: 'min-w-[200px]', render: () => null },
   { key: 'category', header: 'Category', render: () => null },
-  { key: 'baseSalePrice', header: 'Base Price', align: 'right', headerClassName: 'text-right', render: () => null },
   { key: 'offers', header: 'Offers', render: () => null },
   { key: 'status', header: 'Status', render: () => null },
   { key: 'actions', header: '', mobileLabel: 'Actions', align: 'right', headerClassName: 'text-right', tight: true, render: () => null },

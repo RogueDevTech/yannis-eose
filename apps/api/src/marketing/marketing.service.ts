@@ -5356,7 +5356,7 @@ export class MarketingService {
         sql`${schema.offerGroups.id} IN (
           SELECT ogi.offer_group_id FROM offer_group_items ogi
           INNER JOIN products p ON p.id = ogi.product_id
-          WHERE p.group_id = ${groupId}
+          WHERE (p.group_id = ${groupId} OR p.group_id IS NULL)
         )`,
       );
     }

@@ -5,8 +5,8 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Modal } from '~/components/ui/modal';
-import { FormField } from '~/components/ui/form-field';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -111,7 +111,7 @@ export function MarketingOffersTab({
       [{ value: '', label: 'All products' }].concat(
         products.map((p) => ({
           value: p.id,
-          label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
+          label: p.name,
         })),
       ),
     [products],
@@ -205,43 +205,52 @@ export function MarketingOffersTab({
         />
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="min-w-0 flex-1 sm:max-w-xs">
-            <FormField label="Search offers" htmlFor="offers-hub-search">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                }}
-                className="w-full"
-              >
-                <SearchInput
-                  id="offers-hub-search"
-                  value={offerSearch}
-                  onChange={setOfferSearch}
-                  placeholder="Name or product…"
-                  withSubmitButton
-                  wrapperClassName="w-full"
-                />
-              </form>
-            </FormField>
-          </div>
-          {/* Hidden on mobile — the product filter lives in the page-header
-              kebab there (Action icon). Desktop keeps it inline. */}
-          <div className="hidden md:block min-w-0 flex-1 sm:max-w-sm">
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0 !px-0 md:!px-4"
+          hideMobileSheet
+          badgeCount={filterProductId ? 1 : 0}
+          searchRow={
+            <form
+              className="min-w-0 flex-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <SearchInput
+                value={offerSearch}
+                onChange={setOfferSearch}
+                placeholder="Name or product…"
+                withSubmitButton
+                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
+              />
+            </form>
+          }
+          desktopInlineFilters={
             <SearchableSelect
               id="offers-filter-product"
-              label="Product filter"
               value={filterProductId}
               onChange={setFilterProductId}
               options={productOptions}
               placeholder="All products"
               searchPlaceholder="Search products…"
+              wrapperClassName="w-full min-w-0 sm:w-48"
             />
-          </div>
-        </div>
-
-        {/* Actions moved to the page header (FormsPage) */}
+          }
+          sheetFilterBody={
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Product</span>
+              <SearchableSelect
+                id="offers-filter-product-mobile"
+                value={filterProductId}
+                onChange={setFilterProductId}
+                options={productOptions}
+                placeholder="All products"
+                searchPlaceholder="Search products…"
+              />
+            </div>
+          }
+        />
       </div>
 
       {offersLoading ? (
@@ -409,10 +418,10 @@ export function MarketingOffersTab({
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-sm text-app-fg whitespace-nowrap">
-                          <NairaPrice amount={Number(it.price) * Number(it.quantity)} />
+                          <NairaPrice amount={Number(it.price)} />
                         </p>
                         <p className="text-xs text-app-fg-muted whitespace-nowrap">
-                          x{it.quantity} · <NairaPrice amount={Number(it.price)} /> each
+                          x{it.quantity}
                         </p>
                       </div>
                     </div>

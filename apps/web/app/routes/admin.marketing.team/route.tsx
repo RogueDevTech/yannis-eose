@@ -2,7 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, parsePerPage, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
 import { MarketingTeamLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { FundingBalanceRow, MarketingTeamOverviewStats } from '~/features/marketing/types';
@@ -66,10 +66,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url, 'today');
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
-  // URL-driven rows-per-page — the team list is sliced client-side from the
-  // full member set, so `perPage` is both the slice size and totalPages divisor.
-  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
-
   const teamShell = { dateFilters: filters, leaderboardPeriod };
 
   const pageData = (async () => {
@@ -244,15 +240,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
-  // Client-side pagination — `marketing.listFundingBalances` returns all members.
-  // The loader is the single source of truth for which slice is shown.
-  const PAGE_SIZE = perPage;
-  const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
   const totalCount = sorted.length;
-  const totalPages = Math.max(1, Math.ceil(Math.max(0, totalCount) / PAGE_SIZE));
-  const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
-  const start = (page - 1) * PAGE_SIZE;
-  const pagedMembers = sorted.slice(start, start + PAGE_SIZE);
 
   // Full id+name list for the Media Buyer SearchableSelect — derived from the
   // pre-search set so the dropdown shows every team member, not just whoever
@@ -262,13 +250,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   return {
-    teamMembers: pagedMembers,
+    teamMembers: sorted,
     fundingSummary,
     dateFilters: filters,
     leaderboardPeriod,
-    page,
-    totalPages,
-    limit: PAGE_SIZE,
+    page: 1,
+    totalPages: 1,
+    limit: totalCount,
     totalCount,
     q,
     sortBy,

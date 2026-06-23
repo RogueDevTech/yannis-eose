@@ -389,9 +389,8 @@ export function MarketingFormEditPage({
             <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
 
             <div className="card space-y-4">
-              <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <TextInput label="Form Name" name="name" required defaultValue={campaign.name} />
+                <TextInput label="Form name" name="name" required defaultValue={campaign.name} />
                 <FormSelect
                   key={`status-${campaign.id}`}
                   label="Status"

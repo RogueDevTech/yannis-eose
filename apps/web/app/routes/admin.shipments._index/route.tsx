@@ -24,6 +24,7 @@ import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { LocationOption, ShipmentRow, ShipmentStatus } from '~/features/inventory/types';
 import { ShipmentsTab } from '~/features/inventory/ShipmentsTab';
 import { ShipmentsListLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
@@ -423,75 +424,54 @@ function ShipmentsIndexContent(data: {
         ]}
       />
 
-      {/* Desktop-only filter bar — on mobile these filters live in the
-          page-header kebab (Action icon group). */}
-      <div className="card p-4 space-y-3 hidden md:block">
-        <form method="get" className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <FormSelect
-              label="Status"
-              name="status"
-              defaultValue={data.filters.status}
-              wrapperClassName="w-full sm:w-48"
-              options={statusFilterOptions}
-            />
-            <div className="w-full sm:w-56">
-              <input type="hidden" name="destinationLocationId" value={desktopWarehouse} />
-              <SearchableSelect
-                label="Warehouse"
-                value={desktopWarehouse}
-                onChange={setDesktopWarehouse}
-                wrapperClassName="w-full"
-                placeholder="All warehouses"
-                searchPlaceholder="Search warehouses..."
-                options={warehouseFilterOptions}
-              />
-            </div>
-            <div className="w-full sm:w-40">
-              <TextInput label="From" type="date" name="fromDate" defaultValue={data.filters.fromDate} />
-            </div>
-            <div className="w-full sm:w-40">
-              <TextInput label="To" type="date" name="toDate" defaultValue={data.filters.toDate} />
-            </div>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <SearchInput
-              name="search"
-              defaultValue={data.filters.search}
-              placeholder="Search label, supplier, or supplier ref…"
-              wrapperClassName="w-full"
-              withSubmitButton={false}
-            />
-            <div className="flex items-center gap-2 shrink-0">
-              <button type="submit" className="btn-primary btn-sm">
-                Apply filters
-              </button>
-              {hasActiveFilters ? (
-                <Link to="/admin/shipments" prefetch="intent" className="btn-ghost btn-sm">
-                  Reset
-                </Link>
-              ) : null}
-            </div>
-          </div>
+      <div className="list-panel">
+        <form method="get">
+          {/* Carry controlled SearchableSelect value as hidden input */}
+          <input type="hidden" name="destinationLocationId" value={desktopWarehouse} />
+          <ToolbarFiltersCollapsible
+            className="!border-0 !px-0 md:!px-4"
+            hideMobileSheet
+            badgeCount={activeFilters.length}
+            searchRow={
+              <div className="min-w-0 flex-1 flex items-center gap-2">
+                <SearchInput
+                  name="search"
+                  defaultValue={data.filters.search}
+                  placeholder="Search label, supplier, or ref…"
+                  withSubmitButton
+                  wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
+                />
+              </div>
+            }
+            desktopInlineFilters={
+              <>
+                <FormSelect
+                  name="status"
+                  defaultValue={data.filters.status}
+                  wrapperClassName="w-full min-w-0 sm:w-40"
+                  options={statusFilterOptions}
+                />
+                <SearchableSelect
+                  value={desktopWarehouse}
+                  onChange={setDesktopWarehouse}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
+                  placeholder="All warehouses"
+                  searchPlaceholder="Search warehouses..."
+                  options={warehouseFilterOptions}
+                />
+                <TextInput type="date" name="fromDate" defaultValue={data.filters.fromDate} wrapperClassName="w-full min-w-0 sm:w-36" />
+                <TextInput type="date" name="toDate" defaultValue={data.filters.toDate} wrapperClassName="w-full min-w-0 sm:w-36" />
+                {hasActiveFilters ? (
+                  <Link to="/admin/shipments" prefetch="intent" className="btn-ghost btn-sm shrink-0">
+                    Reset
+                  </Link>
+                ) : null}
+              </>
+            }
+            sheetFilterBody={<div />}
+          />
         </form>
       </div>
-
-      {/* Mobile search bar — search stays on the page; the other filters live
-          in the page-header kebab. Hidden fields carry the active filters so a
-          search submit does not drop them. */}
-      <form method="get" className="w-full md:hidden">
-        <input type="hidden" name="status" defaultValue={data.filters.status} />
-        <input type="hidden" name="destinationLocationId" defaultValue={data.filters.destinationLocationId} />
-        <input type="hidden" name="fromDate" defaultValue={data.filters.fromDate} />
-        <input type="hidden" name="toDate" defaultValue={data.filters.toDate} />
-        <SearchInput
-          name="search"
-          defaultValue={data.filters.search}
-          placeholder="Search label, supplier, or ref…"
-          wrapperClassName="w-full"
-          withSubmitButton
-        />
-      </form>
 
       {data.loadError && (
         <div className="card p-4 text-sm text-danger-700 dark:text-danger-300">
@@ -513,7 +493,7 @@ function ShipmentsIndexContent(data: {
             Showing {(data.page - 1) * data.limit + 1}–{Math.min(data.page * data.limit, data.totalShipments)} of{' '}
             {data.totalShipments} shipments
           </p>
-          <Pagination page={data.page} totalPages={data.totalPages} pageParam="page" pageSize={data.limit} />
+          <Pagination page={data.page} totalPages={data.totalPages} pageParam="page" pageSize={data.limit} pageSizeParam="perPage" />
         </div>
       )}
     </div>

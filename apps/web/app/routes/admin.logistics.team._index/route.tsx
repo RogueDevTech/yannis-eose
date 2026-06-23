@@ -6,7 +6,6 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   getSessionCookie,
-  parsePerPage,
   requirePermissionOrRoles,
   redirectIfUnauthorized,
 } from '~/lib/api.server';
@@ -47,10 +46,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const { startDate, endDate, periodAllTime, filters } = resolveMarketingDateFilters(url);
-  // URL-driven rows-per-page — the provider list is sliced client-side, so
-  // `perPage` is both the slice size and the totalPages divisor.
-  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
-
   const productId = url.searchParams.get('productId') || undefined;
   const logisticsTeamShell = { dateFilters: filters };
 
@@ -147,24 +142,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       sorted.sort((a, b) => (sortDir === 'asc' ? num(a) - num(b) : num(b) - num(a)));
     }
 
-    const PAGE_SIZE = perPage;
-    const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
     const totalCount = sorted.length;
-    const totalPages = Math.max(1, Math.ceil(Math.max(0, totalCount) / PAGE_SIZE));
-    const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
-    const start = (page - 1) * PAGE_SIZE;
-    const pagedProviders = sorted.slice(start, start + PAGE_SIZE);
 
     return {
-      providers: pagedProviders,
+      providers: sorted,
       locations: allLocations,
       productOptions,
       productId: productId ?? null,
       dateFilters: filters,
       periodAllTime,
-      page,
-      totalPages,
-      limit: PAGE_SIZE,
+      page: 1,
+      totalPages: 1,
+      limit: totalCount,
       totalCount,
       unfilteredCount,
       q,

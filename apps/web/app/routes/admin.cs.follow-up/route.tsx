@@ -7,6 +7,7 @@ import {
   getCurrentUser,
   requirePermissionOrRoles,
   safeStatus,
+  parsePerPage,
   DEFERRED_LOADER_TIMEOUT_MS,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
 } from '~/lib/api.server';
@@ -221,7 +222,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const olderThanDays = url.searchParams.get('olderThanDays') || (!customStartDate && !customEndDate ? '14' : undefined);
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const limit = 50;
+  const { perPage: limit } = parsePerPage(url.searchParams);
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
   const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: ALL_FOLLOW_UP_STATUSES }));
@@ -314,7 +315,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: FollowUpPageData['orders']; pagination: { total: number; totalPages: number } } } })?.result?.data
       : null;
-    return { orders: ordersData?.orders ?? [], total: ordersData?.pagination?.total ?? 0, totalPages: ordersData?.pagination?.totalPages ?? 1, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1, groups };
+    return { orders: ordersData?.orders ?? [], total: ordersData?.pagination?.total ?? 0, totalPages: ordersData?.pagination?.totalPages ?? 1, limit, closers, statusCounts, products, abandonedCarts: [], abandonedCartsTotal: 0, abandonedCartsTotalPages: 1, groups };
   })();
 
   // Serialize the listInput so the component can use it for deep-select

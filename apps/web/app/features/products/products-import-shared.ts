@@ -92,12 +92,17 @@ export function resolveRow(parsed: ParsedRow, categories: CategoryInfo[]): Resol
     errors.push('Name must be at least 2 characters.');
   }
 
-  const basePrice = parseNumeric(parsed.basePriceInput);
-  if (basePrice === null) {
+  // Base and cost price are optional — products are sold via offer tiers, so a
+  // blank base price defaults to 0 (auto-syncs to the cheapest offer later) and
+  // a blank cost stays null. Only flag when a non-empty cell isn't a valid number.
+  const baseProvided = parsed.basePriceInput.trim() !== '';
+  const basePrice = baseProvided ? parseNumeric(parsed.basePriceInput) : 0;
+  if (baseProvided && basePrice === null) {
     errors.push('Base price must be a number ≥ 0 (e.g. 30000 or 12999.99).');
   }
-  const costPrice = parseNumeric(parsed.costPriceInput);
-  if (costPrice === null) {
+  const costProvided = parsed.costPriceInput.trim() !== '';
+  const costPrice = costProvided ? parseNumeric(parsed.costPriceInput) : null;
+  if (costProvided && costPrice === null) {
     errors.push('Cost price must be a number ≥ 0.');
   }
 

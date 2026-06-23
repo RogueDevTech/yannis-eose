@@ -111,12 +111,19 @@ export class InventoryService {
           stockCount: schema.inventoryLevels.stockCount,
           reservedCount: schema.inventoryLevels.reservedCount,
           locationName: schema.logisticsLocations.name,
+          // Company-group of the owning provider — stamped on the notification
+          // so the feed's group-isolation filter can scope it correctly.
+          groupId: schema.logisticsProviders.groupId,
           ...(hasLocCol ? { locationThreshold: schema.logisticsLocations.lowStockThreshold } : {}),
         })
         .from(schema.inventoryLevels)
         .leftJoin(
           schema.logisticsLocations,
           eq(schema.logisticsLocations.id, schema.inventoryLevels.locationId),
+        )
+        .leftJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
         )
         .where(
           and(
@@ -161,7 +168,7 @@ export class InventoryService {
         type: 'inventory:low_stock' as const,
         title: 'Low stock alert',
         body,
-        data: { productId, locationId, available, threshold },
+        data: { productId, locationId, available, threshold, groupId: row.groupId ?? null },
       };
 
       const roles = ['SUPER_ADMIN', 'ADMIN', 'STOCK_MANAGER'] as const;
@@ -1100,17 +1107,30 @@ export class InventoryService {
     // Shrinkage alert: notify SuperAdmin and Head of Logistics
     if (hasShrinkage) {
       const shortage = transfer.quantitySent - input.quantityReceived;
+      // Company-group of the destination's provider — stamped so the feed's
+      // group-isolation filter scopes the alert to the right company.
+      const [destProvider] = await tx
+        .select({ groupId: schema.logisticsProviders.groupId })
+        .from(schema.logisticsLocations)
+        .innerJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(eq(schema.logisticsLocations.id, transfer.toLocationId))
+        .limit(1);
+      const groupId = destProvider?.groupId ?? null;
+      const shrinkageData = { transferId: transfer.id, productId: transfer.productId, shortage, groupId };
       this.notifications.enqueueCreateForRole('SUPER_ADMIN', {
         type: 'logistics:shrinkage',
         title: 'Stock shrinkage alert',
         body: `Transfer received with shortage: ${shortage} unit(s) missing. Requires investigation.`,
-        data: { transferId: transfer.id, productId: transfer.productId, shortage },
+        data: shrinkageData,
       });
       this.notifications.enqueueCreateForRole('HEAD_OF_LOGISTICS', {
         type: 'logistics:shrinkage',
         title: 'Stock shrinkage alert',
         body: `Transfer received with shortage: ${shortage} unit(s) missing. Requires investigation.`,
-        data: { transferId: transfer.id, productId: transfer.productId, shortage },
+        data: shrinkageData,
       });
     }
 

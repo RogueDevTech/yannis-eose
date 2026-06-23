@@ -295,7 +295,7 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
                 ? `Showing ${(data.page - 1) * data.limit + 1}–${Math.min(data.page * data.limit, data.total)} of ${data.total} ${data.total === 1 ? 'shipment' : 'shipments'}`
                 : 'No shipments'}
             </p>
-            <Pagination page={data.page} totalPages={data.totalPages} pageSize={data.limit} />
+            <Pagination page={data.page} totalPages={data.totalPages} pageSize={data.limit} pageSizeParam="perPage" />
           </div>
         ) : null}
       </Card>

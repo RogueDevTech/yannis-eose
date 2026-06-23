@@ -207,7 +207,7 @@ export const financeRouter = router({
   setBudget: permissionProcedure('finance.read')
     .input(setBudgetSchema)
     .mutation(async ({ input, ctx }) => {
-      return getFinanceService().setBudget(input, ctx.user.id);
+      return getFinanceService().setBudget(input, ctx.user.id, ctx.activeGroupId);
     }),
 
   listBudgets: permissionProcedure('finance.read')

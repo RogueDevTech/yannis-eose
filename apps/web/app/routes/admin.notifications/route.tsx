@@ -103,7 +103,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const logFrom = url.searchParams.get('logFrom') ?? '';
   const logTo = url.searchParams.get('logTo') ?? '';
   const logPage = Math.max(1, parseInt(url.searchParams.get('logPage') ?? '1', 10));
-  const logLimit = 50;
+  const { perPage: logLimit } = parsePerPage(url.searchParams, { param: 'logPerPage' });
   const logInput = encodeURIComponent(
     JSON.stringify({
       status: logStatus || undefined,
