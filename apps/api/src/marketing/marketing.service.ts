@@ -4173,13 +4173,16 @@ export class MarketingService {
       if (bCond) conditions.push(bCond);
     };
 
+    // CS/servicing scope includes ALL order sources (offline, edge-form, online).
+    // Marketing scope excludes offline — MBs only care about edge-form/online orders.
+    const includeAllSources = orderBranchScope === 'servicing';
     const orderConditions: Parameters<typeof and>[0][] = [
       // Exclude DELETED orders (editorial) from all marketing metrics.
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
       // Exclude offline orders — marketing metrics only count edge-form orders.
       // Follow-up orders are included — MB spent to acquire the lead (CEO 2026-06-19).
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`,
+      ...(includeAllSources ? [] : [sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`]),
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4195,7 +4198,7 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`,
+      ...(includeAllSources ? [] : [sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`]),
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -4221,7 +4224,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
-      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`,
+      ...(includeAllSources ? [] : [sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`]),
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));

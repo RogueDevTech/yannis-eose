@@ -381,7 +381,7 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={9} />}>
         {(metrics) => (
           <div>
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders Funnel</h2>
@@ -390,6 +390,7 @@ function CSDashboard({
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
+              { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
               // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live

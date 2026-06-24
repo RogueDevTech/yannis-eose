@@ -1037,7 +1037,7 @@ function HeaderBranchSwitcher({
     return new Set(branchGroups.filter((g) => g.status === 'INACTIVE').map((g) => g.id));
   }, [branchGroups]);
   const visibleBranches = useMemo(
-    () => branches.filter((b) => !b.groupId || !inactiveGroupIds.has(b.groupId)),
+    () => branches.filter((b) => (!b.groupId || !inactiveGroupIds.has(b.groupId)) && !b.readOnly),
     [branches, inactiveGroupIds],
   );
   const [open, setOpen] = useState(false);
@@ -1241,7 +1241,12 @@ function HeaderBranchSwitcher({
     : isOrgWideRole && derivedGroups.length > 1
       ? (derivedGroups.find((g) => g.branchIds.every((id) => appliedSet.has(id)))?.name ?? derivedGroups[0]!.name)
     : isAllBranches
-    ? 'All Branches'
+      // Multi-company: show the company name instead of "All Branches" to avoid cross-company ambiguity
+    ? (hasMultipleGroups && selectedGroupLabel
+        ? selectedGroupLabel
+        : hasMultipleGroups && activeGroups?.length
+          ? activeGroups[0]!.name
+          : 'All Branches')
     : isMultiBranch
       ? (selectedGroupLabel ?? `${visibleSelectedIds.length} Branches`)
       : visibleSelectedIds.length === 1
