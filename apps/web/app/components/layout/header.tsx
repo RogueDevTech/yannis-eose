@@ -32,6 +32,8 @@ interface BranchInfo {
   groupId?: string | null;
   /** Resolved company group name for display. */
   groupName?: string | null;
+  /** Historical branch from orders/campaigns — no active membership. Read-only data lens. */
+  readOnly?: boolean;
 }
 
 interface HeaderProps {
@@ -228,7 +230,7 @@ export function Header({
     return active.filter((g) => visibleGroupIds.has(g.id));
   }, [branchGroups, branches]);
   const mobileHasMultipleGroups = (mobileActiveGroups?.length ?? 0) > 1;
-  const allMobileBranchIds = useMemo(() => (branches ?? []).map((b) => b.id), [branches]);
+  const allMobileBranchIds = useMemo(() => (branches ?? []).filter((b) => !b.readOnly).map((b) => b.id), [branches]);
   // When multiple groups exist, default to first group to prevent cross-company mixing.
   const defaultMobileBranchIds = useMemo(() => {
     if (mobileHasMultipleGroups && mobileActiveGroups?.length) {
@@ -831,15 +833,18 @@ export function Header({
                               </div>
                               {isExpanded && groupBranches.map((branch) => {
                                 const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                                const isReadOnly = branch.readOnly === true;
+                                const isDisabled = isInactive || isReadOnly;
                                 const isBranchChecked = mobileChecked.has(branch.id);
                                 return (
                                   <label
                                     key={branch.id}
-                                    className="w-full flex items-center gap-3 pl-10 pr-5 py-2 text-sm cursor-pointer select-none"
+                                    className={`w-full flex items-center gap-3 pl-10 pr-5 py-2 text-sm select-none ${isDisabled ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
                                   >
                                     <input
                                       type="checkbox"
                                       checked={isBranchChecked}
+                                      disabled={isDisabled}
                                       onChange={() => {
                                         setMobileChecked((prev) => {
                                           const next = new Set(prev);
@@ -857,15 +862,20 @@ export function Header({
                                           return next;
                                         });
                                       }}
-                                      className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                                      className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0 disabled:opacity-50"
                                     />
                                     <span className="inline-flex items-center justify-center w-5 h-5 rounded text-micro font-bold flex-shrink-0 bg-app-hover text-app-fg-muted">
                                       {branch.code.slice(0, 2)}
                                     </span>
-                                    <span className="truncate text-app-fg">{branch.name}</span>
+                                    <span className={`truncate ${isDisabled ? 'text-app-fg-muted' : 'text-app-fg'}`}>{branch.name}</span>
                                     {isInactive && (
                                       <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded ml-auto flex-shrink-0">
                                         Inactive
+                                      </span>
+                                    )}
+                                    {isReadOnly && !isInactive && (
+                                      <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded ml-auto flex-shrink-0">
+                                        Read-only
                                       </span>
                                     )}
                                   </label>
@@ -878,15 +888,18 @@ export function Header({
                         // Flat view for single-group
                         branches.map((branch) => {
                           const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                          const isReadOnly = branch.readOnly === true;
+                          const isDisabled = isInactive || isReadOnly;
                           const isBranchChecked = mobileChecked.has(branch.id);
                           return (
                             <label
                               key={branch.id}
-                              className="w-full flex items-center gap-3 px-5 py-2 text-sm cursor-pointer select-none"
+                              className={`w-full flex items-center gap-3 px-5 py-2 text-sm select-none ${isDisabled ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
                             >
                               <input
                                 type="checkbox"
                                 checked={isBranchChecked}
+                                disabled={isDisabled}
                                 onChange={() => {
                                   setMobileChecked((prev) => {
                                     const next = new Set(prev);
@@ -898,13 +911,18 @@ export function Header({
                                     return next;
                                   });
                                 }}
-                                className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                                className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0 disabled:opacity-50"
                               />
-                              <span className="truncate text-app-fg">{branch.name}</span>
+                              <span className={`truncate ${isDisabled ? 'text-app-fg-muted' : 'text-app-fg'}`}>{branch.name}</span>
                               <span className="flex items-center gap-1.5 text-micro ml-auto">
                                 {isInactive && (
                                   <span className="font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded">
                                     Inactive
+                                  </span>
+                                )}
+                                {isReadOnly && !isInactive && (
+                                  <span className="font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded">
+                                    Read-only
                                   </span>
                                 )}
                                 <span className="font-mono text-app-fg-muted">{branch.code}</span>
@@ -1065,7 +1083,7 @@ function HeaderBranchSwitcher({
 
   // Multi-select state: checked branch IDs within the open dropdown.
   // Initialised from session state; defaults to all visible branches checked.
-  const allBranchIds = useMemo(() => visibleBranches.map((b) => b.id), [visibleBranches]);
+  const allBranchIds = useMemo(() => visibleBranches.filter((b) => !b.readOnly).map((b) => b.id), [visibleBranches]);
   // When multiple groups exist, "all" defaults to the first group's branches
   // to prevent cross-company data mixing.
   const defaultBranchIds = useMemo(() => {
@@ -1385,27 +1403,35 @@ function HeaderBranchSwitcher({
                     {/* Individual branches — collapsible */}
                     {isExpanded && groupBranches.map((branch) => {
                       const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                      const isReadOnly = branch.readOnly === true;
+                      const isDisabled = isInactive || isReadOnly;
                       const isChecked = checked.has(branch.id);
                       return (
                         <label
                           key={branch.id}
-                          className="w-full flex items-center gap-2.5 pl-8 pr-3 py-1 hover:bg-app-hover transition-colors duration-100 cursor-pointer select-none"
+                          className={`w-full flex items-center gap-2.5 pl-8 pr-3 py-1 transition-colors duration-100 select-none ${isDisabled ? 'opacity-50 cursor-default' : 'hover:bg-app-hover cursor-pointer'}`}
                         >
                           <input
                             type="checkbox"
                             checked={isChecked}
+                            disabled={isDisabled}
                             onChange={() => handleToggle(branch.id)}
-                            className="w-3.5 h-3.5 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                            className="w-3.5 h-3.5 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0 disabled:opacity-50"
                           />
                           <span className="inline-flex items-center justify-center w-4 h-4 rounded text-micro font-bold flex-shrink-0 bg-app-hover text-app-fg-muted">
                             {branch.code.slice(0, 2)}
                           </span>
-                          <span className={`text-xs truncate ${isInactive ? 'text-app-fg-muted' : 'text-app-fg'}`}>
+                          <span className={`text-xs truncate ${isDisabled ? 'text-app-fg-muted' : 'text-app-fg'}`}>
                             {branch.name}
                           </span>
                           {isInactive && (
                             <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1 py-0.5 rounded flex-shrink-0">
                               Inactive
+                            </span>
+                          )}
+                          {isReadOnly && !isInactive && (
+                            <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1 py-0.5 rounded flex-shrink-0">
+                              Read-only
                             </span>
                           )}
                         </label>
@@ -1418,29 +1444,37 @@ function HeaderBranchSwitcher({
               // Flat view: no groups or non-SuperAdmin
               visibleBranches.map((branch) => {
                 const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                const isReadOnly = branch.readOnly === true;
+                const isDisabled = isInactive || isReadOnly;
                 const isChecked = checked.has(branch.id);
                 return (
                   <label
                     key={branch.id}
-                    className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-app-hover transition-colors duration-100 cursor-pointer select-none"
+                    className={`w-full flex items-center gap-2.5 px-3 py-1.5 transition-colors duration-100 select-none ${isDisabled ? 'opacity-50 cursor-default' : 'hover:bg-app-hover cursor-pointer'}`}
                   >
                     <input
                       type="checkbox"
                       checked={isChecked}
+                      disabled={isDisabled}
                       onChange={() => handleToggle(branch.id)}
-                      className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0"
+                      className="w-4 h-4 rounded border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border flex-shrink-0 disabled:opacity-50"
                     />
                     <span className="inline-flex items-center justify-center w-5 h-5 rounded text-micro font-bold flex-shrink-0 bg-app-hover text-app-fg-muted">
                       {branch.code.slice(0, 2)}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium truncate ${isInactive ? 'text-app-fg-muted' : 'text-app-fg'}`}>
+                      <p className={`text-xs font-medium truncate ${isDisabled ? 'text-app-fg-muted' : 'text-app-fg'}`}>
                         {branch.name}
                       </p>
                     </div>
                     {isInactive && (
                       <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded flex-shrink-0">
                         Inactive
+                      </span>
+                    )}
+                    {isReadOnly && !isInactive && (
+                      <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded flex-shrink-0">
+                        Read-only
                       </span>
                     )}
                   </label>
