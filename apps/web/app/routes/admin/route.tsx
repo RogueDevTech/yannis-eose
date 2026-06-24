@@ -79,7 +79,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch user's branches for the branch switcher (non-blocking). `status` is
   // kept so the switcher can tag a disabled branch instead of dropping it.
-  type BranchListEntry = { id: string; name: string; code: string; status?: string; groupId?: string | null };
+  type BranchListEntry = { id: string; name: string; code: string; status?: string; groupId?: string | null; readOnly?: boolean };
   const branchesPromise = apiRequest<unknown>('/trpc/branches.listAll', { method: 'GET', cookie })
     .then((res) => {
       if (!res.ok) return [] as BranchListEntry[];

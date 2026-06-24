@@ -36,6 +36,8 @@ interface Branch {
   status: string;
   settings: Record<string, unknown> | null;
   createdAt: string;
+  groupId?: string | null;
+  groupName?: string | null;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -174,20 +176,18 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
         }
       />
 
-      {/* Branches grid — same card shape as `/admin/marketing/forms`. The
-          whole card is a click target that routes to the branch detail page
-          (overlay link with `inset-0`); the Edit button sits on top via
-          `relative z-10` so it stays interactive without bubbling to the
-          card's link. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {branches.map((branch) => (
+      {/* Branches grid — grouped by company when multiple groups exist.
+          Same card shape as `/admin/marketing/forms`. The whole card is a
+          click target that routes to the branch detail page. */}
+      {(() => {
+        const uniqueGroupIds = [...new Set(branches.map((b) => b.groupId).filter(Boolean))];
+        const isMultiGroup = uniqueGroupIds.length > 1;
+
+        const renderBranchCard = (branch: Branch) => (
           <article
             key={branch.id}
             className="group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 flex flex-col min-h-[180px] focus-within:ring-2 focus-within:ring-brand-500"
           >
-            {/* Card-level link — covers the whole surface so any click
-                outside the action buttons opens the detail view. The link
-                itself has no children; the visible content sits above it. */}
             <Link
               to={`/admin/branches/${branch.id}`}
               prefetch="intent"
@@ -240,16 +240,56 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
               </span>
             </div>
           </article>
-        ))}
-        {branches.length === 0 && (
-          <div className="col-span-full">
+        );
+
+        if (branches.length === 0) {
+          return (
             <EmptyState
               title="No branches yet"
               description="Create one to enable multi-branch mode."
             />
+          );
+        }
+
+        if (!isMultiGroup) {
+          return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {branches.map(renderBranchCard)}
+            </div>
+          );
+        }
+
+        // Group branches by company so cross-company data is never mixed
+        const groupNameMap = new Map<string, string>();
+        for (const b of branches) {
+          if (b.groupId && b.groupName) groupNameMap.set(b.groupId, b.groupName);
+        }
+        // Also include group names from branchGroups for groups with no branches
+        for (const g of (branchGroups ?? [])) {
+          if (!groupNameMap.has(g.id)) groupNameMap.set(g.id, g.name);
+        }
+
+        return (
+          <div className="space-y-8">
+            {uniqueGroupIds.map((gId) => {
+              const groupBranches = branches.filter((b) => b.groupId === gId);
+              return (
+                <section key={gId!}>
+                  <h2 className="text-sm font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                    {groupNameMap.get(gId!) ?? 'Unknown company'}
+                    <span className="ml-1.5 text-app-fg-muted/60 font-normal normal-case">
+                      ({groupBranches.length})
+                    </span>
+                  </h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {groupBranches.map(renderBranchCard)}
+                  </div>
+                </section>
+              );
+            })}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Create Modal */}
       {createOpen && (

@@ -2478,10 +2478,51 @@ function BranchSupervisorTeamsPanel({
         // inside each department's "Manage" detail view, not at the master level.
         <>
           {visibleDepartments.length === 0 ? (
-            <EmptyState
-              title="No departments to manage"
-              description="You don't have permission to manage any department on this branch."
-            />
+            canManageAny ? (
+              <div className="space-y-4">
+                <EmptyState
+                  title="No departments set up"
+                  description="This branch has no departments yet. Create a department to get started."
+                />
+                <div className="flex items-center justify-center gap-3">
+                  {canManageCSTeams && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 transition-colors"
+                      onClick={() => {
+                        submitSquadMutation({
+                          intent: 'createBranchTeam',
+                          department: 'CS',
+                          name: 'Team 1',
+                        });
+                      }}
+                    >
+                      + Create CS department
+                    </button>
+                  )}
+                  {canManageMarketingTeams && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 transition-colors"
+                      onClick={() => {
+                        submitSquadMutation({
+                          intent: 'createBranchTeam',
+                          department: 'MARKETING',
+                          name: 'Team 1',
+                        });
+                      }}
+                    >
+                      + Create Marketing department
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="No departments to manage"
+                description="You don't have permission to manage any department on this branch."
+              />
+            )
           ) : (
             // Department cards — same shape as `/admin/branches` list cards
             // and `/admin/marketing/forms` (CEO directive 2026-05-10):

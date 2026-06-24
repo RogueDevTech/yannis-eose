@@ -699,6 +699,11 @@ export const marketingRouter = router({
         );
       }
 
+      // Head of CS sees orders scoped by servicing branch (where CS works),
+      // not marketing branch (where the lead was attributed).
+      const csRoles = new Set(['HEAD_OF_CS']);
+      const orderBranchScope = csRoles.has(ctx.user.role) ? 'servicing' as const : undefined;
+
       return getMarketingService().getPerformanceMetrics(
         mediaBuyerId,
         input.startDate && input.endDate ? 'this_month' : 'all_time',
@@ -708,6 +713,7 @@ export const marketingRouter = router({
         assignedCsId,
         undefined,
         ctx.effectiveBranchIds,
+        orderBranchScope,
       );
     }),
 
@@ -1683,7 +1689,13 @@ export const marketingRouter = router({
           limit: requestLimit,
           ...(mode === 'received'
             ? { requesterId: ctx.user.id }
-            : { excludeSelfAsRequester: true, callerId: ctx.user.id }),
+            : {
+                excludeSelfAsRequester: true,
+                callerId: ctx.user.id,
+                // Supervisors only see requests targeted at them (their team MBs),
+                // not every request in the branch.
+                ...(isMarketingSupervisor && { targetUserId: ctx.user.id }),
+              }),
           ...dateRange,
           ...(input.requestStatus && { status: input.requestStatus }),
           ...(input.search && { search: input.search }),
@@ -1774,7 +1786,12 @@ export const marketingRouter = router({
           : Promise.resolve(null),
         canDistribute
           ? getMarketingService().fundingRequestStatusCounts(
-              { excludeSelfAsRequester: true, ...dateRange },
+              {
+                excludeSelfAsRequester: true,
+                // Supervisors: only count requests targeted at them (their team).
+                ...(isMarketingSupervisor && { targetUserId: ctx.user.id }),
+                ...dateRange,
+              },
               ctx.user,
               branchId,
               ctx.effectiveBranchIds,
