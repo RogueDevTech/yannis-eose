@@ -276,7 +276,20 @@ export const marketingRouter = router({
       return next({ ctx });
     })
     .query(async ({ ctx }) => {
-      return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId, undefined, ctx.effectiveBranchIds);
+      // Supervisors only see their team members, not all branch MBs.
+      let restrictToUserIds: string[] | undefined;
+      if (
+        ctx.user.role === 'MEDIA_BUYER' &&
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true &&
+        ctx.currentBranchId
+      ) {
+        const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, ctx.currentBranchId);
+        if (scope.marketingUserIds.length > 0) {
+          restrictToUserIds = scope.marketingUserIds;
+          if (!restrictToUserIds.includes(ctx.user.id)) restrictToUserIds.push(ctx.user.id);
+        }
+      }
+      return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId, { restrictToUserIds }, ctx.effectiveBranchIds);
     }),
 
   /** Recipient candidates for the Request Funding modal (migration 0106).
@@ -853,7 +866,7 @@ export const marketingRouter = router({
           restrictMbIds,
           ctx.effectiveBranchIds,
         ),
-        getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds),
+        getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds: restrictMbIds ?? undefined }, ctx.effectiveBranchIds),
         getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
         getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds, restrictMbIds?.length === 1 ? restrictMbIds[0] : undefined)
@@ -1277,7 +1290,7 @@ export const marketingRouter = router({
         // Team Analysis roster — ACTIVE only, so it lines up with the
         // ACTIVE-only leaderboard and a deactivated account never shows as a
         // metric-less ghost row.
-        getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true }, ctx.effectiveBranchIds),
+        getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true, restrictToUserIds: restrictMbIds ?? undefined }, ctx.effectiveBranchIds),
         getMarketingService().getFundingSummary(branchId, Object.keys(fundingOpts).length > 0 ? fundingOpts : undefined, ctx.effectiveBranchIds),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,
@@ -1756,7 +1769,18 @@ export const marketingRouter = router({
             })()
           : Promise.resolve(null),
         isFundingAdmin
-          ? getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds).catch(() => null)
+          ? (async () => {
+              // Supervisors only see their team's balances, not all branch MBs.
+              let restrictToUserIds: string[] | undefined;
+              if (isMarketingSupervisor && supervisorFallbackBranchId) {
+                const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, supervisorFallbackBranchId);
+                if (scope.marketingUserIds.length > 0) {
+                  restrictToUserIds = scope.marketingUserIds;
+                  if (!restrictToUserIds.includes(ctx.user.id)) restrictToUserIds.push(ctx.user.id);
+                }
+              }
+              return getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds }, ctx.effectiveBranchIds);
+            })().catch(() => null)
           : Promise.resolve(null),
         showFundingBalance
           ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds)

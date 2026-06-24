@@ -216,6 +216,12 @@ export async function action({ request }: ActionFunctionArgs) {
  */
 export default function AdminLayout() {
   const { user, notifications, branches, branchGroups } = useLoaderData<typeof loader>();
+  // Marketing supervisors are locked to their primary branch to prevent
+  // scope confusion — they must not switch branches.
+  const isSupervisorLockedToBranch =
+    user?.role === 'MEDIA_BUYER' &&
+    user?.isMarketingTeamSupervisorOnActiveBranch === true &&
+    !!user?.currentBranchId;
   const [resolvedBranches, setResolvedBranches] = useState<
     Array<{ id: string; name: string; code: string; status?: string; groupId?: string | null }> | null
   >(null);
@@ -247,7 +253,11 @@ export default function AdminLayout() {
   return (
     <DashboardLayout
       user={user}
-      branches={resolvedBranches ?? []}
+      branches={
+        isSupervisorLockedToBranch
+          ? (resolvedBranches ?? []).filter((b) => b.id === user!.currentBranchId)
+          : (resolvedBranches ?? [])
+      }
       branchGroups={resolvedGroups}
       branchesHydrationReady={resolvedBranches !== null}
       notificationsPromise={notifications}

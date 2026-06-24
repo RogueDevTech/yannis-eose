@@ -1523,7 +1523,7 @@ export class MarketingService {
   async listFundingBalances(
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
-    opts?: { activeOnly?: boolean },
+    opts?: { activeOnly?: boolean; /** Pre-resolved user IDs to restrict to (e.g. supervisor team scope). */ restrictToUserIds?: string[] },
     effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
@@ -1542,12 +1542,19 @@ export class MarketingService {
     // for every metric. Finance/report callers leave it off so a deactivated
     // recipient with a real outstanding balance still surfaces.
     const activeOnly = opts?.activeOnly === true;
+    const restrictToUserIds = opts?.restrictToUserIds;
+    const recipientUserIds: string[] = [];
+
+    // When the caller already resolved a team scope (e.g. supervisor's team),
+    // skip the internal user resolution and use those IDs directly.
+    if (restrictToUserIds && restrictToUserIds.length > 0) {
+      recipientUserIds.push(...restrictToUserIds);
+    } else {
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasGlobalView =
       caller.role === 'SUPER_ADMIN' ||
       callerPerms.includes(canonicalPermissionCode('finance.read')) ||
       callerPerms.includes(canonicalPermissionCode('marketing.scope.global'));
-    const recipientUserIds: string[] = [];
 
     if (hasGlobalView) {
       const recipients = await this.db
@@ -1591,6 +1598,7 @@ export class MarketingService {
         recipientUserIds.push(...narrowed);
       }
     }
+    } // end else (no restrictToUserIds)
 
     const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     if (branchUserIds) {
