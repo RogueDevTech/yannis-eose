@@ -132,6 +132,10 @@ export const createStaffSchema = z.object({
   // Branch assignment
   branchIds: z.array(z.string().uuid()).optional(),
   primaryBranchId: z.string().uuid().optional(),
+  // Per-company primary: { groupId → branchId }. When a user spans multiple
+  // company groups, each group gets its own primary branch. Falls back to
+  // the single `primaryBranchId` when absent.
+  primaryBranchByGroup: z.record(z.string().uuid(), z.string().uuid()).optional(),
 
   // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX.
   // Required on create (CEO directive 2026-04-24) — every staff member must have a reachable
@@ -203,6 +207,7 @@ export const updateStaffSchema = z.object({
   productIds: z.array(z.string().uuid()).optional(),
   branchIds: z.array(z.string().uuid()).optional(),
   primaryBranchId: z.string().uuid().optional(),
+  primaryBranchByGroup: z.record(z.string().uuid(), z.string().uuid()).optional(),
 });
 
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;

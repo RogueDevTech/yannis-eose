@@ -474,6 +474,44 @@ export class AuthService {
       throw new BadRequestException('Failed to record mirror session.');
     }
 
+    // Resolve activeGroupId + selectedBranchIds for the mirrored session,
+    // same as the login flow — without this the header branch switcher can't
+    // determine which company group is active.
+    let mirrorActiveGroupId: string | null = null;
+    let mirrorSelectedBranchIds: string[] | null = null;
+    if (currentBranchId) {
+      const [branchRow] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, currentBranchId))
+        .limit(1);
+      mirrorActiveGroupId = branchRow?.groupId ?? null;
+    } else if (targetMemberships.length > 0) {
+      const memberBranchIds = targetMemberships.map((m) => m.branchId as string);
+      const groupRows = await this.db
+        .selectDistinct({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, memberBranchIds));
+      const validGroups = groupRows.filter((g) => g.groupId != null);
+      if (validGroups.length > 0) mirrorActiveGroupId = validGroups[0]!.groupId;
+    }
+    if (mirrorActiveGroupId) {
+      const groupBranches = await this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(eq(schema.branches.groupId, mirrorActiveGroupId));
+      const allGroupIds = groupBranches.map((b) => b.id);
+      const memberBranchIds = targetMemberships.map((m) => m.branchId as string);
+      if (targetIsGlobal) {
+        mirrorSelectedBranchIds = allGroupIds;
+      } else if (memberBranchIds.length > 0) {
+        const scoped = allGroupIds.filter((id) => memberBranchIds.includes(id));
+        mirrorSelectedBranchIds = scoped.length > 0 ? scoped : allGroupIds;
+      } else {
+        mirrorSelectedBranchIds = allGroupIds;
+      }
+    }
+
     const mirroredSession: SessionUser = {
       id: target.id,
       email: target.email,
@@ -489,6 +527,8 @@ export class AuthService {
       permissions: Array.from(targetPermSet),
       logisticsLocationId: target.logisticsLocationId,
       currentBranchId,
+      activeGroupId: mirrorActiveGroupId,
+      selectedBranchIds: mirrorSelectedBranchIds,
       branchIds: targetMemberships.map((m) => m.branchId as string),
       // Surface the target's appearance so the admin sees the app exactly as the
       // user would. The green border makes Mirror Mode obvious; the theme is part

@@ -1565,8 +1565,23 @@ export const branchesRouter = router({
 
   /** List all branch groups with their member branch count. */
   listGroups: authedProcedure
-    .query(async () => {
+    .query(async ({ ctx }) => {
       const db = getDb();
+
+      // Non-admin users only see groups that contain branches they can access.
+      // This prevents leaking company names to users outside those companies.
+      if (!isAdminLevel(ctx.user)) {
+        const userBranches = await listBranchesForUser({ id: ctx.user.id, role: ctx.user.role, memberOnly: true });
+        const groupIds = [...new Set(userBranches.map((b) => b.groupId).filter(Boolean))] as string[];
+        if (groupIds.length === 0) return [];
+        const groups = await db
+          .select({ id: schema.branchGroups.id, name: schema.branchGroups.name, status: schema.branchGroups.status, createdAt: schema.branchGroups.createdAt })
+          .from(schema.branchGroups)
+          .where(inArray(schema.branchGroups.id, groupIds))
+          .orderBy(asc(schema.branchGroups.createdAt));
+        return groups.map((g) => ({ ...g, branchCount: userBranches.filter((b) => b.groupId === g.id).length, userCount: 0 }));
+      }
+
       const groups = await db
         .select({
           id: schema.branchGroups.id,

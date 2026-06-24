@@ -142,6 +142,8 @@ export interface EditingUser {
   productIds: string[];
   restrictProductAccess: boolean;
   primaryBranchId: string | null;
+  /** Per-company-group primary branch map: { groupId → branchId }. */
+  primaryBranchByGroup?: Record<string, string>;
   branchIds: string[];
   roleTemplateId: string | null;
   permissionOverrides: Record<string, boolean>;
@@ -379,7 +381,41 @@ export function UserCreatePage({
 
   const [selectedRole, setSelectedRole] = useState(editingUser?.role ?? '');
   const [accountName, setAccountName] = useState(editingUser?.name ?? '');
-  const [selectedBranchId, setSelectedBranchId] = useState(editingUser?.primaryBranchId ?? '');
+  // Per-company primary branch map: { groupId → branchId }.
+  // When branches span multiple company groups, each group needs its own primary.
+  const [primaryBranchByGroup, setPrimaryBranchByGroup] = useState<Record<string, string>>(() => {
+    if (!editingUser) return {};
+    // Use the per-group map from the server when available (multi-company users)
+    if (editingUser.primaryBranchByGroup && Object.keys(editingUser.primaryBranchByGroup).length > 0) {
+      return { ...editingUser.primaryBranchByGroup };
+    }
+    // Fall back: derive from single primaryBranchId
+    const primaryId = editingUser.primaryBranchId;
+    if (!primaryId) {
+      // Legacy user: no primary set, try to derive from first branch's group
+      const firstBranch = branches.find((b) => editingUser.branchIds.includes(b.id));
+      if (firstBranch?.groupId) return { [firstBranch.groupId]: firstBranch.id };
+      return {};
+    }
+    const primaryBranch = branches.find((b) => b.id === primaryId);
+    if (primaryBranch?.groupId) return { [primaryBranch.groupId]: primaryId };
+    return {};
+  });
+  // Derived: first primary from the map — used for backward-compat (conflict checks, hidden field).
+  const selectedBranchId = useMemo(() => {
+    const vals = Object.values(primaryBranchByGroup);
+    return vals[0] ?? '';
+  }, [primaryBranchByGroup]);
+  const setSelectedBranchId = (id: string) => {
+    if (!id) {
+      setPrimaryBranchByGroup({});
+      return;
+    }
+    const branch = branches.find((b) => b.id === id);
+    if (branch?.groupId) {
+      setPrimaryBranchByGroup((prev) => ({ ...prev, [branch.groupId!]: id }));
+    }
+  };
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
     editingUser?.branchIds ?? [],
   );
@@ -390,6 +426,48 @@ export function UserCreatePage({
    * and skip its validation/submit gating. Mirrors the server-side allowlist.
    */
   const roleNeedsBranch = !!selectedRole && BRANCH_ELIGIBLE_ROLES.has(selectedRole);
+
+  // Compute which company groups have at least one selected branch.
+  const groupsWithSelectedBranches = useMemo(() => {
+    if (!branchGroups || branchGroups.length <= 1) return [];
+    const selected = new Set(selectedBranchIds);
+    return branchGroups.filter((g) =>
+      branches.some((b) => b.groupId === g.id && selected.has(b.id)),
+    );
+  }, [branchGroups, branches, selectedBranchIds]);
+  const hasMultiGroupSelection = groupsWithSelectedBranches.length > 1;
+
+  // Validate: every group with selected branches must have a primary.
+  const allGroupPrimariesSet = useMemo(() => {
+    if (!hasMultiGroupSelection) return !!selectedBranchId;
+    return groupsWithSelectedBranches.every((g) => !!primaryBranchByGroup[g.id]);
+  }, [hasMultiGroupSelection, groupsWithSelectedBranches, primaryBranchByGroup, selectedBranchId]);
+
+  // Auto-assign primaries for groups that don't have one yet (e.g. when toggling a new group on).
+  useEffect(() => {
+    if (!hasMultiGroupSelection) return;
+    const selected = new Set(selectedBranchIds);
+    let changed = false;
+    const next = { ...primaryBranchByGroup };
+    for (const g of groupsWithSelectedBranches) {
+      const currentPrimary = next[g.id];
+      if (currentPrimary && selected.has(currentPrimary)) continue;
+      // Pick first selected branch in this group
+      const fallback = branches.find((b) => b.groupId === g.id && selected.has(b.id));
+      if (fallback) {
+        next[g.id] = fallback.id;
+        changed = true;
+      }
+    }
+    // Remove primaries for groups that no longer have selected branches
+    for (const gid of Object.keys(next)) {
+      if (!groupsWithSelectedBranches.some((g) => g.id === gid)) {
+        delete next[gid];
+        changed = true;
+      }
+    }
+    if (changed) setPrimaryBranchByGroup(next);
+  }, [hasMultiGroupSelection, groupsWithSelectedBranches, selectedBranchIds, branches, primaryBranchByGroup]);
 
   useEffect(() => {
     // Skip auto-fill when editing — the user already has assigned branches we shouldn't override.
@@ -594,25 +672,40 @@ export function UserCreatePage({
   const toggleSelectAllBranches = () => {
     if (allBranchesSelected) {
       setSelectedBranchIds([]);
-      setSelectedBranchId('');
+      setPrimaryBranchByGroup({});
       return;
     }
     const ids = activeBranches.map((b) => b.id);
     setSelectedBranchIds(ids);
-    setSelectedBranchId((prev) => (prev && ids.includes(prev) ? prev : ids[0] ?? ''));
+    // Auto-assign primaries will be handled by the useEffect above.
   };
 
   const toggleBranch = (id: string) => {
     setSelectedBranchIds((prev) => {
       if (prev.includes(id)) {
         const next = prev.filter((branchId) => branchId !== id);
-        if (selectedBranchId === id) {
-          setSelectedBranchId(next[0] ?? '');
+        // Clear primary for this branch's group if it was the primary
+        const branch = branches.find((b) => b.id === id);
+        if (branch?.groupId && primaryBranchByGroup[branch.groupId] === id) {
+          const fallback = branches.find(
+            (b) => b.groupId === branch.groupId && b.id !== id && next.includes(b.id),
+          );
+          setPrimaryBranchByGroup((prev) => {
+            const updated = { ...prev };
+            if (fallback) {
+              updated[branch.groupId!] = fallback.id;
+            } else {
+              delete updated[branch.groupId!];
+            }
+            return updated;
+          });
         }
         return next;
       }
-      if (!selectedBranchId) {
-        setSelectedBranchId(id);
+      // Adding a branch — set as primary for its group if none set
+      const branch = branches.find((b) => b.id === id);
+      if (branch?.groupId && !primaryBranchByGroup[branch.groupId]) {
+        setPrimaryBranchByGroup((prev) => ({ ...prev, [branch.groupId!]: id }));
       }
       return [...prev, id];
     });
@@ -623,22 +716,21 @@ export function UserCreatePage({
   // branches (keeping any already-selected branches from other groups).
   const toggleGroupBranches = (groupBranches: UserCreateBranch[], allSelected: boolean) => {
     const groupIds = groupBranches.map((b) => b.id);
+    const groupId = groupBranches[0]?.groupId;
     if (allSelected) {
       const groupIdSet = new Set(groupIds);
-      setSelectedBranchIds((prev) => {
-        const next = prev.filter((id) => !groupIdSet.has(id));
-        if (selectedBranchId && groupIdSet.has(selectedBranchId)) {
-          setSelectedBranchId(next[0] ?? '');
-        }
-        return next;
-      });
+      setSelectedBranchIds((prev) => prev.filter((id) => !groupIdSet.has(id)));
+      if (groupId) {
+        setPrimaryBranchByGroup((prev) => {
+          const updated = { ...prev };
+          delete updated[groupId];
+          return updated;
+        });
+      }
       return;
     }
-    setSelectedBranchIds((prev) => {
-      const next = [...new Set([...prev, ...groupIds])];
-      if (!selectedBranchId) setSelectedBranchId(groupIds[0] ?? '');
-      return next;
-    });
+    setSelectedBranchIds((prev) => [...new Set([...prev, ...groupIds])]);
+    // Auto-assign primary will be handled by the useEffect.
   };
 
   const avatarGradient =
@@ -752,6 +844,13 @@ export function UserCreatePage({
           name="primaryBranchId"
           value={roleNeedsBranch ? selectedBranchId : ''}
         />
+        {roleNeedsBranch && hasMultiGroupSelection && (
+          <input
+            type="hidden"
+            name="primaryBranchByGroup"
+            value={JSON.stringify(primaryBranchByGroup)}
+          />
+        )}
         {selectedTemplateId ? (
           <input type="hidden" name="roleTemplateId" value={selectedTemplateId} />
         ) : null}
@@ -928,7 +1027,7 @@ export function UserCreatePage({
                 viewerRole={viewerRole}
               />
               )}
-              {roleNeedsBranch && (
+              {roleNeedsBranch && !hasMultiGroupSelection && (
               <SearchableSelect
                 id="primaryBranchId"
                 label="Primary Branch"
@@ -945,6 +1044,35 @@ export function UserCreatePage({
                     description: branch.code,
                   }))}
               />
+              )}
+              {roleNeedsBranch && hasMultiGroupSelection && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-app-fg">Primary Branch per Company <span className="text-red-500">*</span></p>
+                  {groupsWithSelectedBranches.map((group) => {
+                    const groupBranches = branches.filter(
+                      (b) => b.groupId === group.id && selectedBranchIds.includes(b.id),
+                    );
+                    return (
+                      <SearchableSelect
+                        key={group.id}
+                        id={`primaryBranch-${group.id}`}
+                        label={group.name}
+                        required
+                        placeholder={`Select primary for ${group.name}`}
+                        searchPlaceholder="Search branches..."
+                        value={primaryBranchByGroup[group.id] ?? ''}
+                        onChange={(val) =>
+                          setPrimaryBranchByGroup((prev) => ({ ...prev, [group.id]: val }))
+                        }
+                        options={groupBranches.map((b) => ({
+                          value: b.id,
+                          label: b.name,
+                          description: b.code,
+                        }))}
+                      />
+                    );
+                  })}
+                </div>
               )}
               {selectedRole && COMPANY_WIDE_OPTIONAL_SQUAD_ROLES.has(selectedRole) ? (
                 <p className="text-xs text-app-fg-muted mt-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2">
@@ -1269,12 +1397,12 @@ export function UserCreatePage({
             disabled={
               isEditMode
                 ? !selectedRole ||
-                  (roleNeedsBranch && (selectedBranchIds.length === 0 || !selectedBranchId)) ||
+                  (roleNeedsBranch && (selectedBranchIds.length === 0 || !allGroupPrimariesSet)) ||
                   // phoneLocal is optional on edit — if non-empty, it must be a complete value
                   (phoneLocal.length > 0 && !phoneIsComplete)
                 : !selectedRole ||
                   !phoneIsComplete ||
-                  (roleNeedsBranch && (selectedBranchIds.length === 0 || !selectedBranchId))
+                  (roleNeedsBranch && (selectedBranchIds.length === 0 || !allGroupPrimariesSet))
             }
           >
             {isEditMode ? 'Save changes' : 'Create User'}
