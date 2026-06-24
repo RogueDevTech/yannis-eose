@@ -252,6 +252,7 @@ export interface FundingSliceData {
   records: FundingRecord[];
   total: number;
   page: number;
+  limit?: number;
   totalPages: number;
   statusCounts: FundingStatusCounts;
   statusFilter?: string;
@@ -263,6 +264,7 @@ export interface FundingRequestsSliceData {
   records: FundingRequestRecord[];
   total: number;
   page: number;
+  limit?: number;
   totalPages: number;
   statusCounts: FundingRequestStatusCounts;
   statusFilter?: FundingRequestStatusFilter;
@@ -305,6 +307,7 @@ export interface MarketingFundingLoaderData {
     records: DistributingFundingEntry[];
     total: number;
     page: number;
+    limit?: number;
     totalPages: number;
     typeFilter: 'all' | DistributingFundingEntryType;
     statusFilter?: string;

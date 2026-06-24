@@ -2272,24 +2272,23 @@ function UnifiedDistributingTable({
           </div>
         </button>
       )}
-      pagination={
-        slice.totalPages > 1
-          ? {
-              page: slice.page,
-              totalPages: slice.totalPages,
-              pageParam: 'page',
-              wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
-              controlsClassName: 'sm:justify-end',
-              summary: (
-                <span className="text-app-fg-muted">
-                  {slice.total > 0
-                    ? `Showing ${slice.records.length} of ${slice.total} entries`
-                    : 'No entries'}
-                </span>
-              ),
-            }
-          : undefined
-      }
+      pagination={{
+        page: slice.page,
+        totalPages: slice.totalPages,
+        pageParam: 'page',
+        pageSize: slice.limit,
+        pageSizeParam: 'perPage',
+        pageSizeOptions: [20, 50, 100, 200, 500],
+        wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+        controlsClassName: 'sm:justify-end',
+        summary: (
+          <span className="text-app-fg-muted">
+            {slice.total > 0
+              ? `Showing ${slice.records.length} of ${slice.total} entries`
+              : 'No entries'}
+          </span>
+        ),
+      }}
     />
   );
 }
@@ -2299,6 +2298,7 @@ type UnifiedReceivedSlice = {
   records: DistributingFundingEntry[];
   total: number;
   page: number;
+  limit?: number;
   totalPages: number;
   typeFilter: 'all' | 'transfer' | 'request';
   statusFilter: string;
@@ -2653,24 +2653,23 @@ function UnifiedReceivedTable({
           </div>
         </button>
       )}
-      pagination={
-        slice.totalPages > 1
-          ? {
-              page: slice.page,
-              totalPages: slice.totalPages,
-              pageParam: 'page',
-              wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
-              controlsClassName: 'sm:justify-end',
-              summary: (
-                <span className="text-app-fg-muted">
-                  {slice.total > 0
-                    ? `Showing ${slice.records.length} of ${slice.total} entries`
-                    : 'No entries'}
-                </span>
-              ),
-            }
-          : undefined
-      }
+      pagination={{
+        page: slice.page,
+        totalPages: slice.totalPages,
+        pageParam: 'page',
+        pageSize: slice.limit,
+        pageSizeParam: 'perPage',
+        pageSizeOptions: [20, 50, 100, 200, 500],
+        wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+        controlsClassName: 'sm:justify-end',
+        summary: (
+          <span className="text-app-fg-muted">
+            {slice.total > 0
+              ? `Showing ${slice.records.length} of ${slice.total} entries`
+              : 'No entries'}
+          </span>
+        ),
+      }}
     />
   );
 }

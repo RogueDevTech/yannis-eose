@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import type { DashboardData, DashboardFilters } from './types';
 import type { DashboardSecondaryApiPayload } from '~/routes/api.dashboard-secondary';
@@ -30,13 +30,16 @@ export function DashboardSecondaryProvider({
     () => buildQuery(filters),
     [filters.startDate, filters.endDate, filters.periodAllTime],
   );
+  // Cache-bust: include a mount timestamp so a page reload after branch switch
+  // doesn't serve a stale HTTP-cached response (max-age=10 on the secondary API).
+  const [mountTs] = useState(() => Date.now());
 
   useEffect(() => {
-    void fetcher.load(`/api/dashboard-secondary?${qs}`);
-  }, [qs]);
+    void fetcher.load(`/api/dashboard-secondary?${qs}&_t=${mountTs}`);
+  }, [qs, mountTs]);
 
   const retry = useCallback(() => {
-    void fetcher.load(`/api/dashboard-secondary?${qs}`);
+    void fetcher.load(`/api/dashboard-secondary?${qs}&_t=${Date.now()}`);
   }, [fetcher, qs]);
 
   const value = useMemo((): CtxValue => {

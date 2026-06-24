@@ -42,6 +42,8 @@ export interface OrdersAndCounts {
   orderCounts: Record<string, number>;
   totalOrders: number;
   recentOrders: DashboardData['recentOrders'];
+  /** Offline order count for CS dashboard funnel. */
+  offlineCount?: number;
 }
 
 /** What the loader returns — orders shell deferred; KPIs load post-mount via `/api/dashboard-secondary`. */
