@@ -4029,6 +4029,9 @@ export class MarketingService {
     assignedCsId?: string,
     supervisorScope?: OrdersAggregateSupervisorScope,
     effectiveBranchIds?: string[] | null,
+    /** Which branch column to scope orders by. Defaults to `branchId` (marketing).
+     *  CS/Sales roles should pass `'servicing'` so orders scope by `servicing_branch_id`. */
+    orderBranchScope?: 'marketing' | 'servicing',
   ) {
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
@@ -4165,7 +4168,8 @@ export class MarketingService {
       // team-analysis drill) already pass `branchId = null`, so a non-null
       // branchId here always means "scope to this branch" — including for a
       // Media Buyer viewing their own metrics after switching branches.
-      const bCond = branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds);
+      const branchCol = orderBranchScope === 'servicing' ? schema.orders.servicingBranchId : schema.orders.branchId;
+      const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
       if (bCond) conditions.push(bCond);
     };
 

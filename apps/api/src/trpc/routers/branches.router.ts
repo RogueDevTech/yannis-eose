@@ -87,7 +87,7 @@ export function getBranchTeamsService(): BranchTeamsService {
  * Attribution is by ownership (`media_buyer_id`), so this never widens what a
  * buyer can see beyond their own data.
  */
-async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
+async function mediaBuyerBranchScopeIds(userId: string): Promise<{ all: string[]; memberIds: Set<string> }> {
   const db = getDb();
   const [memberships, orderBranches, campaignBranches] = await Promise.all([
     db
@@ -103,11 +103,15 @@ async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
       .from(schema.campaigns)
       .where(eq(schema.campaigns.mediaBuyerId, userId)),
   ]);
-  const ids = new Set<string>();
-  for (const r of [...memberships, ...orderBranches, ...campaignBranches]) {
-    if (r.branchId) ids.add(r.branchId);
+  const memberIds = new Set<string>();
+  for (const r of memberships) {
+    if (r.branchId) memberIds.add(r.branchId);
   }
-  return [...ids];
+  const all = new Set<string>(memberIds);
+  for (const r of [...orderBranches, ...campaignBranches]) {
+    if (r.branchId) all.add(r.branchId);
+  }
+  return { all: [...all], memberIds };
 }
 
 /**
@@ -124,7 +128,7 @@ export async function listBranchesForUser(user: {
    *  memberships directly. Used by `listAll` for non-admin org-wide roles so
    *  they only see branches they're explicitly assigned to (their group). */
   memberOnly?: boolean;
-}): Promise<Array<{ id: string; name: string; code: string; status: string; groupId: string | null; groupName: string | null }>> {
+}): Promise<Array<{ id: string; name: string; code: string; status: string; groupId: string | null; groupName: string | null; readOnly?: boolean }>> {
   const db = getDb();
   // Org-wide roles see every branch even without explicit branch memberships:
   // SuperAdmin / Admin manage anything; HR creates / edits staff across the
@@ -162,21 +166,27 @@ export async function listBranchesForUser(user: {
       );
 
   const fetchRows = async (): Promise<
-    Array<{ id: string; name: string; code: string; status: string; groupId: string | null; groupName: string | null }>
+    Array<{ id: string; name: string; code: string; status: string; groupId: string | null; groupName: string | null; readOnly?: boolean }>
   > => {
     let rows: Array<{ id: string; name: string; code: string; status: string; groupId: string | null }>;
+    // For MBs, track which branches are real memberships vs historical (orders/campaigns)
+    let mbMemberIds: Set<string> | null = null;
     if (seesAll) {
       rows = await db.select(branchCols).from(schema.branches).where(activeGroupCondition);
     } else {
-      const branchIds =
-        user.role === 'MEDIA_BUYER'
-          ? await mediaBuyerBranchScopeIds(user.id)
-          : (
-              await db
-                .select({ branchId: schema.userBranches.branchId })
-                .from(schema.userBranches)
-                .where(eq(schema.userBranches.userId, user.id))
-            ).map((m) => m.branchId);
+      let branchIds: string[];
+      if (user.role === 'MEDIA_BUYER') {
+        const scope = await mediaBuyerBranchScopeIds(user.id);
+        branchIds = scope.all;
+        mbMemberIds = scope.memberIds;
+      } else {
+        branchIds = (
+          await db
+            .select({ branchId: schema.userBranches.branchId })
+            .from(schema.userBranches)
+            .where(eq(schema.userBranches.userId, user.id))
+        ).map((m) => m.branchId);
+      }
       if (branchIds.length === 0) return [];
       rows = await db
         .select(branchCols)
@@ -200,7 +210,12 @@ export async function listBranchesForUser(user: {
         .where(inArray(schema.branchGroups.id, uniqueGroupIds));
       for (const g of groupRows) groupNameMap.set(g.id, g.name);
     }
-    return rows.map((r) => ({ ...r, groupName: r.groupId ? groupNameMap.get(r.groupId) ?? null : null }));
+    return rows.map((r) => ({
+      ...r,
+      groupName: r.groupId ? groupNameMap.get(r.groupId) ?? null : null,
+      // Historical branches (from orders/campaigns but no active membership) are read-only
+      ...(mbMemberIds && !mbMemberIds.has(r.id) ? { readOnly: true } : {}),
+    }));
   };
 
   if (!branchesCacheService) return fetchRows();
@@ -374,7 +389,7 @@ export const branchesRouter = router({
     .query(async ({ input, ctx }) => {
       const db = getDb();
       const teams = getBranchTeamsService();
-      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
+      const isSuperAdmin = isAdminLevel(ctx.user);
       const overviewPerms = ctx.user.permissions ?? [];
       const hasBranchManagePermission = overviewPerms.includes('branches.manage');
       const hasBranchManageUsersPermission = overviewPerms.includes('branches.manage_users');
@@ -589,7 +604,7 @@ export const branchesRouter = router({
       const teams = getBranchTeamsService();
 
       // ── Auth: same matrix as overview ─────────────────────────────────
-      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
+      const isSuperAdmin = isAdminLevel(ctx.user);
       const perms = ctx.user.permissions ?? [];
       const hasBranchManagePermission = perms.includes('branches.manage');
       const hasBranchManageUsersPermission = perms.includes('branches.manage_users');
@@ -1119,7 +1134,7 @@ export const branchesRouter = router({
     .query(async ({ input, ctx }) => {
       const db = getDb();
       const teams = getBranchTeamsService();
-      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
+      const isSuperAdmin = isAdminLevel(ctx.user);
       const perms = ctx.user.permissions ?? [];
       const hasBranchManagePermission = perms.includes('branches.manage');
       const hasBranchManageUsersPermission = perms.includes('branches.manage_users');
@@ -1178,7 +1193,7 @@ export const branchesRouter = router({
     .query(async ({ input, ctx }) => {
       const teams = getBranchTeamsService();
       const db = getDb();
-      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
+      const isSuperAdmin = isAdminLevel(ctx.user);
       const perms = ctx.user.permissions ?? [];
       const hasBranchManagePermission = perms.includes('branches.manage');
       const hasBranchManageUsersPermission = perms.includes('branches.manage_users');
@@ -1521,8 +1536,8 @@ export const branchesRouter = router({
         // attributed to. A branch they were removed from stays reachable as a
         // read-only data lens; branch-scoped mutations are blocked server-side
         // (see `blockMediaBuyerMutationsOutsideMemberBranch` in trpc.ts).
-        const scopeIds = await mediaBuyerBranchScopeIds(ctx.user.id);
-        if (!scopeIds.includes(input.branchId)) {
+        const scope = await mediaBuyerBranchScopeIds(ctx.user.id);
+        if (!scope.all.includes(input.branchId)) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'You have no orders or campaigns in this branch',
