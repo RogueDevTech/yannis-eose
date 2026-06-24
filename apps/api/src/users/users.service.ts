@@ -897,11 +897,18 @@ export class UsersService {
       }
 
       if (requestedBranchIds.length > 0) {
+        // Per-company primary: when primaryBranchByGroup is provided, each group
+        // gets its own primary branch. Otherwise fall back to single primaryBranchId.
+        const primaryBranchIdSet = new Set(
+          input.primaryBranchByGroup
+            ? Object.values(input.primaryBranchByGroup)
+            : input.primaryBranchId ? [input.primaryBranchId] : [],
+        );
         await tx.insert(schema.userBranches).values(
           requestedBranchIds.map((branchId) => ({
             userId: createdUser.id,
             branchId,
-            isPrimary: branchId === input.primaryBranchId,
+            isPrimary: primaryBranchIdSet.has(branchId),
             roleInBranch: null,
           })),
         );
@@ -1675,12 +1682,29 @@ export class UsersService {
     if (input.primaryBranchId && !nextBranchIds.includes(input.primaryBranchId)) {
       nextBranchIds.push(input.primaryBranchId);
     }
+    // Ensure per-group primaries are also in the branch list
+    if (input.primaryBranchByGroup) {
+      for (const bid of Object.values(input.primaryBranchByGroup)) {
+        if (!nextBranchIds.includes(bid)) nextBranchIds.push(bid);
+      }
+    }
     const nextPrimaryBranchId = input.primaryBranchId ?? beforeRow.primaryBranchId ?? null;
     if (nextBranchIds.length > 0 && nextPrimaryBranchId && !nextBranchIds.includes(nextPrimaryBranchId)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Primary branch must be one of the selected branches.',
       });
+    }
+    // Validate per-group primaries are all in the selected branches
+    if (input.primaryBranchByGroup) {
+      for (const [groupId, bid] of Object.entries(input.primaryBranchByGroup)) {
+        if (!nextBranchIds.includes(bid)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Primary branch for group ${groupId} must be one of the selected branches.`,
+          });
+        }
+      }
     }
 
     const effectiveRole = input.role ?? beforeRow.role;
@@ -1697,7 +1721,8 @@ export class UsersService {
     if (
       roleNeedsBranch &&
       (input.branchIds !== undefined || input.primaryBranchId !== undefined) &&
-      !nextPrimaryBranchId
+      !nextPrimaryBranchId &&
+      !input.primaryBranchByGroup
     ) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -2103,7 +2128,7 @@ export class UsersService {
 
     const beforeMembershipBranchIds = [...existingBranchIds].sort((a, b) => a.localeCompare(b));
     const branchesOrPrimaryPayloadTouched =
-      input.branchIds !== undefined || input.primaryBranchId !== undefined;
+      input.branchIds !== undefined || input.primaryBranchId !== undefined || input.primaryBranchByGroup !== undefined;
     const afterMembershipBranchIds = branchesOrPrimaryPayloadTouched
       ? [...new Set(nextBranchIds)].sort((a, b) => a.localeCompare(b))
       : beforeMembershipBranchIds;
@@ -2136,7 +2161,14 @@ export class UsersService {
           roleTemplateId: schema.users.roleTemplateId,
           updatedAt: schema.users.updatedAt,
         });
-      if (input.branchIds !== undefined || input.primaryBranchId !== undefined) {
+      if (input.branchIds !== undefined || input.primaryBranchId !== undefined || input.primaryBranchByGroup !== undefined) {
+        // Per-company primary: when primaryBranchByGroup is provided, each group
+        // gets its own primary branch. Otherwise fall back to single primaryBranchId.
+        const primaryBranchIdSet = new Set(
+          input.primaryBranchByGroup
+            ? Object.values(input.primaryBranchByGroup)
+            : nextPrimaryBranchId ? [nextPrimaryBranchId] : [],
+        );
         await tx
           .delete(schema.userBranches)
           .where(eq(schema.userBranches.userId, input.userId));
@@ -2144,7 +2176,7 @@ export class UsersService {
           nextBranchIds.map((branchId) => ({
             userId: input.userId,
             branchId,
-            isPrimary: branchId === nextPrimaryBranchId,
+            isPrimary: primaryBranchIdSet.has(branchId),
             roleInBranch: null,
           })),
         );

@@ -115,6 +115,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }>(matrixRes, {});
     const permissionOverrides = matrixExtracted.userOverrides ?? {};
 
+    // Build per-group primary map from membership data
+    const primaryBranchByGroup: Record<string, string> = {};
+    for (const m of user.branchMemberships ?? []) {
+      if (m.isPrimary && m.groupId) {
+        primaryBranchByGroup[m.groupId] = m.branchId;
+      }
+    }
     const editingUser: EditingUser = {
       id: user.id,
       name: user.name,
@@ -127,6 +134,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       productIds: user.assignedProductIds ?? [],
       restrictProductAccess: user.restrictProductAccess ?? false,
       primaryBranchId: user.primaryBranchId ?? null,
+      primaryBranchByGroup: Object.keys(primaryBranchByGroup).length > 0 ? primaryBranchByGroup : undefined,
       branchIds: (user.branchMemberships ?? []).map((m) => m.branchId),
       roleTemplateId: user.roleTemplateId ?? null,
       permissionOverrides,
@@ -414,6 +422,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const prevPrimary = target.primaryBranchId ?? null;
     if (nextPrimary !== prevPrimary && nextPrimary) {
       body.primaryBranchId = nextPrimary;
+    }
+  }
+  if (formData.has('primaryBranchByGroup')) {
+    try {
+      const parsed = JSON.parse(formData.get('primaryBranchByGroup')?.toString() ?? '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        (body as Record<string, unknown>).primaryBranchByGroup = parsed;
+      }
+    } catch {
+      // ignore malformed payload
     }
   }
 

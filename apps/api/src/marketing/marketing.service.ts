@@ -230,8 +230,9 @@ export class MarketingService {
     tx: MarketingFundingTx,
     userId: string,
     branchId: string | null,
+    effectiveBranchIds?: string[] | null,
   ): Promise<number> {
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
 
     const [inRow] = await tx
       .select({ total: sum(schema.marketingFunding.amount) })
@@ -859,6 +860,7 @@ export class MarketingService {
       scopeOrgWideHead?: boolean;
     },
     currentBranchId: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     // Branch isolation: receiver must be on `currentBranchId`; sender must be too unless
     // admin-class (session branch is enough — no `user_branches` row required). Global NULL
@@ -906,6 +908,7 @@ export class MarketingService {
           tx,
           senderId,
           currentBranchId,
+          effectiveBranchIds,
         );
         this.assertSufficientMarketingDisbursable(disbursable, input.amount);
       }
@@ -2159,6 +2162,7 @@ export class MarketingService {
       scopeOrgWideHead?: boolean;
     },
     currentBranchId: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const approverId = actor.id;
     const [existing] = await this.db
@@ -2261,6 +2265,7 @@ export class MarketingService {
           tx,
           approverId,
           currentBranchId,
+          effectiveBranchIds,
         );
         this.assertSufficientMarketingDisbursable(disbursable, sentAmount);
       }

@@ -186,7 +186,7 @@ export const marketingRouter = router({
           });
         }
       }
-      return getMarketingService().createFunding(fundingInput, ctx.user, bId);
+      return getMarketingService().createFunding(fundingInput, ctx.user, bId, ctx.effectiveBranchIds);
     }),
 
   verifyFunding: authedProcedure
@@ -411,6 +411,7 @@ export const marketingRouter = router({
         input.receiptUrl,
         ctx.user,
         input.branchId ?? ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
