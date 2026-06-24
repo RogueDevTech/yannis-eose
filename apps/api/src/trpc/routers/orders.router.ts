@@ -677,7 +677,7 @@ export const ordersRouter = router({
           perms.includes('marketing.scope.global') ||
           perms.includes('logistics.scope.global');
         const marketingTeamSupervisorOrders =
-          ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!ctx.currentBranchId;
+          ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
         if (
           !hasOrdersRead &&
           !hasMarketingOrders &&
@@ -1058,6 +1058,35 @@ export const ordersRouter = router({
           ctx.effectiveBranchIds,
           isFollowUp,
         ),
+      );
+    }),
+
+  /** Lightweight offline + duplicate counts for dashboard stat strips. */
+  supplementaryCounts: authedProcedure
+    .input(
+      z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+      }).optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const effectiveBranchId = orderListBranchIdOwnerAware(ctx.user, ctx.currentBranchId);
+      const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, effectiveBranchId, {
+        startDate: input?.startDate,
+        endDate: input?.endDate,
+      });
+      const branchScope: 'servicing' | 'marketing' =
+        ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
+      const countsBranchId = aggregateBranchIdForCloserSelfQuery(ctx.user, narrowed.assignedCsId, effectiveBranchId);
+      return getOrdersService().getSupplementaryCounts(
+        narrowed.mediaBuyerId,
+        narrowed.startDate,
+        narrowed.endDate,
+        narrowed.assignedCsId,
+        countsBranchId,
+        narrowed.supervisorScope,
+        branchScope,
+        ctx.effectiveBranchIds,
       );
     }),
 
