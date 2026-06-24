@@ -25,7 +25,7 @@ import {
   runMarketingFundingAction,
 } from '~/lib/marketing-pages.server';
 
-const PER_PAGE = 20;
+const DEFAULT_PER_PAGE = 100;
 /** Upper bound of `listFunding` / `listFundingRequests` (`limit` zod-capped at 100).
  * Used when the unified table fetches transfers + requests in one shot for an
  * `entryType=all` view — we over-fetch a single page and merge client-side.
@@ -84,6 +84,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     entryTypeParam === 'transfer' || entryTypeParam === 'request' ? entryTypeParam : 'all';
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  const perPageRaw = parseInt(url.searchParams.get('perPage') || '', 10);
+  const PER_PAGE = Number.isFinite(perPageRaw) && perPageRaw > 0 ? Math.min(perPageRaw, 1000) : DEFAULT_PER_PAGE;
 
   const statusParam = url.searchParams.get('status') ?? undefined;
   const statusFilter =
@@ -235,6 +237,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       records: transferRecords,
       total: transferData?.pagination?.total ?? incomingCounts.ALL,
       page,
+      limit: PER_PAGE,
       totalPages: Math.max(1, Math.ceil((transferData?.pagination?.total ?? incomingCounts.ALL) / PER_PAGE)),
       statusCounts: incomingCounts,
       statusFilter,
@@ -244,6 +247,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       records: requestRecords,
       total: requestData?.pagination?.total ?? myRequestsCounts.ALL,
       page,
+      limit: PER_PAGE,
       totalPages: Math.max(1, Math.ceil((requestData?.pagination?.total ?? myRequestsCounts.ALL) / PER_PAGE)),
       statusCounts: myRequestsCounts,
       statusFilter: requestStatusFilter,
@@ -282,6 +286,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       records: paged,
       total: totalMergedCount,
       page,
+      limit: PER_PAGE,
       totalPages: Math.max(1, Math.ceil(totalMergedCount / PER_PAGE)),
       typeFilter: entryTypeFilter,
       statusFilter: entryStatusParam ?? statusParam ?? requestStatusParam ?? undefined,

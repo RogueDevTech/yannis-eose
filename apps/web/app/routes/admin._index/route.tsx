@@ -89,8 +89,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!periodAllTime && endDate) ordersListInput.endDate = endDate;
   const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify(ordersListInput)), deferredOpt);
   const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, deferredOpt);
+  // Offline count for CS dashboard funnel strip (HoCS / CS supervisor).
+  const needsOffline = role === 'HEAD_OF_CS' || role === 'CS_CLOSER';
+  const suppInput = JSON.stringify({ startDate, endDate });
+  const supplementaryP = needsOffline
+    ? apiRequest<unknown>(`/trpc/orders.supplementaryCounts?input=${encodeURIComponent(suppInput)}`, deferredOpt)
+        .then((r) => r.ok ? ((r.data as { result?: { data?: { offlineCount: number } } })?.result?.data?.offlineCount ?? 0) : 0)
+        .catch(() => 0)
+    : Promise.resolve(0);
 
-  const pageData = Promise.all([ordersP, countsP]).then(([ordersRes, countsRes]): OrdersAndCounts => {
+  const pageData = Promise.all([ordersP, countsP, supplementaryP]).then(([ordersRes, countsRes, offlineCount]): OrdersAndCounts => {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
       : null;
@@ -101,8 +109,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderCounts: countsData,
       totalOrders: ordersData?.pagination?.total ?? 0,
       recentOrders: ordersData?.orders ?? [],
+      offlineCount,
     };
-  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [] }));
+  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [], offlineCount: 0 }));
 
   return defer({
     variant: 'dashboard' as const,

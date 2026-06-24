@@ -93,7 +93,9 @@ async function applyMarketingSupervisorScope<
   ctx: { user: SessionUser; currentBranchId: string | null },
   input: T,
 ): Promise<T> {
-  const branchId = ctx.currentBranchId;
+  // Fall back to the user's first branch when on "All Branches" so supervisors
+  // still get team-scoped data instead of seeing nothing or everything.
+  const branchId = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
   if (!branchId) return input;
   if (input.mediaBuyerId) return input;
   if (input.mediaBuyerIds) return input;
@@ -121,7 +123,7 @@ function seesFullMarketingTeamSurfaces(user: SessionUser): boolean {
 /** HoM-class / perm holders, or branch marketing supervisor with an active branch session. */
 function assertMarketingTeamSurfacesAccess(ctx: { user: SessionUser; currentBranchId: string | null }) {
   if (seesFullMarketingTeamSurfaces(ctx.user)) return;
-  if (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && ctx.currentBranchId) return;
+  if (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true) return;
   throw new TRPCError({
     code: 'FORBIDDEN',
     message: 'Missing marketing.teamOverview access',
@@ -136,7 +138,7 @@ async function resolveMarketingTeamViewerScope(ctx: {
   restrictMediaBuyerIds?: string[];
 }> {
   if (seesFullMarketingTeamSurfaces(ctx.user)) return {};
-  const branchId = ctx.currentBranchId;
+  const branchId = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
   if (!branchId || ctx.user.isMarketingTeamSupervisorOnActiveBranch !== true) {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'Marketing team overview access denied.' });
   }
@@ -634,12 +636,13 @@ export const marketingRouter = router({
         // from `applySupervisorScope` and drops the single `mediaBuyerId`
         // filter; the metrics service then OR-aggregates across the IDs.
         // When `personalOnly` is set, skip this expansion — supervisor sees only their own stats.
+        const supervisorBranch = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
         if (
           !input.personalOnly &&
           ctx.user.isMarketingTeamSupervisorOnActiveBranch === true &&
-          ctx.currentBranchId
+          supervisorBranch
         ) {
-          const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, ctx.currentBranchId, {
+          const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
             mediaBuyerId: ctx.user.id,
             startDate: input.startDate,
             endDate: input.endDate,
@@ -1060,7 +1063,7 @@ export const marketingRouter = router({
       // `restrictBuyerIds` instead of opening the global users.list query).
       const callerPerms = ctx.user.permissions ?? [];
       const isMarketingSupervisor =
-        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId;
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
       const canSeeBuyerPicklist =
         includeMarketingExportPicklists &&
         (isAdminLevel(ctx.user) || callerPerms.includes('users.read') || isMarketingSupervisor);
@@ -1387,7 +1390,7 @@ export const marketingRouter = router({
       const branchId = ctx.currentBranchId;
       const isMediaBuyer = ctx.user.role === 'MEDIA_BUYER';
       const isMarketingSupervisor =
-        isMediaBuyer && ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId;
+        isMediaBuyer && ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
       const callerPerms = ctx.user.permissions ?? [];
       const canSeeBuyerPicklist =
         (!isMediaBuyer && (isAdminLevel(ctx.user) || callerPerms.includes('users.read'))) ||
@@ -1446,7 +1449,7 @@ export const marketingRouter = router({
       const canApproveAdSpend =
         isAdminLevel(ctx.user) ||
         callerPerms.includes('marketing.adSpend.approve') ||
-        (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId);
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
 
       // Marketing teams with their MB member IDs — drives the Team filter dropdown.
       const marketingTeams = (teamsRaw ?? [])
@@ -1631,9 +1634,13 @@ export const marketingRouter = router({
       const branchId = ctx.currentBranchId;
       const role = ctx.user.role;
       const isMediaBuyer = role === 'MEDIA_BUYER';
-      const isMarketingSupervisor = isMediaBuyer && ctx.user.isTeamSupervisor && branchId
-        ? await getBranchTeamsService().isMarketingSupervisorOnBranch(ctx.user.id, branchId)
-        : false;
+      // When branchId is null (All Branches), fall back to the user's first branch
+      // for the supervisor check so they still see admin funding surfaces.
+      const supervisorFallbackBranchId = branchId ?? (ctx.user.branchIds?.[0] ?? null);
+      let isMarketingSupervisor = false;
+      if (isMediaBuyer && ctx.user.isTeamSupervisor && supervisorFallbackBranchId) {
+        isMarketingSupervisor = await getBranchTeamsService().isMarketingSupervisorOnBranch(ctx.user.id, supervisorFallbackBranchId);
+      }
       const isFundingAdmin =
         isAdminLevel(ctx.user) ||
         role === 'HEAD_OF_MARKETING' ||
@@ -1730,7 +1737,7 @@ export const marketingRouter = router({
           ? (async () => {
               // Supervisors see only their team members as funding recipients
               if (isMarketingSupervisor) {
-                const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId!);
+                const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, supervisorFallbackBranchId!);
                 const teamMemberIds = scope.marketingUserIds.filter((id) => id !== ctx.user.id);
                 if (teamMemberIds.length === 0) return null;
                 return getUsersService().list(
