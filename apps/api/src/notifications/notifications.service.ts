@@ -226,25 +226,53 @@ export class NotificationsService {
    * Create notifications for all ACTIVE users with a given role.
    * Fan-out runs in parallel per user. Prefer `enqueueCreateForRole` on request paths so HTTP latency
    * is not tied to DB insert + push for every recipient.
+   *
+   * When `groupId` is provided, only users with a branch membership in that
+   * company group receive the notification, and `groupId` is auto-stamped into
+   * the notification data so the list filter can isolate per-company.
    */
   async createForRole(
     role: (typeof schema.users.$inferSelect)['role'],
     input: Omit<CreateNotificationInput, 'userId'>,
+    groupId?: string | null,
   ): Promise<void> {
-    const rows = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.role, role),
-          eq(schema.users.status, 'ACTIVE'),
-        ),
-      );
+    let rows: { id: string }[];
+
+    if (groupId) {
+      // Scope to users who have at least one branch in this company group.
+      rows = await this.db
+        .selectDistinct({ id: schema.users.id })
+        .from(schema.users)
+        .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.users.id))
+        .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
+        .where(
+          and(
+            eq(schema.users.role, role),
+            eq(schema.users.status, 'ACTIVE'),
+            eq(schema.branches.groupId, groupId),
+          ),
+        );
+    } else {
+      rows = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, role),
+            eq(schema.users.status, 'ACTIVE'),
+          ),
+        );
+    }
+
+    // Auto-stamp groupId into notification data so the list filter can isolate.
+    const enrichedInput = groupId
+      ? { ...input, data: { ...(input.data as Record<string, unknown> ?? {}), groupId } }
+      : input;
 
     await Promise.all(
       rows.map(async (row) => {
         try {
-          await this.create({ ...input, userId: row.id });
+          await this.create({ ...enrichedInput, userId: row.id });
         } catch (err) {
           this.logger.warn(`Failed to create notification for user ${row.id}: ${err}`);
         }
@@ -295,12 +323,16 @@ export class NotificationsService {
   /**
    * Fire-and-forget role fan-out (`createForRole`). Use from orders / inventory / cart / payment code paths
    * so request latency is not tied to N sequential `create()` calls. Errors are logged only.
+   *
+   * Pass `groupId` to scope recipients to a single company group and auto-stamp
+   * the notification for per-company isolation.
    */
   enqueueCreateForRole(
     role: (typeof schema.users.$inferSelect)['role'],
     input: Omit<CreateNotificationInput, 'userId'>,
+    groupId?: string | null,
   ): void {
-    void this.createForRole(role, input).catch((err: unknown) => {
+    void this.createForRole(role, input, groupId).catch((err: unknown) => {
       this.logger.warn(
         `createForRole(${role}) failed: ${err instanceof Error ? err.message : String(err)}`,
       );

@@ -234,6 +234,17 @@ export async function action({ request }: ActionFunctionArgs) {
       // ignore malformed overrides payload
     }
   }
+  const primaryBranchByGroupRaw = formData.get('primaryBranchByGroup')?.toString();
+  if (primaryBranchByGroupRaw) {
+    try {
+      const parsed = JSON.parse(primaryBranchByGroupRaw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        body.primaryBranchByGroup = parsed;
+      }
+    } catch {
+      // ignore malformed payload
+    }
+  }
 
   // Build inline compensation if any values were provided (and no existing plan selected)
   const hasCompensation = fixedSalaryStr || bonusStr || commissionValueStr || upsellCommissionValueStr;

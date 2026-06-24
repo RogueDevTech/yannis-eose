@@ -169,9 +169,12 @@ function CompactBranchBadgeRow({
 export function UserBranchBadges({
   branches,
   compact = false,
+  showCompanyGroups = false,
 }: {
   branches: UserBranchBadgeItem[] | null | undefined;
   compact?: boolean;
+  /** Show company name headers when branches span multiple companies. SuperAdmin only. */
+  showCompanyGroups?: boolean;
 }) {
   if (!branches || branches.length === 0) {
     return (
@@ -198,9 +201,9 @@ export function UserBranchBadges({
     return <CompactBranchBadgeRow listForPills={listForPills} pills={pills} />;
   }
 
-  // Group by company when branches span multiple groups
+  // Group by company when branches span multiple companies (SuperAdmin only)
   const uniqueGroups = new Set(branches.map((b) => b.groupId).filter(Boolean));
-  if (uniqueGroups.size > 1) {
+  if (showCompanyGroups && uniqueGroups.size > 1) {
     const groupMap = new Map<string, { name: string; pills: React.ReactNode[] }>();
     for (let i = 0; i < listForPills.length; i++) {
       const b = listForPills[i]!;

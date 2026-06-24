@@ -1351,7 +1351,7 @@ export function UserDetailPage({
                           Capacity: {user.capacity}
                         </span>
                       )}
-                      <UserBranchBadges branches={user.branchMemberships} />
+                      <UserBranchBadges branches={user.branchMemberships} showCompanyGroups={isSuperAdmin} />
                     </div>
                   </div>
                 </div>

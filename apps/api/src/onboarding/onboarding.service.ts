@@ -423,7 +423,7 @@ export class OnboardingService {
       title: 'Onboarding submitted for review',
       body: `${actor.name ?? 'A staff member'} submitted their onboarding profile.`,
       data: { userId: targetUserId },
-    });
+    }, actor.activeGroupId);
 
     return submitted;
   }

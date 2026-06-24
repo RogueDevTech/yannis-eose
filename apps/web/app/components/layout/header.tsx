@@ -221,7 +221,12 @@ export function Header({
   }, [markAsRead, onRemoveRealtimeNotification]);
 
   // Mobile multi-branch checkbox state — mirrors desktop HeaderBranchSwitcher logic.
-  const mobileActiveGroups = useMemo(() => branchGroups?.filter((g) => g.status !== 'INACTIVE'), [branchGroups]);
+  const mobileActiveGroups = useMemo(() => {
+    const active = branchGroups?.filter((g) => g.status !== 'INACTIVE');
+    if (!active || !branches) return active;
+    const visibleGroupIds = new Set(branches.filter((b) => b.groupId).map((b) => b.groupId));
+    return active.filter((g) => visibleGroupIds.has(g.id));
+  }, [branchGroups, branches]);
   const mobileHasMultipleGroups = (mobileActiveGroups?.length ?? 0) > 1;
   const allMobileBranchIds = useMemo(() => (branches ?? []).map((b) => b.id), [branches]);
   // When multiple groups exist, default to first group to prevent cross-company mixing.
@@ -1000,7 +1005,14 @@ function HeaderBranchSwitcher({
   selectedBranchIds?: string[] | null;
 }) {
   // Only show active groups in the branch filter dropdown
-  const activeGroups = useMemo(() => branchGroups?.filter((g) => g.status !== 'INACTIVE'), [branchGroups]);
+  const activeGroups = useMemo(() => {
+    const active = branchGroups?.filter((g) => g.status !== 'INACTIVE');
+    if (!active) return active;
+    // Only show groups that contain at least one branch visible to this user.
+    // Prevents non-admin users from seeing companies they have no branches in.
+    const visibleGroupIds = new Set(branches.filter((b) => b.groupId).map((b) => b.groupId));
+    return active.filter((g) => visibleGroupIds.has(g.id));
+  }, [branchGroups, branches]);
   // Hide branches whose group is inactive
   const inactiveGroupIds = useMemo(() => {
     if (!branchGroups) return new Set<string>();
