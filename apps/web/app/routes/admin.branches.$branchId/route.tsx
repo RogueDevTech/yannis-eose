@@ -1135,8 +1135,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return Response.json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-/** Page size for the Branch members table. Tuned to fit a viewport without scrolling. */
-const MEMBERS_PAGE_SIZE = 20;
+/** Show all members — no pagination on the branch detail page. */
+const MEMBERS_PAGE_SIZE = 10_000;
 
 function BranchMembersPanel({
   branchId,
@@ -1533,21 +1533,10 @@ function BranchMembersPanel({
             }}
           />
 
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center justify-end gap-3">
             <p className="text-sm text-app-fg-muted">
-              Showing {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)}{' '}
-              of {filtered.length}
+              {filtered.length} member{filtered.length !== 1 ? 's' : ''}
             </p>
-            <Pagination
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
-              pageSize={pageSize}
-              onPageSizeChange={(n) => {
-                setPageSize(n);
-                setPage(1);
-              }}
-            />
           </div>
         </>
       )}

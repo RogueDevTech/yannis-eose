@@ -18,6 +18,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
 import { UsersService } from '../users/users.service';
 import { LogisticsService } from '../logistics/logistics.service';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -104,6 +105,7 @@ export class ReportsService {
     private readonly financeService: FinanceService,
     private readonly usersService: UsersService,
     private readonly logisticsService: LogisticsService,
+    private readonly branchTeamsService: BranchTeamsService,
   ) {}
 
   /** Batch-resolve product IDs → names. */
@@ -340,9 +342,23 @@ export class ReportsService {
         ? 'all_time'
         : 'this_month';
 
+    // Supervisors export only their team members, not all branch MBs.
+    let restrictToUserIds: string[] | undefined;
+    if (
+      user.role === 'MEDIA_BUYER' &&
+      (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true &&
+      currentBranchId
+    ) {
+      const scope = await this.branchTeamsService.listSupervisorScopeIds(user.id, currentBranchId);
+      if (scope.marketingUserIds.length > 0) {
+        restrictToUserIds = scope.marketingUserIds;
+        if (!restrictToUserIds.includes(user.id)) restrictToUserIds.push(user.id);
+      }
+    }
+
     const [balances, leaderboard] = await Promise.all([
-      this.marketingService.listFundingBalances(user, currentBranchId, undefined, effectiveBranchIds),
-      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId, undefined, effectiveBranchIds),
+      this.marketingService.listFundingBalances(user, currentBranchId, { restrictToUserIds }, effectiveBranchIds),
+      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId, restrictToUserIds, effectiveBranchIds),
     ]);
 
     // Leaderboard only includes Media Buyers — Heads of Marketing won't have a row.
