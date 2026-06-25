@@ -66,15 +66,17 @@ export function FundingLedgerPage({
         key: 'date',
         header: 'Date',
         nowrap: true,
-        render: (e) => (
-          <span className="text-xs text-app-fg-muted">
-            {new Date(e.eventDate).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </span>
-        ),
+        render: (e) => {
+          const d = new Date(e.eventDate);
+          return (
+            <span className="text-xs text-app-fg-muted">
+              {d.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+              <span className="ml-1 text-app-fg-muted/60">
+                {d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+              </span>
+            </span>
+          );
+        },
       },
       {
         key: 'type',
@@ -249,6 +251,9 @@ export function FundingLedgerPage({
                     </span>
                     <span className="text-xs text-app-fg-muted">
                       {new Date(e.eventDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                      <span className="ml-1 text-app-fg-muted/60">
+                        {new Date(e.eventDate).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </span>
                     </span>
                   </div>
                   <p className="text-sm text-app-fg truncate">{e.description}</p>

@@ -1525,7 +1525,10 @@ function RecipientBalancesPanel({
       header: 'Received',
       align: 'right',
       headerClassName: 'text-right',
-      render: (b) => <span className="text-sm tabular-nums"><NairaPrice amount={Number(b.totalReceived)} /></span>,
+      render: (b) => {
+        const received = Number(b.totalReceived);
+        return <span className={`text-sm tabular-nums ${received > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}><NairaPrice amount={received} /></span>;
+      },
     },
     {
       key: 'spent',
@@ -1534,7 +1537,7 @@ function RecipientBalancesPanel({
       headerClassName: 'text-right',
       render: (b) => {
         const spent = Number(b.totalDistributed || '0') + Number(b.totalSpend || '0');
-        return <span className="text-sm tabular-nums"><NairaPrice amount={spent} /></span>;
+        return <span className={`text-sm tabular-nums ${spent > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}><NairaPrice amount={spent} /></span>;
       },
     },
     {
@@ -1581,9 +1584,9 @@ function RecipientBalancesPanel({
               <NairaPrice amount={Number(b.balance)} />
             </span>
           </div>
-          <div className="flex gap-3 text-xs text-app-fg-muted">
-            <span>Received: <NairaPrice amount={Number(b.totalReceived)} /></span>
-            <span>Spent: <NairaPrice amount={spent} /></span>
+          <div className="flex gap-3 text-xs">
+            <span className={Number(b.totalReceived) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>Received: <NairaPrice amount={Number(b.totalReceived)} /></span>
+            <span className={spent > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}>Spent: <NairaPrice amount={spent} /></span>
           </div>
         </div>
       );

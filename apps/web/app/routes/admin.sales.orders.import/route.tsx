@@ -16,7 +16,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireRole(request, ['SUPER_ADMIN']);
+  await requireRole(request, ['SUPER_ADMIN', 'SUPPORT']);
   const cookie = getSessionCookie(request);
 
   // Fetch products, media buyers, CS agents, and branches in parallel
@@ -83,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requireRole(request, ['SUPER_ADMIN']);
+  await requireRole(request, ['SUPER_ADMIN', 'SUPPORT']);
   const cookie = getSessionCookie(request);
   const form = await request.formData();
   const intent = form.get('intent') as string;

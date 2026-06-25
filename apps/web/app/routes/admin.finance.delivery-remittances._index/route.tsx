@@ -45,7 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageParam = parseInt(url.searchParams.get('page') ?? '1', 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
-  const { perPage: remittancesPageSize } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
+  const { perPage: remittancesPageSize, pageSizeOptions } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
   const statusFilter = url.searchParams.get('status') ?? undefined;
   const locationFilter = url.searchParams.get('location') ?? undefined;
   const sentByFilter = url.searchParams.get('sentBy') ?? undefined;
@@ -201,7 +201,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     remittances,
-    pagination: { total, totalPages, page, pageSize: remittancesPageSize },
+    pagination: { total, totalPages, page, pageSize: remittancesPageSize, pageSizeOptions },
     locations,
     filters: {
       status: statusFilter ?? '',
@@ -239,6 +239,23 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
+
+  if (intent === 'generateInvoice') {
+    const orderId = formData.get('orderId')?.toString();
+    if (!orderId) return json({ error: 'Order ID is required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/finance.ensureInvoiceByOrder', {
+      method: 'POST',
+      cookie,
+      body: { orderId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to generate invoice') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
 
   if (intent === 'createRemittance') {
     // Order IDs + receipt URLs arrive as JSON strings so we don't have to

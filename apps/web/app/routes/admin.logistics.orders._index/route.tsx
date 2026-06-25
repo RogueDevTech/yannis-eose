@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // URL-driven page size — defaults to 40 (this page's historical default), allows
   // [20, 40, 50, 100]. The shared <Pagination> picker reads this from `?perPage=`.
   const { perPage: ORDERS_PER_PAGE } = parsePerPage(url.searchParams, {
-    defaultPerPage: 50,
+    defaultPerPage: 100,
     allowed: LOGISTICS_PAGE_SIZE_OPTIONS,
   });
 
