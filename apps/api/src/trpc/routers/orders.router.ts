@@ -51,7 +51,7 @@ import { CsOrderRoutingService } from '../../orders/cs-order-routing.service';
 import { TestOrderPurgeService } from '../../orders/test-order-purge.service';
 import { FollowUpConfigService } from '../../orders/follow-up-config.service';
 import type { VoipService } from '../../voip/voip.service';
-import { isAdminLevel, isSuperAdminOnly } from '../../common/authz';
+import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 import { CacheService } from '../../common/cache/cache.service';
 
@@ -510,8 +510,8 @@ export const ordersRouter = router({
   importOrder: authedProcedure
     .input(importOrderSchema)
     .mutation(async ({ input, ctx }) => {
-      if (!isSuperAdminOnly(ctx.user)) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin can import orders' });
+      if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'SUPPORT') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin and Support can import orders' });
       }
       const res = await getOrdersService().importOrder(input, ctx.user.id);
       await invalidateOrdersAggregatesCache();

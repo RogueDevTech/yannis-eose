@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import type { OrderInvoice } from '~/features/orders/types';
-import { useLocation, useNavigation, useSearchParams } from '@remix-run/react';
+import { useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -83,7 +83,7 @@ export interface DeliveryRemittanceSummary {
 
 export interface DeliveryRemittancesPageProps {
   remittances: DeliveryRemittanceListItem[];
-  pagination: { total: number; totalPages: number; page: number; pageSize: number };
+  pagination: { total: number; totalPages: number; page: number; pageSize: number; pageSizeOptions?: number[] };
   locations: Array<{ id: string; name: string; providerName?: string | null }>;
   filters: {
     status: string;
@@ -157,7 +157,7 @@ export function DeliveryRemittancesPage({
   const location = useLocation();
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
-  const { totalPages, page, pageSize } = pagination;
+  const { totalPages, page, pageSize, pageSizeOptions } = pagination;
   const {
     totalPages: eligibleTotalPages,
     page: eligiblePage,
@@ -166,6 +166,17 @@ export function DeliveryRemittancesPage({
   const navigateTo = useNavigate();
   const [showExportModal, setShowExportModal] = useState(false);
   const [eligibleInvoicePreview, setEligibleInvoicePreview] = useState<OrderInvoice | null>(null);
+  const generateInvoiceFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [generatingOrderId, setGeneratingOrderId] = useState<string | null>(null);
+  const isGeneratingInvoice = generateInvoiceFetcher.state !== 'idle';
+  // Clear generating state + reload on success
+  useEffect(() => {
+    if (generateInvoiceFetcher.state === 'idle' && generateInvoiceFetcher.data?.success) {
+      setGeneratingOrderId(null);
+      primeSamePathRefetch();
+      window.location.reload();
+    }
+  }, [generateInvoiceFetcher.state, generateInvoiceFetcher.data, primeSamePathRefetch]);
   const [eligibleSelectedIds, setEligibleSelectedIds] = useState<Set<string>>(() => new Set());
   const [selectedEligibleById, setSelectedEligibleById] = useState<Map<string, EligibleOrder>>(
     () => new Map(),
@@ -456,28 +467,51 @@ export function DeliveryRemittancesPage({
         render: (o) => (
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <TableActionButton
-              variant="primary"
-              disabled={!o.invoice}
-              title={o.invoice ? 'View invoice' : 'No invoice yet'}
-              onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
-            >
-              View Invoice
-            </TableActionButton>
-            <TableActionButton
               variant="neutral"
-              disabled={!o.invoice}
-              title={o.invoice ? 'Download' : 'No invoice yet'}
-              onClick={() => {
-                if (o.invoice) void generateInvoicePdf(o.invoice);
-              }}
+              onClick={() => navigateTo(`/admin/orders/${o.id}`)}
+              title="View order"
             >
-              Download
+              Order
             </TableActionButton>
+            {o.invoice ? (
+              <>
+                <TableActionButton
+                  variant="primary"
+                  title="View invoice"
+                  onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+                >
+                  Invoice
+                </TableActionButton>
+                <TableActionButton
+                  variant="neutral"
+                  title="Download"
+                  onClick={() => {
+                    if (o.invoice) void generateInvoicePdf(o.invoice);
+                  }}
+                >
+                  Download
+                </TableActionButton>
+              </>
+            ) : (
+              <generateInvoiceFetcher.Form method="post">
+                <input type="hidden" name="intent" value="generateInvoice" />
+                <input type="hidden" name="orderId" value={o.id} />
+                <TableActionButton
+                  variant="primary"
+                  type="submit"
+                  disabled={isGeneratingInvoice && generatingOrderId === o.id}
+                  onClick={() => setGeneratingOrderId(o.id)}
+                >
+                  {isGeneratingInvoice && generatingOrderId === o.id ? 'Generating…' : 'Generate Invoice'}
+                </TableActionButton>
+              </generateInvoiceFetcher.Form>
+            )}
           </div>
         ),
       },
     ],
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [generateInvoiceFetcher, isGeneratingInvoice, generatingOrderId, navigateTo],
   );
 
   const onEligibleToggle = useCallback((id: string, checked: boolean) => {
@@ -871,6 +905,7 @@ export function DeliveryRemittancesPage({
               totalPages,
               pageParam: 'page',
               pageSize,
+              pageSizeOptions,
               showWhenSinglePage: true,
               wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
               controlsClassName: 'sm:justify-end',
@@ -1109,23 +1144,45 @@ export function DeliveryRemittancesPage({
                 </div>
                 <div className="flex items-center justify-end gap-1.5 pt-0.5">
                   <TableActionButton
-                    variant="primary"
-                    disabled={!o.invoice}
-                    title={o.invoice ? 'View invoice' : 'No invoice yet'}
-                    onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
-                  >
-                    View invoice
-                  </TableActionButton>
-                  <TableActionButton
                     variant="neutral"
-                    disabled={!o.invoice}
-                    title={o.invoice ? 'Download' : 'No invoice yet'}
-                    onClick={() => {
-                      if (o.invoice) void generateInvoicePdf(o.invoice);
-                    }}
+                    onClick={() => navigateTo(`/admin/orders/${o.id}`)}
+                    title="View order"
                   >
-                    Download
+                    Order
                   </TableActionButton>
+                  {o.invoice ? (
+                    <>
+                      <TableActionButton
+                        variant="primary"
+                        title="View invoice"
+                        onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+                      >
+                        Invoice
+                      </TableActionButton>
+                      <TableActionButton
+                        variant="neutral"
+                        title="Download"
+                        onClick={() => {
+                          if (o.invoice) void generateInvoicePdf(o.invoice);
+                        }}
+                      >
+                        Download
+                      </TableActionButton>
+                    </>
+                  ) : (
+                    <generateInvoiceFetcher.Form method="post">
+                      <input type="hidden" name="intent" value="generateInvoice" />
+                      <input type="hidden" name="orderId" value={o.id} />
+                      <TableActionButton
+                        variant="primary"
+                        type="submit"
+                        disabled={isGeneratingInvoice && generatingOrderId === o.id}
+                        onClick={() => setGeneratingOrderId(o.id)}
+                      >
+                        {isGeneratingInvoice && generatingOrderId === o.id ? 'Generating…' : 'Generate Invoice'}
+                      </TableActionButton>
+                    </generateInvoiceFetcher.Form>
+                  )}
                 </div>
               </div>
             )}

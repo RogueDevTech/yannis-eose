@@ -18,7 +18,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const userId = url.searchParams.get('userId') || (user.role === 'MEDIA_BUYER' ? user.id : '');
   const entryTypeFilter = url.searchParams.get('entryType') || 'all';
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const { perPage } = parsePerPage(url.searchParams);
+  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
 
   // Fetch MB list for the picker (admin/HoM only)
   const isAdmin = isAdminLevel(user) || user.role === 'HEAD_OF_MARKETING' || user.role === 'FINANCE_OFFICER';
