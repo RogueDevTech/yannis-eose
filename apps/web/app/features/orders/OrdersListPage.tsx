@@ -241,6 +241,8 @@ export interface OrdersListPageProps {
   canFreeze?: boolean;
   /** When true, show "Create offline order" button (CS_CLOSER / HEAD_OF_CS). */
   canCreateOffline?: boolean;
+  /** When true, show "Import orders" link (SuperAdmin only). */
+  canImportOrders?: boolean;
   /**
    * When false (default), the Export / Export Selected buttons are hidden.
    * Server still enforces `orders.export` on the actual download — this is the UI gate.
@@ -339,6 +341,7 @@ function OrdersListPageImpl({
   myWorkload = null,
   liveEvents,
   canCreateOffline = false,
+  canImportOrders = false,
   canExport = false,
   productsForOfflineOrder = [],
   dailyCounts,
@@ -1807,6 +1810,11 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
+                {canImportOrders && (
+                  <Link to="/admin/sales/orders/import" prefetch="intent" className="btn-secondary btn-sm">
+                    Import orders
+                  </Link>
+                )}
                 {canCreateOffline && (
                   <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
                     <span className="hidden sm:inline">Create offline order</span>
@@ -1846,6 +1854,16 @@ function OrdersListPageImpl({
                   >
                     Create offline order
                   </Button>
+                )}
+                {canImportOrders && (
+                  <Link
+                    to="/admin/sales/orders/import"
+                    prefetch="intent"
+                    className="btn-secondary btn-sm h-12 w-full justify-center"
+                    onClick={() => closeSheet()}
+                  >
+                    Import orders
+                  </Link>
                 )}
                 {canExport && (
                   <Button

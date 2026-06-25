@@ -1,6 +1,7 @@
 import {
   createOrderSchema,
   createOfflineOrderSchema,
+  importOrderSchema,
   orderItemSchema,
   EDGE_FORM_ACTOR_ID,
   transitionOrderSchema,
@@ -50,7 +51,7 @@ import { CsOrderRoutingService } from '../../orders/cs-order-routing.service';
 import { TestOrderPurgeService } from '../../orders/test-order-purge.service';
 import { FollowUpConfigService } from '../../orders/follow-up-config.service';
 import type { VoipService } from '../../voip/voip.service';
-import { isAdminLevel } from '../../common/authz';
+import { isAdminLevel, isSuperAdminOnly } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 import { CacheService } from '../../common/cache/cache.service';
 
@@ -498,6 +499,21 @@ export const ordersRouter = router({
         ctx.user.id,
         branchId ?? ctx.currentBranchId,
       );
+      await invalidateOrdersAggregatesCache();
+      return res;
+    }),
+
+  /**
+   * Import a single order from an external CRM export (SuperAdmin only).
+   * Skips dedup, CS routing, and notifications. Sets status + createdAt directly.
+   */
+  importOrder: authedProcedure
+    .input(importOrderSchema)
+    .mutation(async ({ input, ctx }) => {
+      if (!isSuperAdminOnly(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin can import orders' });
+      }
+      const res = await getOrdersService().importOrder(input, ctx.user.id);
       await invalidateOrdersAggregatesCache();
       return res;
     }),

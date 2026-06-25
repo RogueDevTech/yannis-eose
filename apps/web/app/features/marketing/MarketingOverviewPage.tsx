@@ -367,6 +367,11 @@ export function MarketingOverviewPage({
       valueClassName: 'text-success-600 dark:text-success-400',
     },
     {
+      label: 'Unconfirmed',
+      value: Math.max(0, metrics.totalOrders - metrics.confirmedOrders).toString(),
+      valueClassName: 'text-warning-600 dark:text-warning-400',
+    },
+    {
       label: 'Avg CPA',
       value: formatNaira(Math.round(avgCpa)),
       valueClassName: cpaColorClass(avgCpa),
