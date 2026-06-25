@@ -147,6 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'ADMIN' ||
     user.role === 'SUPPORT' ||
     userPerms.includes(canonicalPermissionCode('orders.export'));
+  const canImportOrders = user.role === 'SUPER_ADMIN';
   // SmartPick (bulk N-pick toolbar) requires BOTH `orders.bulkAssign` AND
   // `orders.reassign`. `bulkAssignToCS` calls `assignToCS` per order and that
   // service-level path checks `orders.reassign` (or same-branch + CS-supervisor)
@@ -252,6 +253,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
     currentUserId: user.id,
     canCreateOffline,
+    canImportOrders,
     canExport,
     canBulkPick,
     canFreeze,
@@ -278,6 +280,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'canAssignDirectly'
       | 'currentUserId'
       | 'canCreateOffline'
+      | 'canImportOrders'
       | 'canExport'
       | 'canBulkPick'
       | 'canFreeze'
@@ -453,6 +456,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
     currentUserId: user.id,
     canCreateOffline,
+    canImportOrders,
     canExport,
     canBulkPick,
     canFreeze,
@@ -814,6 +818,7 @@ export default function CSOrdersRoute() {
       canAssignDirectly: boolean;
       currentUserId: string;
       canCreateOffline: boolean;
+      canImportOrders: boolean;
       canFreeze: boolean;
       page: number;
       limit: number;
@@ -837,6 +842,7 @@ export default function CSOrdersRoute() {
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
+        | 'canImportOrders'
         | 'canFreeze'
         | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'

@@ -125,6 +125,40 @@ export const createOfflineOrderSchema = z.object({
 export type CreateOfflineOrderInput = z.infer<typeof createOfflineOrderSchema>;
 
 /**
+ * Import order — SuperAdmin-only bulk import from external CRM.
+ * Accepts raw phone (hashed server-side), target status, and optional createdAt override.
+ * Skips dedup, CS routing, and notifications.
+ */
+export const importOrderSchema = z.object({
+  customerName: z.string().min(2, 'Customer name is required'),
+  customerPhone: z.string().min(1, 'Customer phone is required').max(50),
+  customerAddress: z.string().optional(),
+  deliveryAddress: z.string().optional(),
+  deliveryNotes: z.string().optional(),
+  deliveryState: z.string().max(100).optional(),
+  customerGender: z.string().max(50).optional(),
+  customerEmail: z.string().email().max(255).optional(),
+  items: z.array(orderItemSchema).min(1, 'At least one item is required'),
+  totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /** Target status: CS_ASSIGNED for pending, REMITTED for delivered+remitted */
+  targetStatus: z.enum(['CS_ASSIGNED', 'REMITTED']),
+  /** Override createdAt to preserve original CRM date (ISO string) */
+  createdAtOverride: z.string().optional(),
+  /** Media buyer to attribute the order to */
+  mediaBuyerId: z.string().uuid().optional(),
+  /** CS agent to assign the order to */
+  assignedCsId: z.string().uuid(),
+  /** Branch for the order */
+  branchId: z.string().uuid(),
+  /** Ad-hoc fields from the CRM export (whatsappNumber, unit, deliveryTime, importMediaBuyer, importCS, etc.) */
+  customFields: z
+    .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50), z.object({ label: z.string(), value: z.string() })]))
+    .optional(),
+});
+
+export type ImportOrderInput = z.infer<typeof importOrderSchema>;
+
+/**
  * Transition order — move order to a new status.
  * Metadata varies by transition (e.g. cancel reason, delivery qty).
  */

@@ -30,7 +30,7 @@ export function getCartOrdersService(): CartOrdersService {
 // ── Router ──────────────────────────────────────────────────────────
 
 export const cartOrdersRouter = router({
-  list: permissionProcedure('orders.read')
+  list: permissionProcedure('orders.read', 'marketing.orders')
     .input(listCartOrdersSchema)
     .query(async ({ input, ctx }) => {
       const viewerCloserId = ctx.user.role === 'CS_CLOSER' ? ctx.user.id : null;
