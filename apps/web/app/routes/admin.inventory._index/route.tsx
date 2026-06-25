@@ -68,7 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
   // URL-driven page size — clamped to [20, 50, 100]; the `<Pagination>` per-page picker writes `perPage`.
-  const { perPage: LEVELS_LIMIT } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
+  const { perPage: LEVELS_LIMIT } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
 
   const levelsInput: {
     productId?: string;

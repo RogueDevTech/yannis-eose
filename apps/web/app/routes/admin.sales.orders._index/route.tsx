@@ -58,7 +58,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   // URL-driven page size — clamped to allowed set; default 50.
-  const { perPage: ORDERS_PER_PAGE } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
+  const { perPage: ORDERS_PER_PAGE } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
   let status = url.searchParams.get('status') || undefined;
   if (status && !CS_ORDERS_VISIBLE_STATUSES.has(status)) {
     url.searchParams.delete('status');
@@ -147,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'ADMIN' ||
     user.role === 'SUPPORT' ||
     userPerms.includes(canonicalPermissionCode('orders.export'));
-  const canImportOrders = user.role === 'SUPER_ADMIN';
+  const canImportOrders = user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT';
   // SmartPick (bulk N-pick toolbar) requires BOTH `orders.bulkAssign` AND
   // `orders.reassign`. `bulkAssignToCS` calls `assignToCS` per order and that
   // service-level path checks `orders.reassign` (or same-branch + CS-supervisor)

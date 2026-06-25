@@ -205,11 +205,9 @@ export class AuthService {
       } else {
         currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
       }
-    } else if (memberships.length > 0) {
-      // All-branch user (admin-class, org-wide head) WITH a branch assignment →
-      // default to primary / first branch. Switcher still offers "All branches".
-      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
     }
+    // Global users (admin-class, org-wide heads) default to null = "All Branches".
+    // They can narrow via the header switcher.
 
     // Resolve effective permissions at sign-in time so the very first request after the
     // login redirect (e.g. `requirePermission(...)` on `/admin/logistics/...`) sees the
@@ -460,9 +458,9 @@ export class AuthService {
       } else {
         currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
       }
-    } else if (targetMemberships.length > 0) {
-      currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
     }
+    // Global users (org-wide heads, admins) default to null = "All Branches".
+    // They can narrow via the header switcher.
 
     const insertedRows = await this.db
       .insert(schema.mirrorSessions)
@@ -506,7 +504,7 @@ export class AuthService {
         .where(eq(schema.branches.groupId, mirrorActiveGroupId));
       const allGroupIds = groupBranches.map((b) => b.id);
       const memberBranchIds = targetMemberships.map((m) => m.branchId as string);
-      if (targetIsGlobal) {
+      if (isAdminLevel(target) || target.scopeGlobal) {
         mirrorSelectedBranchIds = allGroupIds;
       } else if (memberBranchIds.length > 0) {
         const scoped = allGroupIds.filter((id) => memberBranchIds.includes(id));
@@ -630,9 +628,8 @@ export class AuthService {
       } else {
         currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
       }
-    } else if (memberships.length > 0) {
-      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
     }
+    // Global users default to null = "All Branches".
 
     const restored: SessionUser = {
       id: actor.id,

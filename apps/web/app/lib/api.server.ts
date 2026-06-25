@@ -138,7 +138,7 @@ export function parsePerPage(
   options?: { defaultPerPage?: number; allowed?: readonly number[]; param?: string },
 ): { perPage: number; pageSizeOptions: number[] } {
   const allowed = options?.allowed ?? DEFAULT_PAGE_SIZE_OPTIONS;
-  const fallback = options?.defaultPerPage ?? allowed[0] ?? 20;
+  const fallback = options?.defaultPerPage ?? 100;
   const raw = Number(searchParams.get(options?.param ?? 'perPage') ?? '');
   const perPage = allowed.includes(raw) ? raw : fallback;
   return { perPage, pageSizeOptions: [...allowed] };
