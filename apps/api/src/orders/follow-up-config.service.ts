@@ -1047,7 +1047,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     };
   }
 
-  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, _startDate?: string, _endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
+  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
     {
@@ -1059,11 +1059,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         conditions.push(bCond);
       }
     }
-    // Status counts: no date filter applied. The stat strip should always
-    // reflect the full pipeline for the branch/CS scope so that the pills
-    // remain accurate regardless of which status the user is viewing.
-    // The date filter is status-aware in the list query (listFollowUpOrders)
-    // but the pills show the full picture.
+    if (startDate) conditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(endDate)));
 
     const rows = await this.db
       .select({
@@ -1089,6 +1086,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         deletedConditions.push(bCond);
       }
     }
+    if (startDate) deletedConditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) deletedConditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(endDate)));
     const [deletedRow] = await this.db
       .select({ count: count() })
       .from(schema.followUpOrders)

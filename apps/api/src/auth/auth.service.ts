@@ -452,7 +452,11 @@ export class AuthService {
         throw new BadRequestException('Target user has no branch — cannot mirror.');
       }
       if (target.role === 'MEDIA_BUYER') {
-        currentBranchId = null;
+        // Single-branch MBs default to that branch so supervisor features and
+        // branch-scoped pages work immediately — matches login flow.
+        currentBranchId = targetMemberships.length === 1
+          ? targetMemberships[0]!.branchId as string
+          : null;
       } else {
         currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
       }
@@ -619,7 +623,10 @@ export class AuthService {
     });
     if (!actorGlobal) {
       if (actor.role === 'MEDIA_BUYER') {
-        currentBranchId = null;
+        // Single-branch MBs default to that branch — matches login flow.
+        currentBranchId = memberships.length === 1
+          ? memberships[0]!.branchId as string
+          : null;
       } else {
         currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
       }

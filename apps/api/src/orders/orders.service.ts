@@ -9,6 +9,7 @@ import { db as schema } from '@yannis/shared';
 import {
   type CreateOrderInput,
   type CreateOfflineOrderInput,
+  type ImportOrderInput,
   type TransitionOrderInput,
   type UpdateOrderInput,
   type RequestOrderLinePriceChangeInput,
@@ -1856,6 +1857,102 @@ export class OrdersService {
       actorName,
       description: `Assigned to ${actorName ?? 'creator'} (auto-assigned on offline creation)`,
       branchId: order.branchId ?? null,
+    });
+
+    return { id: order.id };
+  }
+
+  /**
+   * Import a single order from an external CRM export (SuperAdmin only).
+   * Simplified version of createOffline that:
+   * - Skips dedup (historical data would trigger false positives)
+   * - Skips CS routing (branch is explicitly provided)
+   * - Skips notifications and events (no need for historical imports)
+   * - Sets status directly to targetStatus (CS_ASSIGNED or REMITTED)
+   * - Preserves original createdAt from the CRM export
+   */
+  async importOrder(
+    input: ImportOrderInput,
+    actorId: string,
+  ): Promise<{ id: string }> {
+    const customerPhoneHash = this.hashPhone(input.customerPhone);
+
+    // Parse createdAt override — fall back to now if not provided or invalid
+    let createdAtDate: Date | undefined;
+    if (input.createdAtOverride) {
+      const parsed = new Date(input.createdAtOverride);
+      if (!isNaN(parsed.getTime())) createdAtDate = parsed;
+    }
+
+    // Build timestamp overrides for terminal statuses
+    const statusTimestamps: Record<string, Date | undefined> = {};
+    if (input.targetStatus === 'REMITTED' && createdAtDate) {
+      statusTimestamps.confirmedAt = createdAtDate;
+      statusTimestamps.allocatedAt = createdAtDate;
+      statusTimestamps.dispatchedAt = createdAtDate;
+      statusTimestamps.deliveredAt = createdAtDate;
+    }
+
+    const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.orders)
+        .values({
+          mediaBuyerId: input.mediaBuyerId ?? null,
+          branchId: input.branchId,
+          servicingBranchId: input.branchId,
+          assignedCsId: input.assignedCsId,
+          customerName: input.customerName,
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          customerAddress: input.customerAddress ?? null,
+          deliveryAddress: input.deliveryAddress ?? input.customerAddress ?? null,
+          deliveryNotes: input.deliveryNotes ?? null,
+          deliveryState: input.deliveryState ?? null,
+          customerGender: input.customerGender ?? null,
+          customerEmail: input.customerEmail ?? null,
+          paymentMethod: 'PAY_ON_DELIVERY',
+          items: input.items,
+          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          status: input.targetStatus,
+          orderSource: 'offline',
+          customFields: input.customFields ?? null,
+          ...(createdAtDate ? { createdAt: createdAtDate } : {}),
+          ...statusTimestamps,
+        })
+        .returning();
+
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to import order' });
+      }
+
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: created.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+      return created;
+    });
+
+    // Minimal timeline event for audit trail
+    const actorRow = await this.db
+      .select({ name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, actorId))
+      .limit(1);
+    const actorName = actorRow[0]?.name ?? null;
+
+    void this.writeTimelineEvent({
+      orderId: order.id,
+      eventType: 'ORDER_RECEIVED',
+      actorId,
+      actorName,
+      description: `Imported from external CRM (status: ${input.targetStatus})`,
+      branchId: input.branchId,
     });
 
     return { id: order.id };
