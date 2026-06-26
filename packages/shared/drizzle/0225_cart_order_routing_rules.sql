@@ -36,3 +36,22 @@ CREATE TABLE IF NOT EXISTS cart_order_sync_logs (
 
 -- Add routing_rule_id FK to cart_orders so we can track which rule routed each order
 ALTER TABLE cart_orders ADD COLUMN IF NOT EXISTS routing_rule_id UUID REFERENCES cart_order_routing_rules(id);
+
+-- Seed default rule: all cart orders → Lagos branch
+INSERT INTO cart_order_routing_rules (id, name, source_branch_id, target_branch_id, priority, enabled)
+VALUES (
+  'a0000000-0000-0000-0000-000000000001',
+  'All carts → Lagos',
+  NULL,
+  '00000000-0000-0000-0000-000000000001',
+  10,
+  true
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Backfill: assign unrouted cart orders (NULL servicing branch) to Lagos
+-- so CS can see and work them. Already-assigned orders are untouched.
+UPDATE cart_orders
+SET servicing_branch_id = '00000000-0000-0000-0000-000000000001',
+    updated_at = now()
+WHERE servicing_branch_id IS NULL;

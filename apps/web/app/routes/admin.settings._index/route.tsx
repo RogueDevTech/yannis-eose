@@ -96,10 +96,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })
     : Promise.resolve({ notificationEmailConfig: null, voipState: null });
 
-  // Resolve active group name for the "Settings for: [Group]" label (SuperAdmin only).
+  // Resolve active group name for the "Settings for: [Group]" label (admin-level only).
   const activeGroupId = (user as { activeGroupId?: string | null } | null)?.activeGroupId ?? null;
   let activeGroupName: string | null = null;
-  if (activeGroupId && user?.role === 'SUPER_ADMIN') {
+  if (activeGroupId && isAdmin) {
     const groupRes = await apiRequest<{ result?: { data?: { name: string } } }>(
       `/trpc/branches.getGroup?input=${encodeURIComponent(JSON.stringify({ groupId: activeGroupId }))}`,
       { method: 'GET', cookie },

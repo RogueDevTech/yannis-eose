@@ -892,7 +892,7 @@ export function SettingsPage({
       {/* System Tab — grouped form: toggle VOIP, Sales routing + distribution then submit once */}
       {activeTab === 'system' && (
         <div className="space-y-4">
-          {activeGroupName && user?.role === 'SUPER_ADMIN' && (
+          {activeGroupName && isSuperAdmin && (
             <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800">
               <svg className="w-4 h-4 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21" />
@@ -994,42 +994,26 @@ export function SettingsPage({
 
               {/* CS order routing — evaluated before distribution */}
               <div className="card lg:col-span-2">
-                <Collapsible
-                  contentClassName="mt-4"
-                  trigger={
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
-                          />
-                        </svg>
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-app-fg">Sales routing</h3>
-                        <p className="text-sm text-app-fg-muted">
-                          Which branch handles each new marketing order.
-                        </p>
-                      </div>
-                    </div>
-                  }
+                <Link
+                  to="/admin/settings/cs-order-routing"
+                  className="flex items-center gap-3"
                 >
-                <div className="rounded-lg border border-app-border p-4">
-                  <p className="text-sm text-app-fg-muted">
-                    Three options: <strong className="text-app-fg">Split across all Sales branches</strong> (default — load-balanced org-wide), <strong className="text-app-fg">Same branch as marketing</strong> (Lagos → Lagos, Abuja → Abuja), or <strong className="text-app-fg">By product</strong> (per-SKU mapping). Runs before the dispatch strategy below picks which closer in the chosen branch takes the order.
-                  </p>
-                  <p className="mt-3">
-                    <Link
-                      to="/admin/settings/cs-order-routing"
-                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      Open Sales routing
-                    </Link>
-                  </p>
-                </div>
-                </Collapsible>
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Sales routing</h3>
+                    <p className="text-sm text-app-fg-muted">
+                      Which branch handles each new marketing order.
+                    </p>
+                  </div>
+                </Link>
               </div>
 
               {/* CS order distribution — org default; per-squad overrides on each branch */}
@@ -1166,46 +1150,42 @@ export function SettingsPage({
 
               {/* Follow-up order config — auto-pull stale orders into follow-up pipeline */}
               <div className="card lg:col-span-2">
-                <Collapsible
-                  contentClassName="mt-4"
-                  trigger={
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
-                        </svg>
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-app-fg">Follow up order config</h3>
-                        <p className="text-sm text-app-fg-muted">
-                          Auto-pull stale orders into follow-up for CS to rework.
-                        </p>
-                      </div>
-                    </div>
-                  }
+                <Link
+                  to="/admin/settings/follow-up-config"
+                  className="flex items-center gap-3"
                 >
-                <div className="rounded-lg border border-app-border p-4">
-                  <p className="text-sm text-app-fg-muted">
-                    Define rules like <strong className="text-app-fg">"Confirmed orders older than 7 days"</strong> and the system auto-pulls matching orders at midnight. Source orders get frozen. HoCS assigns to closers from the follow-up queue.
-                  </p>
-                  <p className="mt-3">
-                    <Link
-                      to="/admin/settings/follow-up-config"
-                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      Open follow up order config
-                    </Link>
-                  </p>
-                  <p className="mt-2">
-                    <Link
-                      to="/admin/settings/cart-order-routing"
-                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      Open cart order routing config
-                    </Link>
-                  </p>
-                </div>
-                </Collapsible>
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Follow up order config</h3>
+                    <p className="text-sm text-app-fg-muted">
+                      Auto-pull stale orders into follow-up for CS to rework.
+                    </p>
+                  </div>
+                </Link>
+              </div>
+
+              {/* Cart order routing — which branch receives abandoned cart orders */}
+              <div className="card lg:col-span-2">
+                <Link
+                  to="/admin/settings/cart-order-routing"
+                  className="flex items-center gap-3"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Cart order config</h3>
+                    <p className="text-sm text-app-fg-muted">
+                      Configure which branch receives cart orders from abandoned carts.
+                    </p>
+                  </div>
+                </Link>
               </div>
 
               {/* Marketing Profitability — target ROAS + green/red threshold */}
@@ -1284,38 +1264,22 @@ export function SettingsPage({
               {/* Company Groups — multi-company boundary. Admin-level only. */}
               {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT') && (
               <div className="card lg:col-span-2">
-                <Collapsible
-                  contentClassName="mt-4"
-                  trigger={
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21" />
-                        </svg>
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-app-fg">Company groups</h3>
-                        <p className="text-sm text-app-fg-muted">
-                          Group branches into companies for data isolation.
-                        </p>
-                      </div>
-                    </div>
-                  }
+                <Link
+                  to="/admin/settings/branch-groups"
+                  className="flex items-center gap-3"
                 >
-                <div className="rounded-lg border border-app-border p-4">
-                  <p className="text-sm text-app-fg-muted">
-                    Each group acts as a company boundary. Products, settings, and commission plans are isolated per group. Users see branches as normal.
-                  </p>
-                  <p className="mt-3">
-                    <Link
-                      to="/admin/settings/branch-groups"
-                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      Manage company groups
-                    </Link>
-                  </p>
-                </div>
-                </Collapsible>
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Company groups</h3>
+                    <p className="text-sm text-app-fg-muted">
+                      Group branches into companies for data isolation.
+                    </p>
+                  </div>
+                </Link>
               </div>
               )}
 

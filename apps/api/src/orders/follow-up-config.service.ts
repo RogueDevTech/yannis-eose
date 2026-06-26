@@ -1640,12 +1640,76 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       });
     });
 
+    // Auto-generate a draft invoice when a follow-up order is CONFIRMED.
+    // Mirrors the regular orders CONFIRMED trigger. Idempotent — the graduation
+    // path also tries to create one, so whichever fires first wins.
+    if (newStatus === 'CONFIRMED') {
+      try {
+        await this.autoCreateInvoiceForFollowUpOrder(orderId, order);
+      } catch (err) {
+        this.logger.warn(`Auto-invoice for follow-up order ${orderId} on CONFIRMED failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     // Graduation: when DELIVERED, copy into orders table
     if (newStatus === 'DELIVERED') {
       await this.graduateToOrders(orderId);
     }
 
     return { success: true };
+  }
+
+  // ── Auto Invoice on CONFIRMED ──────────────────────────────────────
+
+  private async autoCreateInvoiceForFollowUpOrder(
+    followUpOrderId: string,
+    order: typeof schema.followUpOrders.$inferSelect,
+  ): Promise<void> {
+    // Idempotent — skip if an invoice already exists
+    const [existing] = await this.db
+      .select({ id: schema.invoices.id })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.orderId, followUpOrderId))
+      .limit(1);
+    if (existing) return;
+
+    const items = await this.db
+      .select({
+        quantity: schema.followUpOrderItems.quantity,
+        unitPrice: schema.followUpOrderItems.unitPrice,
+        offerLabel: schema.followUpOrderItems.offerLabel,
+        productName: schema.products.name,
+      })
+      .from(schema.followUpOrderItems)
+      .leftJoin(schema.products, eq(schema.followUpOrderItems.productId, schema.products.id))
+      .where(eq(schema.followUpOrderItems.followUpOrderId, followUpOrderId));
+
+    if (items.length === 0) {
+      this.logger.warn(`autoCreateInvoiceForFollowUpOrder: follow-up order ${followUpOrderId} has no items, skipping`);
+      return;
+    }
+
+    const lineItems = items.map((it) => ({
+      description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
+      quantity: it.quantity,
+      unitPrice: String(it.unitPrice),
+    }));
+    const totalAmount = items.reduce((sum, it) => sum + Number(it.unitPrice), 0);
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      await tx.insert(schema.invoices).values({
+        orderId: followUpOrderId,
+        recipientInfo: {
+          name: order.customerName,
+          address: order.customerAddress ?? undefined,
+        },
+        lineItems,
+        taxRate: null,
+        totalAmount: totalAmount.toFixed(2),
+        dueDate: null,
+        status: 'DRAFT',
+      });
+    });
   }
 
   // ── Graduation ─────────────────────────────────────────────────────

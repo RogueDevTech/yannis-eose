@@ -518,7 +518,7 @@ export class AuthController {
         groupId = await this.authService.resolveGroupFromBranches(merged.branchIds);
       }
       // Global users with no memberships: pick first active group
-      if (!groupId && (merged.scopeGlobal || merged.role === 'SUPER_ADMIN' || merged.role === 'ADMIN')) {
+      if (!groupId && (merged.scopeGlobal || isAdminLevel(merged))) {
         groupId = await this.authService.getFirstActiveGroupId();
       }
       if (groupId) {
