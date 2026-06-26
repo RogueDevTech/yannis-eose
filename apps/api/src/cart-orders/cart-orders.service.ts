@@ -109,11 +109,12 @@ export class CartOrdersService {
       VALUES (${RULE_ID}, 'All carts → Lagos', NULL, ${LAGOS_BRANCH_ID}, 10, true)
       ON CONFLICT (id) DO NOTHING
     `);
-    // Backfill unrouted cart orders to Lagos
+    // Backfill all cart orders not on Lagos to Lagos (CEO directive: single CS branch for carts)
     const result = await this.db.execute(sql`
       UPDATE cart_orders
       SET servicing_branch_id = ${LAGOS_BRANCH_ID}, updated_at = now()
       WHERE servicing_branch_id IS NULL
+         OR servicing_branch_id != ${LAGOS_BRANCH_ID}
     `);
     const backfilled = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
     if (backfilled > 0) {
