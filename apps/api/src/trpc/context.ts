@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isOrgWideDepartmentHead } from '../common/authz';
 
 /**
  * tRPC context — created for every request.
@@ -57,8 +58,12 @@ export function createContext(req: Request, res: Response): TrpcContext {
     // leak data from the user's other assigned branches.
       : currentBranchId
         ? [currentBranchId]
-    // No specific branch → fall back to user's assigned branches / global
-      : user?.scopeGlobal
+    // No specific branch → fall back to user's assigned branches / global.
+    // Org-wide department heads (HEAD_OF_CS, HEAD_OF_LOGISTICS, etc.) have
+    // scopeOrgWideHead=true — they must see all branches just like scopeGlobal
+    // users, otherwise their aggregates miss orders in branches they aren't
+    // personally assigned to.
+      : (user?.scopeGlobal || (user && isOrgWideDepartmentHead(user)))
         ? (activeGroupId && user?.branchIds?.length ? user.branchIds : null)
         : (user?.branchIds?.length ? user.branchIds : null);
   return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };

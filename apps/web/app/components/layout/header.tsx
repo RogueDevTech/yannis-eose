@@ -318,9 +318,14 @@ export function Header({
           aria-label="Yannis home"
         >
           <img
-            src={getAppLogoSrc(isDarkTheme)}
+            src={getAppLogoSrc(false)}
             alt="Yannis"
-            className="h-[1.575rem] w-auto max-w-[108px] object-contain"
+            className="h-[1.575rem] w-auto max-w-[108px] object-contain dark:hidden"
+          />
+          <img
+            src={getAppLogoSrc(true)}
+            alt="Yannis"
+            className="h-[1.575rem] w-auto max-w-[108px] object-contain hidden dark:block"
           />
         </Link>
 

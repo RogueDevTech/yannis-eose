@@ -1,9 +1,10 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
-import type { ListCartOrdersInput, UpdateCartOrderInput } from '@yannis/shared';
+import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
@@ -1004,7 +1005,20 @@ export class CartOrdersService {
         const directMb = cart.mediaBuyerId && validMbIds.has(cart.mediaBuyerId) ? cart.mediaBuyerId : null;
         const campaignMb = !directMb && cart.campaignId ? campaignMbMap.get(cart.campaignId) ?? null : null;
         const safeMbId = directMb ?? (campaignMb && validMbIds.has(campaignMb) ? campaignMb : null);
-        const resolvedBranchId = targetBranchId ?? (cart.campaignId ? campaignBranchMap.get(cart.campaignId) ?? null : null);
+
+        // Resolve servicing branch: explicit target → routing rules → campaign branch fallback
+        let resolvedBranchId = targetBranchId;
+        let resolvedRuleId: string | null = null;
+        if (!resolvedBranchId) {
+          const campaignBranch = cart.campaignId ? campaignBranchMap.get(cart.campaignId) ?? null : null;
+          const routing = await this.resolveRoutingBranch(campaignBranch);
+          if (routing) {
+            resolvedBranchId = routing.branchId;
+            resolvedRuleId = routing.ruleId;
+          } else {
+            resolvedBranchId = campaignBranch;
+          }
+        }
 
         await withActor(this.db, actor, async (tx) => {
           const [co] = await tx
@@ -1029,6 +1043,7 @@ export class CartOrdersService {
               orderSource: 'online',
               customFields: cart.customFieldValues,
               servicingBranchId: resolvedBranchId,
+              routingRuleId: resolvedRuleId,
             })
             .returning({ id: schema.cartOrders.id });
 
@@ -1068,5 +1083,285 @@ export class CartOrdersService {
     }
 
     return { pulled: succeeded };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // Cart Order Routing Rules — CRUD + route resolution + auto-pull cron
+  // ══════════════════════════════════════════════════════════════════════
+
+  async listRoutingRules(enabledOnly?: boolean) {
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (enabledOnly) conditions.push(eq(schema.cartOrderRoutingRules.enabled, true));
+
+    const rules = await this.db
+      .select({
+        id: schema.cartOrderRoutingRules.id,
+        name: schema.cartOrderRoutingRules.name,
+        sourceBranchId: schema.cartOrderRoutingRules.sourceBranchId,
+        targetBranchId: schema.cartOrderRoutingRules.targetBranchId,
+        priority: schema.cartOrderRoutingRules.priority,
+        enabled: schema.cartOrderRoutingRules.enabled,
+        createdAt: schema.cartOrderRoutingRules.createdAt,
+        updatedAt: schema.cartOrderRoutingRules.updatedAt,
+      })
+      .from(schema.cartOrderRoutingRules)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(schema.cartOrderRoutingRules.priority), asc(schema.cartOrderRoutingRules.createdAt));
+
+    // Enrich with branch names
+    const branchIds = [...new Set([
+      ...rules.map((r) => r.sourceBranchId).filter(Boolean),
+      ...rules.map((r) => r.targetBranchId).filter(Boolean),
+    ])] as string[];
+
+    const branchMap = new Map<string, string>();
+    if (branchIds.length > 0) {
+      const rows = await this.db
+        .select({ id: schema.branches.id, name: schema.branches.name })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, branchIds));
+      for (const r of rows) branchMap.set(r.id, r.name);
+    }
+
+    return rules.map((r) => ({
+      ...r,
+      sourceBranchName: r.sourceBranchId ? branchMap.get(r.sourceBranchId) ?? null : null,
+      targetBranchName: r.targetBranchId ? branchMap.get(r.targetBranchId) ?? null : null,
+    }));
+  }
+
+  async createRoutingRule(actor: SessionUser, input: CreateCartOrderRoutingRuleInput) {
+    const [rule] = await withActor(this.db, actor, async (tx) => {
+      return tx
+        .insert(schema.cartOrderRoutingRules)
+        .values({
+          name: input.name,
+          sourceBranchId: input.sourceBranchId ?? null,
+          targetBranchId: input.targetBranchId ?? null,
+          priority: input.priority ?? 0,
+          enabled: input.enabled ?? true,
+        })
+        .returning();
+    });
+    return rule;
+  }
+
+  async updateRoutingRule(actor: SessionUser, input: UpdateCartOrderRoutingRuleInput) {
+    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.name !== undefined) updateFields['name'] = input.name;
+    if (input.sourceBranchId !== undefined) updateFields['sourceBranchId'] = input.sourceBranchId;
+    if (input.targetBranchId !== undefined) updateFields['targetBranchId'] = input.targetBranchId;
+    if (input.priority !== undefined) updateFields['priority'] = input.priority;
+    if (input.enabled !== undefined) updateFields['enabled'] = input.enabled;
+
+    const [updated] = await withActor(this.db, actor, async (tx) => {
+      return tx
+        .update(schema.cartOrderRoutingRules)
+        .set(updateFields)
+        .where(eq(schema.cartOrderRoutingRules.id, input.ruleId))
+        .returning();
+    });
+    if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Routing rule not found' });
+    return updated;
+  }
+
+  async deleteRoutingRule(actor: SessionUser, ruleId: string) {
+    const [deleted] = await withActor(this.db, actor, async (tx) => {
+      return tx
+        .delete(schema.cartOrderRoutingRules)
+        .where(eq(schema.cartOrderRoutingRules.id, ruleId))
+        .returning({ id: schema.cartOrderRoutingRules.id });
+    });
+    if (!deleted) throw new TRPCError({ code: 'NOT_FOUND', message: 'Routing rule not found' });
+    return { success: true };
+  }
+
+  /**
+   * Resolve the target servicing branch for a cart by evaluating routing rules.
+   * Rules are evaluated in priority order (highest first). First match wins.
+   * If no rule matches, returns null (caller decides fallback).
+   */
+  private async resolveRoutingBranch(
+    campaignBranchId: string | null,
+  ): Promise<{ branchId: string; ruleId: string; ruleName: string } | null> {
+    const rules = await this.db
+      .select()
+      .from(schema.cartOrderRoutingRules)
+      .where(eq(schema.cartOrderRoutingRules.enabled, true))
+      .orderBy(desc(schema.cartOrderRoutingRules.priority), asc(schema.cartOrderRoutingRules.createdAt));
+
+    if (rules.length === 0) return null;
+
+    for (const rule of rules) {
+      // sourceBranchId filter: if set, only match carts from this marketing branch
+      if (rule.sourceBranchId && rule.sourceBranchId !== campaignBranchId) continue;
+      // sourceBranchId=null matches everything (org-wide catch-all)
+
+      if (rule.targetBranchId) {
+        return { branchId: rule.targetBranchId, ruleId: rule.id, ruleName: rule.name };
+      }
+
+      // targetBranchId=null → round-robin across active CS branches
+      const activeBranches = await this.getActiveCsBranchIds();
+      if (activeBranches.length === 0) return null;
+
+      // Simple round-robin: use current count of today's cart orders as offset
+      const todayCount = await this.db
+        .select({ c: count() })
+        .from(schema.cartOrders)
+        .where(gte(schema.cartOrders.createdAt, nigeriaDayStart(new Date().toISOString().slice(0, 10))));
+      const idx = (todayCount[0]?.c ?? 0) % activeBranches.length;
+      return { branchId: activeBranches[idx]!, ruleId: rule.id, ruleName: rule.name };
+    }
+
+    return null;
+  }
+
+  /** Returns branch IDs that have an active CS department. */
+  private async getActiveCsBranchIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ branchId: schema.branchDepartments.branchId })
+      .from(schema.branchDepartments)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.branchDepartments.branchId))
+      .where(and(
+        eq(schema.branchDepartments.department, 'CS'),
+        eq(schema.branchDepartments.status, 'ACTIVE'),
+        eq(schema.branches.status, 'ACTIVE'),
+        sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
+      ));
+    return rows.map((r) => r.branchId);
+  }
+
+  async listActiveCsBranches(effectiveBranchIds?: string[] | null): Promise<Array<{ id: string; name: string }>> {
+    const conditions = [
+      eq(schema.branchDepartments.department, 'CS'),
+      eq(schema.branchDepartments.status, 'ACTIVE'),
+      eq(schema.branches.status, 'ACTIVE'),
+      sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
+    ];
+    const bCond = branchScopeCondition(schema.branches.id, null, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+    return this.db
+      .select({ id: schema.branches.id, name: schema.branches.name })
+      .from(schema.branchDepartments)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.branchDepartments.branchId))
+      .where(and(...conditions));
+  }
+
+  // ── Sync Logs ───────────────────────────────────────────────────────
+
+  async listSyncLogs(page = 1, limit = 50) {
+    const offset = (page - 1) * limit;
+    const logs = await this.db
+      .select()
+      .from(schema.cartOrderSyncLogs)
+      .orderBy(desc(schema.cartOrderSyncLogs.startedAt))
+      .limit(limit)
+      .offset(offset);
+    return { logs, page, limit };
+  }
+
+  // ── Auto-Pull Cron ──────────────────────────────────────────────────
+  // Every 2 hours: pull all ABANDONED carts (older than 30 min) that
+  // haven't been pulled yet, routing each via the configured rules.
+
+  @Cron('0 30 */2 * * *', { timeZone: 'Africa/Lagos' })
+  async handleCartOrderAutoSync() {
+    try {
+      const result = await this.runAutoSync('cron');
+      if (result.totalPulled > 0) {
+        this.logger.log(`Cart order auto-sync: ${result.totalPulled} orders pulled (${result.fallbackCount} fallback)`);
+      }
+    } catch (err) {
+      this.logger.error(`Cart order auto-sync failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  async runAutoSync(triggeredBy: 'cron' | 'manual', actorId?: string) {
+    const startedAt = new Date();
+
+    // Find all abandoned carts not yet pulled into cart_orders (older than 30 min)
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const carts = await this.db
+      .select({ id: schema.cartAbandonments.id })
+      .from(schema.cartAbandonments)
+      .where(
+        and(
+          inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
+          lte(schema.cartAbandonments.updatedAt, thirtyMinAgo),
+          sql`${schema.cartAbandonments.id} NOT IN (SELECT source_cart_id FROM cart_orders)`,
+        ),
+      )
+      .limit(5000);
+
+    if (carts.length === 0) {
+      await this.db.insert(schema.cartOrderSyncLogs).values({
+        triggeredBy,
+        triggeredByUserId: actorId ?? null,
+        startedAt,
+        finishedAt: new Date(),
+        totalPulled: 0,
+        fallbackCount: 0,
+        ruleResults: [],
+      });
+      return { totalPulled: 0, fallbackCount: 0, ruleResults: [] };
+    }
+
+    // Pull all carts with no explicit target branch — routing rules are
+    // evaluated inside pullFromAbandonedCarts per cart.
+    const actor: SessionUser = {
+      id: actorId ?? SYSTEM_ACTOR_ID,
+      name: actorId ? undefined : 'System',
+      role: 'SUPER_ADMIN',
+    } as SessionUser;
+
+    const cartIds = carts.map((c) => c.id);
+    const result = await this.pullFromAbandonedCarts(cartIds, null, actor);
+
+    // Count how many were routed by rules vs fallback
+    const routed = await this.db
+      .select({
+        routingRuleId: schema.cartOrders.routingRuleId,
+        c: count(),
+      })
+      .from(schema.cartOrders)
+      .where(
+        and(
+          inArray(schema.cartOrders.sourceCartId, cartIds),
+          gte(schema.cartOrders.createdAt, startedAt),
+        ),
+      )
+      .groupBy(schema.cartOrders.routingRuleId);
+
+    let fallbackCount = 0;
+    const ruleResults: Array<{ ruleId: string; ruleName: string; pulled: number }> = [];
+    const ruleIds = routed.filter((r) => r.routingRuleId).map((r) => r.routingRuleId!);
+    const ruleNameMap = new Map<string, string>();
+    if (ruleIds.length > 0) {
+      const rules = await this.db
+        .select({ id: schema.cartOrderRoutingRules.id, name: schema.cartOrderRoutingRules.name })
+        .from(schema.cartOrderRoutingRules)
+        .where(inArray(schema.cartOrderRoutingRules.id, ruleIds));
+      for (const r of rules) ruleNameMap.set(r.id, r.name);
+    }
+    for (const r of routed) {
+      if (r.routingRuleId) {
+        ruleResults.push({ ruleId: r.routingRuleId, ruleName: ruleNameMap.get(r.routingRuleId) ?? 'Unknown', pulled: r.c });
+      } else {
+        fallbackCount = r.c;
+      }
+    }
+
+    await this.db.insert(schema.cartOrderSyncLogs).values({
+      triggeredBy,
+      triggeredByUserId: actorId ?? null,
+      startedAt,
+      finishedAt: new Date(),
+      totalPulled: result.pulled,
+      fallbackCount,
+      ruleResults,
+    });
+
+    return { totalPulled: result.pulled, fallbackCount, ruleResults };
   }
 }

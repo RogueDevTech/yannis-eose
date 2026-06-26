@@ -523,6 +523,11 @@ export {
   bulkAssignCartOrdersSchema,
   transitionCartOrderSchema,
   updateCartOrderSchema,
+  createCartOrderRoutingRuleSchema,
+  updateCartOrderRoutingRuleSchema,
+  deleteCartOrderRoutingRuleSchema,
+  listCartOrderRoutingRulesSchema,
+  listCartOrderSyncLogsSchema,
 } from './cart-orders';
 
 export type {
@@ -531,6 +536,9 @@ export type {
   BulkAssignCartOrdersInput,
   TransitionCartOrderInput,
   UpdateCartOrderInput,
+  CreateCartOrderRoutingRuleInput,
+  UpdateCartOrderRoutingRuleInput,
+  ListCartOrderRoutingRulesInput,
 } from './cart-orders';
 
 export type {

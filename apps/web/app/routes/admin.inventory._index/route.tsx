@@ -131,7 +131,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   type BundleData = {
     levels: {
       levels: InventoryLevel[];
-      totals?: { totalStock: number; totalReserved: number; totalDelivered: number };
+      totals?: { totalStock: number; totalReserved: number; totalDelivered: number; totalLocations: number };
       pagination: { total: number; totalPages: number };
     };
     movements: { movements: StockMovement[]; pagination: { total: number } };
@@ -271,7 +271,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     levels: levelsData?.levels ?? [],
-    levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0, totalDelivered: 0 },
+    levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0, totalDelivered: 0, totalLocations: 0 },
     totalLevels: levelsData?.pagination?.total ?? 0,
     levelsPage: page,
     levelsTotalPages: levelsData?.pagination?.totalPages ?? 1,

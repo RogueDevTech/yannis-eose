@@ -22,7 +22,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'orders.read');
+  const user = await requirePermission(request, ['orders.read', 'marketing.orders']);
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);

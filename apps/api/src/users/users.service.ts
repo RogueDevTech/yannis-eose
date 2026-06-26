@@ -123,7 +123,7 @@ export class UsersService {
     if (isAdminLevelRole(role)) {
       return { scopeGlobal: true, scopeOrgWideHead: false };
     }
-    if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_LOGISTICS') {
+    if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_LOGISTICS' || role === 'HEAD_OF_MARKETING') {
       return { scopeGlobal: false, scopeOrgWideHead: true };
     }
     return { scopeGlobal: false, scopeOrgWideHead: false };

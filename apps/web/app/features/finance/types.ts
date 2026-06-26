@@ -49,6 +49,7 @@ export interface FinanceOverviewPulse {
   pendingRemittanceAmount: number;
   pendingRemittanceBatchCount: number;
   disputedRemittanceBatchCount: number;
+  disputedRemittanceAmount: number;
   totalRemitted: number;
   totalRemittedCount: number;
   receivedAmount: number;

@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, integer, numeric, jsonb, timestamp, boolean } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -7,6 +7,7 @@ import { stockBatches } from './inventory';
 import { logisticsProviders, logisticsLocations } from './logistics';
 import { campaigns } from './marketing';
 import { cartAbandonments } from './cart';
+import { branches } from './branches';
 
 // ── Cart Orders ──────────────────────────────────────────────────────
 // Standalone table for orders recovered from abandoned carts. Full order
@@ -60,6 +61,8 @@ export const cartOrders = pgTable('cart_orders', {
   customFields: jsonb('custom_fields'),
   branchId: uuid('branch_id'),
   servicingBranchId: uuid('servicing_branch_id'),
+  /** Which routing rule determined the servicing branch. NULL = manual pull / fallback. */
+  routingRuleId: uuid('routing_rule_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),
@@ -99,5 +102,48 @@ export const cartOrderTimelineEvents = pgTable('cart_order_timeline_events', {
   description: text('description').notNull(),
   metadata: jsonb('metadata'),
   branchId: uuid('branch_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ── Cart Order Routing Rules ────────────────────────────────────────
+// Admin-configured rules that determine which branch cart orders are
+// routed to when pulled from abandoned carts. Evaluated in priority
+// order (highest first). First matching rule wins.
+
+export const cartOrderRoutingRules = pgTable('cart_order_routing_rules', {
+  id: uuidv7Pk(),
+  /** Human-readable label, e.g. "Lagos carts → Lagos CS". */
+  name: text('name').notNull(),
+  /** Optional source branch filter: only route carts whose campaign belongs to this marketing branch.
+   *  NULL = match carts from any branch (org-wide). */
+  sourceBranchId: uuid('source_branch_id').references(() => branches.id),
+  /** Target: push cart orders to this specific branch's CS team.
+   *  NULL = round-robin across all active CS branches. */
+  targetBranchId: uuid('target_branch_id').references(() => branches.id),
+  /** Higher priority = evaluated first. */
+  priority: integer('priority').notNull().default(0),
+  /** Disabled rules are skipped during routing. */
+  enabled: boolean('enabled').notNull().default(true),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+// ── Cart Order Sync Logs ────────────────────────────────────────────
+// Tracks each auto-pull cron run for audit + debugging.
+
+export const cartOrderSyncLogs = pgTable('cart_order_sync_logs', {
+  id: uuidv7Pk(),
+  /** 'cron' or 'manual' */
+  triggeredBy: text('triggered_by').notNull(),
+  /** User who triggered manual sync. NULL for cron. */
+  triggeredByUserId: uuid('triggered_by_user_id').references(() => users.id),
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  totalPulled: integer('total_pulled').notNull().default(0),
+  /** Per-rule breakdown: [{ruleId, ruleName, pulled, targetBranchName}] */
+  ruleResults: jsonb('rule_results'),
+  /** Count of carts routed via fallback (no rule matched). */
+  fallbackCount: integer('fallback_count').notNull().default(0),
+  errorMessage: text('error_message'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

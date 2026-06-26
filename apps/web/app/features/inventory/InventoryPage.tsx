@@ -468,6 +468,7 @@ export function InventoryPage(props: InventoryStreamData) {
   const pageReservedSum = levels.reduce((sum, l) => sum + l.reservedCount, 0);
   const totalStock = levelsTotals?.totalStock ?? pageStockSum;
   const totalReserved = levelsTotals?.totalReserved ?? pageReservedSum;
+  const totalLocations = levelsTotals?.totalLocations ?? new Set(levels.map((l) => l.locationId)).size;
 
   /** CompactTable columns for stock levels — `hideOnMobile` drops Reserved + Status
    *  on narrow desktop table columns; mobile uses card rows from the same component. */
@@ -1370,7 +1371,7 @@ export function InventoryPage(props: InventoryStreamData) {
             value: (totalStock - totalReserved).toLocaleString(),
             valueClassName: 'text-success-600 dark:text-success-400',
           },
-          { label: 'Total Locations', value: (displayLocations.length > 0 ? displayLocations : locations).length.toLocaleString(), valueClassName: 'text-app-fg' },
+          { label: 'Locations', value: totalLocations.toLocaleString(), valueClassName: 'text-app-fg' },
         ]}
       />
 
