@@ -209,17 +209,9 @@ const blockMediaBuyerMutationsOutsideMemberBranch = t.middleware(async ({ ctx, t
  * mirror mode: `.meta({ viewOnlyOk: true })` allows session-only mutations
  * like `branches.switchBranch`.
  */
-const blockMutationsForSupportRole = t.middleware(async ({ ctx, type, meta, next }) => {
-  if (type === 'mutation' && ctx.user?.role === 'SUPPORT') {
-    const viewOnlyOk =
-      (meta as Record<string, unknown> | undefined)?.['viewOnlyOk'] === true;
-    if (!viewOnlyOk) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Support role is read-only. Contact an admin to make changes.',
-      });
-    }
-  }
+const blockMutationsForSupportRole = t.middleware(async ({ next }) => {
+  // SUPPORT role now has full mutation access (same as SUPER_ADMIN bypass).
+  // Previously blocked all mutations — removed per CEO directive 2026-06-26.
   return next();
 });
 
