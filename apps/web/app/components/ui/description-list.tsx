@@ -30,7 +30,7 @@ interface DescriptionListProps {
   /** stacked = label above value; horizontal = label left value right; grid = 2-col */
   layout?: DescriptionListLayout;
   /** Applies only when layout="grid". Default is 2 columns. */
-  gridColumns?: 2 | 3;
+  gridColumns?: 2 | 3 | 4;
   /** Applies only when layout="grid" — columns on mobile (< sm). Default is 1. */
   mobileColumns?: 1 | 2;
   /** Applies only when layout="grid" — tighter gaps and smaller value text */
@@ -57,9 +57,10 @@ export function DescriptionList({
 
   if (layout === 'grid') {
     const gridColsClass =
-      gridColumns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2';
+      gridColumns === 4 ? 'sm:grid-cols-4' : gridColumns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2';
     const mobileGridClass = mobileColumns === 2 ? 'grid-cols-2' : 'grid-cols-1';
-    const desktopFullWidth = gridColumns === 3 ? 'sm:col-span-3' : 'sm:col-span-2';
+    const desktopFullWidth =
+      gridColumns === 4 ? 'sm:col-span-4' : gridColumns === 3 ? 'sm:col-span-3' : 'sm:col-span-2';
     const fullWidthClass = [
       mobileColumns === 2 ? 'col-span-2' : '',
       desktopFullWidth,

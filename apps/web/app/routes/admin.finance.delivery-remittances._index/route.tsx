@@ -12,7 +12,7 @@ import { DeliveryRemittancesLoadingShell } from '~/features/finance/FinanceDefer
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
 
-const ELIGIBLE_PAGE_SIZE = 50;
+const DEFAULT_ELIGIBLE_PAGE_SIZE = 500;
 
 export const meta: MetaFunction = () => [
   { title: 'Cash Remittances — Finance — Yannis EOSE' },
@@ -45,7 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageParam = parseInt(url.searchParams.get('page') ?? '1', 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
-  const { perPage: remittancesPageSize, pageSizeOptions } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
+  const { perPage: remittancesPageSize, pageSizeOptions } = parsePerPage(url.searchParams, { defaultPerPage: 500 });
   const statusFilter = url.searchParams.get('status') ?? undefined;
   const locationFilter = url.searchParams.get('location') ?? undefined;
   const sentByFilter = url.searchParams.get('sentBy') ?? undefined;
@@ -82,11 +82,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const eligiblePageParam = parseInt(url.searchParams.get('eligiblePage') ?? '1', 10);
   const eligiblePage =
     isNaN(eligiblePageParam) || eligiblePageParam < 1 ? 1 : eligiblePageParam;
+  const { perPage: eligiblePageSize } = parsePerPage(url.searchParams, { defaultPerPage: DEFAULT_ELIGIBLE_PAGE_SIZE, param: 'eligiblePerPage' });
   const eligibleQ = url.searchParams.get('q')?.trim() ?? undefined;
 
   const eligibleListBase: Record<string, unknown> = {
     page: eligiblePage,
-    limit: ELIGIBLE_PAGE_SIZE,
+    limit: eligiblePageSize,
   };
   if (locationFilter) eligibleListBase.logisticsLocationId = locationFilter;
   if (eligibleQ) eligibleListBase.search = eligibleQ;
@@ -197,7 +198,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const eligibleOrders = eligibleListData?.orders ?? [];
   const eligibleTotal = eligibleListData?.total ?? 0;
   const eligibleTotalPages =
-    Math.ceil(eligibleTotal / ELIGIBLE_PAGE_SIZE) || 1;
+    Math.ceil(eligibleTotal / eligiblePageSize) || 1;
 
   return {
     remittances,
@@ -219,7 +220,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       total: eligibleTotal,
       totalPages: eligibleTotalPages,
       page: eligiblePage,
-      pageSize: ELIGIBLE_PAGE_SIZE,
+      pageSize: eligiblePageSize,
     },
     eligibleTotal,
     summary,

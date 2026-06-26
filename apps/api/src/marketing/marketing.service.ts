@@ -292,6 +292,79 @@ export class MarketingService {
     }
   }
 
+  /**
+   * Compute a Media Buyer's available balance inside a transaction.
+   * Matches the ledger formula: received (SENT+COMPLETED) − distributed (SENT+COMPLETED+DISPUTED) − spend (non-REJECTED).
+   */
+  private async computeMbBalanceInTx(
+    tx: MarketingFundingTx,
+    userId: string,
+    branchId: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<number> {
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+
+    const [receivedRow, outRow] = await Promise.all([
+      tx
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(
+          and(
+            eq(schema.marketingFunding.receiverId, userId),
+            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+          ),
+        )
+        .then((r) => r[0]),
+      tx
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(
+          and(
+            eq(schema.marketingFunding.senderId, userId),
+            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+          ),
+        )
+        .then((r) => r[0]),
+    ]);
+
+    let spendTotalStr = '0';
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      spendTotalStr = '0';
+    } else {
+      const [spendRow] = await tx
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(
+          and(
+            eq(schema.adSpendLogs.mediaBuyerId, userId),
+            ne(schema.adSpendLogs.status, 'REJECTED'),
+            branchCampaignIds
+              ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
+              : undefined,
+          ),
+        );
+      spendTotalStr = spendRow?.total ?? '0';
+    }
+
+    const received = Number(receivedRow?.total ?? '0');
+    const outgoing = Number(outRow?.total ?? '0');
+    const spend = Number(spendTotalStr);
+    return received - outgoing - spend;
+  }
+
+  private assertSufficientMbBalance(balance: number, expenseAmount: number): void {
+    const b = Math.round(balance * 100);
+    const e = Math.round(expenseAmount * 100);
+    if (b < e) {
+      const fmt = (n: number) =>
+        n.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Insufficient funding balance to log ₦${fmt(expenseAmount)} expense. Available: ₦${fmt(Math.max(0, balance))}.`,
+      });
+    }
+  }
+
   private spendDateToYmd(spendDate: Date | string): string {
     if (typeof spendDate === 'string') {
       return spendDate.length >= 10 ? spendDate.slice(0, 10) : spendDate;
@@ -2673,7 +2746,7 @@ export class MarketingService {
   // Ad Spend Logs
   // ============================================
 
-  async createAdSpend(input: CreateAdSpendInput, mediaBuyerId: string, branchId?: string | null) {
+  async createAdSpend(input: CreateAdSpendInput, mediaBuyerId: string, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
       if (branchId && input.campaignId) {
         const [campaign] = await tx
@@ -2693,6 +2766,10 @@ export class MarketingService {
           });
         }
       }
+
+      // Enforce: expense cannot exceed available funding balance
+      const balance = await this.computeMbBalanceInTx(tx, mediaBuyerId, branchId ?? null, effectiveBranchIds);
+      this.assertSufficientMbBalance(balance, input.spendAmount);
 
       // Screenshot is optional per CEO 2026-05 — empty string preserves the
       // column's NOT NULL constraint without a schema migration. status
@@ -2734,6 +2811,7 @@ export class MarketingService {
     input: CreateAdSpendBatchInput,
     mediaBuyerId: string,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     if (input.lines.length === 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add at least one ad' });
@@ -2777,7 +2855,12 @@ export class MarketingService {
     }
 
     const spendDateAt = new Date(input.spendDate);
+    const batchTotal = input.lines.reduce((acc, l) => acc + l.spendAmount, 0);
     const inserted = await withActor(this.db, { id: mediaBuyerId }, async (tx) => {
+      // Enforce: batch total cannot exceed available funding balance
+      const balance = await this.computeMbBalanceInTx(tx, mediaBuyerId, branchId ?? null, effectiveBranchIds);
+      this.assertSufficientMbBalance(balance, batchTotal);
+
       return tx
         .insert(schema.adSpendLogs)
         .values(

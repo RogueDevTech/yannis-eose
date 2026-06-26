@@ -437,9 +437,12 @@ export class ShipmentsService {
     const batchIds = Array.from(
       new Set(lines.map((line) => line.batchId).filter((batchId): batchId is string => typeof batchId === 'string' && batchId.length > 0)),
     );
+
+
     const productIds = Array.from(new Set(lines.map((line) => line.productId)));
 
-    const [batchRows, levelRows] = await Promise.all([
+    // Batch remaining (shipment-scoped FIFO) + inventory levels across ALL locations for these products
+    const [batchRows, allLevelRows] = await Promise.all([
       batchIds.length > 0
         ? this.db
             .select({
@@ -453,31 +456,31 @@ export class ShipmentsService {
         ? this.db
             .select({
               productId: schema.inventoryLevels.productId,
+              locationId: schema.inventoryLevels.locationId,
+              locationName: schema.logisticsLocations.name,
               stockCount: schema.inventoryLevels.stockCount,
               reservedCount: schema.inventoryLevels.reservedCount,
             })
             .from(schema.inventoryLevels)
-            .where(
-              and(
-                eq(schema.inventoryLevels.locationId, row.destinationLocationId),
-                inArray(schema.inventoryLevels.productId, productIds),
-              ),
+            .innerJoin(
+              schema.logisticsLocations,
+              eq(schema.inventoryLevels.locationId, schema.logisticsLocations.id),
             )
+            .where(inArray(schema.inventoryLevels.productId, productIds))
         : Promise.resolve([]),
     ]);
 
     const batchRemainingById = new Map(
       batchRows.map((batch) => [batch.id, Number(batch.remainingQuantity ?? 0)]),
     );
-    const levelByProductId = new Map(
-      levelRows.map((level) => [
-        level.productId,
-        {
-          stockCount: Number(level.stockCount ?? 0),
-          reservedCount: Number(level.reservedCount ?? 0),
-        },
-      ]),
-    );
+
+    // Build per-line reserved at destination warehouse
+    const reservedByProductId = new Map<string, number>();
+    for (const level of allLevelRows) {
+      if (level.locationId === row.destinationLocationId) {
+        reservedByProductId.set(level.productId, Number(level.reservedCount ?? 0));
+      }
+    }
 
     const linesWithStatus = lines.map((line) => {
       const receivedQuantity = line.receivedQuantity != null ? Number(line.receivedQuantity) : null;
@@ -485,11 +488,7 @@ export class ShipmentsService {
         line.batchId && batchRemainingById.has(line.batchId)
           ? batchRemainingById.get(line.batchId) ?? 0
           : null;
-      const currentLevel = line.batchId ? levelByProductId.get(line.productId) : null;
-      const currentStockCount = currentLevel ? currentLevel.stockCount : null;
-      const currentReservedCount = currentLevel ? currentLevel.reservedCount : null;
-      const currentAvailableCount =
-        currentLevel ? Math.max(currentLevel.stockCount - currentLevel.reservedCount, 0) : null;
+      const currentReservedCount = line.batchId ? (reservedByProductId.get(line.productId) ?? 0) : null;
       return {
         ...line,
         batchRemainingQuantity: batchRemaining,
@@ -497,48 +496,96 @@ export class ShipmentsService {
           receivedQuantity != null && batchRemaining != null
             ? Math.max(receivedQuantity - batchRemaining, 0)
             : null,
-        currentStockCount,
         currentReservedCount,
-        currentAvailableCount,
       };
     });
-
-    const inventoryContext = levelRows.reduce(
-      (acc, level) => {
-        const stockCount = Number(level.stockCount ?? 0);
-        const reservedCount = Number(level.reservedCount ?? 0);
-        acc.currentStock += stockCount;
-        acc.currentReserved += reservedCount;
-        acc.currentAvailable += Math.max(stockCount - reservedCount, 0);
-        return acc;
-      },
-      {
-        currentStock: 0,
-        currentReserved: 0,
-        currentAvailable: 0,
-      },
-    );
 
     const summary = linesWithStatus.reduce(
       (acc, line) => {
         const received = line.receivedQuantity != null ? Number(line.receivedQuantity) : 0;
         const remaining = line.batchRemainingQuantity ?? 0;
         const consumed = line.consumedQuantity ?? 0;
+        const reserved = line.currentReservedCount ?? 0;
         if (line.batchId) acc.verifiedLineCount += 1;
         acc.totalReceived += received;
         acc.remainingFromShipment += remaining;
         acc.consumedFromShipment += consumed;
+        acc.currentReserved += reserved;
         return acc;
       },
       {
         totalReceived: 0,
         remainingFromShipment: 0,
         consumedFromShipment: 0,
-        currentStock: inventoryContext.currentStock,
-        currentReserved: inventoryContext.currentReserved,
-        currentAvailable: inventoryContext.currentAvailable,
+        currentReserved: 0,
         verifiedLineCount: 0,
       },
+    );
+
+    // Sold per location: DELIVERY movements for these products, grouped by from_location_id
+    const soldRows = productIds.length > 0
+      ? await this.db.execute<{ locationId: string; sold: number }>(sql`
+          SELECT sm.from_location_id AS "locationId",
+                 COALESCE(SUM(ABS(sm.quantity)), 0)::int AS "sold"
+          FROM stock_movements sm
+          WHERE sm.movement_type = 'DELIVERY'
+            AND sm.product_id IN (${sql.join(productIds.map((id) => sql`${id}`), sql`, `)})
+          GROUP BY sm.from_location_id
+        `)
+      : [];
+    const soldByLocationId = new Map(soldRows.map((r) => [r.locationId, r.sold]));
+
+    // Stock distribution: aggregate across all locations that hold these products
+    type StockDistributionEntry = {
+      locationId: string;
+      locationName: string;
+      isDestination: boolean;
+      stock: number;
+      reserved: number;
+      available: number;
+      sold: number;
+    };
+    const locationAgg = new Map<string, StockDistributionEntry>();
+    for (const level of allLevelRows) {
+      const stockCount = Number(level.stockCount ?? 0);
+      const reservedCount = Number(level.reservedCount ?? 0);
+      const existing = locationAgg.get(level.locationId);
+      if (existing) {
+        existing.stock += stockCount;
+        existing.reserved += reservedCount;
+        existing.available += Math.max(stockCount - reservedCount, 0);
+      } else {
+        locationAgg.set(level.locationId, {
+          locationId: level.locationId,
+          locationName: level.locationName,
+          isDestination: level.locationId === row.destinationLocationId,
+          stock: stockCount,
+          reserved: reservedCount,
+          available: Math.max(stockCount - reservedCount, 0),
+          sold: soldByLocationId.get(level.locationId) ?? 0,
+        });
+      }
+    }
+    // Include locations that have sold everything (stock=0 but sold>0)
+    for (const [locationId, sold] of soldByLocationId) {
+      if (sold > 0 && !locationAgg.has(locationId)) {
+        // Need location name — look up from allLevelRows or fallback
+        const levelRow = allLevelRows.find((l) => l.locationId === locationId);
+        if (levelRow) {
+          locationAgg.set(locationId, {
+            locationId,
+            locationName: levelRow.locationName,
+            isDestination: locationId === row.destinationLocationId,
+            stock: 0,
+            reserved: 0,
+            available: 0,
+            sold,
+          });
+        }
+      }
+    }
+    const stockDistribution = Array.from(locationAgg.values()).sort((a, b) =>
+      a.isDestination ? -1 : b.isDestination ? 1 : a.locationName.localeCompare(b.locationName),
     );
 
     return {
@@ -551,6 +598,7 @@ export class ShipmentsService {
       },
       lines: linesWithStatus,
       summary,
+      stockDistribution,
       allowedTransitions: this.getAllowedTransitions({ status: row.status }, actor),
     };
   }

@@ -153,9 +153,14 @@ export function TplLayout({
                 aria-label="3PL home"
               >
                 <img
-                  src={getAppLogoSrc(isDarkTheme)}
+                  src={getAppLogoSrc(false)}
                   alt="Yannis"
-                  className="h-[1.575rem] w-auto max-w-[108px] md:h-8 md:max-w-none object-contain"
+                  className="h-[1.575rem] w-auto max-w-[108px] md:h-8 md:max-w-none object-contain dark:hidden"
+                />
+                <img
+                  src={getAppLogoSrc(true)}
+                  alt="Yannis"
+                  className="h-[1.575rem] w-auto max-w-[108px] md:h-8 md:max-w-none object-contain hidden dark:block"
                 />
                 <span className="hidden sm:inline text-sm font-medium text-app-fg-muted">
                   3PL

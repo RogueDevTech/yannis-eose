@@ -56,7 +56,7 @@ function isStatusReached(current: ShipmentStatus, target: ShipmentStatus): boole
 }
 
 export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps) {
-  const { shipment, lines, summary, allowedTransitions } = data;
+  const { shipment, lines, summary, stockDistribution, allowedTransitions } = data;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const navigation = useNavigation();
@@ -274,19 +274,8 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         ),
       },
       {
-        key: 'available',
-        header: 'Available now',
-        align: 'right',
-        nowrap: true,
-        render: (l) => (
-          <span className="tabular-nums text-success-600 dark:text-success-400">
-            {l.currentAvailableCount != null ? l.currentAvailableCount : <span className="text-app-fg-muted">—</span>}
-          </span>
-        ),
-      },
-      {
         key: 'reserved',
-        header: 'Reserved now',
+        header: 'Reserved',
         align: 'right',
         nowrap: true,
         render: (l) => (
@@ -480,24 +469,19 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         <CardBody>
           <DescriptionList
             layout="grid"
-            gridColumns={3}
+            gridColumns={4}
             mobileColumns={2}
-            divided
-            className="gap-y-3"
+            dense
             items={[
-              { label: 'Destination', value: shipment.destinationLocationName ?? '—' },
-              { label: 'Supplier', value: shipment.supplierName ?? '—' },
-              { label: 'Supplier ref', value: shipment.supplierReference ?? '—' },
+              { label: 'Destination', value: shipment.destinationLocationName },
+              { label: 'Supplier', value: shipment.supplierName },
+              { label: 'Supplier ref', value: shipment.supplierReference, hideIfEmpty: true },
+              { label: 'Landing cost', value: formatNaira(shipment.totalLandingCost) },
               { label: 'Expected arrival', value: formatDate(shipment.expectedArrivalAt) },
-              { label: 'Arrived', value: formatDate(shipment.arrivedAt) },
-              { label: 'Verified', value: formatDate(shipment.verifiedAt) },
-              { label: 'Closed', value: formatDate(shipment.closedAt) },
-              { label: 'Total landing cost', value: formatNaira(shipment.totalLandingCost) },
-              {
-                label: 'Notes',
-                value: shipment.notes ?? <span className="text-app-fg-muted">—</span>,
-                fullWidth: true,
-              },
+              { label: 'Arrived', value: formatDate(shipment.arrivedAt), hideIfEmpty: true },
+              { label: 'Verified', value: formatDate(shipment.verifiedAt), hideIfEmpty: true },
+              { label: 'Closed', value: formatDate(shipment.closedAt), hideIfEmpty: true },
+              { label: 'Notes', value: shipment.notes, hideIfEmpty: true, fullWidth: true },
               ...(shipment.cancelledReason
                 ? [
                     {
@@ -522,16 +506,13 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                 embedded
                 items={[
                   { label: 'Received', value: summary.totalReceived, valueClassName: 'text-app-fg' },
-                  { label: 'Remaining', value: summary.remainingFromShipment, valueClassName: 'text-brand-600 dark:text-brand-400' },
                   { label: 'Consumed', value: summary.consumedFromShipment, valueClassName: 'text-app-fg' },
-                  { label: 'Available now', value: summary.currentAvailable, valueClassName: 'text-success-600 dark:text-success-400' },
-                  { label: 'Reserved now', value: summary.currentReserved, valueClassName: 'text-warning-600 dark:text-warning-400' },
-                  { label: 'Stock now', value: summary.currentStock, valueClassName: 'text-app-fg' },
+                  { label: 'Remaining', value: summary.remainingFromShipment, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                  { label: 'Reserved', value: summary.currentReserved, valueClassName: 'text-warning-600 dark:text-warning-400' },
                 ]}
               />
               <p className="text-xs text-app-fg-muted">
-                Remaining and consumed are exact from the FIFO batches created by this shipment. Available,
-                reserved, and stock reflect the current destination-warehouse inventory context for these shipment SKUs.
+                Consumed and remaining are from this shipment's FIFO batches. Reserved = units held for confirmed orders at the destination warehouse.
               </p>
             </>
           ) : (
@@ -553,6 +534,59 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
           emptyTitle="No line items on this shipment"
         />
       </section>
+
+      {stockDistribution.length > 0 && (
+        <Card>
+          <CardHeader title="Stock distribution" />
+          <CardBody>
+            <CompactTable
+              columns={[
+                {
+                  key: 'location',
+                  header: 'Location',
+                  render: (r) => (
+                    <span>
+                      {r.locationName}
+                      {r.isDestination && (
+                        <span className="ml-1.5 text-xs text-app-fg-muted">(destination)</span>
+                      )}
+                    </span>
+                  ),
+                },
+                { key: 'stock', header: 'Stock', align: 'right' as const, render: (r) => <span className="tabular-nums">{r.stock}</span> },
+                {
+                  key: 'reserved',
+                  header: 'Reserved',
+                  align: 'right' as const,
+                  render: (r) => (
+                    <span className="tabular-nums text-warning-600 dark:text-warning-400">{r.reserved}</span>
+                  ),
+                },
+                {
+                  key: 'sold',
+                  header: 'Sold',
+                  align: 'right' as const,
+                  render: (r) => <span className="tabular-nums">{r.sold}</span>,
+                },
+                {
+                  key: 'available',
+                  header: 'Available',
+                  align: 'right' as const,
+                  render: (r) => (
+                    <span className="tabular-nums text-success-600 dark:text-success-400">{r.available}</span>
+                  ),
+                },
+              ]}
+              rows={stockDistribution}
+              rowKey={(r) => r.locationId}
+              emptyTitle="No stock at any location"
+            />
+            <p className="mt-2 text-xs text-app-fg-muted">
+              Current stock of this shipment's products across all locations. Stock = total units on shelf. Available = stock minus reserved.
+            </p>
+          </CardBody>
+        </Card>
+      )}
 
       {fetcherSurface.rawError && !shipmentModalOpen ? (
         <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">

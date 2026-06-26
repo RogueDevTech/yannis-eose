@@ -1666,6 +1666,9 @@ export class InventoryService {
             totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(
               Number,
             ),
+            totalLocations: sql<number>`COUNT(DISTINCT ${schema.inventoryLevels.locationId})`.mapWith(
+              Number,
+            ),
           })
           .from(schema.inventoryLevels)
           .where(whereClause),
@@ -1765,6 +1768,7 @@ export class InventoryService {
         totalStock: sums?.totalStock ?? 0,
         totalReserved: sums?.totalReserved ?? 0,
         totalDelivered: deliveredRows[0]?.totalDelivered ?? 0,
+        totalLocations: sums?.totalLocations ?? 0,
       },
       pagination: {
         page: input.page,

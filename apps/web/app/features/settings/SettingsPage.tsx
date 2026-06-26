@@ -1196,6 +1196,14 @@ export function SettingsPage({
                       Open follow up order config
                     </Link>
                   </p>
+                  <p className="mt-2">
+                    <Link
+                      to="/admin/settings/cart-order-routing"
+                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Open cart order routing config
+                    </Link>
+                  </p>
                 </div>
                 </Collapsible>
               </div>
