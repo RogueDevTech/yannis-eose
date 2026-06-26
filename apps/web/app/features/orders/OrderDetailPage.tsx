@@ -1572,15 +1572,12 @@ export function OrderDetailPage({
   useEffect(() => {
     if (autoEnsureInvoiceFiredRef.current) return;
     if (isMirroring) return;
-    // Cart/follow-up orders auto-generate invoices during the CONFIRMED transition —
-    // skip the client-side auto-ensure to avoid cascading revalidation crashes.
-    if (isCartOrder || isFollowUpOrder) return;
     // Only auto-generate for CONFIRMED and beyond — pre-confirmed orders have no confirmedAt
     if (PRE_CONFIRMED_STATUSES.has(order.status)) return;
     // Wait for the invoice fetch to complete with a definitive "no invoice" result
     const fetchDone = invoiceFetcher.state === 'idle' && invoiceFetcher.data;
     if (!fetchDone) return;
-    const hasInvoice = invoiceFetcher.data.ok && invoiceFetcher.data.invoice;
+    const hasInvoice = invoiceFetcher.data!.ok && invoiceFetcher.data!.invoice;
     if (hasInvoice) return;
     // Also skip if streamed invoice is present
     if (invoice !== undefined) return;
