@@ -7,6 +7,11 @@ import {
   bulkAssignCartOrdersSchema,
   transitionCartOrderSchema,
   updateCartOrderSchema,
+  createCartOrderRoutingRuleSchema,
+  updateCartOrderRoutingRuleSchema,
+  deleteCartOrderRoutingRuleSchema,
+  listCartOrderRoutingRulesSchema,
+  listCartOrderSyncLogsSchema,
 } from '@yannis/shared';
 import type { CartOrdersService } from '../../cart-orders/cart-orders.service';
 import { getFinanceService } from './finance.router';
@@ -184,5 +189,47 @@ export const cartOrdersRouter = router({
         ctx.effectiveBranchIds,
         isMB ? ctx.user.id : undefined,
       );
+    }),
+
+  // ── Cart Order Routing Config ─────────────────────────────────────
+
+  routingListRules: permissionProcedure('orders.followUpConfig')
+    .input(listCartOrderRoutingRulesSchema)
+    .query(async ({ input }) => {
+      return getCartOrdersService().listRoutingRules(input.enabledOnly);
+    }),
+
+  routingCreateRule: permissionProcedure('orders.followUpConfig')
+    .input(createCartOrderRoutingRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().createRoutingRule(ctx.user, input);
+    }),
+
+  routingUpdateRule: permissionProcedure('orders.followUpConfig')
+    .input(updateCartOrderRoutingRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().updateRoutingRule(ctx.user, input);
+    }),
+
+  routingDeleteRule: permissionProcedure('orders.followUpConfig')
+    .input(deleteCartOrderRoutingRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().deleteRoutingRule(ctx.user, input.ruleId);
+    }),
+
+  routingSyncNow: permissionProcedure('orders.followUpConfig')
+    .mutation(async ({ ctx }) => {
+      return getCartOrdersService().runAutoSync('manual', ctx.user.id);
+    }),
+
+  routingListSyncLogs: permissionProcedure('orders.followUpConfig')
+    .input(listCartOrderSyncLogsSchema)
+    .query(async ({ input }) => {
+      return getCartOrdersService().listSyncLogs(input.page, input.limit);
+    }),
+
+  routingListActiveCsBranches: permissionProcedure('orders.followUpConfig')
+    .query(async ({ ctx }) => {
+      return getCartOrdersService().listActiveCsBranches(ctx.effectiveBranchIds);
     }),
 });

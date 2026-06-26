@@ -13,7 +13,8 @@ export function FinanceCashRemittanceSection({
   byProduct?: RemittanceBreakdownRow[];
   byLocation?: RemittanceBreakdownRow[];
 }) {
-  const totalDelivered = pulse.awaitingCash + pulse.totalRemitted;
+  // Total delivered = sum of all visible cards so numbers always reconcile
+  const totalDelivered = pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount;
   const totalDeliveredOrders = pulse.awaitingOrderCount + pulse.totalRemittedCount;
 
   return (
@@ -71,9 +72,9 @@ export function FinanceCashRemittanceSection({
           >
             <p className="text-xs font-medium text-app-fg-muted">Disputed</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-danger-600 dark:text-danger-400">
-              {pulse.disputedRemittanceBatchCount}
+              {formatNaira(Math.round(pulse.disputedRemittanceAmount))}
             </p>
-            <p className="text-xs text-app-fg-muted mt-0.5">Batch(es) need attention</p>
+            <p className="text-xs text-app-fg-muted mt-0.5">{pulse.disputedRemittanceBatchCount} batch(es) need attention</p>
           </Link>
         </div>
 

@@ -363,7 +363,7 @@ export function InventoryOverviewLoadingShell() {
           { label: 'Total Stock', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Reserved', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Available', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Total Locations', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Locations', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
       <Tabs
@@ -960,16 +960,15 @@ export function ShipmentDetailLoadingShell() {
       </div>
 
       {/* Shipment details — labels visible, values pulse. Mirrors the
-          `DescriptionList layout="grid" gridColumns={3}` on the real page. */}
+          `DescriptionList layout="grid" gridColumns={4} dense` on the real page. */}
       <Card>
         <CardHeader title="Shipment details" />
         <CardBody>
           <DescriptionList
             layout="grid"
-            gridColumns={3}
+            gridColumns={4}
             mobileColumns={2}
-            divided
-            className="gap-y-3"
+            dense
             items={SHIPMENT_DETAIL_FIELDS.map((f) => ({
               label: f.label,
               value: <TableCellTextPulse className={f.pulseClass} />,

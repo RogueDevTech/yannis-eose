@@ -136,9 +136,14 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
           `}
         >
           <img
-            src={getAppLogoSrc(isDarkTheme)}
+            src={getAppLogoSrc(false)}
             alt="Yannis"
-            className="h-8 w-auto max-w-full object-contain flex-shrink-0"
+            className="h-8 w-auto max-w-full object-contain flex-shrink-0 dark:hidden"
+          />
+          <img
+            src={getAppLogoSrc(true)}
+            alt="Yannis"
+            className="h-8 w-auto max-w-full object-contain flex-shrink-0 hidden dark:block"
           />
         </div>
 

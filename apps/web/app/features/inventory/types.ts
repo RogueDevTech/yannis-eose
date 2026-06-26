@@ -101,7 +101,7 @@ export interface WarehouseRowLite {
 export interface InventoryStreamData {
   levels: InventoryLevel[];
   /** Sum of stock/reserved/delivered across all rows matching current filters (not just this page). */
-  levelsTotals?: { totalStock: number; totalReserved: number; totalDelivered: number };
+  levelsTotals?: { totalStock: number; totalReserved: number; totalDelivered: number; totalLocations: number };
   totalLevels: number;
   /** Server-side pagination state for the Stock Levels tab. */
   levelsPage?: number;
@@ -342,9 +342,7 @@ export interface ShipmentDetail {
     batchId: string | null;
     batchRemainingQuantity: number | null;
     consumedQuantity: number | null;
-    currentStockCount: number | null;
     currentReservedCount: number | null;
-    currentAvailableCount: number | null;
     varianceReason: string | null;
     createdAt: string;
   }>;
@@ -352,11 +350,18 @@ export interface ShipmentDetail {
     totalReceived: number;
     remainingFromShipment: number;
     consumedFromShipment: number;
-    currentStock: number;
     currentReserved: number;
-    currentAvailable: number;
     verifiedLineCount: number;
   };
+  stockDistribution: Array<{
+    locationId: string;
+    locationName: string;
+    isDestination: boolean;
+    stock: number;
+    reserved: number;
+    available: number;
+    sold: number;
+  }>;
   allowedTransitions: string[];
 }
 

@@ -64,3 +64,39 @@ export const updateCartOrderSchema = z.object({
 });
 
 export type UpdateCartOrderInput = z.infer<typeof updateCartOrderSchema>;
+
+// ── Cart Order Routing Rules ────────────────────────────────────────
+
+export const createCartOrderRoutingRuleSchema = z.object({
+  name: z.string().min(1).max(200),
+  sourceBranchId: z.string().uuid().nullable().optional(),
+  targetBranchId: z.string().uuid().nullable().optional(),
+  priority: z.number().int().min(0).max(1_000_000).optional(),
+  enabled: z.boolean().optional(),
+});
+
+export const updateCartOrderRoutingRuleSchema = z.object({
+  ruleId: z.string().uuid(),
+  name: z.string().min(1).max(200).optional(),
+  sourceBranchId: z.string().uuid().nullable().optional(),
+  targetBranchId: z.string().uuid().nullable().optional(),
+  priority: z.number().int().min(0).max(1_000_000).optional(),
+  enabled: z.boolean().optional(),
+});
+
+export const deleteCartOrderRoutingRuleSchema = z.object({
+  ruleId: z.string().uuid(),
+});
+
+export const listCartOrderRoutingRulesSchema = z.object({
+  enabledOnly: z.boolean().optional(),
+});
+
+export const listCartOrderSyncLogsSchema = z.object({
+  page: z.number().int().min(1).optional().default(1),
+  limit: z.number().int().min(1).max(200).optional().default(50),
+});
+
+export type CreateCartOrderRoutingRuleInput = z.infer<typeof createCartOrderRoutingRuleSchema>;
+export type UpdateCartOrderRoutingRuleInput = z.infer<typeof updateCartOrderRoutingRuleSchema>;
+export type ListCartOrderRoutingRulesInput = z.infer<typeof listCartOrderRoutingRulesSchema>;

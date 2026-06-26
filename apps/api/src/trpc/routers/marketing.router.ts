@@ -468,7 +468,7 @@ export const marketingRouter = router({
     .input(createAdSpendWithBranchSchema)
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...adSpendInput } = input;
-      return getMarketingService().createAdSpend(adSpendInput, ctx.user.id, branchId ?? ctx.currentBranchId);
+      return getMarketingService().createAdSpend(adSpendInput, ctx.user.id, branchId ?? ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -484,6 +484,7 @@ export const marketingRouter = router({
         batchInput,
         ctx.user.id,
         branchId ?? ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
