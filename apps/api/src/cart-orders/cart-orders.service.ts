@@ -40,6 +40,10 @@ export class CartOrdersService {
     this.backfillMissingMediaBuyers().catch((err) =>
       this.logger.warn(`Cart orders MB backfill failed: ${err.message}`),
     );
+    // Seed default routing rule on boot (idempotent)
+    this.seedDefaultRoutingRule().catch((err) =>
+      this.logger.warn(`Cart routing rule seed failed: ${err.message}`),
+    );
   }
 
   private async backfillMissingMediaBuyers() {
@@ -94,6 +98,26 @@ export class CartOrdersService {
       + ((r3 as unknown as { rowCount?: number })?.rowCount ?? 0);
     if (total > 0) {
       this.logger.log(`Backfilled media_buyer_id/campaign_id on ${total} cart orders`);
+    }
+  }
+
+  private async seedDefaultRoutingRule() {
+    const LAGOS_BRANCH_ID = '00000000-0000-0000-0000-000000000001';
+    const RULE_ID = 'a0000000-0000-0000-0000-000000000001';
+    await this.db.execute(sql`
+      INSERT INTO cart_order_routing_rules (id, name, source_branch_id, target_branch_id, priority, enabled)
+      VALUES (${RULE_ID}, 'All carts → Lagos', NULL, ${LAGOS_BRANCH_ID}, 10, true)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    // Backfill unrouted cart orders to Lagos
+    const result = await this.db.execute(sql`
+      UPDATE cart_orders
+      SET servicing_branch_id = ${LAGOS_BRANCH_ID}, updated_at = now()
+      WHERE servicing_branch_id IS NULL
+    `);
+    const backfilled = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (backfilled > 0) {
+      this.logger.log(`Backfilled ${backfilled} cart orders to Lagos branch`);
     }
   }
 
@@ -527,12 +551,76 @@ export class CartOrdersService {
       });
     });
 
+    // Auto-generate a draft invoice when a cart order is CONFIRMED.
+    // Mirrors the regular orders CONFIRMED trigger. Idempotent — the graduation
+    // path also tries to create one, so whichever fires first wins.
+    if (newStatus === 'CONFIRMED') {
+      try {
+        await this.autoCreateInvoiceForCartOrder(orderId, order);
+      } catch (err) {
+        this.logger.warn(`Auto-invoice for cart order ${orderId} on CONFIRMED failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     // Graduate to orders on DELIVERED
     if (newStatus === 'DELIVERED') {
       await this.graduateToOrders(orderId);
     }
 
     return { success: true };
+  }
+
+  // ── Auto Invoice on CONFIRMED ────────────────────────────────────────
+
+  private async autoCreateInvoiceForCartOrder(
+    cartOrderId: string,
+    order: typeof schema.cartOrders.$inferSelect,
+  ): Promise<void> {
+    // Idempotent — skip if an invoice already exists for this cart order
+    const [existing] = await this.db
+      .select({ id: schema.invoices.id })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.orderId, cartOrderId))
+      .limit(1);
+    if (existing) return;
+
+    const items = await this.db
+      .select({
+        quantity: schema.cartOrderItems.quantity,
+        unitPrice: schema.cartOrderItems.unitPrice,
+        offerLabel: schema.cartOrderItems.offerLabel,
+        productName: schema.products.name,
+      })
+      .from(schema.cartOrderItems)
+      .leftJoin(schema.products, eq(schema.cartOrderItems.productId, schema.products.id))
+      .where(eq(schema.cartOrderItems.cartOrderId, cartOrderId));
+
+    if (items.length === 0) {
+      this.logger.warn(`autoCreateInvoiceForCartOrder: cart order ${cartOrderId} has no items, skipping`);
+      return;
+    }
+
+    const lineItems = items.map((it) => ({
+      description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
+      quantity: it.quantity,
+      unitPrice: String(it.unitPrice),
+    }));
+    const totalAmount = items.reduce((sum, it) => sum + Number(it.unitPrice), 0);
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      await tx.insert(schema.invoices).values({
+        orderId: cartOrderId,
+        recipientInfo: {
+          name: order.customerName,
+          address: order.customerAddress ?? undefined,
+        },
+        lineItems,
+        taxRate: null,
+        totalAmount: totalAmount.toFixed(2),
+        dueDate: null,
+        status: 'DRAFT',
+      });
+    });
   }
 
   // ── Graduate to Orders ───────────────────────────────────────────────
