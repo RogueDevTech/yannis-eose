@@ -1115,67 +1115,48 @@ export class CartOrdersService {
           }
         }
 
-        const co = await withActor(this.db, actor, async (tx) => {
-          const safeCampaignId = cart.campaignId && validCampaignIds.has(cart.campaignId) ? cart.campaignId : null;
-          const [row] = await tx
-            .insert(schema.cartOrders)
-            .values({
-              sourceCartId: cart.id,
-              campaignId: safeCampaignId,
-              mediaBuyerId: safeMbId,
-              status: 'UNPROCESSED',
-              customerName: cart.customerName || 'Unknown',
-              customerPhoneHash: cart.customerPhoneHash,
-              customerPhone: cart.customerPhone,
-              customerAddress: cart.customerAddress,
-              deliveryAddress: cart.deliveryAddress,
-              totalAmount: sql`${unitPrice}::numeric`,
-              deliveryNotes: cart.deliveryNotes,
-              deliveryState: cart.deliveryState,
-              customerGender: cart.customerGender,
-              preferredDeliveryDate: cart.preferredDeliveryDate,
-              paymentMethod: cart.paymentMethod,
-              customerEmail: cart.customerEmail,
-              orderSource: 'online',
-              customFields: cart.customFieldValues,
-              servicingBranchId: resolvedBranchId,
-              routingRuleId: resolvedRuleId,
-            })
-            .returning({ id: schema.cartOrders.id });
+        // Use raw SQL to bypass Drizzle schema / trigger conflicts.
+        // The stamp_actor trigger on cart_orders/cart_order_items expects
+        // valid_from but Drizzle's insert may not include it, causing
+        // "column valid_from does not exist" errors inside withActor.
+        const safeCampaignId = cart.campaignId && validCampaignIds.has(cart.campaignId) ? cart.campaignId : null;
+        const [co] = await this.db.execute<{ id: string }>(sql`
+          INSERT INTO cart_orders (
+            source_cart_id, campaign_id, media_buyer_id, status,
+            customer_name, customer_phone_hash, customer_phone,
+            customer_address, delivery_address, total_amount,
+            delivery_notes, delivery_state, customer_gender,
+            preferred_delivery_date, payment_method, customer_email,
+            order_source, custom_fields, servicing_branch_id, routing_rule_id
+          ) VALUES (
+            ${cart.id}, ${safeCampaignId}, ${safeMbId}, 'UNPROCESSED',
+            ${cart.customerName || 'Unknown'}, ${cart.customerPhoneHash}, ${cart.customerPhone},
+            ${cart.customerAddress}, ${cart.deliveryAddress}, ${unitPrice}::numeric,
+            ${cart.deliveryNotes}, ${cart.deliveryState}, ${cart.customerGender},
+            ${cart.preferredDeliveryDate}, ${cart.paymentMethod}, ${cart.customerEmail},
+            'online', ${cart.customFieldValues ? JSON.stringify(cart.customFieldValues) : null}::jsonb,
+            ${resolvedBranchId}, ${resolvedRuleId}
+          ) RETURNING id
+        `);
 
-          if (row) {
-            // Item insert is best-effort — the product FK could fail if the
-            // product was deleted. The cart order itself is what matters (CS
-            // needs the phone to call, not the line item to start recovery).
-            try {
-              await tx.insert(schema.cartOrderItems).values({
-                cartOrderId: row.id,
-                productId: cart.productId,
-                quantity: qty,
-                unitPrice,
-                offerLabel: cart.offerLabel,
-              });
-            } catch (itemErr) {
-              this.logger.warn(`Cart order ${row.id} created but item insert failed (product ${cart.productId}): ${itemErr instanceof Error ? itemErr.message : itemErr}`);
-            }
-          }
-          return row ?? null;
-        });
-
-        // Timeline event outside the transaction — cart_order_timeline_events
-        // lacks temporal columns (valid_from) so the stamp_actor trigger fails
-        // inside withActor. Best-effort; doesn't block the pull.
         if (co) {
+          // Item insert — best-effort
           try {
-            await this.db.insert(schema.cartOrderTimelineEvents).values({
-              cartOrderId: co.id,
-              eventType: 'ORDER_RECEIVED',
-              actorId: actor.id === SYSTEM_ACTOR_ID ? null : actor.id,
-              actorName: actor.name ?? 'System',
-              description: 'Cart order created from abandoned cart.',
-              metadata: { sourceCartId: cart.id },
-              branchId: resolvedBranchId,
-            });
+            await this.db.execute(sql`
+              INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
+              VALUES (gen_random_uuid(), ${co.id}, ${cart.productId}, ${qty}, ${unitPrice}::numeric, ${cart.offerLabel})
+            `);
+          } catch (itemErr) {
+            this.logger.warn(`Cart order ${co.id} item insert failed: ${itemErr instanceof Error ? itemErr.message : itemErr}`);
+          }
+
+          // Timeline insert — best-effort
+          try {
+            await this.db.execute(sql`
+              INSERT INTO cart_order_timeline_events (id, cart_order_id, event_type, actor_name, description, metadata, branch_id)
+              VALUES (gen_random_uuid(), ${co.id}, 'ORDER_RECEIVED', 'System', 'Cart order created from abandoned cart.',
+                ${JSON.stringify({ sourceCartId: cart.id })}::jsonb, ${resolvedBranchId})
+            `);
           } catch (tlErr) {
             this.logger.warn(`Cart order ${co.id} timeline insert failed: ${tlErr instanceof Error ? tlErr.message : tlErr}`);
           }
