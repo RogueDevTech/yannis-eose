@@ -1115,9 +1115,9 @@ export class CartOrdersService {
           }
         }
 
-        await withActor(this.db, actor, async (tx) => {
+        const co = await withActor(this.db, actor, async (tx) => {
           const safeCampaignId = cart.campaignId && validCampaignIds.has(cart.campaignId) ? cart.campaignId : null;
-          const [co] = await tx
+          const [row] = await tx
             .insert(schema.cartOrders)
             .values({
               sourceCartId: cart.id,
@@ -1143,35 +1143,43 @@ export class CartOrdersService {
             })
             .returning({ id: schema.cartOrders.id });
 
-          if (co) {
+          if (row) {
             // Item insert is best-effort — the product FK could fail if the
             // product was deleted. The cart order itself is what matters (CS
             // needs the phone to call, not the line item to start recovery).
             try {
               await tx.insert(schema.cartOrderItems).values({
-                cartOrderId: co.id,
+                cartOrderId: row.id,
                 productId: cart.productId,
                 quantity: qty,
                 unitPrice,
                 offerLabel: cart.offerLabel,
               });
             } catch (itemErr) {
-              this.logger.warn(`Cart order ${co.id} created but item insert failed (product ${cart.productId}): ${itemErr instanceof Error ? itemErr.message : itemErr}`);
+              this.logger.warn(`Cart order ${row.id} created but item insert failed (product ${cart.productId}): ${itemErr instanceof Error ? itemErr.message : itemErr}`);
             }
+          }
+          return row ?? null;
+        });
 
-            await tx.insert(schema.cartOrderTimelineEvents).values({
+        // Timeline event outside the transaction — cart_order_timeline_events
+        // lacks temporal columns (valid_from) so the stamp_actor trigger fails
+        // inside withActor. Best-effort; doesn't block the pull.
+        if (co) {
+          try {
+            await this.db.insert(schema.cartOrderTimelineEvents).values({
               cartOrderId: co.id,
               eventType: 'ORDER_RECEIVED',
-              // System actor may not exist in users table — skip FK to avoid
-              // blocking the entire pull. Human-initiated pulls pass a real user.
               actorId: actor.id === SYSTEM_ACTOR_ID ? null : actor.id,
               actorName: actor.name ?? 'System',
               description: 'Cart order created from abandoned cart.',
               metadata: { sourceCartId: cart.id },
               branchId: resolvedBranchId,
             });
+          } catch (tlErr) {
+            this.logger.warn(`Cart order ${co.id} timeline insert failed: ${tlErr instanceof Error ? tlErr.message : tlErr}`);
           }
-        });
+        }
         succeeded++;
       } catch (err) {
         this.logger.error(`Cart pull FAILED cart ${cart.id}: ${err instanceof Error ? err.stack ?? err.message : err}`);
