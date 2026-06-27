@@ -1021,7 +1021,7 @@ export class CartOrdersService {
   async pullFromAbandonedCarts(
     cartIds: string[],
     targetBranchId: string | null,
-    actor: SessionUser,
+    _actor: SessionUser,
   ) {
     const carts = await this.db
       .select()
