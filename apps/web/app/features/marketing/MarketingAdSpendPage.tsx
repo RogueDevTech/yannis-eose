@@ -6,10 +6,13 @@ import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
+import { useBulkAction } from '~/hooks/useBulkAction';
+import { BulkProgressModal } from '~/components/ui/bulk-progress-modal';
 import { createAdSpendLogFormSchema, updateAdSpendSchema } from '@yannis/shared/validators';
 import { PageNotification } from '~/components/ui/page-notification';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -34,8 +37,10 @@ import { Textarea } from '~/components/ui/textarea';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn, type CompactTableMobileCardHelpers } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
+import { SmartPick } from '~/components/ui/smart-pick';
+import { Tabs } from '~/components/ui/tabs';
 import { SortMenu, type SortMenuValue } from '~/components/ui/sort-menu';
-import { fetchAdSpendIntervalPreview } from '~/lib/trpc-browser';
+import { fetchAdSpendIntervalPreview, postApproveAdSpend, postRejectAdSpend } from '~/lib/trpc-browser';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
@@ -246,6 +251,77 @@ export function MarketingAdSpendPage({
   const [editFileUploadState, setEditFileUploadState] = useState<FileUploadUploadState>('idle');
   const [dismissedError, setDismissedError] = useState(false);
 
+  // ── Bulk selection + approve ──────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkApprove, setConfirmBulkApprove] = useState(false);
+  const [confirmBulkReject, setConfirmBulkReject] = useState(false);
+  const [bulkRejectReason, setBulkRejectReason] = useState('');
+  const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
+  const [bulkGen, setBulkGen] = useState(0);
+  const bulkAction = useBulkAction();
+  /** Optimistic status overrides — applied on top of server data so the UI
+   *  updates instantly without waiting for the bulk action to finish. */
+  const [optimisticPatches, setOptimisticPatches] = useState<Map<string, string>>(new Map());
+
+  const toggleSelect = useCallback((id: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleBulkApprove = useCallback(async () => {
+    setConfirmBulkApprove(false);
+    const ids = [...selectedIds];
+    // Optimistic: mark selected as APPROVED immediately
+    setOptimisticPatches((prev) => {
+      const next = new Map(prev);
+      for (const id of ids) next.set(id, 'APPROVED');
+      return next;
+    });
+    clearSelection();
+    await bulkAction.run({
+      label: 'Approving expenses',
+      items: ids,
+      processFn: async (id) => {
+        await postApproveAdSpend(id);
+        return true;
+      },
+    });
+    setOptimisticPatches(new Map());
+    setBulkGen((g) => g + 1);
+  }, [selectedIds, bulkAction, clearSelection]);
+
+  const handleBulkReject = useCallback(async () => {
+    const reason = bulkRejectReason.trim() || undefined;
+    setConfirmBulkReject(false);
+    setBulkRejectReason('');
+    const ids = [...selectedIds];
+    // Optimistic: mark selected as REJECTED immediately
+    setOptimisticPatches((prev) => {
+      const next = new Map(prev);
+      for (const id of ids) next.set(id, 'REJECTED');
+      return next;
+    });
+    clearSelection();
+    await bulkAction.run({
+      label: 'Rejecting expenses',
+      items: ids,
+      processFn: async (id) => {
+        await postRejectAdSpend(id, reason);
+        return true;
+      },
+    });
+    setOptimisticPatches(new Map());
+    setBulkGen((g) => g + 1);
+  }, [selectedIds, bulkAction, clearSelection, bulkRejectReason]);
+
   const userIdsOnPage = useMemo(() => {
     const s = new Set<string>();
     for (const row of adSpend ?? []) {
@@ -271,6 +347,8 @@ export function MarketingAdSpendPage({
     p.set('gPerPage', String(groupsPerPage));
     p.set('view', viewMode);
     if (userIdsOnPage.length > 0) p.set('userIds', JSON.stringify(userIdsOnPage));
+    // Cache-bust after bulk actions so the secondary re-fetches fresh data.
+    if (bulkGen > 0) p.set('_bg', String(bulkGen));
     return p.toString();
   }, [
     filters?.startDate,
@@ -286,6 +364,7 @@ export function MarketingAdSpendPage({
     groupsPerPage,
     viewMode,
     userIdsOnPage,
+    bulkGen,
   ]);
 
   useEffect(() => {
@@ -317,6 +396,33 @@ export function MarketingAdSpendPage({
   }, [secondary?.ok, groupsPageResolved]);
 
   const inlineLoading = secondaryLoading && !secondary && (products.length === 0 || groups.length === 0);
+
+  /** Server `adSpend` with optimistic status patches applied. */
+  const patchedAdSpend = useMemo(() => {
+    if (optimisticPatches.size === 0) return adSpend;
+    return (adSpend ?? []).map((row) => {
+      const patch = optimisticPatches.get(row.id);
+      if (!patch) return row;
+      return { ...row, status: patch };
+    });
+  }, [adSpend, optimisticPatches]);
+
+  /** All PENDING IDs on the current page (both views merged, deduped). */
+  const pendingIdsOnPage = useMemo(() => {
+    const ids: string[] = [];
+    // Daily view: lines inside groups
+    for (const g of groups) {
+      for (const line of g.lines) {
+        if (line.status === 'PENDING') ids.push(line.id);
+      }
+    }
+    // Detailed view: flat list (uses patched data for optimistic updates)
+    for (const row of patchedAdSpend ?? []) {
+      if ((row.status ?? 'PENDING') === 'PENDING') ids.push(row.id);
+    }
+    // Dedupe across views (a line can appear in both)
+    return [...new Set(ids)];
+  }, [groups, patchedAdSpend]);
 
   const [formCampaignId, setFormCampaignId] = useState('');
   const [formProductId, setFormProductId] = useState('');
@@ -950,14 +1056,29 @@ export function MarketingAdSpendPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <BranchScopedLink
-                to="/admin/marketing/expenses/new"
-                actionLabel="adding ad spend"
-                onClick={() => closeSheet()}
-                className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
-              >
-                + Add Expense
-              </BranchScopedLink>
+              <>
+                <BranchScopedLink
+                  to="/admin/marketing/expenses/new"
+                  actionLabel="adding ad spend"
+                  onClick={() => closeSheet()}
+                  className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
+                >
+                  + Add Expense
+                </BranchScopedLink>
+                {canApproveAdSpend && pendingIdsOnPage.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setSmartPickModalOpen(true);
+                    }}
+                  >
+                    Smart pick{selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}
+                  </Button>
+                )}
+              </>
             )}
           />
         }
@@ -1027,10 +1148,15 @@ export function MarketingAdSpendPage({
         );
       })()}
 
-      {/* High-CPA warning banner removed (CEO directive 2026-05-08) — the
-          inline alert added an extra render path on every page load without
-          changing what an MB or HoM does next. The Profitability column on
-          the leaderboard already surfaces the same signal in context. */}
+      <Tabs
+        value={selectedCategory}
+        onChange={handleCategoryChange}
+        tabs={EXPENSE_CATEGORY_FILTER_OPTIONS.map((opt) => ({
+          value: opt.value,
+          label: opt.label,
+        }))}
+        size="sm"
+      />
 
       <ResponsiveFormPanel open={showAdSpendForm} onClose={() => setShowAdSpendForm(false)}>
         <fetcher.Form method="post" className="card space-y-3" onSubmit={handleLogAdSpendSubmit} noValidate>
@@ -1224,12 +1350,6 @@ export function MarketingAdSpendPage({
           desktopInlineFilters={
             <>
               <FormSelect
-                value={selectedCategory}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-                options={EXPENSE_CATEGORY_FILTER_OPTIONS}
-                wrapperClassName="w-auto min-w-[10rem]"
-              />
-              <FormSelect
                 value={selectedStatus}
                 onChange={(e) => handleAdSpendStatusChange(e.target.value)}
                 options={AD_SPEND_STATUS_OPTIONS.map((opt) => ({
@@ -1283,37 +1403,95 @@ export function MarketingAdSpendPage({
           }
           sheetFilterBody={null}
         />
+        {/* Desktop: Smart pick card */}
+        {canApproveAdSpend && pendingIdsOnPage.length > 0 && (
+          <div className="hidden md:block rounded-lg border border-app-border bg-app-elevated px-3 py-2">
+            <SmartPick
+              total={pendingIdsOnPage.length}
+              selectedCount={selectedIds.size}
+              onPick={(count) => {
+                const picked = pendingIdsOnPage.slice(0, count);
+                setSelectedIds(new Set(picked));
+              }}
+              onClear={clearSelection}
+              itemNoun="expenses"
+              presets={[5, 10, 20, 50]}
+            />
+          </div>
+        )}
+        {/* Bulk action bar — shown when items are selected (both mobile + desktop) */}
+        {canApproveAdSpend && selectedIds.size > 0 && (
+          <div className="flex items-center gap-2 px-2.5 py-1.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-700/50 rounded-lg">
+            <span className="text-xs md:text-sm font-semibold text-brand-700 dark:text-brand-300 shrink-0">
+              {selectedIds.size} selected
+            </span>
+            <button onClick={clearSelection} className="text-xs text-brand-500 hover:text-brand-600 underline shrink-0">
+              Clear
+            </button>
+            <div className="flex-1" />
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                variant="danger"
+                size="sm"
+                className="text-xs md:text-sm"
+                onClick={() => setConfirmBulkReject(true)}
+                disabled={bulkAction.isRunning}
+              >
+                Reject
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="text-xs md:text-sm"
+                onClick={() => setConfirmBulkApprove(true)}
+                disabled={bulkAction.isRunning}
+              >
+                Approve
+              </Button>
+            </div>
+          </div>
+        )}
         <CompactTable
           withCard={false}
           columns={legacyAdSpendColumns}
-          rows={adSpend}
+          rows={patchedAdSpend}
           rowKey={(s) => s.id}
           emptyTitle="No ad spend records yet"
           emptyDescription="Try adjusting your filters"
-          renderMobileCard={(s) => (
-            <button
-              type="button"
-              onClick={() => setPeekAdSpend(s)}
-              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] space-y-1.5 px-3 py-2.5 text-left"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-app-fg truncate">
-                  <NairaPrice amount={Number(s.spendAmount)} />
-                  <span className="ml-1.5 text-xs font-normal text-app-fg-muted">({(s.orderCount ?? 0).toLocaleString()} orders)</span>
-                </span>
-                <StatusBadge status={s.status ?? 'PENDING'} />
-              </div>
-              <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                <span className="truncate">
-                  {users.length === 0 && secondaryLoading
-                    ? '...'
-                    : getUserName(s.mediaBuyerId, users)}
-                </span>
-                <span className="whitespace-nowrap">
-                  {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </span>
-              </div>
-            </button>
+          selection={canApproveAdSpend ? {
+            selectedIds,
+            isSelectable: (s) => (s.status ?? 'PENDING') === 'PENDING',
+            onToggle: toggleSelect,
+          } : undefined}
+          renderMobileCard={(s, _i, helpers) => (
+            <>
+              {helpers.rowSelection && (
+                <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">{helpers.rowSelection}</div>
+              )}
+              <button
+                type="button"
+                onClick={() => setPeekAdSpend(s)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] space-y-1.5 px-3 py-2.5 text-left"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-app-fg truncate">
+                    <NairaPrice amount={Number(s.spendAmount)} />
+                    <span className="ml-1.5 text-xs font-normal text-app-fg-muted">({(s.orderCount ?? 0).toLocaleString()} orders)</span>
+                  </span>
+                  <StatusBadge status={s.status ?? 'PENDING'} />
+                </div>
+                <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+                  <span className="truncate">
+                    {users.length === 0 && secondaryLoading
+                      ? '...'
+                      : getUserName(s.mediaBuyerId, users)}
+                  </span>
+                  <span className="whitespace-nowrap">
+                    {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </div>
+              </button>
+            </>
           )}
         />
       </div>
@@ -1640,6 +1818,122 @@ export function MarketingAdSpendPage({
           </div>
         </Modal>
       )}
+
+      {/* Bulk approve / reject confirmations */}
+      {(confirmBulkApprove || confirmBulkReject) && (() => {
+        // Sum amounts from both flat list and group lines
+        let totalAmount = 0;
+        const counted = new Set<string>();
+        for (const row of adSpend ?? []) {
+          if (selectedIds.has(row.id) && !counted.has(row.id)) {
+            totalAmount += Number(row.spendAmount);
+            counted.add(row.id);
+          }
+        }
+        for (const g of groups) {
+          for (const line of g.lines) {
+            if (selectedIds.has(line.id) && !counted.has(line.id)) {
+              totalAmount += Number(line.spendAmount);
+              counted.add(line.id);
+            }
+          }
+        }
+        const n = selectedIds.size;
+        const noun = n !== 1 ? 'expenses' : 'expense';
+
+        if (confirmBulkApprove) return (
+          <Modal open onClose={() => setConfirmBulkApprove(false)} maxWidth="max-w-sm">
+            <div className="p-5 space-y-4">
+              <h3 className="text-base font-semibold text-app-fg">Approve {n} {noun}?</h3>
+              <p className="text-sm text-app-fg-muted">
+                Total: <span className="font-semibold text-app-fg"><NairaPrice amount={totalAmount} /></span>
+              </p>
+              <p className="text-sm text-app-fg-muted">
+                All {n} selected pending {noun} will be marked as approved. This cannot be undone.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button variant="secondary" size="sm" onClick={() => setConfirmBulkApprove(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm" onClick={handleBulkApprove}>
+                  Approve all
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        );
+
+        return (
+          <Modal open onClose={() => { setConfirmBulkReject(false); setBulkRejectReason(''); }} maxWidth="max-w-sm">
+            <div className="p-5 space-y-4">
+              <h3 className="text-base font-semibold text-app-fg">Reject {n} {noun}?</h3>
+              <p className="text-sm text-app-fg-muted">
+                Total: <span className="font-semibold text-app-fg"><NairaPrice amount={totalAmount} /></span>
+              </p>
+              <p className="text-sm text-app-fg-muted">
+                All {n} selected pending {noun} will be rejected. Media buyers can correct and re-submit.
+              </p>
+              <Textarea
+                id="bulk-reject-reason"
+                label="Reason (optional)"
+                value={bulkRejectReason}
+                onChange={(e) => setBulkRejectReason(e.target.value)}
+                placeholder="Why are these entries being rejected?"
+                rows={2}
+                maxLength={500}
+              />
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <Button variant="secondary" size="sm" onClick={() => { setConfirmBulkReject(false); setBulkRejectReason(''); }}>
+                  Cancel
+                </Button>
+                <Button variant="danger" size="sm" onClick={handleBulkReject}>
+                  Reject all
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Mobile Smart-pick modal */}
+      <Modal
+        open={smartPickModalOpen}
+        onClose={() => setSmartPickModalOpen(false)}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4 p-5">
+          <div>
+            <h3 className="text-base font-semibold text-app-fg">Smart pick</h3>
+            <p className="mt-0.5 text-sm text-app-fg-muted">
+              Select pending expenses for bulk approval.
+            </p>
+          </div>
+          <SmartPick
+            total={pendingIdsOnPage.length}
+            selectedCount={selectedIds.size}
+            onPick={(count) => {
+              const picked = pendingIdsOnPage.slice(0, count);
+              setSelectedIds(new Set(picked));
+            }}
+            onClear={clearSelection}
+            itemNoun="expenses"
+            presets={[5, 10, 20, 50]}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => setSmartPickModalOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk progress modal */}
+      <BulkProgressModal state={bulkAction.progress} onDone={bulkAction.reset} />
     </div>
   );
 }

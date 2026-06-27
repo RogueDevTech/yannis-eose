@@ -1186,8 +1186,29 @@ export class MarketingService {
 
     const total = Number(totalRows[0]?.count ?? 0);
 
+    // When filtered to a single receiver, compute a running balance for each row.
+    // Balance = cumulative received (oldest→newest) at the point of each transaction.
+    // We query ALL disbursements for this receiver (not just the current page) to get
+    // accurate running totals, then attach the balance to only the page's rows.
+    let balanceByRowId: Map<string, string> | null = null;
+    if (input.receiverId) {
+      const runningRows = await this.db.execute<{ id: string; balanceAfter: string }>(sql`
+        SELECT id, SUM(amount) OVER (ORDER BY sent_at ASC, id ASC)::text AS "balanceAfter"
+        FROM marketing_funding
+        WHERE receiver_id = ${input.receiverId}
+          AND status IN ('SENT', 'COMPLETED')
+        ORDER BY sent_at DESC
+      `);
+      balanceByRowId = new Map(runningRows.map((r) => [r.id, r.balanceAfter]));
+    }
+
+    const enrichedRecords = records.map((r) => ({
+      ...r,
+      balanceAfter: balanceByRowId?.get(r.id) ?? null,
+    }));
+
     return {
-      records,
+      records: enrichedRecords,
       pagination: { page: input.page, limit: input.limit, total },
       filteredTotalAmount: sumRows[0]?.total ?? '0',
     };
@@ -2217,8 +2238,51 @@ export class MarketingService {
       this.db.select({ count: count() }).from(schema.marketingFundingRequests).where(whereClause),
     ]);
 
+    // Compute requester balance at time of each request. For each request row,
+    // balance = total received by requester before this request minus total distributed
+    // and ad spend before this request.
+    const requesterIds = Array.from(new Set(rows.map((r) => r.requesterId)));
+    let balanceByRowId: Map<string, string> | null = null;
+    if (requesterIds.length > 0) {
+      const balanceRows = await this.db.execute<{ id: string; balanceAtRequest: string }>(sql`
+        SELECT
+          fr.id,
+          GREATEST(0,
+            COALESCE((
+              SELECT SUM(mf.amount)
+              FROM marketing_funding mf
+              WHERE mf.receiver_id = fr.requester_id
+                AND mf.status IN ('SENT', 'COMPLETED')
+                AND mf.sent_at <= fr.created_at
+            ), 0)
+            - COALESCE((
+              SELECT SUM(mf2.amount)
+              FROM marketing_funding mf2
+              WHERE mf2.sender_id = fr.requester_id
+                AND mf2.status IN ('SENT', 'COMPLETED', 'DISPUTED')
+                AND mf2.sent_at <= fr.created_at
+            ), 0)
+            - COALESCE((
+              SELECT SUM(al.spend_amount)
+              FROM ad_spend_logs al
+              WHERE al.media_buyer_id = fr.requester_id
+                AND al.status != 'REJECTED'
+                AND al.created_at <= fr.created_at
+            ), 0)
+          )::text AS "balanceAtRequest"
+        FROM marketing_funding_requests fr
+        WHERE fr.id IN (${sql.join(rows.map((r) => sql`${r.id}`), sql`, `)})
+      `);
+      balanceByRowId = new Map(balanceRows.map((r) => [r.id, r.balanceAtRequest]));
+    }
+
+    const enrichedRows = rows.map((r) => ({
+      ...r,
+      balanceAtRequest: balanceByRowId?.get(r.id) ?? null,
+    }));
+
     return {
-      records: rows,
+      records: enrichedRows,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
   }

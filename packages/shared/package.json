@@ -26,6 +26,7 @@
     "db:seed:boost": "tsx src/db/seed-boost.ts",
     "db:seed:cross-funnel": "tsx src/db/seed-cross-funnel.ts",
     "db:seed:delivery-remittance-disputed": "tsx src/db/seed-delivery-remittance-disputed.ts",
+    "db:seed:expenses-today": "tsx src/db/seed-expenses-today.ts",
     "db:seed-permissions": "tsx scripts/seed-permissions.ts",
     "db:seed-message-templates": "tsx scripts/seed-message-templates.ts",
     "db:audit-permission-coverage": "tsx scripts/audit-permission-coverage.ts",

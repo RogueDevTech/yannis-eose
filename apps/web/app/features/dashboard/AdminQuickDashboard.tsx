@@ -72,6 +72,8 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
   const firstName = userName?.split(' ')[0] ?? 'Admin';
   const statusCounts = data.statusCounts ?? {};
   const offlineCount = data.offlineCount ?? 0;
+  const cartCounts = data.cartOrdersCounts ?? {};
+  const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -95,6 +97,10 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
   /** Offline + CS-specific links go to sales orders. */
   function salesLink(extra?: Record<string, string>): string {
     return buildLink('/admin/sales/orders', extra);
+  }
+  /** Cart orders page link. */
+  function cartOrdersLink(): string {
+    return buildLink('/admin/cart-orders');
   }
 
   // Mirror the Sales Orders page stat strip (CEO six-bucket pipeline).
@@ -203,6 +209,12 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
               value: `${deliveryRate.toFixed(1)}%`,
               valueClassName: deliveryRateColorClass(deliveryRate),
               title: 'Delivery Rate — delivered / total orders',
+            },
+            {
+              label: 'Cart Abandonment',
+              value: cartTotal,
+              valueClassName: 'text-orange-600 dark:text-orange-400',
+              to: cartOrdersLink(),
             },
           ]}
         />

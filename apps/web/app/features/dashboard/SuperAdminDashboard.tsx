@@ -172,6 +172,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       {(() => {
         const sc = orderPipeline.statusCounts;
         const offlineCount = orderPipeline.offlineCount ?? 0;
+        const cartCounts = data?.cartOrdersCounts ?? {};
+        const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
         const ordersTotal = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
         const unassigned = sc['UNPROCESSED'] ?? 0;
         const assigned = sc['CS_ASSIGNED'] ?? 0;
@@ -251,6 +253,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     value: deleted,
                     valueClassName: 'text-danger-600 dark:text-danger-400',
                     to: marketingLink({ status: 'DELETED' }),
+                  },
+                  {
+                    label: 'Cart Abandonment',
+                    value: cartTotal,
+                    valueClassName: 'text-orange-600 dark:text-orange-400',
+                    to: cartOrdersLink(),
                   },
                 ]}
               />

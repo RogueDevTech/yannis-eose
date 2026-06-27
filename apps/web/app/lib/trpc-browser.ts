@@ -346,6 +346,46 @@ export async function fetchOrderClipboardSummary(orderId: string): Promise<Order
  * when the viewer lacks `orders.flaggedDuplicates` permission (403) — the
  * modal falls back to masked `customerPhoneDisplay`.
  */
+/**
+ * POST `marketing.approveAdSpend` — used by bulk-approve flow (session cookie).
+ * Returns true on success, throws on failure.
+ */
+export async function postApproveAdSpend(adSpendId: string): Promise<boolean> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('API base URL not configured');
+  const res = await fetch(`${base}/trpc/marketing.approveAdSpend`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adSpendId }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+    throw new Error(json?.error?.message ?? 'Failed to approve ad spend');
+  }
+  return true;
+}
+
+/**
+ * POST `marketing.rejectAdSpend` — used by bulk-reject flow (session cookie).
+ * Returns true on success, throws on failure.
+ */
+export async function postRejectAdSpend(adSpendId: string, reason?: string): Promise<boolean> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('API base URL not configured');
+  const res = await fetch(`${base}/trpc/marketing.rejectAdSpend`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adSpendId, reason }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+    throw new Error(json?.error?.message ?? 'Failed to reject ad spend');
+  }
+  return true;
+}
+
 export async function fetchDuplicateComparisonPhones(
   orderId: string,
   originalOrderId: string,
