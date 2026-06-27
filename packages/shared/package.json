@@ -29,6 +29,7 @@
     "db:seed:expenses-today": "tsx src/db/seed-expenses-today.ts",
     "db:seed-permissions": "tsx scripts/seed-permissions.ts",
     "db:seed-message-templates": "tsx scripts/seed-message-templates.ts",
+    "db:audit-funding": "tsx src/db/audit-funding-balance.ts",
     "db:audit-permission-coverage": "tsx scripts/audit-permission-coverage.ts",
     "db:baseline": "tsx scripts/baseline-migrations.ts",
     "db:dedupe-products": "tsx scripts/dedupe-products.ts",
