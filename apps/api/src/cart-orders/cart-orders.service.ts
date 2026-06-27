@@ -1038,136 +1038,69 @@ export class CartOrdersService {
     this.logger.log(`pullFromAbandonedCarts: received ${cartIds.length} IDs, matched ${carts.length} carts`);
     if (carts.length === 0) return { pulled: 0 };
 
-    // Resolve product prices
-    const productIds = [...new Set(carts.map((c) => c.productId))];
-    const products = await this.db
-      .select({ id: schema.products.id, baseSalePrice: schema.products.baseSalePrice, offers: schema.products.offers })
-      .from(schema.products)
-      .where(inArray(schema.products.id, productIds));
-    const productMap = new Map(products.map((p) => [p.id, p]));
-
-    // Resolve campaign → branch + mediaBuyer mapping so each cart order
-    // inherits the campaign's branch/MB when the cart abandonment lacks one.
-    // Also tracks which campaign IDs actually exist — orphaned campaigns
-    // (deleted after the cart was captured) must not be inserted into
-    // cart_orders (FK constraint on campaign_id → campaigns).
+    // Resolve campaign → branch mapping for routing resolution.
     const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
-    const validCampaignIds = new Set<string>();
     const campaignBranchMap = new Map<string, string>();
-    const campaignMbMap = new Map<string, string>();
     if (campaignIds.length > 0) {
       const rows = await this.db
-        .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId, mediaBuyerId: schema.campaigns.mediaBuyerId })
+        .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId })
         .from(schema.campaigns)
         .where(inArray(schema.campaigns.id, campaignIds));
       for (const r of rows) {
-        validCampaignIds.add(r.id);
         if (r.branchId) campaignBranchMap.set(r.id, r.branchId);
-        if (r.mediaBuyerId) campaignMbMap.set(r.id, r.mediaBuyerId);
       }
     }
 
-    // Validate mediaBuyerIds — include campaign-derived MBs as candidates
-    const directMbIds = carts.map((c) => c.mediaBuyerId).filter(Boolean) as string[];
-    const campaignMbIds = [...campaignMbMap.values()];
-    const mbIds = [...new Set([...directMbIds, ...campaignMbIds])];
-    const validMbIds = new Set(
-      mbIds.length > 0
-        ? (await this.db.select({ id: schema.users.id }).from(schema.users).where(inArray(schema.users.id, mbIds))).map((u) => u.id)
-        : [],
-    );
-
-    let succeeded = 0;
-    for (const cart of carts) {
-      try {
-        // As long as there's a phone, create the cart order — that's all CS
-        // needs to initiate a call. Product/price are nice-to-have extras.
-        if (!cart.customerPhone && !cart.customerPhoneHash) {
-          this.logger.warn(`Cart pull skipped cart ${cart.id}: no phone`);
-          continue;
-        }
-
-        const product = productMap.get(cart.productId);
-        const qty = cart.quantity ?? 1;
-
-        let unitPrice = product?.baseSalePrice ?? '0';
-        if (cart.offerLabel && product?.offers) {
-          const offers = product.offers as Array<{ label?: string; price?: string | number }>;
-          const match = offers.find((o) => o.label === cart.offerLabel);
-          if (match?.price != null) unitPrice = String(match.price);
-        }
-
-        const directMb = cart.mediaBuyerId && validMbIds.has(cart.mediaBuyerId) ? cart.mediaBuyerId : null;
-        const campaignMb = !directMb && cart.campaignId ? campaignMbMap.get(cart.campaignId) ?? null : null;
-        const safeMbId = directMb ?? (campaignMb && validMbIds.has(campaignMb) ? campaignMb : null);
-
-        // Resolve servicing branch: explicit target → routing rules → campaign branch fallback
-        let resolvedBranchId = targetBranchId;
-        let resolvedRuleId: string | null = null;
-        if (!resolvedBranchId) {
-          const campaignBranch = cart.campaignId ? campaignBranchMap.get(cart.campaignId) ?? null : null;
-          const routing = await this.resolveRoutingBranch(campaignBranch);
-          if (routing) {
-            resolvedBranchId = routing.branchId;
-            resolvedRuleId = routing.ruleId;
-          } else {
-            resolvedBranchId = campaignBranch;
-          }
-        }
-
-        // Use raw SQL to bypass Drizzle schema / trigger conflicts.
-        // The stamp_actor trigger on cart_orders/cart_order_items expects
-        // valid_from but Drizzle's insert may not include it, causing
-        // "column valid_from does not exist" errors inside withActor.
-        const safeCampaignId = cart.campaignId && validCampaignIds.has(cart.campaignId) ? cart.campaignId : null;
-        const [co] = await this.db.execute<{ id: string }>(sql`
-          INSERT INTO cart_orders (
-            source_cart_id, campaign_id, media_buyer_id, status,
-            customer_name, customer_phone_hash, customer_phone,
-            customer_address, delivery_address, total_amount,
-            delivery_notes, delivery_state, customer_gender,
-            preferred_delivery_date, payment_method, customer_email,
-            order_source, custom_fields, servicing_branch_id, routing_rule_id
-          ) VALUES (
-            ${cart.id}, ${safeCampaignId}, ${safeMbId}, 'UNPROCESSED',
-            ${cart.customerName || 'Unknown'}, ${cart.customerPhoneHash}, ${cart.customerPhone},
-            ${cart.customerAddress}, ${cart.deliveryAddress}, ${unitPrice}::numeric,
-            ${cart.deliveryNotes}, ${cart.deliveryState}, ${cart.customerGender},
-            ${cart.preferredDeliveryDate}, ${cart.paymentMethod}, ${cart.customerEmail},
-            'online', ${cart.customFieldValues ? JSON.stringify(cart.customFieldValues) : null}::jsonb,
-            ${resolvedBranchId}, ${resolvedRuleId}
-          ) RETURNING id
-        `);
-
-        if (co) {
-          // Item insert — best-effort
-          try {
-            await this.db.execute(sql`
-              INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
-              VALUES (gen_random_uuid(), ${co.id}, ${cart.productId}, ${qty}, ${unitPrice}::numeric, ${cart.offerLabel})
-            `);
-          } catch (itemErr) {
-            this.logger.warn(`Cart order ${co.id} item insert failed: ${itemErr instanceof Error ? itemErr.message : itemErr}`);
-          }
-
-          // Timeline insert — best-effort
-          try {
-            await this.db.execute(sql`
-              INSERT INTO cart_order_timeline_events (id, cart_order_id, event_type, actor_name, description, metadata, branch_id)
-              VALUES (gen_random_uuid(), ${co.id}, 'ORDER_RECEIVED', 'System', 'Cart order created from abandoned cart.',
-                ${JSON.stringify({ sourceCartId: cart.id })}::jsonb, ${resolvedBranchId})
-            `);
-          } catch (tlErr) {
-            this.logger.warn(`Cart order ${co.id} timeline insert failed: ${tlErr instanceof Error ? tlErr.message : tlErr}`);
-          }
-        }
-        succeeded++;
-      } catch (err) {
-        this.logger.error(`Cart pull FAILED cart ${cart.id}: ${err instanceof Error ? err.stack ?? err.message : err}`);
+    // Resolve routing: all carts go through the same routing rule resolution.
+    // For simplicity, resolve once (routing rules are org-wide, not per-cart).
+    let resolvedBranchId = targetBranchId;
+    let resolvedRuleId: string | null = null;
+    if (!resolvedBranchId) {
+      // Use first cart's campaign branch as seed for routing resolution
+      const firstCampaignBranch = carts[0]?.campaignId ? campaignBranchMap.get(carts[0].campaignId) ?? null : null;
+      const routing = await this.resolveRoutingBranch(firstCampaignBranch);
+      if (routing) {
+        resolvedBranchId = routing.branchId;
+        resolvedRuleId = routing.ruleId;
       }
     }
 
-    return { pulled: succeeded };
+    // Bulk INSERT ... SELECT — same pattern as manual SQL that works.
+    // Parameterized per-row INSERTs via postgres.js fail with trigger
+    // "column valid_from does not exist" due to extended query protocol
+    // interaction with the stamp_actor trigger.
+    const validCartIds = carts
+      .filter((c) => c.customerPhone || c.customerPhoneHash)
+      .map((c) => c.id);
+
+    if (validCartIds.length === 0) return { pulled: 0 };
+
+    const inserted = await this.db.execute<{ id: string }>(sql`
+      INSERT INTO cart_orders (
+        id, source_cart_id, campaign_id, media_buyer_id, status,
+        customer_name, customer_phone_hash, customer_phone,
+        customer_address, delivery_address, total_amount,
+        delivery_notes, delivery_state, customer_gender,
+        preferred_delivery_date, payment_method, customer_email,
+        order_source, servicing_branch_id, routing_rule_id,
+        custom_fields
+      )
+      SELECT
+        gen_random_uuid(), ca.id, ca.campaign_id, ca.media_buyer_id,
+        'UNPROCESSED', ca.customer_name, ca.customer_phone_hash, ca.customer_phone,
+        ca.customer_address, ca.delivery_address, 0,
+        ca.delivery_notes, ca.delivery_state, ca.customer_gender,
+        ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
+        'online', ${resolvedBranchId}, ${resolvedRuleId},
+        ca.custom_field_values
+      FROM cart_abandonments ca
+      WHERE ca.id IN (${sql.join(validCartIds.map((id) => sql`${id}`), sql`, `)})
+      RETURNING id, source_cart_id
+    `);
+
+    this.logger.log(`Bulk inserted ${inserted.length} cart orders`);
+
+    return { pulled: inserted.length };
   }
 
   // ══════════════════════════════════════════════════════════════════════
