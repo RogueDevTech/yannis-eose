@@ -384,11 +384,12 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     // a stale "Transfers only" filter from another tab doesn't quietly hide rows here.
     params.delete('entryType');
     params.delete('entryStatus');
+    params.delete('mediaBuyerId');
     setSearchParams(params, { preventScrollReset: true });
   };
 
   const updateSliceParam = (
-    key: 'status' | 'requestStatus' | 'search' | 'entryType' | 'entryStatus' | 'senderId',
+    key: 'status' | 'requestStatus' | 'search' | 'entryType' | 'entryStatus' | 'senderId' | 'mediaBuyerId',
     value: string | undefined,
   ) => {
     const params = new URLSearchParams(searchParams);
@@ -502,14 +503,23 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   );
   // Sender filter — lets admin/SuperAdmin scope the distributing tab to a specific HoM.
   const senderFilter = searchParams.get('senderId') ?? 'ALL';
+  // Media Buyer filter — lets HoM / team supervisor scope the distributing tab to a specific MB.
+  const mediaBuyerFilter = searchParams.get('mediaBuyerId') ?? 'ALL';
   const unifiedDistributingSlice = useMemo(() => {
     if (!distributingEntries) return distributingEntries;
-    if (senderFilter === 'ALL') return distributingEntries;
-    const filtered = distributingEntries.records.filter((e) =>
-      e.entryType === 'transfer' ? e.senderId === senderFilter : true,
-    );
+    const hasSender = senderFilter !== 'ALL';
+    const hasMB = mediaBuyerFilter !== 'ALL';
+    if (!hasSender && !hasMB) return distributingEntries;
+    const filtered = distributingEntries.records.filter((e) => {
+      if (hasSender && e.entryType === 'transfer' && e.senderId !== senderFilter) return false;
+      if (hasMB) {
+        const subjectId = e.entryType === 'transfer' ? e.receiverId : e.requesterId;
+        if (subjectId !== mediaBuyerFilter) return false;
+      }
+      return true;
+    });
     return { ...distributingEntries, records: filtered, total: filtered.length };
-  }, [distributingEntries, senderFilter]);
+  }, [distributingEntries, senderFilter, mediaBuyerFilter]);
 
   // Unique senders for the filter dropdown (from unfiltered data).
   const distributingSenders = useMemo(() => {
@@ -518,6 +528,26 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     for (const e of distributingEntries.records) {
       if (e.entryType === 'transfer' && e.senderId && !seen.has(e.senderId)) {
         seen.set(e.senderId, e.senderName ?? e.senderId);
+      }
+    }
+    return [...seen.entries()]
+      .map(([id, name]) => ({ value: id, label: name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [distributingEntries]);
+
+  // Unique media buyers (receivers of transfers / requesters of requests) for the filter dropdown.
+  const distributingMediaBuyers = useMemo(() => {
+    if (!distributingEntries) return [];
+    const seen = new Map<string, string>();
+    for (const e of distributingEntries.records) {
+      if (e.entryType === 'transfer') {
+        if (e.receiverId && !seen.has(e.receiverId)) {
+          seen.set(e.receiverId, e.receiverName ?? e.receiverId);
+        }
+      } else {
+        if (e.requesterId && !seen.has(e.requesterId)) {
+          seen.set(e.requesterId, e.requesterName ?? e.requesterId);
+        }
       }
     }
     return [...seen.entries()]
@@ -738,19 +768,42 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             filtersBadgeCount={(() => {
               const s =
                 displaySection === 'distributing' ? unifiedDistributingSlice : unifiedReceivedSlice;
-              return s ? ledgerFilterBadgeCount(s.typeFilter, s.statusFilter) : 0;
+              let n = s ? ledgerFilterBadgeCount(s.typeFilter, s.statusFilter) : 0;
+              if (displaySection === 'distributing' && mediaBuyerFilter !== 'ALL') n += 1;
+              if (displaySection === 'distributing' && senderFilter !== 'ALL') n += 1;
+              return n;
             })()}
             filters={(() => {
               const s =
                 displaySection === 'distributing' ? unifiedDistributingSlice : unifiedReceivedSlice;
               if (!s) return undefined;
               return (
-                <FundingFilterControls
-                  slice={s}
-                  sentLabel={displaySection === 'distributing' ? 'Sent' : 'Pending mark-received'}
-                  onTypeChange={(v) => updateSliceParam('entryType', v)}
-                  onStatusChange={(v) => updateSliceParam('entryStatus', v)}
-                />
+                <>
+                  <FundingFilterControls
+                    slice={s}
+                    sentLabel={displaySection === 'distributing' ? 'Sent' : 'Pending mark-received'}
+                    onTypeChange={(v) => updateSliceParam('entryType', v)}
+                    onStatusChange={(v) => updateSliceParam('entryStatus', v)}
+                  />
+                  {displaySection === 'distributing' && distributingMediaBuyers.length > 1 && (
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      {mediaBuyerFilter !== 'ALL' && <FilterDismiss onClear={() => updateSliceParam('mediaBuyerId', undefined)} />}
+                      <SearchableSelect
+                        id="distributing-mb-filter-mobile"
+                        value={mediaBuyerFilter}
+                        onChange={(v) => updateSliceParam('mediaBuyerId', v === 'ALL' ? '' : v)}
+                        options={[
+                          { value: 'ALL', label: 'All media buyers' },
+                          ...distributingMediaBuyers,
+                        ]}
+                        placeholder="All media buyers"
+                        searchPlaceholder="Search media buyer..."
+                        wrapperClassName="w-full"
+                        triggerClassName="!bg-transparent !border-transparent" inlineChevron
+                      />
+                    </div>
+                  )}
+                </>
               );
             })()}
             desktop={renderFundingHeaderToolbar(() => undefined)}
@@ -895,6 +948,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               senders={distributingSenders}
               senderFilter={senderFilter}
               onSenderChange={(v) => updateSliceParam('senderId', v === 'ALL' ? '' : v)}
+              mediaBuyers={distributingMediaBuyers}
+              mediaBuyerFilter={mediaBuyerFilter}
+              onMediaBuyerChange={(v) => updateSliceParam('mediaBuyerId', v === 'ALL' ? '' : v)}
             />
             <UnifiedDistributingTable
               slice={unifiedDistributingSlice}
@@ -1915,6 +1971,9 @@ function UnifiedDistributingFilterBar({
   senders,
   senderFilter,
   onSenderChange,
+  mediaBuyers,
+  mediaBuyerFilter,
+  onMediaBuyerChange,
 }: {
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   searchQuery: string;
@@ -1925,6 +1984,9 @@ function UnifiedDistributingFilterBar({
   senders?: Array<{ value: string; label: string }>;
   senderFilter?: string;
   onSenderChange?: (val: string) => void;
+  mediaBuyers?: Array<{ value: string; label: string }>;
+  mediaBuyerFilter?: string;
+  onMediaBuyerChange?: (val: string) => void;
 }) {
   const filterBadge = ledgerFilterBadgeCount(slice.typeFilter, slice.statusFilter);
 
@@ -2002,6 +2064,25 @@ function UnifiedDistributingFilterBar({
                 ]}
                 placeholder="All senders"
                 searchPlaceholder="Search sender..."
+                wrapperClassName="w-auto min-w-[12rem]"
+              />
+            </div>
+          )}
+          {mediaBuyers && mediaBuyers.length > 1 && onMediaBuyerChange && (
+            <div className="relative">
+              {mediaBuyerFilter && mediaBuyerFilter !== 'ALL' && (
+                <FilterDismiss onClear={() => onMediaBuyerChange('ALL')} />
+              )}
+              <SearchableSelect
+                id="distributing-mb-filter"
+                value={mediaBuyerFilter ?? 'ALL'}
+                onChange={onMediaBuyerChange}
+                options={[
+                  { value: 'ALL', label: 'All media buyers' },
+                  ...mediaBuyers,
+                ]}
+                placeholder="All media buyers"
+                searchPlaceholder="Search media buyer..."
                 wrapperClassName="w-auto min-w-[12rem]"
               />
             </div>

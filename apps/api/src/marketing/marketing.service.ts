@@ -234,13 +234,16 @@ export class MarketingService {
   ): Promise<number> {
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
 
+    // Credits: SENT + COMPLETED — matches getFundingBalance display formula.
+    // SENT funds are in-flight but already deducted from the sender's pool,
+    // so they are available to the receiver for further distribution.
     const [inRow] = await tx
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
       .where(
         and(
           eq(schema.marketingFunding.receiverId, userId),
-          eq(schema.marketingFunding.status, 'COMPLETED'),
+          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
         ),
       );
 
