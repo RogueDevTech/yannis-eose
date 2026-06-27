@@ -313,22 +313,20 @@ export class CartService {
     // Auto-pull newly abandoned carts into the Cart Orders page.
     // Only pull carts not already in cart_orders (the service checks this).
     try {
-      const unpulledCarts = await this.db
-        .select({ id: schema.cartAbandonments.id })
-        .from(schema.cartAbandonments)
-        .where(
-          and(
-            eq(schema.cartAbandonments.status, 'ABANDONED'),
-            sql`${schema.cartAbandonments.id} NOT IN (SELECT source_cart_id FROM cart_orders)`,
-          ),
-        )
-        .limit(500);
+      const unpulledCarts = await this.db.execute<{ id: string }>(sql`
+        SELECT id FROM cart_abandonments
+        WHERE status = 'ABANDONED'
+          AND id NOT IN (SELECT source_cart_id FROM cart_orders)
+        LIMIT 500
+      `);
+      console.log(`[Cart] Found ${unpulledCarts.length} unpulled abandoned cart(s)`);
       if (unpulledCarts.length > 0) {
         const result = await this.cartOrdersService.pullFromAbandonedCarts(
           unpulledCarts.map((c) => c.id),
           null, // round-robin or no branch — service resolves from campaign
           { id: SYSTEM_ACTOR_ID } as Parameters<typeof this.cartOrdersService.pullFromAbandonedCarts>[2],
         );
+        console.log(`[Cart] Pull result: ${result.pulled} pulled`);
         if (result.pulled > 0) {
           console.log(`[Cart] Auto-pulled ${result.pulled} abandoned cart(s) into Cart Orders`);
         }
