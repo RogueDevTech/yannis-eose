@@ -71,6 +71,7 @@ export interface DisbursementRecord {
   verifiedAt: string | null;
   senderName?: string | null;
   receiverName?: string | null;
+  balanceAfter?: string | null;
 }
 
 export interface FundingRequestRecord {
@@ -85,6 +86,7 @@ export interface FundingRequestRecord {
   resolvedBy: string | null;
   /** Set by API when listing (join with users); fallback to lookup by requesterId */
   requesterName?: string | null;
+  balanceAtRequest?: string | null;
 }
 
 export interface DisbursementsPageData {
@@ -610,6 +612,17 @@ export function DisbursementsPage({
           </span>
         ),
       },
+      {
+        key: 'balance',
+        header: 'Balance',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (f) => (
+          <span className="text-sm tabular-nums text-app-fg-muted">
+            {f.balanceAfter != null ? <NairaPrice amount={Number(f.balanceAfter)} /> : '—'}
+          </span>
+        ),
+      },
     ];
   }, [getName]);
 
@@ -666,6 +679,17 @@ export function DisbursementsPage({
         render: (r) => (
           <span className="text-sm text-app-fg-muted">
             {r.resolvedAt ? new Date(r.resolvedAt).toLocaleString('en-NG', DATE_TIME_FMT) : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'balance',
+        header: 'Balance',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (r) => (
+          <span className="text-sm tabular-nums text-app-fg-muted">
+            {r.balanceAtRequest != null ? <NairaPrice amount={Number(r.balanceAtRequest)} /> : '—'}
           </span>
         ),
       },

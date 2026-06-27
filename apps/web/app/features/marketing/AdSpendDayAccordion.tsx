@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { CountPill } from '~/components/ui/count-pill';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -424,6 +425,9 @@ interface AdSpendDayAccordionProps {
    *  the Edit button — without it the action falls back to the row's other
    *  affordances. */
   onEdit?: (line: AdSpendGroupLine) => void;
+  /** Bulk selection state — when provided, checkboxes render on PENDING lines. */
+  selectedIds?: ReadonlySet<string>;
+  onToggleSelect?: (id: string, selected: boolean) => void;
 }
 
 export function AdSpendDayAccordion({
@@ -437,7 +441,10 @@ export function AdSpendDayAccordion({
   actionUrl,
   onPreviewReceipt,
   onEdit,
+  selectedIds,
+  onToggleSelect,
 }: AdSpendDayAccordionProps) {
+  const selectionEnabled = !!selectedIds && !!onToggleSelect;
   // Default to fully collapsed so long lists stay scannable.
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
@@ -486,10 +493,37 @@ export function AdSpendDayAccordion({
                   : 'border-app-border hover:border-app-border-strong',
               ].join(' ')}
             >
+              <div className="flex items-center">
+                {selectionEnabled && (() => {
+                  const pendingLines = g.lines.filter((l) => l.status === 'PENDING');
+                  if (pendingLines.length === 0) return <span className="w-7 shrink-0" />;
+                  const allSelected = pendingLines.every((l) => selectedIds.has(l.id));
+                  const someSelected = !allSelected && pendingLines.some((l) => selectedIds.has(l.id));
+                  return (
+                    <label
+                      className="flex items-center justify-center w-7 shrink-0 cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={allSelected}
+                        ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                        onChange={() => {
+                          const ids = pendingLines.map((l) => l.id);
+                          if (allSelected) {
+                            ids.forEach((id) => onToggleSelect!(id, false));
+                          } else {
+                            ids.forEach((id) => onToggleSelect!(id, true));
+                          }
+                        }}
+                        aria-label={`Select all pending in ${g.spendDate}`}
+                      />
+                    </label>
+                  );
+                })()}
               <button
                 type="button"
                 onClick={() => toggle(key)}
-                className="w-full text-left px-3 py-2 hover:bg-app-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
+                className="flex-1 w-full text-left px-3 py-2 hover:bg-app-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
                 aria-expanded={isOpen}
               >
                 {/* Compact 2-row header. Row 1: date · relative · MB · ₦ total.
@@ -567,6 +601,7 @@ export function AdSpendDayAccordion({
                   </div>
                 </div>
               </button>
+              </div>
 
               {isOpen && (
                 <div className="border-t border-app-border bg-app-base">
@@ -576,20 +611,35 @@ export function AdSpendDayAccordion({
                       columns={lineColumns}
                       rows={g.lines}
                       rowKey={(line) => line.id}
+                      selection={selectionEnabled ? {
+                        selectedIds: selectedIds!,
+                        isSelectable: (line) => line.status === 'PENDING',
+                        onToggle: onToggleSelect!,
+                      } : undefined}
                     />
                   </div>
 
                   <div className="md:hidden divide-y divide-app-border">
                     {g.lines.map((line) => (
-                      <LineCardMobile
-                        key={line.id}
-                        line={line}
-                        canModerate={canModerate}
-                        canEdit={canEditLine(line, currentUserId, canModerate)}
-                        actionUrl={actionUrl}
-                        onPreviewReceipt={onPreviewReceipt}
-                        onEdit={onEdit}
-                      />
+                      <div key={line.id} className="px-3 py-2.5">
+                        {selectionEnabled && line.status === 'PENDING' && (
+                          <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">
+                            <Checkbox
+                              checked={selectedIds!.has(line.id)}
+                              onChange={(e) => onToggleSelect!(line.id, e.target.checked)}
+                              aria-label="Select expense"
+                            />
+                          </div>
+                        )}
+                        <LineCardMobile
+                          line={line}
+                          canModerate={canModerate}
+                          canEdit={canEditLine(line, currentUserId, canModerate)}
+                          actionUrl={actionUrl}
+                          onPreviewReceipt={onPreviewReceipt}
+                          onEdit={onEdit}
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>

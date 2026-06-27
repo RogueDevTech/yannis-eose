@@ -1047,7 +1047,11 @@ export class CartOrdersService {
 
     // Resolve campaign → branch + mediaBuyer mapping so each cart order
     // inherits the campaign's branch/MB when the cart abandonment lacks one.
+    // Also tracks which campaign IDs actually exist — orphaned campaigns
+    // (deleted after the cart was captured) must not be inserted into
+    // cart_orders (FK constraint on campaign_id → campaigns).
     const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
+    const validCampaignIds = new Set<string>();
     const campaignBranchMap = new Map<string, string>();
     const campaignMbMap = new Map<string, string>();
     if (campaignIds.length > 0) {
@@ -1056,6 +1060,7 @@ export class CartOrdersService {
         .from(schema.campaigns)
         .where(inArray(schema.campaigns.id, campaignIds));
       for (const r of rows) {
+        validCampaignIds.add(r.id);
         if (r.branchId) campaignBranchMap.set(r.id, r.branchId);
         if (r.mediaBuyerId) campaignMbMap.set(r.id, r.mediaBuyerId);
       }
@@ -1110,11 +1115,12 @@ export class CartOrdersService {
         }
 
         await withActor(this.db, actor, async (tx) => {
+          const safeCampaignId = cart.campaignId && validCampaignIds.has(cart.campaignId) ? cart.campaignId : null;
           const [co] = await tx
             .insert(schema.cartOrders)
             .values({
               sourceCartId: cart.id,
-              campaignId: cart.campaignId,
+              campaignId: safeCampaignId,
               mediaBuyerId: safeMbId,
               status: 'UNPROCESSED',
               customerName: cart.customerName || 'Unknown',
