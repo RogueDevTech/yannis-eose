@@ -1035,6 +1035,7 @@ export class CartOrdersService {
         ),
       );
 
+    this.logger.log(`pullFromAbandonedCarts: received ${cartIds.length} IDs, matched ${carts.length} carts`);
     if (carts.length === 0) return { pulled: 0 };
 
     // Resolve product prices
@@ -1173,7 +1174,7 @@ export class CartOrdersService {
         });
         succeeded++;
       } catch (err) {
-        this.logger.warn(`Cart pull skipped cart ${cart.id}: ${err instanceof Error ? err.message : err}`);
+        this.logger.error(`Cart pull FAILED cart ${cart.id}: ${err instanceof Error ? err.stack ?? err.message : err}`);
       }
     }
 
