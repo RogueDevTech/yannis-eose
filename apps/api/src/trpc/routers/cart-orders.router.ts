@@ -11,7 +11,6 @@ import {
   updateCartOrderRoutingRuleSchema,
   deleteCartOrderRoutingRuleSchema,
   listCartOrderRoutingRulesSchema,
-  listCartOrderSyncLogsSchema,
 } from '@yannis/shared';
 import type { CartOrdersService } from '../../cart-orders/cart-orders.service';
 import { getFinanceService } from './finance.router';
@@ -215,17 +214,6 @@ export const cartOrdersRouter = router({
     .input(deleteCartOrderRoutingRuleSchema)
     .mutation(async ({ input, ctx }) => {
       return getCartOrdersService().deleteRoutingRule(ctx.user, input.ruleId);
-    }),
-
-  routingSyncNow: permissionProcedure('orders.followUpConfig')
-    .mutation(async ({ ctx }) => {
-      return getCartOrdersService().runAutoSync('manual', ctx.user.id);
-    }),
-
-  routingListSyncLogs: permissionProcedure('orders.followUpConfig')
-    .input(listCartOrderSyncLogsSchema)
-    .query(async ({ input }) => {
-      return getCartOrdersService().listSyncLogs(input.page, input.limit);
     }),
 
   routingListActiveCsBranches: permissionProcedure('orders.followUpConfig')
