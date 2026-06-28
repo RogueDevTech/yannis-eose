@@ -12,15 +12,19 @@ docker restart yannis-eose-api-1
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
-
+sudo docker ps --format '{{.Names}} {{.CreatedAt}}'                           
+                        
+   
 
  PGPASSWORD='586686586686' pg_dump -h 34.105.212.253 -U postgres -d postgres -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql 
 
-
+sudo docker exec yannis-eose-api-1 grep -c "INSERT INTO cart_orders" /app/dist/main.js     
 
 pg_dump "postgresql://postgres:586686586686@34.105.212.253:5432/postgres?sslmode=require" -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql
 
+    
 
+                                                       
 
 
 DATABASE_URL=postgresql://yannis_app: @34.39.26.2:5432/yannis?sslmode=require
