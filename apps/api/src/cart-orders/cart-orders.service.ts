@@ -44,6 +44,10 @@ export class CartOrdersService {
     this.seedDefaultRoutingRule().catch((err) =>
       this.logger.warn(`Cart routing rule seed failed: ${err.message}`),
     );
+    // Backfill cart_order_items for any cart orders missing line items
+    this.backfillMissingCartOrderItems().catch((err) =>
+      this.logger.warn(`Cart order items backfill failed: ${err.message}`),
+    );
   }
 
   private async backfillMissingMediaBuyers() {
@@ -119,6 +123,46 @@ export class CartOrdersService {
     const backfilled = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
     if (backfilled > 0) {
       this.logger.log(`Backfilled ${backfilled} cart orders to Lagos branch`);
+    }
+  }
+
+  /** Backfill cart_order_items for cart orders that were pulled without line items. */
+  private async backfillMissingCartOrderItems() {
+    const result = await this.db.execute(sql`
+      INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
+      SELECT
+        gen_random_uuid(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
+        COALESCE(
+          (SELECT (o->>'price')::numeric
+           FROM jsonb_array_elements(p.offers) AS o
+           WHERE o->>'label' = ca.offer_label
+           LIMIT 1),
+          COALESCE(p.base_sale_price, 0)
+        ),
+        ca.offer_label
+      FROM cart_orders co
+      JOIN cart_abandonments ca ON ca.id = co.source_cart_id
+      LEFT JOIN products p ON p.id = ca.product_id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
+      )
+        AND ca.product_id IS NOT NULL
+    `);
+    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (count > 0) {
+      this.logger.log(`Backfilled ${count} missing cart_order_items from source carts`);
+      // Also fix total_amount on the parent cart_orders
+      await this.db.execute(sql`
+        UPDATE cart_orders co
+        SET total_amount = sub.line_total, updated_at = now()
+        FROM (
+          SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
+          FROM cart_order_items coi
+          GROUP BY coi.cart_order_id
+        ) sub
+        WHERE co.id = sub.cart_order_id
+          AND (co.total_amount IS NULL OR co.total_amount = 0)
+      `);
     }
   }
 
@@ -1099,6 +1143,75 @@ export class CartOrdersService {
     `);
 
     this.logger.log(`Bulk inserted ${inserted.length} cart orders`);
+
+    // Create cart_order_items from the source cart's product/quantity/offerLabel.
+    // The old per-row insert resolved offer prices; the bulk SQL uses the
+    // product's base_sale_price as a fallback. Offer-specific pricing is
+    // resolved via a LATERAL join against the product's offers JSONB.
+    if (inserted.length > 0) {
+      const insertedSourceIds = (inserted as unknown as Array<{ source_cart_id: string }>).map((r) => r.source_cart_id);
+      await this.db.execute(sql`
+        INSERT INTO cart_order_items (
+          id, cart_order_id, product_id, quantity, unit_price, offer_label
+        )
+        SELECT
+          gen_random_uuid(),
+          co.id,
+          ca.product_id,
+          COALESCE(ca.quantity, 1),
+          COALESCE(
+            (SELECT (o->>'price')::numeric
+             FROM jsonb_array_elements(p.offers) AS o
+             WHERE o->>'label' = ca.offer_label
+             LIMIT 1),
+            COALESCE(p.base_sale_price, 0)
+          ),
+          ca.offer_label
+        FROM cart_orders co
+        JOIN cart_abandonments ca ON ca.id = co.source_cart_id
+        LEFT JOIN products p ON p.id = ca.product_id
+        WHERE co.source_cart_id IN (${sql.join(insertedSourceIds.map((id) => sql`${id}`), sql`, `)})
+          AND NOT EXISTS (
+            SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
+          )
+      `);
+
+      // Update total_amount on the parent cart_orders to match item prices
+      await this.db.execute(sql`
+        UPDATE cart_orders co
+        SET total_amount = sub.line_total, updated_at = now()
+        FROM (
+          SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
+          FROM cart_order_items coi
+          WHERE coi.cart_order_id IN (
+            SELECT id FROM cart_orders WHERE source_cart_id IN (${sql.join(insertedSourceIds.map((id) => sql`${id}`), sql`, `)})
+          )
+          GROUP BY coi.cart_order_id
+        ) sub
+        WHERE co.id = sub.cart_order_id
+          AND (co.total_amount IS NULL OR co.total_amount = 0)
+      `);
+
+      // Create timeline events for the newly pulled orders
+      await this.db.execute(sql`
+        INSERT INTO cart_order_timeline_events (
+          id, cart_order_id, event_type, actor_name, description, metadata, branch_id
+        )
+        SELECT
+          gen_random_uuid(),
+          co.id,
+          'ORDER_RECEIVED',
+          'System',
+          'Cart order created from abandoned cart.',
+          jsonb_build_object('sourceCartId', co.source_cart_id),
+          co.servicing_branch_id
+        FROM cart_orders co
+        WHERE co.source_cart_id IN (${sql.join(insertedSourceIds.map((id) => sql`${id}`), sql`, `)})
+          AND NOT EXISTS (
+            SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
+          )
+      `);
+    }
 
     return { pulled: inserted.length };
   }
