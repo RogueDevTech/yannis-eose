@@ -310,26 +310,12 @@ export class CartService {
     if (merged > 0) {
       console.log(`[Cart] Merged ${merged} duplicate cart(s)`);
     }
-    // Auto-pull newly abandoned carts into the Cart Orders page.
-    // Only pull carts not already in cart_orders (the service checks this).
+    // Auto-pull newly abandoned carts into Cart Orders via the shared
+    // runAutoSync path (applies routing rules + writes sync logs).
     try {
-      const unpulledCarts = await this.db.execute<{ id: string }>(sql`
-        SELECT id FROM cart_abandonments
-        WHERE status = 'ABANDONED'
-          AND id NOT IN (SELECT source_cart_id FROM cart_orders)
-        LIMIT 500
-      `);
-      console.log(`[Cart] Found ${unpulledCarts.length} unpulled abandoned cart(s)`);
-      if (unpulledCarts.length > 0) {
-        const result = await this.cartOrdersService.pullFromAbandonedCarts(
-          unpulledCarts.map((c) => c.id),
-          null, // round-robin or no branch — service resolves from campaign
-          { id: SYSTEM_ACTOR_ID } as Parameters<typeof this.cartOrdersService.pullFromAbandonedCarts>[2],
-        );
-        console.log(`[Cart] Pull result: ${result.pulled} pulled`);
-        if (result.pulled > 0) {
-          console.log(`[Cart] Auto-pulled ${result.pulled} abandoned cart(s) into Cart Orders`);
-        }
+      const result = await this.cartOrdersService.runAutoSync('cron');
+      if (result.totalPulled > 0) {
+        console.log(`[Cart] Auto-pulled ${result.totalPulled} abandoned cart(s) into Cart Orders`);
       }
     } catch (err) {
       console.error(`[Cart] Auto-pull to Cart Orders failed: ${err instanceof Error ? err.message : err}`);

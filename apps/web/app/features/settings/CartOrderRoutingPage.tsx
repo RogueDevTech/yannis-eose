@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { CompactTable } from '~/components/ui/compact-table';
-import { Tabs } from '~/components/ui/tabs';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -28,34 +27,17 @@ interface RoutingRule {
 
 interface Branch { id: string; name: string; status?: string }
 
-interface SyncLog {
-  id: string;
-  triggeredBy: string;
-  startedAt: string;
-  finishedAt: string | null;
-  totalPulled: number;
-  fallbackCount: number;
-  ruleResults: Array<{ ruleId: string; ruleName: string; pulled: number }> | null;
-  errorMessage: string | null;
-}
-
 interface Props {
   rules: RoutingRule[];
   branches: Branch[];
-  syncLogs: SyncLog[];
 }
 
 // ── Component ───────────────────────────────────────────────────────
 
-export function CartOrderRoutingPage({ rules, branches, syncLogs }: Props) {
-  const [tab, setTab] = useState('rules');
+export function CartOrderRoutingPage({ rules, branches }: Props) {
   const [editRule, setEditRule] = useState<RoutingRule | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RoutingRule | null>(null);
-
-  const syncFetcher = useFetcher();
-  useFetcherToast(syncFetcher, { successMessage: 'Cart orders synced' });
-  const isSyncing = syncFetcher.state !== 'idle';
 
   return (
     <div>
@@ -64,41 +46,18 @@ export function CartOrderRoutingPage({ rules, branches, syncLogs }: Props) {
         description="Configure which branch receives cart orders pulled from abandoned carts."
         backTo="/admin/settings"
         actions={
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => syncFetcher.submit({ intent: 'syncNow' }, { method: 'POST' })}
-              disabled={isSyncing}
-            >
-              {isSyncing ? 'Syncing…' : 'Sync now'}
-            </Button>
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              Add rule
-            </Button>
-          </div>
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            Add rule
+          </Button>
         }
         mobileInlineActions
       />
 
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: 'rules', label: 'Routing Rules' },
-          { value: 'logs', label: 'Sync Logs' },
-        ]}
+      <RulesTab
+        rules={rules}
+        onEdit={setEditRule}
+        onDelete={setDeleteTarget}
       />
-
-      {tab === 'rules' && (
-        <RulesTab
-          rules={rules}
-          onEdit={setEditRule}
-          onDelete={setDeleteTarget}
-        />
-      )}
-
-      {tab === 'logs' && <LogsTab logs={syncLogs} />}
 
       {(showCreate || editRule) && (
         <RuleFormModal
@@ -335,77 +294,5 @@ function DeleteConfirmModal({
         </Button>
       </div>
     </Modal>
-  );
-}
-
-// ── Logs Tab ────────────────────────────────────────────────────────
-
-function LogsTab({ logs }: { logs: SyncLog[] }) {
-  if (logs.length === 0) {
-    return (
-      <EmptyState
-        title="No sync logs"
-        description="Sync logs appear after the first auto-pull or manual sync."
-      />
-    );
-  }
-
-  return (
-    <>
-      {/* Mobile cards */}
-      <div className="flex flex-col gap-2 sm:hidden">
-        {logs.map((log) => (
-          <div key={log.id} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">
-                {new Date(log.startedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-              </span>
-              <StatusBadge status={log.triggeredBy === 'cron' ? 'ACTIVE' : 'PENDING'} label={log.triggeredBy === 'cron' ? 'Auto' : 'Manual'} />
-            </div>
-            <div className="mt-1 text-sm font-medium">
-              {log.totalPulled} pulled{log.fallbackCount > 0 ? ` (${log.fallbackCount} fallback)` : ''}
-            </div>
-            {log.ruleResults?.length ? (
-              <div className="mt-1 text-xs text-gray-400">
-                {log.ruleResults.map((r) => `${r.ruleName}: ${r.pulled}`).join(', ')}
-              </div>
-            ) : null}
-            {log.errorMessage && (
-              <div className="mt-1 text-xs text-red-500">{log.errorMessage}</div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop table */}
-      <div className="hidden sm:block">
-        <CompactTable
-          rowKey={(log: SyncLog) => log.id}
-          columns={[
-            {
-              key: 'time', header: 'Time',
-              render: (log: SyncLog) => (
-                <span className="text-xs whitespace-nowrap">
-                  {new Date(log.startedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                </span>
-              ),
-            },
-            {
-              key: 'trigger', header: 'Trigger',
-              render: (log: SyncLog) => <StatusBadge status={log.triggeredBy === 'cron' ? 'ACTIVE' : 'PENDING'} label={log.triggeredBy === 'cron' ? 'Auto' : 'Manual'} />,
-            },
-            { key: 'pulled', header: 'Pulled', render: (log: SyncLog) => <span className="font-medium tabular-nums">{log.totalPulled}</span>, className: 'w-20 text-right' },
-            { key: 'fallback', header: 'Fallback', render: (log: SyncLog) => <span className="tabular-nums text-gray-500">{log.fallbackCount}</span>, className: 'w-20 text-right' },
-            {
-              key: 'details', header: 'Rules',
-              render: (log: SyncLog) => log.ruleResults?.length
-                ? <span className="text-xs text-gray-500">{log.ruleResults.map((r) => `${r.ruleName}: ${r.pulled}`).join(', ')}</span>
-                : <span className="text-xs text-gray-400">—</span>,
-            },
-          ]}
-          rows={logs}
-        />
-      </div>
-    </>
   );
 }

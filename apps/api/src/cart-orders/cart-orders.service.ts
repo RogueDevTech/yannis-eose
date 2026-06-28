@@ -1,5 +1,4 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -128,7 +127,8 @@ export class CartOrdersService {
 
   /** Backfill cart_order_items for cart orders that were pulled without line items. */
   private async backfillMissingCartOrderItems() {
-    const result = await this.db.execute(sql`
+    // Use sql.raw() to force simple query protocol — avoids trigger conflict.
+    const result = await this.db.execute(sql.raw(`
       INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
       SELECT
         gen_random_uuid(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
@@ -147,12 +147,11 @@ export class CartOrdersService {
         SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
       )
         AND ca.product_id IS NOT NULL
-    `);
+    `));
     const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
     if (count > 0) {
       this.logger.log(`Backfilled ${count} missing cart_order_items from source carts`);
-      // Also fix total_amount on the parent cart_orders
-      await this.db.execute(sql`
+      await this.db.execute(sql.raw(`
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
@@ -162,7 +161,7 @@ export class CartOrdersService {
         ) sub
         WHERE co.id = sub.cart_order_id
           AND (co.total_amount IS NULL OR co.total_amount = 0)
-      `);
+      `));
     }
   }
 
@@ -1109,17 +1108,23 @@ export class CartOrdersService {
       }
     }
 
-    // Bulk INSERT ... SELECT — same pattern as manual SQL that works.
-    // Parameterized per-row INSERTs via postgres.js fail with trigger
-    // "column valid_from does not exist" due to extended query protocol
-    // interaction with the stamp_actor trigger.
+    // Bulk INSERT ... SELECT using sql.raw() for ALL values to force the
+    // simple query protocol. Parameterized queries (extended protocol)
+    // conflict with the stamp_actor trigger → "column valid_from does not
+    // exist". The previous version still parameterized branchId/ruleId/IDs,
+    // which kept it on extended protocol and silently failed.
     const validCartIds = carts
       .filter((c) => c.customerPhone || c.customerPhoneHash)
       .map((c) => c.id);
 
     if (validCartIds.length === 0) return { pulled: 0 };
 
-    const inserted = await this.db.execute<{ id: string }>(sql`
+    // Escape UUIDs for safe inline interpolation (all are validated UUIDs from DB)
+    const idList = validCartIds.map((id) => `'${id}'`).join(', ');
+    const branchLiteral = resolvedBranchId ? `'${resolvedBranchId}'` : 'NULL';
+    const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
+
+    const inserted = await this.db.execute<{ id: string }>(sql.raw(`
       INSERT INTO cart_orders (
         id, source_cart_id, campaign_id, media_buyer_id, status,
         customer_name, customer_phone_hash, customer_phone,
@@ -1135,22 +1140,22 @@ export class CartOrdersService {
         ca.customer_address, ca.delivery_address, 0,
         ca.delivery_notes, ca.delivery_state, ca.customer_gender,
         ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
-        'online', ${resolvedBranchId}, ${resolvedRuleId},
+        'online', ${branchLiteral}, ${ruleLiteral},
         ca.custom_field_values
       FROM cart_abandonments ca
-      WHERE ca.id IN (${sql.join(validCartIds.map((id) => sql`${id}`), sql`, `)})
+      WHERE ca.id IN (${idList})
       RETURNING id, source_cart_id
-    `);
+    `));
 
     this.logger.log(`Bulk inserted ${inserted.length} cart orders`);
 
-    // Create cart_order_items from the source cart's product/quantity/offerLabel.
-    // The old per-row insert resolved offer prices; the bulk SQL uses the
-    // product's base_sale_price as a fallback. Offer-specific pricing is
-    // resolved via a LATERAL join against the product's offers JSONB.
+    // Create cart_order_items + timeline events + fix total_amount.
+    // All use sql.raw() to stay on the simple query protocol (same trigger issue).
     if (inserted.length > 0) {
-      const insertedSourceIds = (inserted as unknown as Array<{ source_cart_id: string }>).map((r) => r.source_cart_id);
-      await this.db.execute(sql`
+      const sourceIdList = (inserted as unknown as Array<{ source_cart_id: string }>)
+        .map((r) => `'${r.source_cart_id}'`).join(', ');
+
+      await this.db.execute(sql.raw(`
         INSERT INTO cart_order_items (
           id, cart_order_id, product_id, quantity, unit_price, offer_label
         )
@@ -1170,30 +1175,30 @@ export class CartOrdersService {
         FROM cart_orders co
         JOIN cart_abandonments ca ON ca.id = co.source_cart_id
         LEFT JOIN products p ON p.id = ca.product_id
-        WHERE co.source_cart_id IN (${sql.join(insertedSourceIds.map((id) => sql`${id}`), sql`, `)})
+        WHERE co.source_cart_id IN (${sourceIdList})
           AND NOT EXISTS (
             SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
           )
-      `);
+      `));
 
       // Update total_amount on the parent cart_orders to match item prices
-      await this.db.execute(sql`
+      await this.db.execute(sql.raw(`
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
           SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
           FROM cart_order_items coi
           WHERE coi.cart_order_id IN (
-            SELECT id FROM cart_orders WHERE source_cart_id IN (${sql.join(insertedSourceIds.map((id) => sql`${id}`), sql`, `)})
+            SELECT id FROM cart_orders WHERE source_cart_id IN (${sourceIdList})
           )
           GROUP BY coi.cart_order_id
         ) sub
         WHERE co.id = sub.cart_order_id
           AND (co.total_amount IS NULL OR co.total_amount = 0)
-      `);
+      `));
 
       // Create timeline events for the newly pulled orders
-      await this.db.execute(sql`
+      await this.db.execute(sql.raw(`
         INSERT INTO cart_order_timeline_events (
           id, cart_order_id, event_type, actor_name, description, metadata, branch_id
         )
@@ -1206,11 +1211,11 @@ export class CartOrdersService {
           jsonb_build_object('sourceCartId', co.source_cart_id),
           co.servicing_branch_id
         FROM cart_orders co
-        WHERE co.source_cart_id IN (${sql.join(insertedSourceIds.map((id) => sql`${id}`), sql`, `)})
+        WHERE co.source_cart_id IN (${sourceIdList})
           AND NOT EXISTS (
             SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
           )
-      `);
+      `));
     }
 
     return { pulled: inserted.length };
@@ -1379,67 +1384,30 @@ export class CartOrdersService {
       .where(and(...conditions));
   }
 
-  // ── Sync Logs ───────────────────────────────────────────────────────
+  // ── Auto-Pull (called from cart.service.ts 10-min cron) ─────────────
+  // No standalone cron here — the 10-min abandoned-cart cron in
+  // CartService marks PENDING→ABANDONED then calls runAutoSync so
+  // there is a single pull path with routing rules.
 
-  async listSyncLogs(page = 1, limit = 50) {
-    const offset = (page - 1) * limit;
-    const logs = await this.db
-      .select()
-      .from(schema.cartOrderSyncLogs)
-      .orderBy(desc(schema.cartOrderSyncLogs.startedAt))
-      .limit(limit)
-      .offset(offset);
-    return { logs, page, limit };
-  }
-
-  // ── Auto-Pull Cron ──────────────────────────────────────────────────
-  // Every 2 hours: pull all ABANDONED carts (older than 30 min) that
-  // haven't been pulled yet, routing each via the configured rules.
-
-  @Cron('0 30 */2 * * *', { timeZone: 'Africa/Lagos' })
-  async handleCartOrderAutoSync() {
-    try {
-      const result = await this.runAutoSync('cron');
-      if (result.totalPulled > 0) {
-        this.logger.log(`Cart order auto-sync: ${result.totalPulled} orders pulled (${result.fallbackCount} fallback)`);
-      }
-    } catch (err) {
-      this.logger.error(`Cart order auto-sync failed: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  async runAutoSync(triggeredBy: 'cron' | 'manual', actorId?: string) {
-    const startedAt = new Date();
-
-    // Find all abandoned carts not yet pulled into cart_orders (older than 30 min)
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+  async runAutoSync(_triggeredBy: 'cron' | 'manual', actorId?: string) {
+    // Find all ABANDONED carts not yet pulled into cart_orders.
+    // No age gate — the caller (10-min cron) already marks PENDING→ABANDONED
+    // after 5 min, so anything ABANDONED here is ready to pull.
     const carts = await this.db
       .select({ id: schema.cartAbandonments.id })
       .from(schema.cartAbandonments)
       .where(
         and(
-          inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
-          lte(schema.cartAbandonments.updatedAt, thirtyMinAgo),
+          eq(schema.cartAbandonments.status, 'ABANDONED'),
           sql`${schema.cartAbandonments.id} NOT IN (SELECT source_cart_id FROM cart_orders)`,
         ),
       )
       .limit(5000);
 
     if (carts.length === 0) {
-      await this.db.insert(schema.cartOrderSyncLogs).values({
-        triggeredBy,
-        triggeredByUserId: actorId ?? null,
-        startedAt,
-        finishedAt: new Date(),
-        totalPulled: 0,
-        fallbackCount: 0,
-        ruleResults: [],
-      });
-      return { totalPulled: 0, fallbackCount: 0, ruleResults: [] };
+      return { totalPulled: 0 };
     }
 
-    // Pull all carts with no explicit target branch — routing rules are
-    // evaluated inside pullFromAbandonedCarts per cart.
     const actor: SessionUser = {
       id: actorId ?? SYSTEM_ACTOR_ID,
       name: actorId ? undefined : 'System',
@@ -1449,50 +1417,6 @@ export class CartOrdersService {
     const cartIds = carts.map((c) => c.id);
     const result = await this.pullFromAbandonedCarts(cartIds, null, actor);
 
-    // Count how many were routed by rules vs fallback
-    const routed = await this.db
-      .select({
-        routingRuleId: schema.cartOrders.routingRuleId,
-        c: count(),
-      })
-      .from(schema.cartOrders)
-      .where(
-        and(
-          inArray(schema.cartOrders.sourceCartId, cartIds),
-          gte(schema.cartOrders.createdAt, startedAt),
-        ),
-      )
-      .groupBy(schema.cartOrders.routingRuleId);
-
-    let fallbackCount = 0;
-    const ruleResults: Array<{ ruleId: string; ruleName: string; pulled: number }> = [];
-    const ruleIds = routed.filter((r) => r.routingRuleId).map((r) => r.routingRuleId!);
-    const ruleNameMap = new Map<string, string>();
-    if (ruleIds.length > 0) {
-      const rules = await this.db
-        .select({ id: schema.cartOrderRoutingRules.id, name: schema.cartOrderRoutingRules.name })
-        .from(schema.cartOrderRoutingRules)
-        .where(inArray(schema.cartOrderRoutingRules.id, ruleIds));
-      for (const r of rules) ruleNameMap.set(r.id, r.name);
-    }
-    for (const r of routed) {
-      if (r.routingRuleId) {
-        ruleResults.push({ ruleId: r.routingRuleId, ruleName: ruleNameMap.get(r.routingRuleId) ?? 'Unknown', pulled: r.c });
-      } else {
-        fallbackCount = r.c;
-      }
-    }
-
-    await this.db.insert(schema.cartOrderSyncLogs).values({
-      triggeredBy,
-      triggeredByUserId: actorId ?? null,
-      startedAt,
-      finishedAt: new Date(),
-      totalPulled: result.pulled,
-      fallbackCount,
-      ruleResults,
-    });
-
-    return { totalPulled: result.pulled, fallbackCount, ruleResults };
+    return { totalPulled: result.pulled };
   }
 }
