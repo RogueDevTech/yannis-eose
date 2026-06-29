@@ -318,7 +318,7 @@ export class CartService {
         console.log(`[Cart] Auto-pulled ${result.totalPulled} abandoned cart(s) into Cart Orders`);
       }
     } catch (err) {
-      console.error(`[Cart] Auto-pull to Cart Orders failed: ${err instanceof Error ? err.message : err}`);
+      console.error(`[Cart] Auto-pull to Cart Orders failed:`, err instanceof Error ? err.stack : err);
     }
   }
 

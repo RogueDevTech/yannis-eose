@@ -1745,7 +1745,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (src?.createdAt) resolvedCreatedAt = src.createdAt;
     }
 
-    const graduatedOrderId = await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       // Insert into orders table as a delivered follow-up order
       const [graduated] = await tx
         .insert(schema.orders)
@@ -1843,17 +1843,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           metadata: { followUpOrderId, sourceOrderId: fuOrder.sourceOrderId },
           branchId: fuOrder.servicingBranchId,
         });
-      }
 
-      return graduated?.id ?? null;
-    });
-
-    this.logger.log(`Follow-up order ${followUpOrderId} graduated to orders table`);
-
-    // Auto-generate invoice for the graduated order (same logic as CONFIRMED trigger).
-    if (graduatedOrderId) {
-      try {
-        const items = await this.db
+        // Auto-generate invoice inside the same transaction so a graduated
+        // order can never land in the orders table without an invoice.
+        const gradItems = await tx
           .select({
             quantity: schema.orderItems.quantity,
             unitPrice: schema.orderItems.unitPrice,
@@ -1862,35 +1855,35 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           })
           .from(schema.orderItems)
           .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
-          .where(eq(schema.orderItems.orderId, graduatedOrderId));
+          .where(eq(schema.orderItems.orderId, graduated.id));
 
-        if (items.length > 0) {
-          const lineItems = items.map((it) => ({
+        if (gradItems.length > 0) {
+          const lineItems = gradItems.map((it) => ({
             description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
             quantity: it.quantity,
             unitPrice: String(it.unitPrice),
           }));
-          const totalAmount = items.reduce((sum, it) => sum + Number(it.unitPrice), 0);
+          const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice), 0);
 
-          await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-            await tx.insert(schema.invoices).values({
-              orderId: graduatedOrderId,
-              recipientInfo: {
-                name: fuOrder.customerName,
-                address: fuOrder.customerAddress ?? undefined,
-              },
-              lineItems,
-              taxRate: null,
-              totalAmount: totalAmount.toFixed(2),
-              dueDate: null,
-              status: 'DRAFT',
-            });
+          await tx.insert(schema.invoices).values({
+            orderId: graduated.id,
+            recipientInfo: {
+              name: fuOrder.customerName,
+              address: fuOrder.customerAddress ?? undefined,
+            },
+            lineItems,
+            taxRate: null,
+            totalAmount: totalAmount.toFixed(2),
+            dueDate: null,
+            status: 'DRAFT',
           });
         }
-      } catch (err) {
-        this.logger.warn(`Auto-invoice for graduated follow-up ${graduatedOrderId} failed: ${err instanceof Error ? err.message : err}`);
       }
-    }
+
+      return graduated?.id ?? null;
+    });
+
+    this.logger.log(`Follow-up order ${followUpOrderId} graduated to orders table`);
   }
 
   // ── Transfer Follow-Up Order Between Branches ──────────────────────
