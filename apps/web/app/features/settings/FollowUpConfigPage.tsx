@@ -720,17 +720,10 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           )}
 
-          <div className="rounded-lg border border-app-border p-3 space-y-1.5">
-            <label className="flex items-center gap-2 text-sm text-app-fg">
-              <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
-              Freeze original order
-            </label>
-            <p className="text-[11px] text-app-fg-muted leading-snug pl-6">
-              {freezeOriginal
-                ? 'Original locked when follow-up is created. Only the follow-up can be worked.'
-                : 'Original stays active. Both original and follow-up can be worked simultaneously.'}
-            </p>
-          </div>
+          <label className="flex items-center gap-2 text-sm text-app-fg">
+            <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
+            Freeze original order
+          </label>
 
           <label className="flex items-center gap-2 text-sm text-app-fg">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
