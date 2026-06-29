@@ -833,15 +833,16 @@ export function MarketingOrdersPage({
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
             const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
-            // Confirmed = confirmed-or-beyond (includes delivered/remitted) — matches Dashboard definition
+            // Confirmed tile = narrow bucket (excluding delivered) so tiles tally to total
             const confirmedCount =
               (statusCounts['CONFIRMED'] ?? 0) +
               (statusCounts['AGENT_ASSIGNED'] ?? 0) +
               (statusCounts['DISPATCHED'] ?? 0) +
-              (statusCounts['IN_TRANSIT'] ?? 0) +
-              deliveredCount;
-            // Unconfirmed = everything before CONFIRMED (excludes DELETED)
-            const unconfirmedCount = Math.max(0, statusTotal - confirmedCount);
+              (statusCounts['IN_TRANSIT'] ?? 0);
+            // Confirmed-or-beyond for CR rate calc (includes delivered)
+            const confirmedOrBeyond = confirmedCount + deliveredCount;
+            // Unconfirmed = CS_ENGAGED only (Unassigned + Assigned shown as separate tiles)
+            const unconfirmedCount = statusCounts['CS_ENGAGED'] ?? 0;
             const deletedCount = statusCounts['DELETED'] ?? 0;
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
@@ -910,7 +911,7 @@ export function MarketingOrdersPage({
                       onClick: () => handleStatusChange('DELIVERED'),
                     },
                     ...(() => {
-                      const cr = statusTotal > 0 ? (confirmedCount / statusTotal) * 100 : 0;
+                      const cr = statusTotal > 0 ? (confirmedOrBeyond / statusTotal) * 100 : 0;
                       const dr = statusTotal > 0 ? (deliveredCount / statusTotal) * 100 : 0;
                       return [
                         {
