@@ -1492,9 +1492,21 @@ export class MarketingService {
       );
     }
 
-    // Total received (any status) — gives the headline number HoMs/MBs see.
-    const incomingWhere = and(eq(schema.marketingFunding.receiverId, actorId), ...dateConditions, ...branchFilter);
-    const outgoingWhere = and(eq(schema.marketingFunding.senderId, actorId), ...dateConditions, ...branchFilter);
+    // Total received: COMPLETED only — matches the balance formula so the strip tallies.
+    // SENT transfers are not yet confirmed by the receiver, shown separately as "Pending Mark-Received".
+    const incomingWhere = and(
+      eq(schema.marketingFunding.receiverId, actorId),
+      eq(schema.marketingFunding.status, 'COMPLETED'),
+      ...dateConditions,
+      ...branchFilter,
+    );
+    // Total distributed: SENT + COMPLETED + DISPUTED — all non-cancelled outflows (money left sender's hands).
+    const outgoingWhere = and(
+      eq(schema.marketingFunding.senderId, actorId),
+      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+      ...dateConditions,
+      ...branchFilter,
+    );
 
     const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] =
       await Promise.all([

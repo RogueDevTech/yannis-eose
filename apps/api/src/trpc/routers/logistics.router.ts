@@ -283,7 +283,7 @@ export const logisticsRouter = router({
   listDeliveryRemittances: authedProcedure
     .input(listDeliveryRemittancesSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId);
+      return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   listDeliveryRemittanceEligibleOrders: authedProcedure

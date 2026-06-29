@@ -1543,7 +1543,7 @@ export class LogisticsService {
   /**
    * List delivery remittances. TPL_MANAGER sees own location's; Finance and HoL see all.
    */
-  async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser, groupId?: string | null) {
+  async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canListGlobal =
@@ -1759,6 +1759,9 @@ export class LogisticsService {
     }
     if (input.endDate) {
       awaitingConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+    }
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
 
     const awaitingSummaryQuery = this.db
