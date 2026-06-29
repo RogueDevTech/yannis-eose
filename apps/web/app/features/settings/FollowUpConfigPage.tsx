@@ -669,18 +669,6 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           </div>
 
-          <div className="rounded-lg border border-app-border p-3 space-y-1.5">
-            <label className="flex items-center gap-2 text-sm text-app-fg">
-              <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
-              Freeze original order
-            </label>
-            <p className="text-[11px] text-app-fg-muted leading-snug pl-6">
-              {freezeOriginal
-                ? 'Original locked when follow-up is created. Only the follow-up can be worked.'
-                : 'Original stays active. Both original and follow-up can be worked simultaneously.'}
-            </p>
-          </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-app-fg-muted mb-1">Older than</label>
@@ -731,6 +719,18 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
               <SearchableSelect value={targetGroupId ?? ''} onChange={(v) => setTargetGroupId(v || null)} options={groupOptions} placeholder="Select group" searchPlaceholder="Search..." />
             </div>
           )}
+
+          <div className="rounded-lg border border-app-border p-3 space-y-1.5">
+            <label className="flex items-center gap-2 text-sm text-app-fg">
+              <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
+              Freeze original order
+            </label>
+            <p className="text-[11px] text-app-fg-muted leading-snug pl-6">
+              {freezeOriginal
+                ? 'Original locked when follow-up is created. Only the follow-up can be worked.'
+                : 'Original stays active. Both original and follow-up can be worked simultaneously.'}
+            </p>
+          </div>
 
           <label className="flex items-center gap-2 text-sm text-app-fg">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
