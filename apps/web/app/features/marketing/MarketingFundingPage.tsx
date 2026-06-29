@@ -2007,8 +2007,18 @@ function FundingMetricsStrip({
           {
             label: 'Current balance',
             value: <NairaPrice amount={Number(fundingBalance.balance)} />,
-            valueClassName: 'text-success-600 dark:text-success-400',
+            valueClassName: Number(fundingBalance.balance) > 0
+              ? 'text-success-600 dark:text-success-400'
+              : 'text-app-fg',
             title: `Received ₦${Number(fundingBalance.totalReceived).toLocaleString()} − distributed ₦${Number(fundingBalance.totalDistributed).toLocaleString()} − expenses ₦${Number(fundingBalance.totalSpend).toLocaleString()} (pending + approved).`,
+          },
+          {
+            label: 'Total Expenses',
+            value: <NairaPrice amount={Number(fundingBalance.totalSpend)} />,
+            valueClassName: Number(fundingBalance.totalSpend) > 0
+              ? 'text-orange-600 dark:text-orange-400'
+              : 'text-app-fg',
+            title: 'Ad spend + other expenses (pending + approved, excluding rejected)',
           },
         ]
       : []),
@@ -2030,7 +2040,7 @@ function FundingMetricsStrip({
       valueClassName: Number(summary.totalReceived) > 0
         ? 'text-success-600 dark:text-success-400'
         : 'text-app-fg',
-      title: 'Sum of all incoming ledger transfers (any status)',
+      title: 'Sum of confirmed (mark-received) incoming transfers',
       onClick: () => onFilter({ section: 'received', entryType: 'transfer' }),
       active: isActive('received', 'transfer'),
     },
@@ -2536,7 +2546,7 @@ function UnifiedDistributingTable({
                 {
                   key: 'view',
                   kind: 'button',
-                  label: entry.entryType === 'request' ? 'View' : 'View flow',
+                  label: entry.entryType === 'request' ? 'View' : 'Flow',
                   onClick: () => onOpenDetails(entry),
                 },
                 {
@@ -2943,13 +2953,13 @@ function UnifiedReceivedTable({
                 {
                   key: 'view',
                   kind: 'button',
-                  label: 'View flow',
+                  label: 'Flow',
                   onClick: () => onOpenDetails(entry),
                 },
                 {
                   key: 'received',
                   kind: 'button',
-                  label: 'Mark Received',
+                  label: 'Received',
                   tone: 'success',
                   onClick: () => onOpenMarkReceived(transferToFundingRecord(entry)),
                   show: canMarkReceived,
@@ -2957,7 +2967,7 @@ function UnifiedReceivedTable({
                 {
                   key: 'not-received',
                   kind: 'button',
-                  label: 'Not Received',
+                  label: 'Dispute',
                   tone: 'danger',
                   onClick: () => onOpenNotReceived(transferToFundingRecord(entry)),
                   show: canMarkReceived,
