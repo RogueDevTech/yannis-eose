@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, asc } 
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
@@ -34,7 +34,7 @@ export class CartOrdersService {
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pg: ReturnType<typeof postgres>,
+    @Inject(PG_CLIENT_RAW) private readonly pg: ReturnType<typeof postgres>,
   ) {
     // One-time backfill: set media_buyer_id on cart_orders that are missing it
     // by looking up the source cart abandonment's campaign → mediaBuyerId.

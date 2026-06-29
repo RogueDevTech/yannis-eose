@@ -7,11 +7,11 @@ import { RedisHealthService } from './redis-health.service';
 import { MigrationRunnerService } from './migration-runner.service';
 import { PermissionSeedService } from './permission-seed.service';
 import { MessageTemplateSeedService } from './message-template-seed.service';
-import { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
+import { DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS } from './database.tokens';
 import { shouldLogHttpRequests } from '../common/http-request-timing';
 import { wrapPostgresClientForDbTiming } from './postgres-db-timing-proxy';
 
-export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
+export { DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS } from './database.tokens';
 
 @Global()
 @Module({
@@ -113,8 +113,18 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
             );
           });
 
+        // Stash the unwrapped client for PG_CLIENT_RAW before wrapping
+        (raw as unknown as Record<string, unknown>).__raw = raw;
         return shouldLogHttpRequests() ? wrapPostgresClientForDbTiming(raw) : raw;
       },
+    },
+    {
+      provide: PG_CLIENT_RAW,
+      useFactory: (pgClient: ReturnType<typeof postgres>) => {
+        // If wrapped by timing proxy, retrieve the original; otherwise use as-is
+        return (pgClient as unknown as Record<string, unknown>).__raw ?? pgClient;
+      },
+      inject: [PG_CLIENT],
     },
     {
       provide: DRIZZLE,
@@ -150,6 +160,6 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
     // Skip with MESSAGE_TEMPLATE_SEED_AUTORUN=false. See message-template-seed.service.ts.
     MessageTemplateSeedService,
   ],
-  exports: [DRIZZLE, PG_CLIENT, REDIS, RedisHealthService],
+  exports: [DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS, RedisHealthService],
 })
 export class DatabaseModule {}
