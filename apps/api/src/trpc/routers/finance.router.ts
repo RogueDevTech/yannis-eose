@@ -290,7 +290,7 @@ export const financeRouter = router({
             limit: 1,
             ...(input.startDate && { startDate: input.startDate }),
             ...(input.endDate && { endDate: input.endDate }),
-          }, ctx.user, ctx.activeGroupId)
+          }, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds)
           .catch(() => null),
         getPayrollBatchService()
           .listMonthlyPayrolls({ status: 'PENDING_FINANCE' as const }, ctx.user)
