@@ -768,7 +768,7 @@ export function DeliveryRemittancesPage({
             badge:
               eligibleTotal > 0 ? (
                 <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border border-app-border bg-app-hover px-1.5 text-micro font-semibold tabular-nums text-app-fg-muted">
-                  {eligibleTotal > 99 ? '99+' : eligibleTotal}
+                  {eligibleTotal}
                 </span>
               ) : null,
           },
