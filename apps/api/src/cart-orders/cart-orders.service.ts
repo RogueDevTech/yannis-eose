@@ -683,7 +683,7 @@ export class CartOrdersService {
       .from(schema.cartOrderItems)
       .where(eq(schema.cartOrderItems.cartOrderId, cartOrderId));
 
-    const graduatedOrderId = await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       const [graduated] = await tx
         .insert(schema.orders)
         .values({
@@ -789,17 +789,10 @@ export class CartOrdersService {
           .update(schema.cartAbandonments)
           .set({ status: 'CONVERTED', convertedOrderId: graduated.id })
           .where(eq(schema.cartAbandonments.id, co.sourceCartId));
-      }
 
-      return graduated?.id ?? null;
-    });
-
-    this.logger.log(`Cart order ${cartOrderId} graduated to orders table`);
-
-    // Auto-generate invoice for the graduated order (same logic as CONFIRMED trigger).
-    if (graduatedOrderId) {
-      try {
-        const items = await this.db
+        // Auto-generate invoice inside the same transaction so a graduated
+        // order can never land in the orders table without an invoice.
+        const gradItems = await tx
           .select({
             quantity: schema.orderItems.quantity,
             unitPrice: schema.orderItems.unitPrice,
@@ -808,35 +801,35 @@ export class CartOrdersService {
           })
           .from(schema.orderItems)
           .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
-          .where(eq(schema.orderItems.orderId, graduatedOrderId));
+          .where(eq(schema.orderItems.orderId, graduated.id));
 
-        if (items.length > 0) {
-          const lineItems = items.map((it) => ({
+        if (gradItems.length > 0) {
+          const lineItems = gradItems.map((it) => ({
             description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
             quantity: it.quantity,
             unitPrice: String(it.unitPrice),
           }));
-          const totalAmount = items.reduce((sum, it) => sum + Number(it.unitPrice), 0);
+          const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice), 0);
 
-          await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-            await tx.insert(schema.invoices).values({
-              orderId: graduatedOrderId,
-              recipientInfo: {
-                name: co.customerName,
-                address: co.customerAddress ?? undefined,
-              },
-              lineItems,
-              taxRate: null,
-              totalAmount: totalAmount.toFixed(2),
-              dueDate: null,
-              status: 'DRAFT',
-            });
+          await tx.insert(schema.invoices).values({
+            orderId: graduated.id,
+            recipientInfo: {
+              name: co.customerName,
+              address: co.customerAddress ?? undefined,
+            },
+            lineItems,
+            taxRate: null,
+            totalAmount: totalAmount.toFixed(2),
+            dueDate: null,
+            status: 'DRAFT',
           });
         }
-      } catch (err) {
-        this.logger.warn(`Auto-invoice for graduated cart order ${graduatedOrderId} failed: ${err instanceof Error ? err.message : err}`);
       }
-    }
+
+      return graduated?.id ?? null;
+    });
+
+    this.logger.log(`Cart order ${cartOrderId} graduated to orders table`);
   }
 
   // ── Get Single Cart Order ────────────────────────────────────────────
@@ -1067,23 +1060,28 @@ export class CartOrdersService {
     targetBranchId: string | null,
     _actor: SessionUser,
   ) {
-    const carts = await this.db
-      .select()
-      .from(schema.cartAbandonments)
-      .where(
-        and(
-          inArray(schema.cartAbandonments.id, cartIds),
-          inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
-          // Not already pulled into cart_orders
-          sql`${schema.cartAbandonments.id} NOT IN (SELECT source_cart_id FROM cart_orders)`,
-        ),
-      );
+    // Use pg.unsafe() (simple protocol) for all cart-order queries — Drizzle's
+    // extended protocol has caused silent failures with NOT IN subqueries on
+    // this table.
+    const idList = cartIds.map((id) => `'${id}'`).join(', ');
+    const carts = await this.pg.unsafe<Array<{
+      id: string;
+      campaign_id: string | null;
+      customer_phone: string | null;
+      customer_phone_hash: string;
+    }>>(`
+      SELECT ca.id, ca.campaign_id, ca.customer_phone, ca.customer_phone_hash
+      FROM cart_abandonments ca
+      WHERE ca.id IN (${idList})
+        AND ca.status IN ('PENDING', 'ABANDONED')
+        AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+    `);
 
     this.logger.log(`pullFromAbandonedCarts: received ${cartIds.length} IDs, matched ${carts.length} carts`);
     if (carts.length === 0) return { pulled: 0 };
 
     // Resolve campaign → branch mapping for routing resolution.
-    const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
+    const campaignIds = [...new Set(carts.map((c) => c.campaign_id).filter(Boolean))] as string[];
     const campaignBranchMap = new Map<string, string>();
     if (campaignIds.length > 0) {
       const rows = await this.db
@@ -1101,7 +1099,7 @@ export class CartOrdersService {
     let resolvedRuleId: string | null = null;
     if (!resolvedBranchId) {
       // Use first cart's campaign branch as seed for routing resolution
-      const firstCampaignBranch = carts[0]?.campaignId ? campaignBranchMap.get(carts[0].campaignId) ?? null : null;
+      const firstCampaignBranch = carts[0]?.campaign_id ? campaignBranchMap.get(carts[0].campaign_id) ?? null : null;
       const routing = await this.resolveRoutingBranch(firstCampaignBranch);
       if (routing) {
         resolvedBranchId = routing.branchId;
@@ -1109,19 +1107,15 @@ export class CartOrdersService {
       }
     }
 
-    // Bulk INSERT ... SELECT using sql.raw() for ALL values to force the
-    // simple query protocol. Parameterized queries (extended protocol)
-    // conflict with the stamp_actor trigger → "column valid_from does not
-    // exist". The previous version still parameterized branchId/ruleId/IDs,
-    // which kept it on extended protocol and silently failed.
+    // Filter to carts with phone data, then build safe ID list for SQL.
     const validCartIds = carts
-      .filter((c) => c.customerPhone || c.customerPhoneHash)
+      .filter((c) => c.customer_phone || c.customer_phone_hash)
       .map((c) => c.id);
 
     if (validCartIds.length === 0) return { pulled: 0 };
 
     // Escape UUIDs for safe inline interpolation (all are validated UUIDs from DB)
-    const idList = validCartIds.map((id) => `'${id}'`).join(', ');
+    const validIdList = validCartIds.map((id) => `'${id}'`).join(', ');
     const branchLiteral = resolvedBranchId ? `'${resolvedBranchId}'` : 'NULL';
     const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
 
@@ -1147,7 +1141,7 @@ export class CartOrdersService {
         'online', ${branchLiteral}, ${ruleLiteral},
         ca.custom_field_values
       FROM cart_abandonments ca
-      WHERE ca.id IN (${idList})
+      WHERE ca.id IN (${validIdList})
       RETURNING id, source_cart_id
     `);
 
@@ -1394,18 +1388,17 @@ export class CartOrdersService {
 
   async runAutoSync(_triggeredBy: 'cron' | 'manual', actorId?: string) {
     // Find all ABANDONED carts not yet pulled into cart_orders.
-    // No age gate — the caller (10-min cron) already marks PENDING→ABANDONED
-    // after 5 min, so anything ABANDONED here is ready to pull.
-    const carts = await this.db
-      .select({ id: schema.cartAbandonments.id })
-      .from(schema.cartAbandonments)
-      .where(
-        and(
-          eq(schema.cartAbandonments.status, 'ABANDONED'),
-          sql`${schema.cartAbandonments.id} NOT IN (SELECT source_cart_id FROM cart_orders)`,
-        ),
-      )
-      .limit(5000);
+    // Use pg.unsafe() (simple protocol) for consistency with the INSERT path —
+    // Drizzle's extended protocol has caused silent failures on this table before.
+    const carts = await this.pg.unsafe<Array<{ id: string }>>(`
+      SELECT ca.id
+      FROM cart_abandonments ca
+      WHERE ca.status = 'ABANDONED'
+        AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+      LIMIT 5000
+    `);
+
+    this.logger.log(`[runAutoSync] Found ${carts.length} ABANDONED cart(s) not yet pulled`);
 
     if (carts.length === 0) {
       return { totalPulled: 0 };
@@ -1420,6 +1413,7 @@ export class CartOrdersService {
     const cartIds = carts.map((c) => c.id);
     const result = await this.pullFromAbandonedCarts(cartIds, null, actor);
 
+    this.logger.log(`[runAutoSync] Pulled ${result.pulled} of ${cartIds.length} cart(s)`);
     return { totalPulled: result.pulled };
   }
 }

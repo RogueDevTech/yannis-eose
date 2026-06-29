@@ -7418,6 +7418,15 @@ export class OrdersService {
           fulfillmentLocationId,
           actor,
         );
+        // Safety net: ensure an invoice exists by the time the order is DELIVERED.
+        // The primary creation point is the CONFIRMED transition, but it can silently
+        // fail (logged, not thrown). Without an invoice the order shows "No invoice"
+        // on the delivery-remittance page — this back-fill closes that gap.
+        try {
+          await this.autoCreateInvoiceForOrder(updatedOrder.id, actor, updatedOrder);
+        } catch (err) {
+          this.logger.warn(`Auto-invoice backfill on DELIVERED for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
+        }
         break;
       }
 

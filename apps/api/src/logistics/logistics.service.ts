@@ -2916,22 +2916,57 @@ export class LogisticsService {
       .where(activeGroupId ? or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))! : undefined);
 
     // ── Pass 4: per-provider remittance amounts ────────────────────────────
-    // Same period filter as orders so the cell aligns with the
-    // Assigned/Delivered columns: "of the orders this provider got in this
-    // period, how much cash has come back through Finance".
-    const remitDateCol = sql`COALESCE(${schema.orders.allocatedAt}, ${schema.orders.deliveredAt}, ${schema.orders.createdAt})`;
-    const remittanceConditions: SQL[] = [];
-    if (effectiveStart) remittanceConditions.push(sql`${remitDateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
-    if (effectiveEnd) remittanceConditions.push(sql`${remitDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
-    const bCond2 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
-    if (bCond2) remittanceConditions.push(bCond2);
+    // Approved/disputed from delivery_remittance_outcomes (same source of
+    // truth as the Finance page) so the "Remitted" stat matches. Date filter
+    // is on deliveryRemittances.sentAt to align with Finance's bucketing.
+    // Pending (SENT) batches don't have outcome rows yet, so we query them
+    // separately from order totals.
+    const remitSentAtConditions: SQL[] = [];
+    if (effectiveStart) remitSentAtConditions.push(sql`${schema.deliveryRemittances.sentAt} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) remitSentAtConditions.push(sql`${schema.deliveryRemittances.sentAt} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    if (activeGroupId) {
+      remitSentAtConditions.push(
+        or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))!,
+      );
+    }
 
-    const remittanceRows = await this.db
+    // 4a: approved + disputed from outcomes table
+    const outcomeRows = await this.db
       .select({
         providerId: schema.logisticsLocations.providerId,
-        remittedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
-        pendingRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
-        disputedRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
+        remittedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
+        disputedRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
+      })
+      .from(schema.deliveryRemittanceOutcomes)
+      .innerJoin(
+        schema.deliveryRemittances,
+        eq(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.deliveryRemittances.logisticsLocationId),
+      )
+      .innerJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(remitSentAtConditions.length > 0 ? and(...remitSentAtConditions) : undefined)
+      .groupBy(schema.logisticsLocations.providerId);
+
+    // 4b: pending (SENT) batches — no outcome rows yet, sum from order totals
+    const pendingConditions: SQL[] = [eq(schema.deliveryRemittances.status, 'SENT')];
+    if (effectiveStart) pendingConditions.push(sql`${schema.deliveryRemittances.sentAt} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) pendingConditions.push(sql`${schema.deliveryRemittances.sentAt} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    if (activeGroupId) {
+      pendingConditions.push(
+        or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))!,
+      );
+    }
+
+    const pendingRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        pendingRemittanceAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -2943,8 +2978,29 @@ export class LogisticsService {
         schema.logisticsLocations,
         eq(schema.logisticsLocations.id, schema.deliveryRemittances.logisticsLocationId),
       )
-      .where(remittanceConditions.length > 0 ? and(...remittanceConditions) : undefined)
+      .innerJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(and(...pendingConditions))
       .groupBy(schema.logisticsLocations.providerId);
+
+    // Merge outcome + pending results per provider
+    const remittanceRows = [...outcomeRows, ...pendingRows].reduce<
+      Array<{ providerId: string | null; remittedAmount: string; pendingRemittanceAmount: string; disputedRemittanceAmount: string }>
+    >((acc, _row) => {
+      const row = _row as Record<string, string | null>;
+      const pid = row.providerId;
+      let entry = acc.find((e) => e.providerId === pid);
+      if (!entry) {
+        entry = { providerId: pid ?? null, remittedAmount: '0', pendingRemittanceAmount: '0', disputedRemittanceAmount: '0' };
+        acc.push(entry);
+      }
+      if ('remittedAmount' in row) entry.remittedAmount = row.remittedAmount ?? '0';
+      if ('pendingRemittanceAmount' in row) entry.pendingRemittanceAmount = row.pendingRemittanceAmount ?? '0';
+      if ('disputedRemittanceAmount' in row) entry.disputedRemittanceAmount = row.disputedRemittanceAmount ?? '0';
+      return acc;
+    }, []);
 
     const remittanceByProvider = new Map<string, { received: string; pending: string; disputed: string }>();
     for (const r of remittanceRows) {
