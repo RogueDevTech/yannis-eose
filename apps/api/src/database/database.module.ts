@@ -13,6 +13,10 @@ import { wrapPostgresClientForDbTiming } from './postgres-db-timing-proxy';
 
 export { DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS } from './database.tokens';
 
+/** Module-level ref to the unwrapped postgres.js client.
+ *  Set in PG_CLIENT factory, read by PG_CLIENT_RAW factory. */
+let _rawPgClient: ReturnType<typeof postgres> | null = null;
+
 @Global()
 @Module({
   providers: [
@@ -113,18 +117,17 @@ export { DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS } from './database.tokens';
             );
           });
 
-        // Stash the unwrapped client for PG_CLIENT_RAW before wrapping
-        (raw as unknown as Record<string, unknown>).__raw = raw;
+        // Stash before wrapping so PG_CLIENT_RAW can access it
+        _rawPgClient = raw;
         return shouldLogHttpRequests() ? wrapPostgresClientForDbTiming(raw) : raw;
       },
     },
     {
       provide: PG_CLIENT_RAW,
-      useFactory: (pgClient: ReturnType<typeof postgres>) => {
-        // If wrapped by timing proxy, retrieve the original; otherwise use as-is
-        return (pgClient as unknown as Record<string, unknown>).__raw ?? pgClient;
+      useFactory: () => {
+        if (!_rawPgClient) throw new Error('PG_CLIENT_RAW: raw client not initialized');
+        return _rawPgClient;
       },
-      inject: [PG_CLIENT],
     },
     {
       provide: DRIZZLE,
