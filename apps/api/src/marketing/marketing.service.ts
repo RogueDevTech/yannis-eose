@@ -234,16 +234,16 @@ export class MarketingService {
   ): Promise<number> {
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
 
-    // Credits: SENT + COMPLETED — matches getFundingBalance display formula.
-    // SENT funds are in-flight but already deducted from the sender's pool,
-    // so they are available to the receiver for further distribution.
+    // Credits: only COMPLETED — receiver must mark-received before funds count.
+    // SENT funds are in-flight and deducted from the sender, but not yet
+    // available to the receiver until they confirm receipt.
     const [inRow] = await tx
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
       .where(
         and(
           eq(schema.marketingFunding.receiverId, userId),
-          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+          eq(schema.marketingFunding.status, 'COMPLETED'),
         ),
       );
 
@@ -297,7 +297,7 @@ export class MarketingService {
 
   /**
    * Compute a Media Buyer's available balance inside a transaction.
-   * Matches the ledger formula: received (SENT+COMPLETED) − distributed (SENT+COMPLETED+DISPUTED) − spend (non-REJECTED).
+   * Matches the ledger formula: received (COMPLETED) − distributed (SENT+COMPLETED+DISPUTED) − spend (non-REJECTED).
    */
   private async computeMbBalanceInTx(
     tx: MarketingFundingTx,
@@ -314,7 +314,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.marketingFunding.receiverId, userId),
-            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
           ),
         )
         .then((r) => r[0]),
@@ -1199,7 +1199,7 @@ export class MarketingService {
         SELECT id, SUM(amount) OVER (ORDER BY sent_at ASC, id ASC)::text AS "balanceAfter"
         FROM marketing_funding
         WHERE receiver_id = ${input.receiverId}
-          AND status IN ('SENT', 'COMPLETED')
+          AND status = 'COMPLETED'
         ORDER BY sent_at DESC
       `);
       balanceByRowId = new Map(runningRows.map((r) => [r.id, r.balanceAfter]));
@@ -1563,11 +1563,9 @@ export class MarketingService {
     }
 
     // Match the enforcement logic in computeMarketingDisbursableInTx:
-    // - Received: SENT + COMPLETED (funds in-flight count as received)
+    // - Received: COMPLETED only (receiver must mark-received first)
     // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
     // - Spend: non-REJECTED (PENDING + APPROVED)
-    // Without this, the displayed balance is higher than the enforceable
-    // disbursable — users see funds that the system won't let them move.
     const [receivedRow, distributedRow, spendRow] = await Promise.all([
       this.db
         .select({ total: sum(schema.marketingFunding.amount) })
@@ -1575,7 +1573,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.marketingFunding.receiverId, userId),
-            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
           ),
         )
         .then((r) => r[0]),
@@ -1710,7 +1708,7 @@ export class MarketingService {
     }
 
     // Match the enforcement logic in computeMarketingDisbursableInTx:
-    // - Received: SENT + COMPLETED (funds in-flight count as received)
+    // - Received: COMPLETED only (receiver must mark-received first)
     // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
     const [fundingByReceiver, fundingBySender, spendByMediaBuyer, userRows] = await Promise.all([
       this.db
@@ -1722,7 +1720,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.marketingFunding.receiverId, recipientUserIds),
-            inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
           ),
         )
         .groupBy(schema.marketingFunding.receiverId),
@@ -2255,7 +2253,7 @@ export class MarketingService {
               SELECT SUM(mf.amount)
               FROM marketing_funding mf
               WHERE mf.receiver_id = fr.requester_id
-                AND mf.status IN ('SENT', 'COMPLETED')
+                AND mf.status = 'COMPLETED'
                 AND mf.sent_at <= fr.created_at
             ), 0)
             - COALESCE((

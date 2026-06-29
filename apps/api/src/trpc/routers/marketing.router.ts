@@ -1746,7 +1746,9 @@ export const marketingRouter = router({
         distributingTransfers,
         distributingRequests,
       ] = await Promise.all([
-        getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange, ctx.effectiveBranchIds),
+        // Strip stats are always all-time so they tally with the all-time Current Balance.
+        // The date filter only scopes the transaction list below the strip.
+        getMarketingService().fundingByDirectionSummary(ctx.user.id, {}, ctx.effectiveBranchIds),
         isFundingAdmin
           ? (async () => {
               // Supervisors see only their team members as funding recipients

@@ -4,7 +4,8 @@ import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, asc } 
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
-import { DRIZZLE } from '../database/database.module';
+import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
+import type postgres from 'postgres';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
@@ -33,6 +34,7 @@ export class CartOrdersService {
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    @Inject(PG_CLIENT_RAW) private readonly pg: ReturnType<typeof postgres>,
   ) {
     // One-time backfill: set media_buyer_id on cart_orders that are missing it
     // by looking up the source cart abandonment's campaign → mediaBuyerId.
@@ -127,8 +129,8 @@ export class CartOrdersService {
 
   /** Backfill cart_order_items for cart orders that were pulled without line items. */
   private async backfillMissingCartOrderItems() {
-    // Use sql.raw() to force simple query protocol — avoids trigger conflict.
-    const result = await this.db.execute(sql.raw(`
+    // Use pg.unsafe() to bypass Drizzle — simple protocol avoids trigger conflict.
+    const result = await this.pg.unsafe(`
       INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
       SELECT
         gen_random_uuid(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
@@ -147,11 +149,10 @@ export class CartOrdersService {
         SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
       )
         AND ca.product_id IS NOT NULL
-    `));
-    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
-    if (count > 0) {
-      this.logger.log(`Backfilled ${count} missing cart_order_items from source carts`);
-      await this.db.execute(sql.raw(`
+    `);
+    if (result.count > 0) {
+      this.logger.log(`Backfilled ${result.count} missing cart_order_items from source carts`);
+      await this.pg.unsafe(`
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
@@ -161,7 +162,7 @@ export class CartOrdersService {
         ) sub
         WHERE co.id = sub.cart_order_id
           AND (co.total_amount IS NULL OR co.total_amount = 0)
-      `));
+      `);
     }
   }
 
@@ -1124,7 +1125,10 @@ export class CartOrdersService {
     const branchLiteral = resolvedBranchId ? `'${resolvedBranchId}'` : 'NULL';
     const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
 
-    const inserted = await this.db.execute<{ id: string }>(sql.raw(`
+    // Use pg.unsafe() to bypass Drizzle entirely — postgres.js simple protocol.
+    // db.execute(sql.raw(...)) still routes through Drizzle which uses extended
+    // protocol, triggering "column valid_from does not exist" in stamp_actor.
+    const inserted = await this.pg.unsafe<Array<{ id: string; source_cart_id: string }>>(`
       INSERT INTO cart_orders (
         id, source_cart_id, campaign_id, media_buyer_id, status,
         customer_name, customer_phone_hash, customer_phone,
@@ -1145,17 +1149,16 @@ export class CartOrdersService {
       FROM cart_abandonments ca
       WHERE ca.id IN (${idList})
       RETURNING id, source_cart_id
-    `));
+    `);
 
     this.logger.log(`Bulk inserted ${inserted.length} cart orders`);
 
     // Create cart_order_items + timeline events + fix total_amount.
-    // All use sql.raw() to stay on the simple query protocol (same trigger issue).
+    // All use pg.unsafe() to stay on the simple query protocol.
     if (inserted.length > 0) {
-      const sourceIdList = (inserted as unknown as Array<{ source_cart_id: string }>)
-        .map((r) => `'${r.source_cart_id}'`).join(', ');
+      const sourceIdList = inserted.map((r) => `'${r.source_cart_id}'`).join(', ');
 
-      await this.db.execute(sql.raw(`
+      await this.pg.unsafe(`
         INSERT INTO cart_order_items (
           id, cart_order_id, product_id, quantity, unit_price, offer_label
         )
@@ -1179,10 +1182,10 @@ export class CartOrdersService {
           AND NOT EXISTS (
             SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
           )
-      `));
+      `);
 
       // Update total_amount on the parent cart_orders to match item prices
-      await this.db.execute(sql.raw(`
+      await this.pg.unsafe(`
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
@@ -1195,10 +1198,10 @@ export class CartOrdersService {
         ) sub
         WHERE co.id = sub.cart_order_id
           AND (co.total_amount IS NULL OR co.total_amount = 0)
-      `));
+      `);
 
       // Create timeline events for the newly pulled orders
-      await this.db.execute(sql.raw(`
+      await this.pg.unsafe(`
         INSERT INTO cart_order_timeline_events (
           id, cart_order_id, event_type, actor_name, description, metadata, branch_id
         )
@@ -1215,7 +1218,7 @@ export class CartOrdersService {
           AND NOT EXISTS (
             SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
           )
-      `));
+      `);
     }
 
     return { pulled: inserted.length };

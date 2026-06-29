@@ -395,9 +395,6 @@ function CSDashboard({
               { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
-              // Confirmed = cohort count (confirmed-or-beyond, by createdAt). Live
-              // `counts['CONFIRMED']` only counts orders sitting in CONFIRMED right
-              // now — almost always 0 once they advance to AGENT_ASSIGNED → DELIVERED.
               { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
               { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
               {

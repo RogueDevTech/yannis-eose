@@ -69,8 +69,10 @@ export function wrapPostgresClientForDbTiming(client: Sql): Sql {
     },
     get(target, prop, receiver) {
       if (prop === 'unsafe') {
-        return (query: string, params: unknown[]) => {
-          const result = target.unsafe(query, params as never);
+        return (query: string, params?: unknown[]) => {
+          const result = params !== undefined
+            ? target.unsafe(query, params as never)
+            : target.unsafe(query);
           return wrapUnsafeResult(result);
         };
       }

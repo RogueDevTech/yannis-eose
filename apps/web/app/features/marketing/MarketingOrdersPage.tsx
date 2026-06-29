@@ -832,12 +832,16 @@ export function MarketingOrdersPage({
             const statusTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
-            const unconfirmedCount = statusCounts['CS_ENGAGED'] ?? 0;
+            const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+            // Confirmed = confirmed-or-beyond (includes delivered/remitted) — matches Dashboard definition
             const confirmedCount =
               (statusCounts['CONFIRMED'] ?? 0) +
               (statusCounts['AGENT_ASSIGNED'] ?? 0) +
               (statusCounts['DISPATCHED'] ?? 0) +
-              (statusCounts['IN_TRANSIT'] ?? 0);
+              (statusCounts['IN_TRANSIT'] ?? 0) +
+              deliveredCount;
+            // Unconfirmed = everything before CONFIRMED (excludes DELETED)
+            const unconfirmedCount = Math.max(0, statusTotal - confirmedCount);
             const deletedCount = statusCounts['DELETED'] ?? 0;
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
@@ -900,15 +904,13 @@ export function MarketingOrdersPage({
                     },
                     {
                       label: 'Delivered',
-                      value: (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0),
-                      valueClassName: ((statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0)) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+                      value: deliveredCount,
+                      valueClassName: deliveredCount > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
                       active: selectedStatus === 'DELIVERED',
                       onClick: () => handleStatusChange('DELIVERED'),
                     },
                     ...(() => {
-                      const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
-                      const confirmedOrBeyond = confirmedCount + deliveredCount;
-                      const cr = statusTotal > 0 ? (confirmedOrBeyond / statusTotal) * 100 : 0;
+                      const cr = statusTotal > 0 ? (confirmedCount / statusTotal) * 100 : 0;
                       const dr = statusTotal > 0 ? (deliveredCount / statusTotal) * 100 : 0;
                       return [
                         {

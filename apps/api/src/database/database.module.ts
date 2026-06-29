@@ -7,11 +7,15 @@ import { RedisHealthService } from './redis-health.service';
 import { MigrationRunnerService } from './migration-runner.service';
 import { PermissionSeedService } from './permission-seed.service';
 import { MessageTemplateSeedService } from './message-template-seed.service';
-import { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
+import { DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS } from './database.tokens';
 import { shouldLogHttpRequests } from '../common/http-request-timing';
 import { wrapPostgresClientForDbTiming } from './postgres-db-timing-proxy';
 
-export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
+export { DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS } from './database.tokens';
+
+/** Module-level ref to the unwrapped postgres.js client.
+ *  Set in PG_CLIENT factory, read by PG_CLIENT_RAW factory. */
+let _rawPgClient: ReturnType<typeof postgres> | null = null;
 
 @Global()
 @Module({
@@ -113,7 +117,16 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
             );
           });
 
+        // Stash before wrapping so PG_CLIENT_RAW can access it
+        _rawPgClient = raw;
         return shouldLogHttpRequests() ? wrapPostgresClientForDbTiming(raw) : raw;
+      },
+    },
+    {
+      provide: PG_CLIENT_RAW,
+      useFactory: () => {
+        if (!_rawPgClient) throw new Error('PG_CLIENT_RAW: raw client not initialized');
+        return _rawPgClient;
       },
     },
     {
@@ -150,6 +163,6 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
     // Skip with MESSAGE_TEMPLATE_SEED_AUTORUN=false. See message-template-seed.service.ts.
     MessageTemplateSeedService,
   ],
-  exports: [DRIZZLE, PG_CLIENT, REDIS, RedisHealthService],
+  exports: [DRIZZLE, PG_CLIENT, PG_CLIENT_RAW, REDIS, RedisHealthService],
 })
 export class DatabaseModule {}
