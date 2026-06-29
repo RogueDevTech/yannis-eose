@@ -386,6 +386,68 @@ export async function postRejectAdSpend(adSpendId: string, reason?: string): Pro
   return true;
 }
 
+/** POST `marketing.verifyFunding` — used by bulk mark-received flow (session cookie). */
+export async function postVerifyFunding(
+  fundingId: string,
+  action: 'COMPLETED' | 'DISPUTED',
+  disputeReason?: string,
+): Promise<boolean> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('API base URL not configured');
+  const res = await fetch(`${base}/trpc/marketing.verifyFunding`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fundingId, action, ...(disputeReason ? { disputeReason } : {}) }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+    throw new Error(json?.error?.message ?? 'Failed to verify funding');
+  }
+  return true;
+}
+
+/** POST `marketing.approveFundingRequest` — used by bulk-approve flow (session cookie). */
+export async function postApproveFundingRequest(
+  requestId: string,
+  amount: number,
+  receiptUrl?: string,
+): Promise<boolean> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('API base URL not configured');
+  const res = await fetch(`${base}/trpc/marketing.approveFundingRequest`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, amount, ...(receiptUrl ? { receiptUrl } : {}) }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+    throw new Error(json?.error?.message ?? 'Failed to approve funding request');
+  }
+  return true;
+}
+
+/** POST `marketing.rejectFundingRequest` — used by bulk-reject flow (session cookie). */
+export async function postRejectFundingRequest(
+  requestId: string,
+  reason?: string,
+): Promise<boolean> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('API base URL not configured');
+  const res = await fetch(`${base}/trpc/marketing.rejectFundingRequest`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, ...(reason ? { reason } : {}) }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+    throw new Error(json?.error?.message ?? 'Failed to reject funding request');
+  }
+  return true;
+}
+
 export async function fetchDuplicateComparisonPhones(
   orderId: string,
   originalOrderId: string,

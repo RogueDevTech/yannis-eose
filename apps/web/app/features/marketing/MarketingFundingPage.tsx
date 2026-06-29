@@ -22,6 +22,7 @@ import {
   CompactTable,
   CompactTableActionButton,
   type CompactTableColumn,
+  type CompactTableSelection,
 } from '~/components/ui/compact-table';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
@@ -39,6 +40,13 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Textarea } from '~/components/ui/textarea';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { isAdminLevel } from '~/lib/rbac';
+import { useBulkAction } from '~/hooks/useBulkAction';
+import { BulkProgressModal } from '~/components/ui/bulk-progress-modal';
+import {
+  postVerifyFunding,
+  postApproveFundingRequest,
+  postRejectFundingRequest,
+} from '~/lib/trpc-browser';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
   DistributingFundingEntry,
@@ -201,6 +209,35 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
   const [fundingReceiptModal, setFundingReceiptModal] = useState<FundingRecord | null>(null);
   const [requestDetailsEntry, setRequestDetailsEntry] = useState<DistributingFundingEntry | null>(null);
+
+  // ── Bulk selection ─────────────────────────────────────
+  const [distribSelectedIds, setDistribSelectedIds] = useState<Set<string>>(new Set());
+  const [receivedSelectedIds, setReceivedSelectedIds] = useState<Set<string>>(new Set());
+  const bulkAction = useBulkAction();
+  const [confirmBulkApprove, setConfirmBulkApprove] = useState(false);
+  const [confirmBulkReject, setConfirmBulkReject] = useState(false);
+  const [bulkRejectReason, setBulkRejectReason] = useState('');
+  const [confirmBulkMarkReceived, setConfirmBulkMarkReceived] = useState(false);
+  const [confirmBulkNotReceived, setConfirmBulkNotReceived] = useState(false);
+  const [bulkNotReceivedReason, setBulkNotReceivedReason] = useState('');
+
+  const toggleDistribSelect = useCallback((id: string, selected: boolean) => {
+    setDistribSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const toggleReceivedSelect = useCallback((id: string, selected: boolean) => {
+    setReceivedSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   // The request being approved — looked up across Section 1 (mine), Section 2 (MBs'),
   // AND the unified distributing slice so the Approve modal can pre-fill amount /
@@ -398,6 +435,81 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     params.delete('page');
     setSearchParams(params, { preventScrollReset: true });
   };
+
+  // ── Clear bulk selection on section/tab/filter change ──
+  useEffect(() => {
+    setDistribSelectedIds(new Set());
+    setReceivedSelectedIds(new Set());
+  }, [displaySection, displayTab]);
+
+  // ── Bulk action handlers ───────────────────────────────
+  const handleBulkApproveRequests = useCallback(async () => {
+    setConfirmBulkApprove(false);
+    const ids = [...distribSelectedIds];
+    const amountById = new Map<string, number>();
+    for (const entry of distributingEntries?.records ?? []) {
+      if (entry.entryType === 'request' && ids.includes(entry.id)) {
+        amountById.set(entry.id, Number(entry.amount));
+      }
+    }
+    setDistribSelectedIds(new Set());
+    await bulkAction.run({
+      label: 'Approving funding requests',
+      items: ids,
+      processFn: async (id) => {
+        const amount = amountById.get(id);
+        if (!amount) throw new Error('Amount not found');
+        await postApproveFundingRequest(id, amount);
+        return true;
+      },
+    });
+  }, [distribSelectedIds, distributingEntries, bulkAction]);
+
+  const handleBulkRejectRequests = useCallback(async () => {
+    const reason = bulkRejectReason.trim() || undefined;
+    setConfirmBulkReject(false);
+    setBulkRejectReason('');
+    const ids = [...distribSelectedIds];
+    setDistribSelectedIds(new Set());
+    await bulkAction.run({
+      label: 'Rejecting funding requests',
+      items: ids,
+      processFn: async (id) => {
+        await postRejectFundingRequest(id, reason);
+        return true;
+      },
+    });
+  }, [distribSelectedIds, bulkAction, bulkRejectReason]);
+
+  const handleBulkMarkReceived = useCallback(async () => {
+    setConfirmBulkMarkReceived(false);
+    const ids = [...receivedSelectedIds];
+    setReceivedSelectedIds(new Set());
+    await bulkAction.run({
+      label: 'Marking as received',
+      items: ids,
+      processFn: async (id) => {
+        await postVerifyFunding(id, 'COMPLETED');
+        return true;
+      },
+    });
+  }, [receivedSelectedIds, bulkAction]);
+
+  const handleBulkNotReceived = useCallback(async () => {
+    const reason = bulkNotReceivedReason.trim();
+    setConfirmBulkNotReceived(false);
+    setBulkNotReceivedReason('');
+    const ids = [...receivedSelectedIds];
+    setReceivedSelectedIds(new Set());
+    await bulkAction.run({
+      label: 'Marking as not received',
+      items: ids,
+      processFn: async (id) => {
+        await postVerifyFunding(id, 'DISPUTED', reason || 'Bulk marked as not received');
+        return true;
+      },
+    });
+  }, [receivedSelectedIds, bulkAction, bulkNotReceivedReason]);
 
   // ── Role-aware copy ─────────────────────────────────────
   const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
@@ -952,6 +1064,25 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               mediaBuyerFilter={mediaBuyerFilter}
               onMediaBuyerChange={(v) => updateSliceParam('mediaBuyerId', v === 'ALL' ? '' : v)}
             />
+            {canSendFunding && distribSelectedIds.size > 0 && (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-700/50 rounded-lg mx-4 mt-2">
+                <span className="text-xs md:text-sm font-semibold text-brand-700 dark:text-brand-300 shrink-0">
+                  {distribSelectedIds.size} selected
+                </span>
+                <button onClick={() => setDistribSelectedIds(new Set())} className="text-xs text-brand-500 hover:text-brand-600 underline shrink-0">
+                  Clear
+                </button>
+                <div className="flex-1" />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button variant="danger" size="sm" className="text-xs md:text-sm" onClick={() => setConfirmBulkReject(true)} disabled={bulkAction.isRunning}>
+                    Reject
+                  </Button>
+                  <Button variant="primary" size="sm" className="text-xs md:text-sm" onClick={() => setConfirmBulkApprove(true)} disabled={bulkAction.isRunning}>
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            )}
             <UnifiedDistributingTable
               slice={unifiedDistributingSlice}
               users={users}
@@ -964,6 +1095,12 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               emptyMessage={transferEmptyMessage}
               canApproveFunding={canSendFunding}
               loading={isFundingRouteLoading}
+              selection={canSendFunding ? {
+                selectedIds: distribSelectedIds,
+                isSelectable: (entry) => entry.entryType === 'request' && entry.status === 'PENDING',
+                onToggle: toggleDistribSelect,
+                getRowId: (entry) => entry.id,
+              } : undefined}
             />
           </>
         ) : (
@@ -976,6 +1113,25 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               onTypeChange={(v) => updateSliceParam('entryType', v)}
               onStatusChange={(v) => updateSliceParam('entryStatus', v)}
             />
+            {receivedSelectedIds.size > 0 && (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-700/50 rounded-lg mx-4 mt-2">
+                <span className="text-xs md:text-sm font-semibold text-brand-700 dark:text-brand-300 shrink-0">
+                  {receivedSelectedIds.size} selected
+                </span>
+                <button onClick={() => setReceivedSelectedIds(new Set())} className="text-xs text-brand-500 hover:text-brand-600 underline shrink-0">
+                  Clear
+                </button>
+                <div className="flex-1" />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button variant="danger" size="sm" className="text-xs md:text-sm" onClick={() => setConfirmBulkNotReceived(true)} disabled={bulkAction.isRunning}>
+                    Not Received
+                  </Button>
+                  <Button variant="primary" size="sm" className="text-xs md:text-sm" onClick={() => setConfirmBulkMarkReceived(true)} disabled={bulkAction.isRunning}>
+                    Mark Received
+                  </Button>
+                </div>
+              </div>
+            )}
             <UnifiedReceivedTable
               slice={unifiedReceivedSlice}
               users={users}
@@ -998,6 +1154,15 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 ) : undefined
               }
               loading={isFundingRouteLoading}
+              selection={{
+                selectedIds: receivedSelectedIds,
+                isSelectable: (entry) =>
+                  entry.entryType === 'transfer' &&
+                  entry.status === 'SENT' &&
+                  entry.receiverId === currentUserId,
+                onToggle: toggleReceivedSelect,
+                getRowId: (entry) => entry.id,
+              }}
             />
           </>
         )}
@@ -1530,6 +1695,126 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </div>
         </Modal>
       )}
+
+      {/* ─── Bulk action modals ──────────────────────────────────────────────── */}
+
+      {/* Confirm bulk approve requests */}
+      {confirmBulkApprove && (() => {
+        const n = distribSelectedIds.size;
+        const totalAmount = [...distribSelectedIds].reduce((sum, id) => {
+          const entry = distributingEntries?.records.find(
+            (e) => e.entryType === 'request' && e.id === id,
+          );
+          return sum + (entry ? Number(entry.amount) : 0);
+        }, 0);
+        return (
+          <Modal open onClose={() => setConfirmBulkApprove(false)} maxWidth="max-w-sm">
+            <div className="p-5 space-y-4">
+              <h3 className="text-base font-semibold text-app-fg">Approve {n} request{n > 1 ? 's' : ''}?</h3>
+              <p className="text-sm text-app-fg-muted">
+                Total: <span className="font-semibold text-app-fg"><NairaPrice amount={totalAmount} /></span>
+              </p>
+              <p className="text-sm text-app-fg-muted">
+                Each request will be approved for its full requested amount. This cannot be undone.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button variant="secondary" size="sm" onClick={() => setConfirmBulkApprove(false)}>Cancel</Button>
+                <Button variant="primary" size="sm" onClick={handleBulkApproveRequests}>Approve all</Button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Confirm bulk reject requests */}
+      {confirmBulkReject && (() => {
+        const n = distribSelectedIds.size;
+        return (
+          <Modal open onClose={() => { setConfirmBulkReject(false); setBulkRejectReason(''); }} maxWidth="max-w-sm">
+            <div className="p-5 space-y-4">
+              <h3 className="text-base font-semibold text-app-fg">Reject {n} request{n > 1 ? 's' : ''}?</h3>
+              <p className="text-sm text-app-fg-muted">
+                All {n} selected pending request{n > 1 ? 's' : ''} will be rejected.
+              </p>
+              <Textarea
+                id="bulk-reject-reason"
+                label="Reason (optional)"
+                value={bulkRejectReason}
+                onChange={(e) => setBulkRejectReason(e.target.value)}
+                placeholder="Why are these requests being rejected?"
+                rows={2}
+                maxLength={500}
+              />
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <Button variant="secondary" size="sm" onClick={() => { setConfirmBulkReject(false); setBulkRejectReason(''); }}>Cancel</Button>
+                <Button variant="danger" size="sm" onClick={handleBulkRejectRequests}>Reject all</Button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Confirm bulk mark received */}
+      {confirmBulkMarkReceived && (() => {
+        const n = receivedSelectedIds.size;
+        const totalAmount = [...receivedSelectedIds].reduce((sum, id) => {
+          const rSlice = receivedTransfers;
+          const entry = rSlice?.records.find((r) => r.id === id);
+          return sum + (entry ? Number(entry.amount) : 0);
+        }, 0);
+        return (
+          <Modal open onClose={() => setConfirmBulkMarkReceived(false)} maxWidth="max-w-sm">
+            <div className="p-5 space-y-4">
+              <h3 className="text-base font-semibold text-app-fg">Mark {n} transfer{n > 1 ? 's' : ''} as received?</h3>
+              {totalAmount > 0 && (
+                <p className="text-sm text-app-fg-muted">
+                  Total: <span className="font-semibold text-app-fg"><NairaPrice amount={totalAmount} /></span>
+                </p>
+              )}
+              <p className="text-sm text-app-fg-muted">
+                All {n} selected transfer{n > 1 ? 's' : ''} will be marked as received and added to your balance.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button variant="secondary" size="sm" onClick={() => setConfirmBulkMarkReceived(false)}>Cancel</Button>
+                <Button variant="primary" size="sm" onClick={handleBulkMarkReceived}>Confirm</Button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Confirm bulk not received */}
+      {confirmBulkNotReceived && (() => {
+        const n = receivedSelectedIds.size;
+        return (
+          <Modal open onClose={() => { setConfirmBulkNotReceived(false); setBulkNotReceivedReason(''); }} maxWidth="max-w-sm">
+            <div className="p-5 space-y-4">
+              <h3 className="text-base font-semibold text-app-fg">Mark {n} transfer{n > 1 ? 's' : ''} as not received?</h3>
+              <p className="text-sm text-app-fg-muted">
+                All {n} selected transfer{n > 1 ? 's' : ''} will be disputed. The senders will be notified.
+              </p>
+              <Textarea
+                id="bulk-not-received-reason"
+                label="Reason"
+                value={bulkNotReceivedReason}
+                onChange={(e) => setBulkNotReceivedReason(e.target.value)}
+                placeholder="Why were these transfers not received?"
+                rows={2}
+                maxLength={500}
+              />
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <Button variant="secondary" size="sm" onClick={() => { setConfirmBulkNotReceived(false); setBulkNotReceivedReason(''); }}>Cancel</Button>
+                <Button variant="danger" size="sm" onClick={handleBulkNotReceived} disabled={bulkNotReceivedReason.trim().length < 10}>
+                  Dispute all
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Bulk progress */}
+      <BulkProgressModal state={bulkAction.progress} onDone={bulkAction.reset} />
     </div>
   );
 }
@@ -2106,6 +2391,7 @@ function UnifiedDistributingTable({
   emptyMessage,
   canApproveFunding,
   loading = false,
+  selection,
 }: {
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   users: User[];
@@ -2119,6 +2405,7 @@ function UnifiedDistributingTable({
   /** Phase 21 — gate Approve/Reject on `marketing.funding.approve` or legacy admin/HoM/Finance role. */
   canApproveFunding: boolean;
   loading?: boolean;
+  selection?: CompactTableSelection<DistributingFundingEntry>;
 }) {
   const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
 
@@ -2320,41 +2607,47 @@ function UnifiedDistributingTable({
       loadingVariant="overlay"
       emptyTitle="No entries"
       emptyDescription={emptyMessage}
-      renderMobileCard={(entry) => (
-        <button
-          type="button"
-          onClick={() => onOpenDetails(entry)}
-          className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-medium text-app-fg truncate">
-              {entry.entryType === 'transfer'
-                ? (entry.receiverName ?? userNameById(entry.receiverId))
-                : (entry.requesterName ?? userNameById(entry.requesterId))}
-            </span>
-            <StatusBadge status={entry.status} />
-          </div>
-          <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-            <span className="uppercase tracking-wide">{entry.entryType}</span>
-            <span className="font-medium tabular-nums text-app-fg">
-              <NairaPrice amount={Number(entry.amount)} />
-            </span>
-          </div>
-          {balancesList && (() => {
-            const bal = balanceByUserId.get(subjectUserId(entry));
-            return bal != null ? (
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="text-app-fg-muted">Balance</span>
-                <span className={`font-medium tabular-nums ${bal <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
-                  <NairaPrice amount={bal} />
-                </span>
-              </div>
-            ) : null;
-          })()}
-          <div className="text-xs text-app-fg-muted">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </div>
-        </button>
+      selection={selection}
+      renderMobileCard={(entry, _i, helpers) => (
+        <>
+          {helpers.rowSelection && (
+            <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">{helpers.rowSelection}</div>
+          )}
+          <button
+            type="button"
+            onClick={() => onOpenDetails(entry)}
+            className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-app-fg truncate">
+                {entry.entryType === 'transfer'
+                  ? (entry.receiverName ?? userNameById(entry.receiverId))
+                  : (entry.requesterName ?? userNameById(entry.requesterId))}
+              </span>
+              <StatusBadge status={entry.status} />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+              <span className="uppercase tracking-wide">{entry.entryType}</span>
+              <span className="font-medium tabular-nums text-app-fg">
+                <NairaPrice amount={Number(entry.amount)} />
+              </span>
+            </div>
+            {balancesList && (() => {
+              const bal = balanceByUserId.get(subjectUserId(entry));
+              return bal != null ? (
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-app-fg-muted">Balance</span>
+                  <span className={`font-medium tabular-nums ${bal <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                    <NairaPrice amount={bal} />
+                  </span>
+                </div>
+              ) : null;
+            })()}
+            <div className="text-xs text-app-fg-muted">
+              {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </div>
+          </button>
+        </>
       )}
       pagination={{
         page: slice.page,
@@ -2506,6 +2799,7 @@ function UnifiedReceivedTable({
   emptyMessage,
   emptyAction,
   loading = false,
+  selection,
 }: {
   slice: UnifiedReceivedSlice;
   users: User[];
@@ -2518,6 +2812,7 @@ function UnifiedReceivedTable({
   emptyMessage: string;
   emptyAction?: ReactNode;
   loading?: boolean;
+  selection?: CompactTableSelection<DistributingFundingEntry>;
 }) {
   const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
 
@@ -2712,30 +3007,36 @@ function UnifiedReceivedTable({
       emptyTitle="No entries"
       emptyDescription={emptyMessage}
       emptyAction={emptyAction}
-      renderMobileCard={(entry) => (
-        <button
-          type="button"
-          onClick={() => onOpenDetails(entry)}
-          className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-medium text-app-fg truncate">
-              {entry.entryType === 'transfer'
-                ? (entry.senderName ?? userNameById(entry.senderId))
-                : (entry.requesterName ?? userNameById(entry.requesterId))}
-            </span>
-            <StatusBadge status={entry.status} />
-          </div>
-          <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-            <span className="uppercase tracking-wide">{entry.entryType}</span>
-            <span className="font-medium tabular-nums text-app-fg">
-              <NairaPrice amount={Number(entry.amount)} />
-            </span>
-          </div>
-          <div className="text-xs text-app-fg-muted">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </div>
-        </button>
+      selection={selection}
+      renderMobileCard={(entry, _i, helpers) => (
+        <>
+          {helpers.rowSelection && (
+            <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">{helpers.rowSelection}</div>
+          )}
+          <button
+            type="button"
+            onClick={() => onOpenDetails(entry)}
+            className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-app-fg truncate">
+                {entry.entryType === 'transfer'
+                  ? (entry.senderName ?? userNameById(entry.senderId))
+                  : (entry.requesterName ?? userNameById(entry.requesterId))}
+              </span>
+              <StatusBadge status={entry.status} />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+              <span className="uppercase tracking-wide">{entry.entryType}</span>
+              <span className="font-medium tabular-nums text-app-fg">
+                <NairaPrice amount={Number(entry.amount)} />
+              </span>
+            </div>
+            <div className="text-xs text-app-fg-muted">
+              {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </div>
+          </button>
+        </>
       )}
       pagination={{
         page: slice.page,
