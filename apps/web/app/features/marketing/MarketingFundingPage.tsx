@@ -1745,7 +1745,7 @@ function FundingMetricsStrip({
       valueClassName: Number(summary.totalReceived) > 0
         ? 'text-success-600 dark:text-success-400'
         : 'text-app-fg',
-      title: 'Sum of incoming ledger transfers (any status) in the selected period',
+      title: 'Sum of all incoming ledger transfers (any status)',
       onClick: () => onFilter({ section: 'received', entryType: 'transfer' }),
       active: isActive('received', 'transfer'),
     },
@@ -1757,7 +1757,7 @@ function FundingMetricsStrip({
             valueClassName: Number(summary.totalDistributed) > 0
               ? 'text-orange-600 dark:text-orange-400'
               : 'text-app-fg',
-            title: 'Sum of transfers you have sent in the selected period',
+            title: 'Sum of all transfers you have sent',
             onClick: () => onFilter({ section: 'distributing', entryType: 'transfer' }),
             active: isActive('distributing', 'transfer'),
           },
