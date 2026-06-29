@@ -36,6 +36,7 @@ export const createFollowUpRuleSchema = z
     targetGroupId: z.string().uuid().nullable().optional(),
     priority: z.number().int().min(0).max(1_000_000).optional(),
     enabled: z.boolean().optional(),
+    freezeOriginal: z.boolean().optional(),
   })
   .refine(
     (d) =>
@@ -58,6 +59,7 @@ export const updateFollowUpRuleSchema = z
     targetGroupId: z.string().uuid().nullable().optional(),
     priority: z.number().int().min(0).max(1_000_000).optional(),
     enabled: z.boolean().optional(),
+    freezeOriginal: z.boolean().optional(),
   })
   .refine(
     (d) => {
