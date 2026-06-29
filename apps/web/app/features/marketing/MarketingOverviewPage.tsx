@@ -363,7 +363,7 @@ export function MarketingOverviewPage({
     },
     {
       label: 'Confirmed',
-      value: metrics.confirmedOrders.toString(),
+      value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(),
       valueClassName: 'text-success-600 dark:text-success-400',
     },
     {
