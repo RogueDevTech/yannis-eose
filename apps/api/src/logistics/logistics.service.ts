@@ -1341,7 +1341,7 @@ export class LogisticsService {
     // Phase 20: also accept the explicit `finance.cashRemittance.create` permission
     // so a custom role template can grant just this capability.
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const isFinanceCaller =
       actor.role === 'SUPER_ADMIN' ||
       hasFinanceAccess(actor) ||
@@ -1545,12 +1545,13 @@ export class LogisticsService {
    */
   async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser, groupId?: string | null) {
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canListGlobal =
       actor.role === 'SUPER_ADMIN' ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
-      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
+      this.actorHasAnyPermission(actor, 'finance.read');
     if (!isTplCaller && !canListGlobal) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot list delivery remittances' });
     }
@@ -2024,7 +2025,8 @@ export class LogisticsService {
   /**
    * Breakdown of delivered + remitted orders by product.
    * Optional branchId scopes to a single branch.
-   * Optional startDate/endDate filter by orders.deliveredAt.
+   * Date filter matches the cash-remittance summary hybrid: orders awaiting
+   * remittance are filtered by deliveredAt, remitted orders by sentAt.
    */
   async deliveredOrdersByProduct(
     branchId?: string | null,
@@ -2035,8 +2037,21 @@ export class LogisticsService {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
-    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
-    if (endDate) conditions.push(lte(schema.orders.deliveredAt, new Date(endDate)));
+    // Match the cash-remittance summary scope: awaiting orders use deliveredAt,
+    // remitted orders use the remittance batch sentAt.  Use a scalar subquery
+    // to avoid duplicate rows from multiple remittance batches per order.
+    if (startDate || endDate) {
+      const effectiveDate = sql`COALESCE(
+        (SELECT ${schema.deliveryRemittances.sentAt}
+         FROM ${schema.deliveryRemittanceOrders}
+         JOIN ${schema.deliveryRemittances} ON ${schema.deliveryRemittances.id} = ${schema.deliveryRemittanceOrders.deliveryRemittanceId}
+         WHERE ${schema.deliveryRemittanceOrders.orderId} = ${schema.orders.id}
+         ORDER BY ${schema.deliveryRemittances.sentAt} DESC
+         LIMIT 1),
+        ${schema.orders.deliveredAt})`;
+      if (startDate) conditions.push(sql`${effectiveDate} >= ${new Date(startDate + 'T00:00:00')}`);
+      if (endDate) conditions.push(sql`${effectiveDate} <= ${new Date(endDate + 'T23:59:59')}`);
+    }
 
     const rows = await this.db
       .select({
@@ -2059,7 +2074,8 @@ export class LogisticsService {
   /**
    * Breakdown of delivered + remitted orders by logistics location.
    * Optional branchId scopes to a single branch.
-   * Optional startDate/endDate filter by orders.deliveredAt.
+   * Date filter matches the cash-remittance summary hybrid: orders awaiting
+   * remittance are filtered by deliveredAt, remitted orders by sentAt.
    */
   async deliveredOrdersByLocation(
     branchId?: string | null,
@@ -2070,8 +2086,18 @@ export class LogisticsService {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
-    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
-    if (endDate) conditions.push(lte(schema.orders.deliveredAt, new Date(endDate)));
+    if (startDate || endDate) {
+      const effectiveDate = sql`COALESCE(
+        (SELECT ${schema.deliveryRemittances.sentAt}
+         FROM ${schema.deliveryRemittanceOrders}
+         JOIN ${schema.deliveryRemittances} ON ${schema.deliveryRemittances.id} = ${schema.deliveryRemittanceOrders.deliveryRemittanceId}
+         WHERE ${schema.deliveryRemittanceOrders.orderId} = ${schema.orders.id}
+         ORDER BY ${schema.deliveryRemittances.sentAt} DESC
+         LIMIT 1),
+        ${schema.orders.deliveredAt})`;
+      if (startDate) conditions.push(sql`${effectiveDate} >= ${new Date(startDate + 'T00:00:00')}`);
+      if (endDate) conditions.push(sql`${effectiveDate} <= ${new Date(endDate + 'T23:59:59')}`);
+    }
 
     const rows = await this.db
       .select({
@@ -2109,12 +2135,14 @@ export class LogisticsService {
     // Phase 20: also accept `finance.cashRemittance.create` so any custom role
     // that can create remittances can preview the eligible orders.
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
-    const isFinanceCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+    const canListGlobal =
       actor.role === 'SUPER_ADMIN' ||
       hasFinanceAccess(actor) ||
-      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
-    if (!isTplCaller && !isFinanceCaller) {
+      this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
+      this.actorHasAnyPermission(actor, 'finance.read');
+    if (!isTplCaller && !canListGlobal) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'You cannot list delivery remittance eligible orders',
@@ -2123,7 +2151,7 @@ export class LogisticsService {
 
     const conditions = [eq(schema.orders.status, 'DELIVERED')];
 
-    if (isTplCaller) {
+    if (isTplCaller && !canListGlobal) {
       conditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
@@ -2293,12 +2321,13 @@ export class LogisticsService {
    */
   async getDeliveryRemittance(deliveryRemittanceId: string, actor: SessionUser) {
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canViewGlobal =
       actor.role === 'SUPER_ADMIN' ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
-      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
+      this.actorHasAnyPermission(actor, 'finance.read');
     if (!isTplCaller && !canViewGlobal) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot view delivery remittances' });
     }
