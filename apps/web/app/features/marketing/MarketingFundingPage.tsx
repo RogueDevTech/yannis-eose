@@ -961,6 +961,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           params.set('section', section);
           params.delete('page');
           params.delete('search');
+          // Strip stats are all-time — clear date filters so the list matches.
+          params.delete('startDate');
+          params.delete('endDate');
           if (entryType) params.set('entryType', entryType);
           else params.delete('entryType');
           if (entryStatus) params.set('entryStatus', entryStatus);
@@ -2009,7 +2012,9 @@ function FundingMetricsStrip({
             value: <NairaPrice amount={Number(fundingBalance.balance)} />,
             valueClassName: Number(fundingBalance.balance) > 0
               ? 'text-success-600 dark:text-success-400'
-              : 'text-app-fg',
+              : Number(fundingBalance.balance) < 0
+                ? 'text-danger-600 dark:text-danger-400'
+                : 'text-app-fg',
             title: `Received ₦${Number(fundingBalance.totalReceived).toLocaleString()} − distributed ₦${Number(fundingBalance.totalDistributed).toLocaleString()} − expenses ₦${Number(fundingBalance.totalSpend).toLocaleString()} (pending + approved).`,
           },
           {
@@ -2550,6 +2555,22 @@ function UnifiedDistributingTable({
                   onClick: () => onOpenDetails(entry),
                 },
                 {
+                  key: 'approve',
+                  kind: 'button',
+                  label: 'Approve',
+                  tone: 'success',
+                  onClick: () => onApprove(entry.id),
+                  show: isPendingRequest && canApproveFunding,
+                },
+                {
+                  key: 'reject',
+                  kind: 'button',
+                  label: 'Reject',
+                  tone: 'danger',
+                  onClick: () => onReject(entry.id),
+                  show: isPendingRequest && canApproveFunding,
+                },
+                {
                   key: 'ledger',
                   kind: 'link',
                   label: 'Ledger',
@@ -2581,22 +2602,6 @@ function UnifiedDistributingTable({
                     });
                   },
                   show: entry.entryType === 'transfer' && !!entry.receiptUrl,
-                },
-                {
-                  key: 'approve',
-                  kind: 'button',
-                  label: 'Approve',
-                  tone: 'success',
-                  onClick: () => onApprove(entry.id),
-                  show: isPendingRequest && canApproveFunding,
-                },
-                {
-                  key: 'reject',
-                  kind: 'button',
-                  label: 'Reject',
-                  tone: 'danger',
-                  onClick: () => onReject(entry.id),
-                  show: isPendingRequest && canApproveFunding,
                 },
               ]}
             />

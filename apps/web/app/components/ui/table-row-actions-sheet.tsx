@@ -56,6 +56,8 @@ export interface TableRowActionsSheetProps {
   /** Title in the slide-up sheet. */
   sheetTitle?: string;
   actions: TableRowSheetAction[];
+  /** Max actions shown inline on desktop. Overflow goes into kebab menu. Default: 3. */
+  maxInline?: number;
 }
 
 /**
@@ -64,11 +66,12 @@ export interface TableRowActionsSheetProps {
  *
  * Use on funding/finance dense tables first; other modules can adopt the same pattern.
  */
-export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', actions }: TableRowActionsSheetProps) {
+export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', actions, maxInline = 3 }: TableRowActionsSheetProps) {
   const visible = actions.filter((a) => a.show !== false);
-  const [open, setOpen] = useState(false);
+  const [openSource, setOpenSource] = useState<'mobile' | 'desktop' | null>(null);
+  const open = openSource !== null;
   const titleId = useId();
-  const close = () => setOpen(false);
+  const close = () => setOpenSource(null);
 
   if (visible.length === 0) {
     return <span className="text-app-fg-muted">—</span>;
@@ -124,9 +127,30 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
     );
   };
 
+  // Desktop: show up to maxInline actions inline, rest go into kebab overflow
+  const desktopInline = visible.slice(0, maxInline);
+  const desktopOverflow = visible.slice(maxInline);
+  const needsDesktopKebab = desktopOverflow.length > 0;
+
   return (
     <>
-      <div className="hidden items-center justify-end gap-1.5 md:flex">{visible.map(renderDesktop)}</div>
+      <div className="hidden items-center justify-end gap-1.5 md:flex">
+        {desktopInline.map(renderDesktop)}
+        {needsDesktopKebab && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 shrink-0 p-0 text-app-fg-muted hover:text-app-fg"
+            aria-label={ariaLabel}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => setOpenSource('desktop')}
+          >
+            <EllipsisVerticalIcon className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
       <div className="flex justify-end md:hidden">
         <Button
           type="button"
@@ -136,30 +160,32 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
           aria-label={ariaLabel}
           aria-haspopup="dialog"
           aria-expanded={open}
-          onClick={() => setOpen(true)}
+          onClick={() => setOpenSource('mobile')}
         >
           <EllipsisVerticalIcon />
         </Button>
-        <Modal
-          open={open}
-          onClose={close}
-          maxWidth="max-w-full"
-          aria-labelledby={titleId}
-          contentClassName="p-0"
-        >
-          <div className="border-b border-app-border px-4 py-3">
-            <h2 id={titleId} className="text-base font-semibold text-app-fg">
-              {sheetTitle}
-            </h2>
-          </div>
-          <div className="flex max-h-[min(70dvh,520px)] flex-col gap-1.5 overflow-y-auto p-3">{visible.map(renderSheetRow)}</div>
-          <div className="border-t border-app-border p-3 pt-2">
-            <Button type="button" variant="secondary" className="w-full" onClick={close}>
-              Cancel
-            </Button>
-          </div>
-        </Modal>
       </div>
+      <Modal
+        open={open}
+        onClose={close}
+        maxWidth="max-w-full"
+        aria-labelledby={titleId}
+        contentClassName="p-0"
+      >
+        <div className="border-b border-app-border px-4 py-3">
+          <h2 id={titleId} className="text-base font-semibold text-app-fg">
+            {sheetTitle}
+          </h2>
+        </div>
+        <div className="flex max-h-[min(70dvh,520px)] flex-col gap-1.5 overflow-y-auto p-3">
+          {(openSource === 'desktop' ? desktopOverflow : visible).map(renderSheetRow)}
+        </div>
+        <div className="border-t border-app-border p-3 pt-2">
+          <Button type="button" variant="secondary" className="w-full" onClick={close}>
+            Cancel
+          </Button>
+        </div>
+      </Modal>
     </>
   );
 }

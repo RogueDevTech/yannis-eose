@@ -1615,8 +1615,9 @@ export class MarketingService {
     const totalReceived = receivedRow?.total ?? '0';
     const totalDistributed = distributedRow?.total ?? '0';
     const totalSpend = spendRow?.total ?? '0';
+    // Show actual balance (can be negative for historical overspend).
     const balance = String(
-      Math.max(0, Number(totalReceived) - Number(totalDistributed) - Number(totalSpend)),
+      Number(totalReceived) - Number(totalDistributed) - Number(totalSpend),
     );
 
     return { totalReceived, totalDistributed, totalSpend, balance };
@@ -1800,7 +1801,7 @@ export class MarketingService {
       const totalDistributed = distributedMap.get(u.id) ?? '0';
       const totalSpend = spendMap.get(u.id) ?? '0';
       const balance = String(
-        Math.max(0, Number(totalReceived) - Number(totalDistributed) - Number(totalSpend)),
+        Number(totalReceived) - Number(totalDistributed) - Number(totalSpend),
       );
       result.push({
         userId: u.id,

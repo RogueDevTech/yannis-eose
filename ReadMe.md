@@ -13,7 +13,9 @@ docker restart yannis-eose-api-1
  -->
 
 
-sudo docker logs yannis-eose-api-1 --since 24h 2>&1 | grep -i "\[Cart\]" | tail -20
+sudo docker logs yannis-eose-api-1 --since 30m 2>&1 | grep -i "migration\|cart\|error\|failed" | tail -20       
+
+sudo docker logs yannis-eose-api-1 --since 3m 2>&1 | grep -i "\[Cart\]"   
 
 
   cd ~/yannis-eose && git pull origin main && sudo docker compose build api && sudo docker compose up -d api   
