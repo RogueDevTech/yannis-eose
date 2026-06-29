@@ -669,6 +669,18 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           </div>
 
+          <div className="rounded-lg border border-app-border p-3 space-y-1.5">
+            <label className="flex items-center gap-2 text-sm text-app-fg">
+              <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
+              Freeze original order
+            </label>
+            <p className="text-[11px] text-app-fg-muted leading-snug pl-6">
+              {freezeOriginal
+                ? 'Original locked when follow-up is created. Only the follow-up can be worked.'
+                : 'Original stays active. Both original and follow-up can be worked simultaneously.'}
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-app-fg-muted mb-1">Older than</label>
@@ -692,18 +704,19 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
-            <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={[{ value: '', label: 'All branches' }, ...branchOptions]} placeholder="All branches" searchPlaceholder="Search..." />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-app-fg-muted mb-1">Push to</label>
-            <FormSelect id="fu-target-type" value={targetType} onChange={(e) => setTargetType(e.target.value as 'all' | 'branch' | 'group')} options={[
-              { value: 'all', label: 'All branches (round-robin)' },
-              { value: 'branch', label: 'Specific branch' },
-              { value: 'group', label: 'Follow-up group' },
-            ]} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
+              <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={[{ value: '', label: 'All branches' }, ...branchOptions]} placeholder="All branches" searchPlaceholder="Search..." />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Push to</label>
+              <FormSelect id="fu-target-type" value={targetType} onChange={(e) => setTargetType(e.target.value as 'all' | 'branch' | 'group')} options={[
+                { value: 'all', label: 'All branches (round-robin)' },
+                { value: 'branch', label: 'Specific branch' },
+                { value: 'group', label: 'Follow-up group' },
+              ]} />
+            </div>
           </div>
 
           {targetType === 'branch' && (
@@ -723,18 +736,6 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
             Enabled
           </label>
-
-          <div className="rounded-lg border border-app-border p-3 space-y-1.5">
-            <label className="flex items-center gap-2 text-sm text-app-fg">
-              <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
-              Freeze original order
-            </label>
-            <p className="text-[11px] text-app-fg-muted leading-snug pl-6">
-              {freezeOriginal
-                ? 'The original order will be locked when the follow-up copy is created. Only the follow-up can be worked.'
-                : 'The original order stays active. Both the original and follow-up can be worked by closers simultaneously.'}
-            </p>
-          </div>
         </div>
 
         <div className="flex justify-end gap-2 border-t border-app-border px-4 py-3 sm:px-5 shrink-0">
