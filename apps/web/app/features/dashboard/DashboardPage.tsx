@@ -336,7 +336,7 @@ function CSDashboard({
                 { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
                 { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
                 { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
-                { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
+                { label: 'Confirmed', value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
                 { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
                 {
                   label: 'CR',
@@ -364,7 +364,7 @@ function CSDashboard({
                 <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
                 <div className="space-y-3">
                   <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
-                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders)}</span></div>
                   <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
                   <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
                   <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivery Rate</span><span className="text-sm font-medium text-app-fg">{metrics.deliveryRate.toFixed(1)}%</span></div>
@@ -395,7 +395,7 @@ function CSDashboard({
               { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
-              { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
+              { label: 'Confirmed', value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
               { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
               {
                 label: 'CR',
@@ -504,7 +504,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
         },
         {
           label: 'Confirmed',
-          value: metrics.confirmedOrders.toString(),
+          value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(),
           valueClassName: 'text-success-600 dark:text-success-400',
           to: q('/admin/marketing/orders?status=CONFIRMED'),
         },
@@ -547,7 +547,7 @@ function MarketingPerformanceSummary({ metrics, naira }: { metrics: DashboardDat
       <div className="space-y-3">
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders)}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
       </div>
