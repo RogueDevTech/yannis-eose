@@ -608,50 +608,65 @@ export function MarketingTeamPage({
       <OverviewStatStrip
         mobileGrid
         showScrollControls={false}
-        items={[
-          {
-            label: 'Team members',
-            value: overviewStats.teamMembers.toLocaleString(),
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Total orders',
-            value: overviewStats.totalOrders.toLocaleString(),
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Avg confirmation %',
-            value:
-              overviewStats.averageConfirmationRate != null
-                ? `${Math.round(overviewStats.averageConfirmationRate)}%`
-                : '\u2014',
-            valueClassName: confirmationRateColorClass(overviewStats.averageConfirmationRate),
-          },
-          {
-            label: 'Avg delivery %',
-            value:
-              overviewStats.averageDeliveryRate != null
-                ? `${Math.round(overviewStats.averageDeliveryRate)}%`
-                : '\u2014',
-            valueClassName: deliveryRateColorClass(overviewStats.averageDeliveryRate),
-          },
-          {
-            label: 'Total Sent',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalSent)} />,
-            valueClassName: 'text-app-fg',
-          },
-          {
-            label: 'Completed',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalCompleted)} />,
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Disputed',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalDisputed)} />,
-            valueClassName:
-              parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
-          },
-        ]}
+        items={(() => {
+          const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
+          const totalAdSpend = mbMembers.reduce((s, m) => s + (m.adSpend ?? 0), 0);
+          const totalReceived = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
+          const totalUnspent = mbMembers.reduce((s, m) => s + Number(m.balance), 0);
+          const avgCpa = overviewStats.totalOrders > 0 ? totalAdSpend / overviewStats.totalOrders : 0;
+          return [
+            {
+              label: `Team Members (${overviewStats.teamMembers})`,
+              value: overviewStats.totalOrders.toLocaleString(),
+              valueClassName: 'text-app-fg',
+              title: `${overviewStats.teamMembers} members · ${overviewStats.totalOrders.toLocaleString()} orders`,
+            },
+            {
+              label: 'Avg Confirmation %',
+              value:
+                overviewStats.averageConfirmationRate != null
+                  ? `${Math.round(overviewStats.averageConfirmationRate)}%`
+                  : '\u2014',
+              valueClassName: confirmationRateColorClass(overviewStats.averageConfirmationRate),
+            },
+            {
+              label: 'Avg Delivery %',
+              value:
+                overviewStats.averageDeliveryRate != null
+                  ? `${Math.round(overviewStats.averageDeliveryRate)}%`
+                  : '\u2014',
+              valueClassName: deliveryRateColorClass(overviewStats.averageDeliveryRate),
+            },
+            {
+              label: 'Total Ad Spend',
+              value: <NairaPrice amount={totalAdSpend} />,
+              valueClassName: totalAdSpend > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
+              title: 'Sum of approved + pending ad spend across all media buyers',
+            },
+            {
+              label: 'Avg CPA',
+              value: avgCpa > 0 ? <NairaPrice amount={Math.round(avgCpa)} /> : '\u2014',
+              valueClassName: 'text-app-fg',
+              title: 'Total ad spend ÷ total orders',
+            },
+            {
+              label: `Total Disbursed (${mbMembers.length})`,
+              value: <NairaPrice amount={totalReceived} />,
+              valueClassName: 'text-app-fg',
+              title: `Total funding received by ${mbMembers.length} media buyers`,
+            },
+            {
+              label: 'MB Unspent Balance',
+              value: <NairaPrice amount={totalUnspent} />,
+              valueClassName: totalUnspent > 0
+                ? 'text-blue-600 dark:text-blue-400'
+                : totalUnspent < 0
+                  ? 'text-danger-600 dark:text-danger-400'
+                  : 'text-app-fg',
+              title: 'Undisbursed/unspent funding sitting with media buyers (received − ad spend − expenses)',
+            },
+          ];
+        })()}
       />
 
       <div>
