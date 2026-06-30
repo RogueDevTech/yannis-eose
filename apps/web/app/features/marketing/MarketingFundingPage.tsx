@@ -2006,11 +2006,9 @@ function FundingMetricsStrip({
     && (entryStatus ? activeEntryStatus === entryStatus : !activeEntryStatus);
   // Aggregate balances when the viewer can see the full list (Admin/Finance/HoM).
   // Media Buyer Balance = money parked with MBs not yet spent.
-  const mbBalance = balancesList
-    ? balancesList
-        .filter((row) => row.role === 'MEDIA_BUYER')
-        .reduce((acc, row) => acc + Number(row.balance), 0)
-    : null;
+  const mbRows = balancesList?.filter((row) => row.role === 'MEDIA_BUYER') ?? [];
+  const mbBalance = balancesList ? mbRows.reduce((acc, row) => acc + Number(row.balance), 0) : null;
+  const mbCount = mbRows.length;
 
   const items = [
     ...(fundingBalance
@@ -2038,47 +2036,47 @@ function FundingMetricsStrip({
     ...(mbBalance != null
       ? [
           {
-            label: 'Media Buyer Balance',
+            label: `Media Buyer Balance (${mbCount})`,
             value: <NairaPrice amount={mbBalance} />,
             valueClassName: mbBalance > 0
               ? 'text-blue-600 dark:text-blue-400'
               : 'text-app-fg',
-            title: 'Sum of unspent funding sitting with all Media Buyers (received − expenses).',
+            title: `Sum of unspent funding across ${mbCount} Media Buyer${mbCount !== 1 ? 's' : ''} (received − expenses).`,
           },
         ]
       : []),
     {
-      label: 'Total Received',
+      label: summary.receivedCount ? `Total Received (${summary.receivedCount})` : 'Total Received',
       value: <NairaPrice amount={Number(summary.totalReceived)} />,
       valueClassName: Number(summary.totalReceived) > 0
         ? 'text-success-600 dark:text-success-400'
         : 'text-app-fg',
-      title: 'Sum of confirmed (mark-received) incoming transfers',
+      title: `Sum of confirmed (mark-received) incoming transfers${summary.receivedCount ? ` — ${summary.receivedCount} transfer${summary.receivedCount !== 1 ? 's' : ''}` : ''}`,
       onClick: () => onFilter({ section: 'received', entryType: 'transfer' }),
       active: isActive('received', 'transfer'),
     },
     ...(canDistribute
       ? [
           {
-            label: 'Total Distributed',
+            label: summary.distributedCount ? `Total Distributed (${summary.distributedCount})` : 'Total Distributed',
             value: <NairaPrice amount={Number(summary.totalDistributed)} />,
             valueClassName: Number(summary.totalDistributed) > 0
               ? 'text-orange-600 dark:text-orange-400'
               : 'text-app-fg',
-            title: 'Sum of all transfers you have sent',
+            title: `Sum of all transfers you have sent${summary.distributedCount ? ` — ${summary.distributedCount} transfer${summary.distributedCount !== 1 ? 's' : ''}` : ''}`,
             onClick: () => onFilter({ section: 'distributing', entryType: 'transfer' }),
             active: isActive('distributing', 'transfer'),
           },
         ]
       : []),
     {
-      label: 'Pending Mark-Received',
-      value: summary.pendingMarkReceived.toString(),
+      label: `Pending Mark-Received (${summary.pendingMarkReceived})`,
+      value: <NairaPrice amount={Number(summary.pendingMarkReceivedAmount ?? '0')} />,
       valueClassName:
         summary.pendingMarkReceived > 0
           ? 'text-warning-600 dark:text-warning-400'
           : 'text-app-fg',
-      title: 'Incoming transfers awaiting your confirmation',
+      title: `${summary.pendingMarkReceived} incoming transfer${summary.pendingMarkReceived !== 1 ? 's' : ''} awaiting your confirmation`,
       onClick: () => onFilter({ section: 'received', entryType: 'transfer', entryStatus: 'SENT' }),
       active: isActive('received', 'transfer', 'SENT'),
     },

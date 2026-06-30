@@ -1515,15 +1515,15 @@ export class MarketingService {
     const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] =
       await Promise.all([
         this.db
-          .select({ total: sum(schema.marketingFunding.amount) })
+          .select({ total: sum(schema.marketingFunding.amount), c: count() })
           .from(schema.marketingFunding)
           .where(incomingWhere),
         this.db
-          .select({ total: sum(schema.marketingFunding.amount) })
+          .select({ total: sum(schema.marketingFunding.amount), c: count() })
           .from(schema.marketingFunding)
           .where(outgoingWhere),
         this.db
-          .select({ c: count() })
+          .select({ c: count(), total: sum(schema.marketingFunding.amount) })
           .from(schema.marketingFunding)
           .where(
             and(
@@ -1556,8 +1556,11 @@ export class MarketingService {
 
     return {
       totalReceived: received[0]?.total ?? '0',
+      receivedCount: Number(received[0]?.c ?? 0),
       totalDistributed: distributed[0]?.total ?? '0',
+      distributedCount: Number(distributed[0]?.c ?? 0),
       pendingMarkReceived: Number(pendingReceiveRow[0]?.c ?? 0),
+      pendingMarkReceivedAmount: pendingReceiveRow[0]?.total ?? '0',
       disputedAsReceiver: Number(disputedReceiveRow[0]?.c ?? 0),
       disputedAsSender: Number(disputedSendRow[0]?.c ?? 0),
     };
