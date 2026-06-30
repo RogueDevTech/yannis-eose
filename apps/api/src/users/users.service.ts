@@ -912,24 +912,42 @@ export class UsersService {
             roleInBranch: null,
           })),
         );
-      } else if (actor.activeGroupId) {
+      } else {
         // Non-branch-eligible roles (Stock Manager, Finance Officer, etc.)
         // still need company-group isolation. Auto-assign them to all branches
         // in the creator's active group so existing branch-scoped queries
         // (effectiveBranchIds, user_branches joins) scope correctly.
-        const groupBranches = await tx
-          .select({ id: schema.branches.id })
-          .from(schema.branches)
-          .where(eq(schema.branches.groupId, actor.activeGroupId));
-        if (groupBranches.length > 0) {
-          await tx.insert(schema.userBranches).values(
-            groupBranches.map((b) => ({
-              userId: createdUser.id,
-              branchId: b.id,
-              isPrimary: false,
-              roleInBranch: null,
-            })),
-          );
+        let groupId = actor.activeGroupId ?? null;
+        // Fallback: if the creator has no activeGroupId (e.g. legacy session),
+        // resolve from the first active company group so org-wide users always
+        // get branches assigned.
+        if (!groupId) {
+          const [fallbackGroup] = await tx
+            .select({ id: schema.branchGroups.id })
+            .from(schema.branchGroups)
+            .where(eq(schema.branchGroups.status, 'ACTIVE'))
+            .orderBy(asc(schema.branchGroups.createdAt))
+            .limit(1);
+          groupId = fallbackGroup?.id ?? null;
+        }
+        if (groupId) {
+          const groupBranches = await tx
+            .select({ id: schema.branches.id })
+            .from(schema.branches)
+            .where(and(
+              eq(schema.branches.groupId, groupId),
+              eq(schema.branches.status, 'ACTIVE'),
+            ));
+          if (groupBranches.length > 0) {
+            await tx.insert(schema.userBranches).values(
+              groupBranches.map((b, i) => ({
+                userId: createdUser.id,
+                branchId: b.id,
+                isPrimary: i === 0,
+                roleInBranch: null,
+              })),
+            );
+          }
         }
       }
 
