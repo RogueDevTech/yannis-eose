@@ -238,6 +238,9 @@ export interface FundingRequestStatusCounts {
   APPROVED: number;
   REJECTED: number;
   ALL: number;
+  PENDING_AMOUNT?: string;
+  APPROVED_AMOUNT?: string;
+  REJECTED_AMOUNT?: string;
 }
 
 export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -278,8 +281,11 @@ export interface FundingRequestsSliceData {
 /** Per-actor directional summary used by the page top strip. */
 export interface FundingDirectionSummary {
   totalReceived: string;
+  receivedCount?: number;
   totalDistributed: string;
+  distributedCount?: number;
   pendingMarkReceived: number;
+  pendingMarkReceivedAmount?: string;
   disputedAsReceiver: number;
   disputedAsSender: number;
 }
