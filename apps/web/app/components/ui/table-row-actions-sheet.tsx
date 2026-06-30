@@ -220,7 +220,7 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
         <EllipsisVerticalIcon className="h-4 w-4" />
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-app-border bg-app-elevated shadow-lg dark:shadow-black/50">
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-app-border-strong bg-app-elevated shadow-xl dark:shadow-black/60" style={{ background: 'rgb(var(--app-elevated))' }}>
           <div className="py-1">
             {actions.map((a) => {
               if (a.kind === 'custom') {
