@@ -1721,9 +1721,13 @@ export class LogisticsService {
         // Deduction breakdown — so the CEO sees where the money goes
         grossOrderValue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
         totalDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        deliveryFeeCount: sql<string>`COUNT(CASE WHEN COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
         totalCommitmentFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.commitmentFee}, 0)), 0)::text`,
+        commitmentFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
         totalPosFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.posFee}, 0)), 0)::text`,
+        posFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
         totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0)), 0)::text`,
+        failedDeliveryCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -1831,17 +1835,23 @@ export class LogisticsService {
       // Deduction breakdown for remitted orders
       grossOrderValue: baseSummary?.grossOrderValue ?? '0',
       totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
+      deliveryFeeCount: baseSummary?.deliveryFeeCount ?? '0',
       totalCommitmentFees: baseSummary?.totalCommitmentFees ?? '0',
+      commitmentFeeCount: baseSummary?.commitmentFeeCount ?? '0',
       totalPosFees: baseSummary?.totalPosFees ?? '0',
+      posFeeCount: baseSummary?.posFeeCount ?? '0',
       totalFailedDeliveryCosts: baseSummary?.totalFailedDeliveryCosts ?? '0',
+      failedDeliveryCount: baseSummary?.failedDeliveryCount ?? '0',
     };
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', deliveredCount: '0', deliveredAmount: '0',
-      grossOrderValue: '0', totalDeliveryFees: '0', totalCommitmentFees: '0',
-      totalPosFees: '0', totalFailedDeliveryCosts: '0',
+      grossOrderValue: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
+      totalCommitmentFees: '0', commitmentFeeCount: '0',
+      totalPosFees: '0', posFeeCount: '0',
+      totalFailedDeliveryCosts: '0', failedDeliveryCount: '0',
     };
 
     return {
