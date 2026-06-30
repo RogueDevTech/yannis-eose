@@ -26,6 +26,7 @@ const APPROVE_PERMISSION_BY_TYPE: Record<string, string> = {
   PRODUCT_ARCHIVE: 'permission_requests.product_archive.approve',
   ORDER_LINE_PRICE_CHANGE: 'permission_requests.order_line_price.approve',
   ORDER_DELETION: 'permission_requests.order_deletion.approve',
+  DELIVERED_ORDER_DELETION: 'permission_requests.delivered_order_deletion.approve',
 };
 
 /** True when `viewer.permissions` contains `code` (canonical-aware). */
@@ -84,7 +85,7 @@ export class PermissionRequestsService {
     }
 
     // Step 2 — order-domain contextual check.
-    if (req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') {
+    if (req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION' || req.type === 'DELIVERED_ORDER_DELETION') {
       const payload = req.payload as { orderId?: string; orderType?: 'followUp' | 'cart' } | null;
       const orderId = payload?.orderId;
       const orderType = payload?.orderType;
@@ -213,6 +214,12 @@ export class PermissionRequestsService {
       approverId: string | null;
       approvalReason: string | null;
       approvedAt: Date | string | null;
+      csApprovedBy?: string | null;
+      csApprovedAt?: Date | string | null;
+      csNote?: string | null;
+      logiApprovedBy?: string | null;
+      logiApprovedAt?: Date | string | null;
+      logiNote?: string | null;
       createdAt: Date | string;
     }>,
   ) {
@@ -223,6 +230,8 @@ export class PermissionRequestsService {
       idSet.add(r.requesterId);
       if (r.targetUserId) idSet.add(r.targetUserId);
       if (r.approverId) idSet.add(r.approverId);
+      if (r.csApprovedBy) idSet.add(r.csApprovedBy);
+      if (r.logiApprovedBy) idSet.add(r.logiApprovedBy);
     }
     const ids = [...idSet];
     const userRows =
@@ -242,6 +251,8 @@ export class PermissionRequestsService {
       const reqU = byId.get(row.requesterId);
       const tgtU = row.targetUserId ? byId.get(row.targetUserId) : undefined;
       const appU = row.approverId ? byId.get(row.approverId) : undefined;
+      const csU = row.csApprovedBy ? byId.get(row.csApprovedBy) : undefined;
+      const logiU = row.logiApprovedBy ? byId.get(row.logiApprovedBy) : undefined;
       return {
         ...row,
         requesterName: reqU?.name ?? 'Unknown',
@@ -249,6 +260,8 @@ export class PermissionRequestsService {
         targetUserName: tgtU?.name ?? null,
         targetUserEmail: tgtU?.email ?? null,
         approverName: appU?.name ?? null,
+        csApproverName: csU?.name ?? null,
+        logiApproverName: logiU?.name ?? null,
       };
     });
   }
@@ -350,6 +363,12 @@ export class PermissionRequestsService {
       approverId: schema.permissionRequests.approverId,
       approvalReason: schema.permissionRequests.approvalReason,
       approvedAt: schema.permissionRequests.approvedAt,
+      csApprovedBy: schema.permissionRequests.csApprovedBy,
+      csApprovedAt: schema.permissionRequests.csApprovedAt,
+      csNote: schema.permissionRequests.csNote,
+      logiApprovedBy: schema.permissionRequests.logiApprovedBy,
+      logiApprovedAt: schema.permissionRequests.logiApprovedAt,
+      logiNote: schema.permissionRequests.logiNote,
       createdAt: schema.permissionRequests.createdAt,
     };
 
@@ -506,6 +525,138 @@ export class PermissionRequestsService {
         });
       }
       await this.ordersService.softDeleteOrder(orderId, approver, { approverNote: reason });
+    } else if (req.type === 'DELIVERED_ORDER_DELETION') {
+      const payload = req.payload as { orderId?: string; orderNo?: number | null } | null;
+      const orderId = payload?.orderId;
+      if (!orderId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid payload for delivered order deletion request.',
+        });
+      }
+
+      // Determine which side the approver represents
+      const isCSApprover =
+        approver.role === 'HEAD_OF_CS' ||
+        approver.role === 'BRANCH_ADMIN';
+      const isLogiApprover =
+        approver.role === 'HEAD_OF_LOGISTICS';
+      const isSuperAdmin = approver.role === 'SUPER_ADMIN' || approver.role === 'ADMIN';
+
+      // SuperAdmin/Admin can fill either unfilled side
+      let stampCS = false;
+      let stampLogi = false;
+      if (isSuperAdmin) {
+        if (!req.csApprovedBy) stampCS = true;
+        else if (!req.logiApprovedBy) stampLogi = true;
+        else {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Both sides have already approved.' });
+        }
+      } else if (isCSApprover) {
+        if (req.csApprovedBy) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'CS side has already approved this request.' });
+        }
+        stampCS = true;
+      } else if (isLogiApprover) {
+        if (req.logiApprovedBy) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Logistics side has already approved this request.' });
+        }
+        stampLogi = true;
+      } else {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only Head of CS, Head of Logistics, Branch Admin, or Admin can approve delivered order deletion requests.',
+        });
+      }
+
+      const now = new Date();
+      const updateSet: Record<string, unknown> = { updatedAt: now };
+      if (stampCS) {
+        updateSet.csApprovedBy = approver.id;
+        updateSet.csApprovedAt = now;
+        updateSet.csNote = reason || null;
+      }
+      if (stampLogi) {
+        updateSet.logiApprovedBy = approver.id;
+        updateSet.logiApprovedAt = now;
+        updateSet.logiNote = reason || null;
+      }
+
+      await withActor(this.db, approver, async (tx) => {
+        await tx
+          .update(schema.permissionRequests)
+          .set(updateSet)
+          .where(eq(schema.permissionRequests.id, requestId));
+      });
+
+      // Check if both sides are now approved
+      const bothApproved =
+        (stampCS && !!req.logiApprovedBy) || (stampLogi && !!req.csApprovedBy) || (stampCS && stampLogi);
+
+      if (!bothApproved) {
+        // Partial approval — notify the other side and the requester
+        const sideLabel = stampCS ? 'CS' : 'Logistics';
+        const orderLabel = payload?.orderNo != null
+          ? formatOrderNumber(payload.orderNo)
+          : orderId.slice(0, 8).toUpperCase();
+
+        this.notificationsService.enqueueCreate({
+          userId: req.requesterId,
+          type: 'approval:permission_request',
+          title: 'Deletion request — partial approval',
+          body: `${sideLabel} has approved the deletion of order ${orderLabel}. Awaiting the other department's approval.`,
+          data: { requestId, action: 'PARTIAL_APPROVAL' },
+        });
+
+        return { success: true, action: 'PARTIAL_APPROVAL' };
+      }
+
+      // Both sides approved — resolve approver names for the timeline
+      const csApproverId = stampCS ? approver.id : req.csApprovedBy!;
+      const logiApproverId = stampLogi ? approver.id : req.logiApprovedBy!;
+      const [csUser, logiUser] = await Promise.all([
+        csApproverId === approver.id
+          ? Promise.resolve({ name: approver.name })
+          : this.db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, csApproverId)).limit(1).then((r) => r[0]),
+        logiApproverId === approver.id
+          ? Promise.resolve({ name: approver.name })
+          : this.db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, logiApproverId)).limit(1).then((r) => r[0]),
+      ]);
+
+      // Execute the deletion with stock reversal
+      await this.ordersService.softDeleteDeliveredOrder(orderId, approver, {
+        approverNote: reason,
+        csApproverName: csUser?.name ?? undefined,
+        logiApproverName: logiUser?.name ?? undefined,
+      });
+
+      // Stamp APPROVED on the request
+      await withActor(this.db, approver, async (tx) => {
+        await tx
+          .update(schema.permissionRequests)
+          .set({
+            status: 'APPROVED',
+            approverId: approver.id,
+            approvalReason: reason,
+            approvedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(schema.permissionRequests.id, requestId));
+      });
+
+      const orderLabelFinal = payload?.orderNo != null
+        ? formatOrderNumber(payload.orderNo)
+        : orderId.slice(0, 8).toUpperCase();
+
+      this.notificationsService.enqueueCreate({
+        userId: req.requesterId,
+        type: 'approval:permission_request',
+        title: 'Deletion request approved',
+        body: `Your request to delete delivered order ${orderLabelFinal} was approved by both CS and Logistics. The order has been removed and stock reversed.`,
+        data: { requestId, action: 'APPROVED' },
+      });
+
+      return { success: true, action: 'APPROVED' };
     } else if (req.type === 'PERMISSION_GRANT' && req.targetUserId && req.permissionCode) {
       // Phase 2: grant user_permission - for now we don't have the API, skip
       throw new TRPCError({
@@ -583,7 +734,7 @@ export class PermissionRequestsService {
 
     const isOwnWithdrawalWithoutApproverRights =
       found.requesterId === approver.id &&
-      (found.type === 'ORDER_LINE_PRICE_CHANGE' || found.type === 'ORDER_DELETION');
+      (found.type === 'ORDER_LINE_PRICE_CHANGE' || found.type === 'ORDER_DELETION' || found.type === 'DELIVERED_ORDER_DELETION');
     if (!isOwnWithdrawalWithoutApproverRights) {
       await this.assertApproverMayProcessRequest(approver, found);
     }

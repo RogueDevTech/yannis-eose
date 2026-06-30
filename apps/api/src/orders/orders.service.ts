@@ -14,6 +14,7 @@ import {
   type UpdateOrderInput,
   type RequestOrderLinePriceChangeInput,
   type RequestOrderDeletionInput,
+  type RequestDeliveredOrderDeletionInput,
   type ListOrdersInput,
   type ScheduleCalendarHeatInput,
   type OrderStatus,
@@ -26,6 +27,7 @@ import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
+import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { EventsService } from '../events/events.service';
@@ -352,6 +354,21 @@ export class OrdersService {
         and(
           eq(schema.permissionRequests.status, 'PENDING'),
           permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_DELETION'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  async findPendingDeliveredOrderDeletionRequestId(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'DELIVERED_ORDER_DELETION'),
           sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
         ),
       )
@@ -851,6 +868,178 @@ export class OrdersService {
     // it. The tRPC `softDeleteOrder` procedure also invalidates, but archiving
     // via the order-deletion approval flow goes straight through this service
     // method, bypassing that router call. Mirrors `invalidateOrdersAggregatesCache`.
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+    return { success: true };
+  }
+
+  // ============================================
+  // Delivered Order Deletion — Finance-initiated, dual-approval (HoCS + HoL)
+  // ============================================
+
+  /** Statuses eligible for Finance-initiated deletion (post-delivery duplicates). */
+  private static readonly DELIVERED_DELETION_STATUSES = ['DELIVERED', 'REMITTED'] as const;
+
+  /**
+   * Finance requests deletion of a DELIVERED/REMITTED order. Creates a
+   * DELIVERED_ORDER_DELETION permission request requiring dual approval
+   * from both HoCS and HoL before the order is soft-deleted + stock reversed.
+   */
+  async requestDeliveredOrderDeletion(
+    input: RequestDeliveredOrderDeletionInput,
+    actor: SessionUser,
+  ) {
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    if (
+      !OrdersService.DELIVERED_DELETION_STATUSES.includes(
+        order.status as (typeof OrdersService.DELIVERED_DELETION_STATUSES)[number],
+      )
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only delivered or remitted orders can be requested for deletion via this flow.',
+      });
+    }
+
+    // Permission gate: orders.deletion.request or finance access
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    if (
+      !isAdminLevel(actor) &&
+      !perms.includes(canonicalPermissionCode('orders.deletion.request')) &&
+      !hasFinanceAccess(actor)
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to request delivered order deletion.',
+      });
+    }
+
+    // Check for existing pending request
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'DELIVERED_ORDER_DELETION'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
+        ),
+      )
+      .limit(1);
+    if (duplicate) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'A deletion request is already pending for this order.',
+      });
+    }
+
+    const payload = {
+      orderId: input.orderId,
+      orderNo: order.orderNumber ?? null,
+      orderStatus: order.status,
+    };
+
+    const [req] = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.permissionRequests)
+        .values({
+          type: 'DELIVERED_ORDER_DELETION',
+          status: 'PENDING',
+          requesterId: actor.id,
+          reason: input.reason,
+          payload: payload as unknown as Record<string, unknown>,
+        })
+        .returning({ id: schema.permissionRequests.id }),
+    );
+
+    if (!req?.id) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to create deletion request',
+      });
+    }
+
+    void this.notifyOrderDeletionApprovers({
+      requestId: req.id,
+      orderId: input.orderId,
+      branchId: order.branchId ?? null,
+      servicingBranchId: order.servicingBranchId ?? null,
+      requesterName: actor.name ?? null,
+      excludeUserId: actor.id,
+    });
+
+    return { success: true as const, requestId: req.id };
+  }
+
+  /**
+   * Soft-delete a DELIVERED/REMITTED order after dual approval.
+   * Sets status to DELETED, reverses stock via inventory ADJUSTMENT movements,
+   * and logs the full dual-approval context in the timeline.
+   */
+  async softDeleteDeliveredOrder(
+    orderId: string,
+    actor: SessionUser,
+    opts?: { approverNote?: string; csApproverName?: string; logiApproverName?: string },
+  ): Promise<{ success: true }> {
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+    if (order.status === 'DELETED') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order is already deleted.' });
+    }
+
+    const note = opts?.approverNote?.trim();
+    const csLabel = opts?.csApproverName ?? 'CS Head';
+    const logiLabel = opts?.logiApproverName ?? 'Logistics Head';
+    const description = [
+      'Order deleted via dual-approval (Finance request).',
+      `CS approved by ${csLabel}.`,
+      `Logistics approved by ${logiLabel}.`,
+      ...(note ? [`Note: ${note.slice(0, 500)}`] : []),
+    ].join(' ');
+
+    const now = new Date();
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
+        .where(eq(schema.orders.id, orderId));
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'ORDER_DELETED',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description,
+        metadata: { dualApproval: true, ...(note ? { note } : {}) },
+        branchId: order.branchId ?? null,
+      });
+    });
+
+    // Reverse stock: create ADJUSTMENT movements to undo the DELIVERY deduction
+    try {
+      await this.inventoryService.reverseDeliveryForOrder(orderId, actor);
+    } catch (err) {
+      // Stock reversal is critical but shouldn't block the deletion.
+      // Log the error — manual inventory correction may be needed.
+      console.error(
+        `[softDeleteDeliveredOrder] Stock reversal failed for order ${orderId}:`,
+        err,
+      );
+    }
+
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     return { success: true };
@@ -2573,7 +2762,7 @@ export class OrdersService {
     //   3) pending permission_request to archive (soft-delete) the order.
     // Previously these ran sequentially (3 RTTs); fanning out collapses them
     // to a single wall-clock round-trip on the cache-miss detail load.
-    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId] =
+    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId] =
       await Promise.all([
         this.db
           .select({
@@ -2589,6 +2778,7 @@ export class OrdersService {
           .limit(1),
         this.findPendingOrderLinePriceRequest(orderId),
         this.findPendingOrderDeletionRequestId(orderId),
+        this.findPendingDeliveredOrderDeletionRequestId(orderId),
       ]);
 
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
@@ -2619,6 +2809,7 @@ export class OrdersService {
         requesterName: pendingPriceRequest.requesterName,
       } : null,
       pendingOrderDeletionRequestId,
+      pendingDeliveredOrderDeletionRequestId,
     };
   }
 

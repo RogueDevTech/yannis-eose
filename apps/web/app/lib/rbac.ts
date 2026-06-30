@@ -131,8 +131,9 @@ export function canEditUser(
   if (!viewer) return 'none';
   if (actorUserIdsMatch(viewer.id, target.id)) return 'none';
 
-  // SUPPORT is read-only — hide edit buttons entirely (mutations blocked at tRPC layer).
-  if (viewer.role === 'SUPPORT') return 'none';
+  // SUPPORT can view the form (all fields visible) but mutations are blocked
+  // at the tRPC layer — they see everything read-only.
+  if (viewer.role === 'SUPPORT') return 'full';
 
   // SuperAdmin can edit anyone, including admin-class accounts
   // (CLAUDE.md → "SuperAdmin-only: manage admin-level users"). The earlier

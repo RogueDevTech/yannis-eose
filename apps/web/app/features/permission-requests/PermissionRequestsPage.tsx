@@ -33,6 +33,7 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   PRODUCT_ARCHIVE: 'Product archive',
   ORDER_LINE_PRICE_CHANGE: 'Order line prices',
   ORDER_DELETION: 'Order archive',
+  DELIVERED_ORDER_DELETION: 'Delivered order deletion',
 };
 
 const STATUS_TABS: Array<{ value: PermissionRequestStatusFilter; label: string }> = [
@@ -56,6 +57,7 @@ function requestedSummary(req: PermissionRequest): string {
   if (req.type === 'PRODUCT_ARCHIVE') return 'Archive product';
   if (req.type === 'ORDER_LINE_PRICE_CHANGE') return 'Change order line prices';
   if (req.type === 'ORDER_DELETION') return 'Archive order (soft delete)';
+  if (req.type === 'DELIVERED_ORDER_DELETION') return 'Delete delivered order (dual-approval)';
   if (req.requestedRole) return formatRoleLabel(req.requestedRole);
   if (req.permissionCode) return req.permissionCode;
   return '—';
@@ -79,6 +81,11 @@ function targetSummary(req: PermissionRequest): string {
     const p = req.payload as { orderId?: string; orderNo?: number | null };
     if (p.orderNo != null) return `Order ${formatOrderNumber(p.orderNo)}`;
     if (p.orderId) return `Order ${p.orderId.slice(0, 8).toUpperCase()}`;
+  }
+  if (req.type === 'DELIVERED_ORDER_DELETION' && req.payload) {
+    const p = req.payload as { orderId?: string; orderNo?: number | null; orderStatus?: string };
+    const label = p.orderNo != null ? `Order ${formatOrderNumber(p.orderNo)}` : p.orderId ? `Order ${p.orderId.slice(0, 8).toUpperCase()}` : 'Order';
+    return `${label} (${p.orderStatus ?? 'DELIVERED'})`;
   }
   if (req.targetUserName) return req.targetUserName;
   return '—';
@@ -255,11 +262,11 @@ export function PermissionRequestsPage({
           }
           const mayApprove =
             (req.type === 'PRODUCT_ARCHIVE' && canApproveProductArchive) ||
-            ((req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') && canApproveOrderLinePriceChange) ||
-            (req.type !== 'PRODUCT_ARCHIVE' && req.type !== 'ORDER_LINE_PRICE_CHANGE' && req.type !== 'ORDER_DELETION' && canApprove);
+            ((req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION' || req.type === 'DELIVERED_ORDER_DELETION') && canApproveOrderLinePriceChange) ||
+            (req.type !== 'PRODUCT_ARCHIVE' && req.type !== 'ORDER_LINE_PRICE_CHANGE' && req.type !== 'ORDER_DELETION' && req.type !== 'DELIVERED_ORDER_DELETION' && canApprove);
           const mayReject =
             mayApprove ||
-            ((req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') && viewerId !== '' && viewerId === req.requesterId);
+            ((req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION' || req.type === 'DELIVERED_ORDER_DELETION') && viewerId !== '' && viewerId === req.requesterId);
           return (
             <div className="flex items-center gap-1.5">
               <CompactTableActionButton onClick={() => setViewing(req)}>View</CompactTableActionButton>
@@ -475,6 +482,40 @@ export function PermissionRequestsPage({
                       },
                     ]
                   : []),
+                ...(viewing.type === 'DELIVERED_ORDER_DELETION'
+                  ? [
+                      {
+                        label: 'CS approval',
+                        value: viewing.csApprovedBy ? (
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-medium text-success-600 dark:text-success-400">
+                              Approved by {viewing.csApproverName ?? 'CS Head'}
+                            </p>
+                            <p className="text-xs text-app-fg-muted">{formatDateTime(viewing.csApprovedAt ?? null)}</p>
+                            {viewing.csNote ? <p className="text-xs text-app-fg-muted">{viewing.csNote}</p> : null}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-warning-600 dark:text-warning-400">Pending</span>
+                        ),
+                        fullWidth: true as const,
+                      },
+                      {
+                        label: 'Logistics approval',
+                        value: viewing.logiApprovedBy ? (
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-medium text-success-600 dark:text-success-400">
+                              Approved by {viewing.logiApproverName ?? 'Logistics Head'}
+                            </p>
+                            <p className="text-xs text-app-fg-muted">{formatDateTime(viewing.logiApprovedAt ?? null)}</p>
+                            {viewing.logiNote ? <p className="text-xs text-app-fg-muted">{viewing.logiNote}</p> : null}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-warning-600 dark:text-warning-400">Pending</span>
+                        ),
+                        fullWidth: true as const,
+                      },
+                    ]
+                  : []),
               ]}
             />
             <RequestPayloadView request={viewing} branchNameById={branchNameById} />
@@ -487,15 +528,16 @@ export function PermissionRequestsPage({
               if (viewing.status !== 'PENDING') return null;
               const mayApprove =
                 (viewing.type === 'PRODUCT_ARCHIVE' && canApproveProductArchive) ||
-                ((viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION') &&
+                ((viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION' || viewing.type === 'DELIVERED_ORDER_DELETION') &&
                   canApproveOrderLinePriceChange) ||
                 (viewing.type !== 'PRODUCT_ARCHIVE' &&
                   viewing.type !== 'ORDER_LINE_PRICE_CHANGE' &&
                   viewing.type !== 'ORDER_DELETION' &&
+                  viewing.type !== 'DELIVERED_ORDER_DELETION' &&
                   canApprove);
               const mayReject =
                 mayApprove ||
-                ((viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION') &&
+                ((viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION' || viewing.type === 'DELIVERED_ORDER_DELETION') &&
                   viewerId !== '' &&
                   viewerId === viewing.requesterId);
               if (!mayApprove && !mayReject) return null;
@@ -528,7 +570,7 @@ export function PermissionRequestsPage({
                         setReason('');
                       }}
                     >
-                      {(viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION') &&
+                      {(viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION' || viewing.type === 'DELIVERED_ORDER_DELETION') &&
                       viewerId === viewing.requesterId
                         ? 'Withdraw request'
                         : 'Reject'}

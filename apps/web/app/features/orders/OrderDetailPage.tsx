@@ -1023,6 +1023,9 @@ export function OrderDetailPage({
   );
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [deliveredDeletionModalOpen, setDeliveredDeletionModalOpen] = useState(false);
+  const [deliveredDeletionReason, setDeliveredDeletionReason] = useState('');
+  const deliveredDeletionFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [assignToId, setAssignToId] = useState('');
   const [lateStageTransferReason, setLateStageTransferReason] = useState('');
@@ -1307,6 +1310,13 @@ export function OrderDetailPage({
     successMessage: 'Comment added',
     skipErrorToast: addCommentModalOpen,
   });
+  useFetcherToast(deliveredDeletionFetcher.data, {
+    successMessage: 'Deletion request submitted — awaiting HoCS + HoL approval',
+  });
+  useCloseOnFetcherSuccess(deliveredDeletionFetcher, () => {
+    setDeliveredDeletionModalOpen(false);
+    setDeliveredDeletionReason('');
+  }, { intent: 'requestDeliveredOrderDeletion' });
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
@@ -2788,6 +2798,26 @@ export function OrderDetailPage({
                     </Button>
                   )}
 
+                  {/* Finance: Request delivered order deletion (dual-approval) */}
+                  {(order.status === 'DELIVERED' || order.status === 'REMITTED') &&
+                    (hasFinanceAccess({ role: userRole, permissions }) || isAdminLevel({ role: userRole })) &&
+                    !order.pendingDeliveredOrderDeletionRequestId && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                      onClick={() => setDeliveredDeletionModalOpen(true)}
+                      disabled={deliveredDeletionFetcher.state === 'submitting'}
+                    >
+                      Request deletion
+                    </Button>
+                  )}
+                  {order.pendingDeliveredOrderDeletionRequestId && (
+                    <p className="text-xs text-warning-600 dark:text-warning-400 font-medium">
+                      Deletion request pending approval
+                    </p>
+                  )}
+
                   {/* Assign / Reassign closer */}
                   {showCsAssignForm && csClosersForAssign && csClosersForAssign.length > 0 && (
                     <div className="space-y-1.5">
@@ -3361,6 +3391,70 @@ export function OrderDetailPage({
                   Delete order
                 </Button>
               </fetcher.Form>
+            </div>
+        </Modal>
+      )}
+
+      {/* Delivered order deletion request modal — Finance dual-approval */}
+      {deliveredDeletionModalOpen && (
+        <Modal open onClose={() => { setDeliveredDeletionModalOpen(false); setDeliveredDeletionReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Request order deletion</h3>
+            <p className="text-sm text-app-fg-muted mb-3">
+              This will submit a deletion request for this delivered order. Both the Head of CS and Head of Logistics must approve before it is deleted and stock is reversed.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['Duplicate delivery', 'Erroneous delivery', 'Duplicate order', 'Other'].map((preset) => {
+                const isOther = preset === 'Other';
+                const isActive = isOther
+                  ? deliveredDeletionReason.length > 0 && !['Duplicate delivery', 'Erroneous delivery', 'Duplicate order'].includes(deliveredDeletionReason)
+                  : deliveredDeletionReason === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setDeliveredDeletionReason(isOther ? '' : preset)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700'
+                        : 'bg-app-hover text-app-fg-muted border border-app-border hover:bg-app-hover'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                );
+              })}
+            </div>
+            <Textarea
+              value={deliveredDeletionReason}
+              onChange={(e) => setDeliveredDeletionReason(e.target.value)}
+              placeholder="Enter deletion reason..."
+              rows={3}
+            />
+            <div className="flex gap-2 mt-4 justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setDeliveredDeletionModalOpen(false);
+                  setDeliveredDeletionReason('');
+                }}
+              >
+                Cancel
+              </Button>
+              <deliveredDeletionFetcher.Form method="post">
+                <input type="hidden" name="intent" value="requestDeliveredOrderDeletion" />
+                <input type="hidden" name="reason" value={deliveredDeletionReason} />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  className="border-danger-500 bg-danger-500 hover:bg-danger-600 text-white"
+                  disabled={deliveredDeletionReason.trim().length < 10 || deliveredDeletionFetcher.state === 'submitting'}
+                  loading={deliveredDeletionFetcher.state === 'submitting'}
+                  loadingText="Submitting..."
+                >
+                  Submit request
+                </Button>
+              </deliveredDeletionFetcher.Form>
             </div>
         </Modal>
       )}

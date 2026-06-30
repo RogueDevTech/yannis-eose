@@ -1335,6 +1335,31 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'requestDeliveredOrderDeletion') {
+    const allowedRoles = [
+      'FINANCE_OFFICER',
+      'SUPER_ADMIN',
+      'ADMIN',
+    ];
+    if (!allowedRoles.includes(user.role)) {
+      return json({ error: 'Only Finance or Admin can request delivered order deletion' }, { status: 403 });
+    }
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.requestDeliveredOrderDeletion', {
+      method: 'POST',
+      cookie,
+      body: { orderId, reason },
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to submit deletion request');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, intent: 'requestDeliveredOrderDeletion' });
+  }
+
   if (intent === 'softDeleteOrder') {
     const allowedRoles = [
       'CS_CLOSER',

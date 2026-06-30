@@ -8,6 +8,7 @@ import {
   updateOrderSchema,
   requestOrderLinePriceChangeSchema,
   requestOrderDeletionSchema,
+  requestDeliveredOrderDeletionSchema,
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
@@ -876,6 +877,18 @@ export const ordersRouter = router({
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCache(orderId),
       ]);
+      return res;
+    }),
+
+  /**
+   * Finance-initiated deletion request for DELIVERED/REMITTED orders.
+   * Requires dual approval (HoCS + HoL) before execution.
+   */
+  requestDeliveredOrderDeletion: authedProcedure
+    .input(requestDeliveredOrderDeletionSchema)
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().requestDeliveredOrderDeletion(input, ctx.user);
+      await invalidateOrderDetailCache(input.orderId);
       return res;
     }),
 
