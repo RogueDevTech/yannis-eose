@@ -286,6 +286,39 @@ export const logisticsRouter = router({
       return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
+  /**
+   * Single-request bundle for the Cash Remittances page. Replaces 4 parallel
+   * HTTP round-trips (listDeliveryRemittances + locationOptions + users.list +
+   * eligible orders) with one server-side fan-out. Eligible orders are excluded
+   * from the bundle — they load on demand when the Create modal opens.
+   */
+  deliveryRemittancesPageBundle: authedProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(500).default(500),
+        status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
+        logisticsLocationId: z.string().uuid().optional(),
+        sentBy: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const { getUsersService } = await import('./users.router');
+      const [remittances, locations, usersResult] = await Promise.all([
+        getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        getUsersService().list(
+          { page: 1, limit: 100, sortBy: 'createdAt', sortOrder: 'desc', includeBranchMemberships: false },
+          ctx.user,
+          ctx.currentBranchId,
+          ctx.effectiveBranchIds,
+        ),
+      ]);
+      return { remittances, locations, users: usersResult.users ?? [] };
+    }),
+
   listDeliveryRemittanceEligibleOrders: authedProcedure
     .input(listDeliveryRemittanceEligibleOrdersSchema.optional())
     .query(async ({ input, ctx }) => {
