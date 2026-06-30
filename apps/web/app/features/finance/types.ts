@@ -54,6 +54,17 @@ export interface FinanceOverviewPulse {
   totalRemittedCount: number;
   receivedAmount: number;
   receivedCount: number;
+  deliveredCount: number;
+  deliveredAmount: number;
+  grossOrderValue: number;
+  totalDeliveryFees: number;
+  deliveryFeeCount: number;
+  totalCommitmentFees: number;
+  commitmentFeeCount: number;
+  totalPosFees: number;
+  posFeeCount: number;
+  totalFailedDeliveryCosts: number;
+  failedDeliveryCount: number;
   payrollPendingFinanceCount: number;
   approvalsPendingCount: number;
 }

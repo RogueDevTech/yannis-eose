@@ -13,9 +13,9 @@ export function FinanceCashRemittanceSection({
   byProduct?: RemittanceBreakdownRow[];
   byLocation?: RemittanceBreakdownRow[];
 }) {
-  // Total delivered = sum of all visible cards so numbers always reconcile
-  const totalDelivered = pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount;
-  const totalDeliveredOrders = pulse.awaitingOrderCount + pulse.totalRemittedCount;
+  // Use the actual delivered count/amount from the query — matches the Cash Remittances page
+  const totalDelivered = pulse.deliveredAmount || (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
+  const totalDeliveredOrders = pulse.deliveredCount || (pulse.awaitingOrderCount + pulse.totalRemittedCount);
 
   return (
     <Card>
@@ -77,6 +77,42 @@ export function FinanceCashRemittanceSection({
             <p className="text-xs text-app-fg-muted mt-0.5">{pulse.disputedRemittanceBatchCount} batch(es) need attention</p>
           </Link>
         </div>
+
+        {/* Deduction breakdown */}
+        {pulse.grossOrderValue > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Gross Order Value</p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-app-fg">
+                {formatNaira(Math.round(pulse.grossOrderValue))}
+              </p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Delivery Fees ({pulse.deliveryFeeCount})</p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
+                {formatNaira(Math.round(pulse.totalDeliveryFees))}
+              </p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Commitment Fees ({pulse.commitmentFeeCount})</p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
+                {formatNaira(Math.round(pulse.totalCommitmentFees))}
+              </p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">POS Fees ({pulse.posFeeCount})</p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
+                {formatNaira(Math.round(pulse.totalPosFees))}
+              </p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Failed Delivery ({pulse.failedDeliveryCount})</p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
+                {formatNaira(Math.round(pulse.totalFailedDeliveryCosts))}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Breakdowns side-by-side */}
         {(byProduct.length > 0 || byLocation.length > 0) && (
