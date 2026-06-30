@@ -21,6 +21,7 @@ import { ExportModal } from '~/components/ui/export-modal';
 import { Modal } from '~/components/ui/modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { formatNaira } from '~/lib/format-amount';
+import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import type { FundingBalanceRow, MarketingTeamOverviewStats } from './types';
 import {
   confirmationRateColorClass,
@@ -388,6 +389,7 @@ export function MarketingTeamPage({
             {m.role === 'HEAD_OF_MARKETING' && (
               <span className="shrink-0 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-micro font-semibold text-purple-700 dark:text-purple-300">HoM</span>
             )}
+            {m.isTeamSupervisor && <SupervisorBadge size="sm" />}
           </Link>
         ),
       },
@@ -649,12 +651,6 @@ export function MarketingTeamPage({
                 : '\u2014',
             valueClassName: 'text-app-fg',
             title: `Ad spend: ₦${overviewStats.totalAdSpend.toLocaleString()} · CPA: ₦${Math.round(overviewStats.avgCpa).toLocaleString()} (ad spend ÷ orders)`,
-          },
-          {
-            label: 'Disbursed to MBs',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalSent) + parseFloat(fundingSummary.totalCompleted) + parseFloat(fundingSummary.totalDisputed)} />,
-            valueClassName: 'text-app-fg',
-            title: `Funding sent to media buyers in this period — ${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount} transfer${(fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount) !== 1 ? 's' : ''}`,
           },
           {
             label: 'MB Unspent Balance (all-time)',

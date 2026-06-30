@@ -21,6 +21,7 @@ export interface FundingBalanceRow {
   userId: string;
   name: string;
   role: string;
+  isTeamSupervisor?: boolean;
   totalReceived: string;
   totalDistributed: string;
   totalSpend: string;

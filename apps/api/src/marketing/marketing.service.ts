@@ -1645,6 +1645,7 @@ export class MarketingService {
       userId: string;
       name: string;
       role: string;
+      isTeamSupervisor: boolean;
       totalReceived: string;
       totalDistributed: string;
       totalSpend: string;
@@ -1776,7 +1777,7 @@ export class MarketingService {
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),
       this.db
-        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role, isTeamSupervisor: schema.users.isTeamSupervisor })
         .from(schema.users)
         .where(inArray(schema.users.id, recipientUserIds)),
     ]);
@@ -1798,6 +1799,7 @@ export class MarketingService {
       userId: string;
       name: string;
       role: string;
+      isTeamSupervisor: boolean;
       totalReceived: string;
       totalDistributed: string;
       totalSpend: string;
@@ -1814,6 +1816,7 @@ export class MarketingService {
         userId: u.id,
         name: u.name,
         role: u.role,
+        isTeamSupervisor: u.isTeamSupervisor,
         totalReceived,
         totalDistributed,
         totalSpend,
