@@ -267,7 +267,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            ne(schema.adSpendLogs.status, 'REJECTED'),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
             branchCampaignIds
               ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
               : undefined,
@@ -340,7 +340,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            ne(schema.adSpendLogs.status, 'REJECTED'),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
             branchCampaignIds
               ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
               : undefined,
@@ -1612,7 +1612,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            ne(schema.adSpendLogs.status, 'REJECTED'),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
             branchCampaignIds ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId)) : undefined,
           ),
         )
@@ -1772,7 +1772,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
-            ne(schema.adSpendLogs.status, 'REJECTED'),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
           ),
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),
@@ -2294,7 +2294,7 @@ export class MarketingService {
               SELECT SUM(al.spend_amount)
               FROM ad_spend_logs al
               WHERE al.media_buyer_id = fr.requester_id
-                AND al.status != 'REJECTED'
+                AND al.status = 'APPROVED'
                 AND al.created_at <= fr.created_at
             ), 0)
           )::text AS "balanceAtRequest"
@@ -6273,7 +6273,7 @@ export class MarketingService {
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     const expenseConds: SQL[] = [
       eq(schema.adSpendLogs.mediaBuyerId, userId),
-      ne(schema.adSpendLogs.status, 'REJECTED'),
+      eq(schema.adSpendLogs.status, 'APPROVED'),
     ];
     if (branchCampaignIds) {
       expenseConds.push(

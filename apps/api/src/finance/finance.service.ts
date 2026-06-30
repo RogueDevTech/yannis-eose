@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, ne, and, or, desc, gte, lte, count, sum, sql, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
+import { eq, and, or, desc, gte, lte, count, sum, sql, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -405,11 +405,10 @@ export class FinanceService {
       scopedGroupId = gRow?.groupId ?? null;
     }
 
-    // ── 2. Ad spend date range — PENDING + APPROVED count toward profit ───────────────────────
-    // PENDING spend is real money the MB already spent on ads; excluding it
-    // under-counts costs and inflates profit until the HoM clicks Approve.
-    // Only REJECTED entries are excluded (same rule as balance deduction).
-    const adSpendConditions: Parameters<typeof and>[0][] = [ne(schema.adSpendLogs.status, 'REJECTED')];
+    // ── 2. Ad spend date range — only APPROVED counts toward profit ───────────────────────
+    // Pending expenses are not finalized — only approved entries count in
+    // financial totals. This prevents unverified spend from distorting P&L.
+    const adSpendConditions: Parameters<typeof and>[0][] = [eq(schema.adSpendLogs.status, 'APPROVED')];
     if (input.startDate) {
       adSpendConditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
     }
@@ -1104,10 +1103,9 @@ export class FinanceService {
     const { MV_PROFIT_SUMMARY, MV_AD_SPEND_SUMMARY, MV_ORDER_PIPELINE, MV_COMMISSION_SUMMARY, MV_INDEXES } = await import('./materialized-views');
 
     try {
-      // Drop + recreate ad spend MV: definition changed from
-      // `status = 'APPROVED' AND category = 'AD_SPEND'` to `status != 'REJECTED'`
-      // so PENDING spend and all expense categories are included. `IF NOT EXISTS`
-      // on the CREATE won't pick up the new definition otherwise.
+      // Drop + recreate ad spend MV: definition uses `status = 'APPROVED'` —
+      // only approved expenses count in financial totals. `IF NOT EXISTS`
+      // on the CREATE won't pick up definition changes otherwise.
       await this.pgClient.unsafe('DROP MATERIALIZED VIEW IF EXISTS mv_ad_spend_summary CASCADE');
       await this.pgClient.unsafe(MV_PROFIT_SUMMARY);
       await this.pgClient.unsafe(MV_AD_SPEND_SUMMARY);

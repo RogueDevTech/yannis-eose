@@ -1148,8 +1148,8 @@ export function MarketingAdSpendPage({
               },
               {
                 label: `Others (${!secondary && !otherCountsRef.current ? '—' : otherCounts.APPROVED})`,
-                value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.totalSpend).toLocaleString()}</>,
-                valueClassName: otherCounts.totalSpend > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
+                value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.totalSpend - otherCounts.pendingSpend).toLocaleString()}</>,
+                valueClassName: (otherCounts.totalSpend - otherCounts.pendingSpend) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
                 onClick: () => handleOverviewClick('NOT_AD_SPEND', 'APPROVED'),
                 active: isFilteringNonAdSpend && selectedStatus === 'APPROVED',
               },
