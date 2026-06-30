@@ -1060,99 +1060,80 @@ export class CartOrdersService {
     targetBranchId: string | null,
     _actor: SessionUser,
   ) {
-    // Use pg.unsafe() (simple protocol) for all cart-order queries — Drizzle's
-    // extended protocol has caused silent failures with NOT IN subqueries on
-    // this table.
-    const idList = cartIds.map((id) => `'${id}'`).join(', ');
-    const carts = await this.pg.unsafe<Array<{
-      id: string;
-      campaign_id: string | null;
-      customer_phone: string | null;
-      customer_phone_hash: string;
-    }>>(`
-      SELECT ca.id, ca.campaign_id, ca.customer_phone, ca.customer_phone_hash
-      FROM cart_abandonments ca
-      WHERE ca.id IN (${idList})
-        AND ca.status IN ('PENDING', 'ABANDONED')
-        AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
-    `);
+    if (cartIds.length === 0) return { pulled: 0 };
 
-    this.logger.log(`pullFromAbandonedCarts: received ${cartIds.length} IDs, matched ${carts.length} carts`);
-    if (carts.length === 0) return { pulled: 0 };
-
-    // Resolve campaign → branch mapping for routing resolution.
-    const campaignIds = [...new Set(carts.map((c) => c.campaign_id).filter(Boolean))] as string[];
-    const campaignBranchMap = new Map<string, string>();
-    if (campaignIds.length > 0) {
-      const rows = await this.db
-        .select({ id: schema.campaigns.id, branchId: schema.campaigns.branchId })
-        .from(schema.campaigns)
-        .where(inArray(schema.campaigns.id, campaignIds));
-      for (const r of rows) {
-        if (r.branchId) campaignBranchMap.set(r.id, r.branchId);
-      }
-    }
-
-    // Resolve routing: all carts go through the same routing rule resolution.
-    // For simplicity, resolve once (routing rules are org-wide, not per-cart).
+    // ── 1. Resolve routing BEFORE the transaction (read-only, can use Drizzle) ──
     let resolvedBranchId = targetBranchId;
     let resolvedRuleId: string | null = null;
     if (!resolvedBranchId) {
-      // Use first cart's campaign branch as seed for routing resolution
-      const firstCampaignBranch = carts[0]?.campaign_id ? campaignBranchMap.get(carts[0].campaign_id) ?? null : null;
-      const routing = await this.resolveRoutingBranch(firstCampaignBranch);
+      // Look up the first cart's campaign branch to seed routing
+      const idList = cartIds.map((id) => `'${id}'`).join(', ');
+      const [firstCart] = await this.pg.unsafe<Array<{ campaign_id: string | null }>>(`
+        SELECT ca.campaign_id FROM cart_abandonments ca
+        WHERE ca.id IN (${idList}) AND ca.campaign_id IS NOT NULL
+        LIMIT 1
+      `);
+      let campaignBranchId: string | null = null;
+      if (firstCart?.campaign_id) {
+        const [camp] = await this.db
+          .select({ branchId: schema.campaigns.branchId })
+          .from(schema.campaigns)
+          .where(eq(schema.campaigns.id, firstCart.campaign_id))
+          .limit(1);
+        campaignBranchId = camp?.branchId ?? null;
+      }
+      const routing = await this.resolveRoutingBranch(campaignBranchId);
       if (routing) {
         resolvedBranchId = routing.branchId;
         resolvedRuleId = routing.ruleId;
       }
     }
 
-    // Filter to carts with phone data, then build safe ID list for SQL.
-    const validCartIds = carts
-      .filter((c) => c.customer_phone || c.customer_phone_hash)
-      .map((c) => c.id);
-
-    if (validCartIds.length === 0) return { pulled: 0 };
-
-    // Escape UUIDs for safe inline interpolation (all are validated UUIDs from DB)
-    const validIdList = validCartIds.map((id) => `'${id}'`).join(', ');
     const branchLiteral = resolvedBranchId ? `'${resolvedBranchId}'` : 'NULL';
     const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
+    const safeIdList = cartIds.map((id) => `'${id}'`).join(', ');
 
-    // Use pg.unsafe() to bypass Drizzle entirely — postgres.js simple protocol.
-    // db.execute(sql.raw(...)) still routes through Drizzle which uses extended
-    // protocol, triggering "column valid_from does not exist" in stamp_actor.
-    const inserted = await this.pg.unsafe<Array<{ id: string; source_cart_id: string }>>(`
-      INSERT INTO cart_orders (
-        id, source_cart_id, campaign_id, media_buyer_id, status,
-        customer_name, customer_phone_hash, customer_phone,
-        customer_address, delivery_address, total_amount,
-        delivery_notes, delivery_state, customer_gender,
-        preferred_delivery_date, payment_method, customer_email,
-        order_source, servicing_branch_id, routing_rule_id,
-        custom_fields
-      )
-      SELECT
-        gen_random_uuid(), ca.id, ca.campaign_id, ca.media_buyer_id,
-        'UNPROCESSED', ca.customer_name, ca.customer_phone_hash, ca.customer_phone,
-        ca.customer_address, ca.delivery_address, 0,
-        ca.delivery_notes, ca.delivery_state, ca.customer_gender,
-        ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
-        'online', ${branchLiteral}, ${ruleLiteral},
-        ca.custom_field_values
-      FROM cart_abandonments ca
-      WHERE ca.id IN (${validIdList})
-      RETURNING id, source_cart_id
-    `);
+    // ── 2. Single atomic transaction for all writes ─────────────────────
+    // Uses pg.begin() so all 4 steps succeed or none do. No orphaned rows.
+    // The stamp_actor trigger fires on UPDATE — set the actor inside the tx.
+    const pulled = await this.pg.begin(async (tx) => {
+      // Set actor for stamp_actor trigger on any UPDATEs inside this tx
+      await tx.unsafe(`SELECT set_config('yannis.current_user_id', '${SYSTEM_ACTOR_ID}', true)`);
 
-    this.logger.log(`Bulk inserted ${inserted.length} cart orders`);
+      // Step A: Insert cart_orders from eligible abandoned carts
+      const inserted = await tx.unsafe<Array<{ id: string; source_cart_id: string }>>(`
+        INSERT INTO cart_orders (
+          id, source_cart_id, campaign_id, media_buyer_id, status,
+          customer_name, customer_phone_hash, customer_phone,
+          customer_address, delivery_address, total_amount,
+          delivery_notes, delivery_state, customer_gender,
+          preferred_delivery_date, payment_method, customer_email,
+          order_source, servicing_branch_id, routing_rule_id,
+          custom_fields
+        )
+        SELECT
+          gen_random_uuid(), ca.id, ca.campaign_id, ca.media_buyer_id,
+          'UNPROCESSED', ca.customer_name, ca.customer_phone_hash, ca.customer_phone,
+          ca.customer_address, ca.delivery_address, 0,
+          ca.delivery_notes, ca.delivery_state, ca.customer_gender,
+          ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
+          'online', ${branchLiteral}, ${ruleLiteral},
+          ca.custom_field_values
+        FROM cart_abandonments ca
+        WHERE ca.id IN (${safeIdList})
+          AND ca.status IN ('PENDING', 'ABANDONED')
+          AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
+          AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+        RETURNING id, source_cart_id
+      `);
 
-    // Create cart_order_items + timeline events + fix total_amount.
-    // All use pg.unsafe() to stay on the simple query protocol.
-    if (inserted.length > 0) {
+      this.logger.log(`[pull] Step A: inserted ${inserted.length} cart orders`);
+      if (inserted.length === 0) return 0;
+
       const sourceIdList = inserted.map((r) => `'${r.source_cart_id}'`).join(', ');
 
-      await this.pg.unsafe(`
+      // Step B: Create cart_order_items from product catalog
+      const items = await tx.unsafe<Array<{ id: string }>>(`
         INSERT INTO cart_order_items (
           id, cart_order_id, product_id, quantity, unit_price, offer_label
         )
@@ -1176,10 +1157,12 @@ export class CartOrdersService {
           AND NOT EXISTS (
             SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
           )
+        RETURNING id
       `);
+      this.logger.log(`[pull] Step B: created ${items.length} line items`);
 
-      // Update total_amount on the parent cart_orders to match item prices
-      await this.pg.unsafe(`
+      // Step C: Update total_amount from line items
+      await tx.unsafe(`
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
@@ -1193,9 +1176,10 @@ export class CartOrdersService {
         WHERE co.id = sub.cart_order_id
           AND (co.total_amount IS NULL OR co.total_amount = 0)
       `);
+      this.logger.log(`[pull] Step C: updated totals`);
 
-      // Create timeline events for the newly pulled orders
-      await this.pg.unsafe(`
+      // Step D: Create timeline events
+      await tx.unsafe(`
         INSERT INTO cart_order_timeline_events (
           id, cart_order_id, event_type, actor_name, description, metadata, branch_id
         )
@@ -1213,9 +1197,13 @@ export class CartOrdersService {
             SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
           )
       `);
-    }
+      this.logger.log(`[pull] Step D: created timeline events`);
 
-    return { pulled: inserted.length };
+      return inserted.length;
+    });
+
+    this.logger.log(`pullFromAbandonedCarts: pulled ${pulled} of ${cartIds.length} requested`);
+    return { pulled };
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1386,10 +1374,12 @@ export class CartOrdersService {
   // CartService marks PENDING→ABANDONED then calls runAutoSync so
   // there is a single pull path with routing rules.
 
-  async runAutoSync(_triggeredBy: 'cron' | 'manual', actorId?: string) {
+  async runAutoSync(triggeredBy: 'cron' | 'manual', actorId?: string) {
+    const startedAt = new Date();
+
     // Find all ABANDONED carts not yet pulled into cart_orders.
-    // Use pg.unsafe() (simple protocol) for consistency with the INSERT path —
-    // Drizzle's extended protocol has caused silent failures on this table before.
+    // Use pg.unsafe() (simple protocol) — Drizzle extended protocol has caused
+    // silent failures with NOT IN subqueries on this table.
     const carts = await this.pg.unsafe<Array<{ id: string }>>(`
       SELECT ca.id
       FROM cart_abandonments ca
@@ -1410,10 +1400,46 @@ export class CartOrdersService {
       role: 'SUPER_ADMIN',
     } as SessionUser;
 
+    // Pull in batches of 100 to limit blast radius — if one batch fails,
+    // the rest still get pulled on the next cron run.
+    const BATCH_SIZE = 100;
     const cartIds = carts.map((c) => c.id);
-    const result = await this.pullFromAbandonedCarts(cartIds, null, actor);
+    let totalPulled = 0;
+    let errorMessage: string | null = null;
 
-    this.logger.log(`[runAutoSync] Pulled ${result.pulled} of ${cartIds.length} cart(s)`);
-    return { totalPulled: result.pulled };
+    for (let i = 0; i < cartIds.length; i += BATCH_SIZE) {
+      const batch = cartIds.slice(i, i + BATCH_SIZE);
+      try {
+        const result = await this.pullFromAbandonedCarts(batch, null, actor);
+        totalPulled += result.pulled;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(`[runAutoSync] Batch ${i / BATCH_SIZE + 1} failed (${batch.length} carts): ${msg}`);
+        errorMessage = errorMessage ? `${errorMessage}; ${msg}` : msg;
+        // Continue with next batch — don't let one bad batch block everything
+      }
+    }
+
+    // Write sync log for observability
+    try {
+      await this.pg.unsafe(`
+        INSERT INTO cart_order_sync_logs (
+          id, triggered_by, triggered_by_user_id, started_at, finished_at,
+          total_pulled, error_message
+        ) VALUES (
+          gen_random_uuid(), '${triggeredBy}',
+          ${actorId ? `'${actorId}'` : 'NULL'},
+          '${startedAt.toISOString()}'::timestamptz,
+          now(),
+          ${totalPulled},
+          ${errorMessage ? `'${errorMessage.replace(/'/g, "''")}'` : 'NULL'}
+        )
+      `);
+    } catch (logErr) {
+      this.logger.warn(`[runAutoSync] Failed to write sync log: ${logErr instanceof Error ? logErr.message : logErr}`);
+    }
+
+    this.logger.log(`[runAutoSync] Done: pulled ${totalPulled} of ${cartIds.length} cart(s)${errorMessage ? ` (errors: ${errorMessage})` : ''}`);
+    return { totalPulled };
   }
 }
