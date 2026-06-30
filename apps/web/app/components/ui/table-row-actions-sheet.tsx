@@ -233,7 +233,7 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
                   : tone === 'success'
                     ? 'text-success-600 dark:text-success-400'
                     : 'text-brand-600 dark:text-brand-400';
-              const cls = `flex w-full items-center px-3 py-2 text-left text-sm font-medium hover:bg-app-hover transition-colors ${toneClass}`;
+              const cls = `flex w-full items-center px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/10 ${toneClass}`;
               if (a.kind === 'link') {
                 return (
                   <Link key={a.key} to={a.to} className={cls} onClick={close}>
