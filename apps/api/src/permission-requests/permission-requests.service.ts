@@ -156,7 +156,7 @@ export class PermissionRequestsService {
    * `APPROVE_PERMISSION_BY_TYPE` plus a default grant in `permission-catalog.ts`.
    */
   private viewableTypesForViewer(viewer: SessionUser): Set<string> {
-    if (viewer.role === 'SUPER_ADMIN') {
+    if (viewer.role === 'SUPER_ADMIN' || viewer.role === 'SUPPORT') {
       return new Set(Object.keys(APPROVE_PERMISSION_BY_TYPE));
     }
     const types = new Set<string>();
@@ -171,7 +171,7 @@ export class PermissionRequestsService {
    * requests they submitted or whose type they may approve.
    */
   private viewerScopeWhere(viewer: SessionUser): SQL | undefined {
-    if (viewer.role === 'SUPER_ADMIN') return undefined;
+    if (viewer.role === 'SUPER_ADMIN' || viewer.role === 'SUPPORT') return undefined;
     const viewableTypes = this.viewableTypesForViewer(viewer);
     const typeList = [...viewableTypes] as PermissionRequestRowType[];
     if (typeList.length === 0) {
