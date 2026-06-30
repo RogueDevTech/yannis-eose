@@ -238,6 +238,9 @@ export interface FundingRequestStatusCounts {
   APPROVED: number;
   REJECTED: number;
   ALL: number;
+  PENDING_AMOUNT?: string;
+  APPROVED_AMOUNT?: string;
+  REJECTED_AMOUNT?: string;
 }
 
 export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';

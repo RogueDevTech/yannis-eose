@@ -1368,17 +1368,21 @@ export class MarketingService {
       .select({
         status: schema.marketingFundingRequests.status,
         c: count(),
+        total: sql<string>`COALESCE(SUM(${schema.marketingFundingRequests.amount}), 0)`,
       })
       .from(schema.marketingFundingRequests)
       .where(whereClause)
       .groupBy(schema.marketingFundingRequests.status);
 
-    const out = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+    const out = {
+      PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0,
+      PENDING_AMOUNT: '0', APPROVED_AMOUNT: '0', REJECTED_AMOUNT: '0',
+    };
     for (const r of rows) {
       const n = Number(r.c);
-      if (r.status === 'PENDING') out.PENDING = n;
-      else if (r.status === 'APPROVED') out.APPROVED = n;
-      else if (r.status === 'REJECTED') out.REJECTED = n;
+      if (r.status === 'PENDING') { out.PENDING = n; out.PENDING_AMOUNT = String(r.total); }
+      else if (r.status === 'APPROVED') { out.APPROVED = n; out.APPROVED_AMOUNT = String(r.total); }
+      else if (r.status === 'REJECTED') { out.REJECTED = n; out.REJECTED_AMOUNT = String(r.total); }
       out.ALL += n;
     }
     return out;

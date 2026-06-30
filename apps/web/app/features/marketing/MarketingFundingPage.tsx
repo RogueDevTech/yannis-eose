@@ -954,7 +954,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         fundingBalance={fundingBalance}
         balancesList={balancesList}
         pendingRequestsByMe={myRequests.statusCounts.PENDING}
+        pendingRequestsByMeAmount={myRequests.statusCounts.PENDING_AMOUNT ?? '0'}
         pendingRequestsToMe={mbRequests?.statusCounts.PENDING ?? 0}
+        pendingRequestsToMeAmount={mbRequests?.statusCounts.PENDING_AMOUNT ?? '0'}
         activeSection={displaySection}
         activeEntryType={searchParams.get('entryType') ?? undefined}
         activeEntryStatus={searchParams.get('entryStatus') ?? undefined}
@@ -1977,7 +1979,9 @@ function FundingMetricsStrip({
   fundingBalance,
   balancesList,
   pendingRequestsByMe,
+  pendingRequestsByMeAmount,
   pendingRequestsToMe,
+  pendingRequestsToMeAmount,
   onFilter,
   activeSection,
   activeEntryType,
@@ -1988,7 +1992,9 @@ function FundingMetricsStrip({
   fundingBalance?: MarketingFundingLoaderData['fundingBalance'];
   balancesList?: MarketingFundingLoaderData['balancesList'];
   pendingRequestsByMe: number;
+  pendingRequestsByMeAmount: string;
   pendingRequestsToMe: number;
+  pendingRequestsToMeAmount: string;
   onFilter: (opts: { section: FundingSection; entryType?: string; entryStatus?: string }) => void;
   activeSection?: FundingSection;
   activeEntryType?: string;
@@ -2079,28 +2085,28 @@ function FundingMetricsStrip({
     ...(canDistribute
       ? [
           {
-            label: 'Pending Requests',
-            value: pendingRequestsToMe.toString(),
+            label: `Pending Requests (${pendingRequestsToMe})`,
+            value: <NairaPrice amount={Number(pendingRequestsToMeAmount)} />,
             valueClassName:
               pendingRequestsToMe > 0
                 ? 'text-warning-600 dark:text-warning-400'
                 : 'text-app-fg',
-            title: 'Funding requests from your team waiting for your approval',
+            title: `${pendingRequestsToMe} funding request${pendingRequestsToMe !== 1 ? 's' : ''} from your team waiting for approval`,
             onClick: () => onFilter({ section: 'distributing', entryType: 'request', entryStatus: 'PENDING' }),
             active: isActive('distributing', 'request', 'PENDING'),
           },
         ]
       : []),
     {
-      label: canDistribute ? 'My Requests Out' : 'Pending Requests',
-      value: pendingRequestsByMe.toString(),
+      label: canDistribute ? `My Requests Out (${pendingRequestsByMe})` : `Pending Requests (${pendingRequestsByMe})`,
+      value: <NairaPrice amount={Number(pendingRequestsByMeAmount)} />,
       valueClassName:
         pendingRequestsByMe > 0
           ? 'text-warning-600 dark:text-warning-400'
           : 'text-app-fg',
       title: canDistribute
-        ? 'Funding requests you sent to Finance / SuperAdmin — still awaiting approval'
-        : 'Your funding requests still awaiting approval from Head of Marketing',
+        ? `${pendingRequestsByMe} funding request${pendingRequestsByMe !== 1 ? 's' : ''} you sent to Finance / SuperAdmin — still awaiting approval`
+        : `${pendingRequestsByMe} funding request${pendingRequestsByMe !== 1 ? 's' : ''} still awaiting approval from Head of Marketing`,
       onClick: () => onFilter({ section: 'received', entryType: 'request', entryStatus: 'PENDING' }),
       active: isActive('received', 'request', 'PENDING'),
     },
