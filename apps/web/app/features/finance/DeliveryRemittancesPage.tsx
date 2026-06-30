@@ -79,6 +79,8 @@ export interface DeliveryRemittanceSummary {
   pendingCount: string;
   receivedCount: string;
   disputedCount: string;
+  deliveredCount?: string;
+  deliveredAmount?: string;
 }
 
 export interface DeliveryRemittancesPageProps {
@@ -706,12 +708,13 @@ export function DeliveryRemittancesPage({
         mobileGrid
         items={[
           {
-            label: `Total Invoices (${Number(summary.awaitingCount) + Number(summary.receivedCount) + Number(summary.pendingCount) + Number(summary.disputedCount)})`,
-            value: <NairaPrice amount={Number(summary.awaitingAmount) + Number(summary.receivedAmount) + Number(summary.pendingAmount) + Number(summary.disputedAmount)} />,
+            label: `Delivered Orders (${Number(summary.deliveredCount ?? 0)})`,
+            value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
             valueClassName: 'text-app-fg tabular-nums',
+            title: 'Total delivered + remitted orders in this period',
           },
           {
-            label: `Awaiting (${Number(summary.awaitingCount)})`,
+            label: `Awaiting Remittance (${Number(summary.awaitingCount)})`,
             value: <NairaPrice amount={summary.awaitingAmount} />,
             valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
           },
