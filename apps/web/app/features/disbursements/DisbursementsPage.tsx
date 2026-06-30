@@ -400,6 +400,7 @@ export function DisbursementsPage({
   // single, debounce-free query against the server. Prefilled from the URL on mount/back-nav.
   const [searchQuery, setSearchQuery] = useState(filters.search || '');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [fundingFlowRecord, setFundingFlowRecord] = useState<DisbursementRecord | null>(null);
   const [balancesSearchQuery, setBalancesSearchQuery] = useState(filters.balancesSearch || '');
   const [balancesRoleFilter, setBalancesRoleFilter] = useState(filters.balancesRole || 'ALL');
   const [balancesStatusFilter, setBalancesStatusFilter] = useState(filters.balancesStatus || 'ALL');
@@ -458,6 +459,16 @@ export function DisbursementsPage({
   }, [recipientBalances, funding]);
 
   const getName = useCallback((id: string) => nameMap.get(id) ?? 'Unknown user', [nameMap]);
+  const roleMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of users) map.set(u.id, u.role);
+    for (const b of recipientBalances) map.set(b.userId, b.role);
+    return map;
+  }, [users, recipientBalances]);
+  const getRole = useCallback((id: string) => {
+    const r = roleMap.get(id);
+    return r ? formatRole(r) : '';
+  }, [roleMap]);
 
   const selectedStatus = optimisticStatus;
   const selectedReceiver = optimisticReceiver;
@@ -547,9 +558,12 @@ export function DisbursementsPage({
         key: 'reference',
         header: 'Reference',
         render: (f) => (
-          <span className="text-sm text-app-fg-muted">
-            {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
-          </span>
+          <div>
+            <span className="text-xs font-mono font-medium text-app-fg">DSB-{f.id.slice(0, 8).toUpperCase()}</span>
+            <span className="block text-xs text-app-fg-muted">
+              {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
+            </span>
+          </div>
         ),
       },
       {
@@ -613,14 +627,12 @@ export function DisbursementsPage({
         ),
       },
       {
-        key: 'balance',
-        header: 'Balance',
+        key: 'actions',
+        header: '',
         align: 'right',
-        headerClassName: 'text-right',
+        tight: true,
         render: (f) => (
-          <span className="text-sm tabular-nums text-app-fg-muted">
-            {f.balanceAfter != null ? <NairaPrice amount={Number(f.balanceAfter)} /> : '—'}
-          </span>
+          <TableActionButton onClick={() => setFundingFlowRecord(f)}>View</TableActionButton>
         ),
       },
     ];
@@ -781,35 +793,47 @@ export function DisbursementsPage({
       {
         key: 'actions',
         header: 'Actions',
-        align: 'center',
-        headerClassName: 'text-center',
+        align: 'right',
+        headerClassName: 'text-right',
         tight: true,
         mobileShowLabel: false,
         render: (b) => {
           const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
-          return canSendFundsToRecipient ? (
-            <TableActionButton
-              variant="primary"
-              onClick={() => {
-                setSearchParams((p) => {
-                  const next = new URLSearchParams(p);
-                  next.set('receiverId', b.userId);
-                  next.set('tab', 'disbursements');
-                  next.delete('type');
-                  return next;
-                });
-                setShowForm(true);
-              }}
-            >
-              Send funds
-            </TableActionButton>
-          ) : (
-            <span className="text-xs text-surface-400">&mdash;</span>
+          const ledgerQuery = new URLSearchParams({ userId: b.userId });
+          if (filters.periodAllTime) {
+            ledgerQuery.set('period', 'all_time');
+          } else {
+            if (filters.startDate) ledgerQuery.set('startDate', filters.startDate);
+            if (filters.endDate) ledgerQuery.set('endDate', filters.endDate);
+          }
+          return (
+            <div className="inline-flex items-center gap-1.5">
+              <TableActionButton to={`/admin/marketing/funding/ledger?${ledgerQuery.toString()}`}>
+                Ledger
+              </TableActionButton>
+              {canSendFundsToRecipient && (
+                <TableActionButton
+                  variant="primary"
+                  onClick={() => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('receiverId', b.userId);
+                      next.set('tab', 'disbursements');
+                      next.delete('type');
+                      return next;
+                    });
+                    setShowForm(true);
+                  }}
+                >
+                  Send funds
+                </TableActionButton>
+              )}
+            </div>
           );
         },
       },
     ];
-  }, [canCreate, setSearchParams, setShowForm]);
+  }, [canCreate, setSearchParams, setShowForm, filters.startDate, filters.endDate, filters.periodAllTime]);
 
   return (
     <div className="space-y-4">
@@ -1156,11 +1180,14 @@ export function DisbursementsPage({
                     : 'Create your first disbursement to get started'
                 }
                 renderMobileCard={(f) => (
+                  <button
+                    type="button"
+                    onClick={() => setFundingFlowRecord(f)}
+                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 text-left"
+                  >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-app-fg-muted">
-                        {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
-                      </span>
+                      <span className="text-xs font-mono font-medium text-app-fg">DSB-{f.id.slice(0, 8).toUpperCase()}</span>
                       <StatusBadge status={f.status} />
                     </div>
                     <div className="flex items-center justify-between gap-2">
@@ -1175,6 +1202,7 @@ export function DisbursementsPage({
                       <span>{new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}</span>
                     </div>
                   </div>
+                  </button>
                 )}
               />
             </TableLoadingOverlay>
@@ -1398,23 +1426,38 @@ export function DisbursementsPage({
                           Spent: <NairaPrice amount={Number(b.totalDistributed || '0') + Number(b.totalSpend || '0')} />
                         </div>
                       </div>
-                      {canSendFundsToRecipient ? (
-                        <TableActionButton
-                          variant="primary"
-                          onClick={() => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('receiverId', b.userId);
-                              next.set('tab', 'disbursements');
-                              next.delete('type');
-                              return next;
-                            });
-                            setShowForm(true);
-                          }}
-                        >
-                          Send funds
-                        </TableActionButton>
-                      ) : null}
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const lq = new URLSearchParams({ userId: b.userId });
+                          if (filters.periodAllTime) lq.set('period', 'all_time');
+                          else {
+                            if (filters.startDate) lq.set('startDate', filters.startDate);
+                            if (filters.endDate) lq.set('endDate', filters.endDate);
+                          }
+                          return (
+                            <TableActionButton to={`/admin/marketing/funding/ledger?${lq.toString()}`}>
+                              Ledger
+                            </TableActionButton>
+                          );
+                        })()}
+                        {canSendFundsToRecipient ? (
+                          <TableActionButton
+                            variant="primary"
+                            onClick={() => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('receiverId', b.userId);
+                                next.set('tab', 'disbursements');
+                                next.delete('type');
+                                return next;
+                              });
+                              setShowForm(true);
+                            }}
+                          >
+                            Send funds
+                          </TableActionButton>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 }}
@@ -1478,6 +1521,67 @@ export function DisbursementsPage({
               </Button>
             </div>
           </RequestActionForm>
+        </Modal>
+      )}
+
+      {/* Funding flow detail modal */}
+      {fundingFlowRecord && (
+        <Modal open onClose={() => setFundingFlowRecord(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+          <h3 className="text-lg font-semibold text-app-fg">Funding Flow</h3>
+          <div className="text-center space-y-1 py-2">
+            <p className="text-sm font-medium text-app-fg">
+              {getName(fundingFlowRecord.senderId)} → {getName(fundingFlowRecord.receiverId)}
+            </p>
+            <p className="text-2xl font-bold text-app-fg tabular-nums">
+              <NairaPrice amount={Number(fundingFlowRecord.amount)} />
+            </p>
+          </div>
+          <div className="space-y-3 border-l-2 border-app-border pl-4 ml-2">
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Transfer sent</p>
+              <p className="text-sm text-app-fg">
+                {new Date(fundingFlowRecord.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
+              </p>
+              <p className="text-sm font-medium text-app-fg">{getName(fundingFlowRecord.senderId)}</p>
+              {getRole(fundingFlowRecord.senderId) && (
+                <p className="text-xs text-app-fg-muted">{getRole(fundingFlowRecord.senderId)}</p>
+              )}
+            </div>
+            {fundingFlowRecord.verifiedAt && (
+              <div className="space-y-0.5">
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Received</p>
+                <p className="text-sm text-app-fg">
+                  {new Date(fundingFlowRecord.verifiedAt).toLocaleString('en-NG', DATE_TIME_FMT)}
+                </p>
+                <p className="text-sm font-medium text-app-fg">{getName(fundingFlowRecord.receiverId)}</p>
+                {getRole(fundingFlowRecord.receiverId) && (
+                  <p className="text-xs text-app-fg-muted">{getRole(fundingFlowRecord.receiverId)}</p>
+                )}
+              </div>
+            )}
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Status</p>
+              <StatusBadge status={fundingFlowRecord.status} />
+            </div>
+          </div>
+          {fundingFlowRecord.receiptUrl && (
+            <div>
+              <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Receipt</p>
+              <a
+                href={fundingFlowRecord.receiptUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400 underline"
+              >
+                View receipt
+              </a>
+            </div>
+          )}
+          <div className="flex justify-end pt-2 border-t border-app-border">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setFundingFlowRecord(null)}>
+              Close
+            </Button>
+          </div>
         </Modal>
       )}
 

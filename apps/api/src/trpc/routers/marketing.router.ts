@@ -1296,11 +1296,15 @@ export const marketingRouter = router({
       if (input.startDate) fundingOpts.startDate = input.startDate;
       if (input.endDate) fundingOpts.endDate = input.endDate;
 
-      const [balances, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
-        // Team Analysis roster — ACTIVE only, so it lines up with the
-        // ACTIVE-only leaderboard and a deactivated account never shows as a
-        // metric-less ghost row.
-        getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true, restrictToUserIds: restrictMbIds ?? undefined }, ctx.effectiveBranchIds),
+      const hasDateFilter = !!(input.startDate || input.endDate);
+      const balancesBaseOpts = { activeOnly: true, restrictToUserIds: restrictMbIds ?? undefined };
+      const [balancesAllTime, balancesFiltered, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
+        // All-time balances for the Balance column (always reflects actual running balance)
+        getMarketingService().listFundingBalances(ctx.user, branchId, balancesBaseOpts, ctx.effectiveBranchIds),
+        // Date-filtered balances for Received/Spent/Distributed columns
+        hasDateFilter
+          ? getMarketingService().listFundingBalances(ctx.user, branchId, { ...balancesBaseOpts, startDate: input.startDate, endDate: input.endDate }, ctx.effectiveBranchIds)
+          : null,
         getMarketingService().getFundingSummary(branchId, Object.keys(fundingOpts).length > 0 ? fundingOpts : undefined, ctx.effectiveBranchIds),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,
@@ -1312,6 +1316,15 @@ export const marketingRouter = router({
         ),
         getMarketingService().getProfitabilityConfig(),
       ]);
+
+      // Merge: date-filtered received/spent/distributed with all-time balance
+      const allTimeById = new Map(balancesAllTime.map((b) => [b.userId, b]));
+      const balances = balancesFiltered
+        ? balancesFiltered.map((b) => ({
+            ...b,
+            balance: allTimeById.get(b.userId)?.balance ?? b.balance,
+          }))
+        : balancesAllTime;
 
       // Fallback: when balances is empty AND the caller is admin-class / HoM, the
       // legacy loader fired two more `users.list` queries to surface MB + HoM as
@@ -1570,8 +1583,23 @@ export const marketingRouter = router({
       };
 
       // Pre-fetch HoM IDs so we can scope the summary to Finance→HoM transfers only.
-      const homBalances = await getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds);
-      const homUserIds = homBalances
+      // Two balance fetches: all-time for actual Balance column, date-filtered for Received/Spent/Distributed.
+      const hasDateFilter = !!(input.startDate || input.endDate);
+      const [homBalancesAllTime, homBalancesFiltered] = await Promise.all([
+        getMarketingService().listFundingBalances(ctx.user, branchId, undefined, ctx.effectiveBranchIds),
+        hasDateFilter
+          ? getMarketingService().listFundingBalances(ctx.user, branchId, { startDate: input.startDate, endDate: input.endDate }, ctx.effectiveBranchIds)
+          : null,
+      ]);
+      // Merge: use all-time balance, date-filtered received/spent/distributed
+      const allTimeById = new Map(homBalancesAllTime.map((b) => [b.userId, b]));
+      const homBalances = homBalancesFiltered
+        ? homBalancesFiltered.map((b) => ({
+            ...b,
+            balance: allTimeById.get(b.userId)?.balance ?? b.balance,
+          }))
+        : homBalancesAllTime;
+      const homUserIds = homBalancesAllTime
         .filter((b) => b.role === 'HEAD_OF_MARKETING')
         .map((b) => b.userId);
 
