@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -245,7 +246,7 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
       >
         <EllipsisVerticalIcon className="h-4 w-4" />
       </Button>
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal(
         <div
           ref={menuRef}
           className="fixed z-[9999] min-w-[140px] rounded-lg border border-app-border-strong shadow-xl dark:shadow-black/60"
@@ -278,7 +279,8 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
