@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -137,18 +137,10 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
       <div className="hidden items-center justify-end gap-1.5 md:flex">
         {desktopInline.map(renderDesktop)}
         {needsDesktopKebab && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 shrink-0 p-0 text-app-fg-muted hover:text-app-fg"
-            aria-label={ariaLabel}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            onClick={() => setOpenSource('desktop')}
-          >
-            <EllipsisVerticalIcon className="h-4 w-4" />
-          </Button>
+          <DesktopDropdown
+            ariaLabel={ariaLabel}
+            actions={desktopOverflow}
+          />
         )}
       </div>
       <div className="flex justify-end md:hidden">
@@ -165,8 +157,9 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
           <EllipsisVerticalIcon />
         </Button>
       </div>
+      {/* Mobile-only: full slide-up sheet */}
       <Modal
-        open={open}
+        open={openSource === 'mobile'}
         onClose={close}
         maxWidth="max-w-full"
         aria-labelledby={titleId}
@@ -178,7 +171,7 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
           </h2>
         </div>
         <div className="flex max-h-[min(70dvh,520px)] flex-col gap-1.5 overflow-y-auto p-3">
-          {(openSource === 'desktop' ? desktopOverflow : visible).map(renderSheetRow)}
+          {visible.map(renderSheetRow)}
         </div>
         <div className="border-t border-app-border p-3 pt-2">
           <Button type="button" variant="secondary" className="w-full" onClick={close}>
@@ -187,5 +180,77 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
         </div>
       </Modal>
     </>
+  );
+}
+
+/** Compact positioned dropdown for desktop kebab overflow actions. */
+function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: TableRowSheetAction[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [open]);
+
+  const close = () => setOpen(false);
+
+  return (
+    <div ref={ref} className="relative">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 shrink-0 p-0 text-app-fg-muted hover:text-app-fg"
+        aria-label={ariaLabel}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <EllipsisVerticalIcon className="h-4 w-4" />
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-app-border bg-app-elevated shadow-lg dark:shadow-black/50">
+          <div className="py-1">
+            {actions.map((a) => {
+              if (a.kind === 'custom') {
+                return <div key={a.key} className="px-2 py-1">{a.render({ close })}</div>;
+              }
+              const tone = a.tone ?? 'brand';
+              const toneClass =
+                tone === 'danger'
+                  ? 'text-danger-600 dark:text-danger-400'
+                  : tone === 'success'
+                    ? 'text-success-600 dark:text-success-400'
+                    : 'text-brand-600 dark:text-brand-400';
+              const cls = `flex w-full items-center px-3 py-2 text-left text-sm font-medium hover:bg-app-hover transition-colors ${toneClass}`;
+              if (a.kind === 'link') {
+                return (
+                  <Link key={a.key} to={a.to} className={cls} onClick={close}>
+                    {a.label}
+                  </Link>
+                );
+              }
+              return (
+                <button key={a.key} type="button" className={cls} onClick={() => { a.onClick(); close(); }}>
+                  {a.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
