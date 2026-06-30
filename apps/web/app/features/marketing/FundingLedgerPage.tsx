@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -6,12 +6,14 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Tabs } from '~/components/ui/tabs';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { FormSelect } from '~/components/ui/form-select';
+import { Modal } from '~/components/ui/modal';
 import type { FundingLedgerEntry, FundingLedgerLoaderData } from './types';
 
 const ENTRY_TYPE_TABS = [
@@ -59,6 +61,7 @@ export function FundingLedgerPage({
   entryTypeFilter,
 }: FundingLedgerLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [detailEntry, setDetailEntry] = useState<FundingLedgerEntry | null>(null);
 
   const columns = useMemo(
     (): CompactTableColumn<FundingLedgerEntry>[] => [
@@ -81,6 +84,8 @@ export function FundingLedgerPage({
       {
         key: 'type',
         header: 'Type',
+        nowrap: true,
+        minWidth: 'min-w-[6rem]',
         render: (e) => (
           <span className={`text-xs font-medium ${TYPE_COLORS[e.entryType] ?? 'text-app-fg'}`}>
             {TYPE_LABELS[e.entryType] ?? e.entryType}
@@ -91,7 +96,7 @@ export function FundingLedgerPage({
         key: 'description',
         header: 'Description',
         render: (e) => (
-          <span className="text-sm text-app-fg line-clamp-1">{e.description}</span>
+          <span className="text-sm text-app-fg truncate block max-w-[20rem]" title={e.description}>{e.description}</span>
         ),
       },
       {
@@ -149,6 +154,15 @@ export function FundingLedgerPage({
             </span>
           );
         },
+      },
+      {
+        key: 'actions',
+        header: '',
+        align: 'right',
+        tight: true,
+        render: (e) => (
+          <TableActionButton onClick={() => setDetailEntry(e)}>View</TableActionButton>
+        ),
       },
     ],
     [],
@@ -244,6 +258,11 @@ export function FundingLedgerPage({
               rows={entries}
               rowKey={(e) => `${e.entryType}-${e.id}`}
               renderMobileCard={(e) => (
+                <button
+                  type="button"
+                  onClick={() => setDetailEntry(e)}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 text-left"
+                >
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className={`text-xs font-medium ${TYPE_COLORS[e.entryType] ?? ''}`}>
@@ -285,6 +304,7 @@ export function FundingLedgerPage({
                   </div>
                   <StatusBadge status={e.status} />
                 </div>
+                </button>
               )}
             />
           )}
@@ -304,6 +324,75 @@ export function FundingLedgerPage({
           description="Pick a media buyer above to view their complete funding history."
         />
       )}
+
+      {/* Detail modal */}
+      <Modal
+        open={!!detailEntry}
+        onClose={() => setDetailEntry(null)}
+      >
+        {detailEntry && (
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold text-app-fg">Transaction Detail</h2>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Type</p>
+                <p className={`font-medium ${TYPE_COLORS[detailEntry.entryType] ?? 'text-app-fg'}`}>
+                  {TYPE_LABELS[detailEntry.entryType] ?? detailEntry.entryType}
+                </p>
+              </div>
+              <div>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Date</p>
+                <p className="text-app-fg">
+                  {new Date(detailEntry.eventDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {' '}
+                  {new Date(detailEntry.eventDate).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                </p>
+              </div>
+              <div>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Amount</p>
+                <p className="font-medium tabular-nums text-app-fg">
+                  <NairaPrice amount={Number(detailEntry.amount)} />
+                </p>
+              </div>
+              <div>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Status</p>
+                <StatusBadge status={detailEntry.status} />
+              </div>
+              {detailEntry.balanceEffect !== 0 && (
+                <div>
+                  <p className="text-app-fg-muted text-xs uppercase tracking-wider">
+                    {detailEntry.balanceEffect > 0 ? 'Credit' : 'Debit'}
+                  </p>
+                  <p className={`font-medium tabular-nums ${detailEntry.balanceEffect > 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
+                    {detailEntry.balanceEffect > 0 ? '+' : '-'}
+                    <NairaPrice amount={Math.abs(detailEntry.balanceEffect)} />
+                  </p>
+                </div>
+              )}
+              {detailEntry.entryType !== 'request' && (
+                <div>
+                  <p className="text-app-fg-muted text-xs uppercase tracking-wider">Running Balance</p>
+                  <p className={`font-semibold tabular-nums ${detailEntry.runningBalance < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                    <NairaPrice amount={detailEntry.runningBalance} />
+                  </p>
+                </div>
+              )}
+            </div>
+            {detailEntry.description && (
+              <div>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Description</p>
+                <p className="text-sm text-app-fg">{detailEntry.description}</p>
+              </div>
+            )}
+            {detailEntry.counterpartyName && (
+              <div>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Counterparty</p>
+                <p className="text-sm text-app-fg">{detailEntry.counterpartyName}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
