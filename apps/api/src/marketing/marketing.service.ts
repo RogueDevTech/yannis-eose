@@ -2229,11 +2229,13 @@ export class MarketingService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    const targetUser = alias(schema.users, 'target_user');
     const [rows, totalRows] = await Promise.all([
       this.db
         .select({
           id: schema.marketingFundingRequests.id,
           requesterId: schema.marketingFundingRequests.requesterId,
+          targetUserId: schema.marketingFundingRequests.targetUserId,
           amount: schema.marketingFundingRequests.amount,
           reason: schema.marketingFundingRequests.reason,
           status: schema.marketingFundingRequests.status,
@@ -2242,9 +2244,11 @@ export class MarketingService {
           resolvedAt: schema.marketingFundingRequests.resolvedAt,
           resolvedBy: schema.marketingFundingRequests.resolvedBy,
           requesterName: schema.users.name,
+          targetUserName: targetUser.name,
         })
         .from(schema.marketingFundingRequests)
         .leftJoin(schema.users, eq(schema.marketingFundingRequests.requesterId, schema.users.id))
+        .leftJoin(targetUser, eq(schema.marketingFundingRequests.targetUserId, targetUser.id))
         .where(whereClause)
         .orderBy(desc(schema.marketingFundingRequests.createdAt))
         .limit(input.limit)

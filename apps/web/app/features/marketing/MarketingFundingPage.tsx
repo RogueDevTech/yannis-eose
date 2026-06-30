@@ -738,6 +738,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         createdAt: r.createdAt,
         requesterId: r.requesterId,
         requesterName: r.requesterName ?? null,
+        targetUserId: r.targetUserId ?? null,
+        targetUserName: r.targetUserName ?? null,
         reason: r.reason,
         resolvedAt: r.resolvedAt,
         resolvedBy: r.resolvedBy,
@@ -2493,7 +2495,9 @@ function UnifiedDistributingTable({
         header: 'To',
         render: (entry) => (
           <span className="text-app-fg text-sm">
-            {entry.entryType === 'request' ? '—' : (entry.receiverName ?? userNameById(entry.receiverId))}
+            {entry.entryType === 'request'
+              ? (entry.targetUserName ?? '—')
+              : (entry.receiverName ?? userNameById(entry.receiverId))}
           </span>
         ),
       },

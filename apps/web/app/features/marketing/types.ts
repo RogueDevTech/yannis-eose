@@ -54,6 +54,7 @@ export interface MarketingTeamOverviewStats {
 export interface FundingRequestRecord {
   id: string;
   requesterId: string;
+  targetUserId?: string | null;
   amount: string;
   reason: string | null;
   status: string;
@@ -63,6 +64,7 @@ export interface FundingRequestRecord {
   resolvedBy: string | null;
   /** Requester display name when returned by API (e.g. listFundingRequests join) */
   requesterName?: string | null;
+  targetUserName?: string | null;
 }
 
 export type DistributingFundingEntryType = 'transfer' | 'request';
@@ -96,6 +98,8 @@ export interface DistributingFundingRequestEntry {
   createdAt: string;
   requesterId: string;
   requesterName: string | null;
+  targetUserId: string | null;
+  targetUserName: string | null;
   reason: string | null;
   resolvedAt: string | null;
   resolvedBy: string | null;

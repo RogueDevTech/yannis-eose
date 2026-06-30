@@ -271,6 +271,8 @@ export function toDistributingFundingEntries(
       createdAt: record.createdAt,
       requesterId: record.requesterId,
       requesterName: record.requesterName ?? null,
+      targetUserId: record.targetUserId ?? null,
+      targetUserName: record.targetUserName ?? null,
       reason: record.reason ?? null,
       resolvedAt: record.resolvedAt ?? null,
       resolvedBy: record.resolvedBy ?? null,
