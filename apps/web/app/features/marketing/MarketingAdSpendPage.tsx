@@ -791,8 +791,25 @@ export function MarketingAdSpendPage({
         key: 'date',
         header: 'Date',
         nowrap: true,
-        render: (s) =>
-          new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }),
+        render: (s) => {
+          const isPending = (s.status ?? 'PENDING') === 'PENDING';
+          const checkbox = canApproveAdSpend && isPending ? (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(s.id)}
+              onChange={(e) => { e.stopPropagation(); toggleSelect(s.id, e.target.checked); }}
+              className="rounded border-app-border text-brand-600 focus:ring-brand-500 shrink-0"
+              aria-label="Select row"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : null;
+          return (
+            <span className="inline-flex items-center gap-2">
+              {checkbox}
+              {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </span>
+          );
+        },
       },
     ];
 
@@ -913,7 +930,7 @@ export function MarketingAdSpendPage({
       },
     );
     return cols;
-  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData]);
+  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData, selectedIds, toggleSelect]);
 
   const adSpendToolbarFilterBadge = useMemo(() => {
     let n = 0;
@@ -1458,16 +1475,8 @@ export function MarketingAdSpendPage({
           rowKey={(s) => s.id}
           emptyTitle="No ad spend records yet"
           emptyDescription="Try adjusting your filters"
-          selection={canApproveAdSpend ? {
-            selectedIds,
-            isSelectable: (s) => (s.status ?? 'PENDING') === 'PENDING',
-            onToggle: toggleSelect,
-          } : undefined}
-          renderMobileCard={(s, _i, helpers) => (
+          renderMobileCard={(s, _i, _helpers) => (
             <>
-              {helpers.rowSelection && (
-                <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">{helpers.rowSelection}</div>
-              )}
               <button
                 type="button"
                 onClick={() => setPeekAdSpend(s)}
