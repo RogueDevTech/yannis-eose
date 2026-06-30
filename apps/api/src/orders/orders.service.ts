@@ -7164,7 +7164,8 @@ export class OrdersService {
         const rawPreferred = metadata?.preferredDeliveryDate;
         const preferredTrimmed =
           typeof rawPreferred === 'string' ? rawPreferred.trim() : '';
-        if (!preferredTrimmed) {
+        // Skip delivery date validation on retrack — the order already has one
+        if (!preferredTrimmed && !order.preferredDeliveryDate) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: 'Scheduled delivery date is required to confirm the order.',
