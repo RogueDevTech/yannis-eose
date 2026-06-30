@@ -385,6 +385,9 @@ export function MarketingTeamPage({
           >
             <CompactUserAvatar name={m.name} />
             <span className="truncate">{m.name}</span>
+            {m.role === 'HEAD_OF_MARKETING' && (
+              <span className="shrink-0 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-micro font-semibold text-purple-700 dark:text-purple-300">HoM</span>
+            )}
           </Link>
         ),
       },
@@ -648,10 +651,10 @@ export function MarketingTeamPage({
             title: `Ad spend: ₦${overviewStats.totalAdSpend.toLocaleString()} · CPA: ₦${Math.round(overviewStats.avgCpa).toLocaleString()} (ad spend ÷ orders)`,
           },
           {
-            label: 'Total Disbursed',
+            label: 'Disbursed to MBs',
             value: <NairaPrice amount={parseFloat(fundingSummary.totalSent) + parseFloat(fundingSummary.totalCompleted) + parseFloat(fundingSummary.totalDisputed)} />,
             valueClassName: 'text-app-fg',
-            title: `${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount} transfer${(fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount) !== 1 ? 's' : ''} in this period`,
+            title: `Funding sent to media buyers in this period — ${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount} transfer${(fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount) !== 1 ? 's' : ''}`,
           },
           {
             label: 'MB Unspent Balance (all-time)',

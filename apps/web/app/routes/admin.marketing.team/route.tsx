@@ -199,9 +199,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
+  // Role priority: HoMs always appear first regardless of sort column.
+  const rolePriority = (m: FundingBalanceRow) => m.role === 'HEAD_OF_MARKETING' ? 0 : 1;
+
   const sorted = [...afterSearch];
   if (sortBy === 'name') {
     sorted.sort((a, b) => {
+      const rp = rolePriority(a) - rolePriority(b);
+      if (rp !== 0) return rp;
       const c = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? c : -c;
     });
@@ -222,6 +227,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
                   : 0;
     const rate = (m: FundingBalanceRow, k: 'confirmationRate' | 'deliveryRate') => m[k];
     sorted.sort((a, b) => {
+      const rp = rolePriority(a) - rolePriority(b);
+      if (rp !== 0) return rp;
       if (
         sortBy === 'balance' ||
         sortBy === 'received' ||
