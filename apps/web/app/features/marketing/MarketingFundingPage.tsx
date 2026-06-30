@@ -2455,8 +2455,22 @@ function UnifiedDistributingTable({
                 from request
               </span>
             ) : null;
+          // Inline selection checkbox when selection is enabled
+          const canSelect = selection?.isSelectable?.(entry) !== false;
+          const rowId = selection?.getRowId?.(entry) ?? entry.id;
+          const checkbox = selection && canSelect ? (
+            <input
+              type="checkbox"
+              checked={selection.selectedIds.has(rowId)}
+              onChange={(e) => { e.stopPropagation(); selection.onToggle(rowId, e.target.checked); }}
+              className="rounded border-app-border text-brand-600 focus:ring-brand-500 shrink-0"
+              aria-label="Select row"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : null;
           return (
-            <span className="text-app-fg-muted text-xs uppercase tracking-wide">
+            <span className="inline-flex items-center gap-2 text-app-fg-muted text-xs uppercase tracking-wide">
+              {checkbox}
               {entry.entryType === 'request' ? 'Request' : 'Transfer'}
               {fromRequestChip}
             </span>
@@ -2525,9 +2539,10 @@ function UnifiedDistributingTable({
       {
         key: 'date',
         header: 'Date',
+        nowrap: true,
         render: (entry) => (
           <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
           </span>
         ),
       },
@@ -2609,7 +2624,7 @@ function UnifiedDistributingTable({
         },
       },
     ],
-    [users, balancesList, balanceByUserId, canApproveFunding, onViewReceipt, onOpenDetails, onApprove, onReject],
+    [users, balancesList, balanceByUserId, canApproveFunding, onViewReceipt, onOpenDetails, onApprove, onReject, selection],
   );
 
   return (
@@ -2622,12 +2637,8 @@ function UnifiedDistributingTable({
       loadingVariant="overlay"
       emptyTitle="No entries"
       emptyDescription={emptyMessage}
-      selection={selection}
-      renderMobileCard={(entry, _i, helpers) => (
+      renderMobileCard={(entry, _i, _helpers) => (
         <>
-          {helpers.rowSelection && (
-            <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">{helpers.rowSelection}</div>
-          )}
           <button
             type="button"
             onClick={() => onOpenDetails(entry)}
@@ -2867,8 +2878,21 @@ function UnifiedReceivedTable({
                 from request
               </span>
             ) : null;
+          const canSelect = selection?.isSelectable?.(entry) !== false;
+          const rowId = selection?.getRowId?.(entry) ?? entry.id;
+          const checkbox = selection && canSelect ? (
+            <input
+              type="checkbox"
+              checked={selection.selectedIds.has(rowId)}
+              onChange={(e) => { e.stopPropagation(); selection.onToggle(rowId, e.target.checked); }}
+              className="rounded border-app-border text-brand-600 focus:ring-brand-500 shrink-0"
+              aria-label="Select row"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : null;
           return (
-            <span className="text-app-fg-muted text-xs uppercase tracking-wide">
+            <span className="inline-flex items-center gap-2 text-app-fg-muted text-xs uppercase tracking-wide">
+              {checkbox}
               {isTransfer ? 'Transfer' : 'Request'}
               {fromRequestChip}
             </span>
@@ -2928,9 +2952,10 @@ function UnifiedReceivedTable({
       {
         key: 'date',
         header: 'Date',
+        nowrap: true,
         render: (entry) => (
           <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
           </span>
         ),
       },
@@ -3008,7 +3033,7 @@ function UnifiedReceivedTable({
         },
       },
     ],
-    [users, currentUserId, fetcher, onViewReceipt, onOpenMarkReceived, onOpenNotReceived, onOpenDetails],
+    [users, currentUserId, fetcher, onViewReceipt, onOpenMarkReceived, onOpenNotReceived, onOpenDetails, selection],
   );
 
   return (
@@ -3022,12 +3047,8 @@ function UnifiedReceivedTable({
       emptyTitle="No entries"
       emptyDescription={emptyMessage}
       emptyAction={emptyAction}
-      selection={selection}
-      renderMobileCard={(entry, _i, helpers) => (
+      renderMobileCard={(entry, _i, _helpers) => (
         <>
-          {helpers.rowSelection && (
-            <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">{helpers.rowSelection}</div>
-          )}
           <button
             type="button"
             onClick={() => onOpenDetails(entry)}

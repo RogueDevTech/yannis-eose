@@ -179,6 +179,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           targetGroupId: input.targetGroupId ?? null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
+          freezeOriginal: input.freezeOriginal ?? true,
         })
         .returning();
       return rule;
@@ -206,6 +207,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (input.targetGroupId !== undefined) set.targetGroupId = input.targetGroupId;
       if (input.priority !== undefined) set.priority = input.priority;
       if (input.enabled !== undefined) set.enabled = input.enabled;
+      if (input.freezeOriginal !== undefined) set.freezeOriginal = input.freezeOriginal;
       set.updatedAt = new Date();
 
       const [updated] = await tx
@@ -525,11 +527,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         const items = itemsByOrder.get(orig.id) ?? [];
 
         await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-          // Freeze source order
-          await tx
-            .update(schema.orders)
-            .set({ frozenForFollowUp: true, updatedAt: new Date() })
-            .where(eq(schema.orders.id, orig.id));
+          // Freeze source order (unless rule opts out)
+          if (rule.freezeOriginal) {
+            await tx
+              .update(schema.orders)
+              .set({ frozenForFollowUp: true, updatedAt: new Date() })
+              .where(eq(schema.orders.id, orig.id));
+          }
 
           // Create follow-up copy
           const [fuRow] = await tx
@@ -588,8 +592,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               eventType: 'ORDER_ARCHIVED' as const,
               actorId: null,
               actorName: 'System',
-              description: `Order frozen for follow-up (rule: ${rule.name}).`,
-              metadata: { ruleId: rule.id, ruleName: rule.name },
+              description: rule.freezeOriginal
+                ? `Order frozen for follow-up (rule: ${rule.name}).`
+                : `Follow-up order created (rule: ${rule.name}). Original remains active.`,
+              metadata: { ruleId: rule.id, ruleName: rule.name, frozen: rule.freezeOriginal },
               branchId: null,
             });
 

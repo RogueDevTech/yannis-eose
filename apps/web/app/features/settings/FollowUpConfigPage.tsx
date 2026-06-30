@@ -38,6 +38,7 @@ interface Rule {
   targetGroupName: string | null;
   priority: number;
   enabled: boolean;
+  freezeOriginal: boolean;
 }
 
 interface Branch { id: string; name: string; status?: string }
@@ -195,6 +196,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const [targetBranchId, setTargetBranchId] = useState<string | null>(null);
   const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
+  const [freezeOriginal, setFreezeOriginal] = useState(true);
 
   const saveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(saveFetcher.data, { successMessage: editRule ? 'Rule updated' : 'Rule created' });
@@ -216,7 +218,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const openCreate = () => {
     setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeValue('7'); setMaxAgeDays(null);
     setAgeRelativeTo('STATUS_TIMESTAMP'); setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
-    setEnabled(true); setModalOpen(true);
+    setEnabled(true); setFreezeOriginal(true); setModalOpen(true);
   };
   const openEdit = (rule: Rule) => {
     setEditRule(rule); setName(rule.name); setSourceStatus(rule.sourceStatus);
@@ -224,7 +226,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
     setSourceBranchId(rule.sourceBranchId);
     setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
     setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
-    setEnabled(rule.enabled); setModalOpen(true);
+    setEnabled(rule.enabled); setFreezeOriginal(rule.freezeOriginal ?? true); setModalOpen(true);
   };
   const handleSave = () => {
     const parsed = parseAgeValue(ageValue);
@@ -233,7 +235,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
       targetBranchId: targetType === 'branch' ? targetBranchId : null,
       targetGroupId: targetType === 'group' ? targetGroupId : null,
       targetAll: targetType === 'all',
-      priority: 0, enabled,
+      priority: 0, enabled, freezeOriginal,
     };
     if (editRule) payload.ruleId = editRule.id;
     const fd = new FormData();
@@ -356,6 +358,9 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       <span>{formatAge(r)}</span>
                       <span>from {r.sourceBranchName ?? 'All'}</span>
                       <span>→ {r.targetBranchName ?? r.targetGroupName ?? 'All branches'}</span>
+                      {r.freezeOriginal === false && (
+                        <span className="inline-flex items-center rounded-full bg-cyan-100 dark:bg-cyan-900/30 px-2 py-0.5 text-micro font-medium text-cyan-700 dark:text-cyan-300">No freeze</span>
+                      )}
                     </div>
                     <div className="flex gap-2 pt-1">
                       <TableActionButton onClick={() => setViewRule(r)}>View</TableActionButton>
@@ -380,6 +385,15 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                     { key: 'age', header: 'Age', render: (r: Rule) => formatAge(r) },
                     { key: 'sourceBranch', header: 'From', render: (r: Rule) => r.sourceBranchName ?? 'All' },
                     { key: 'target', header: 'Target', render: (r: Rule) => r.targetBranchName ?? r.targetGroupName ?? 'All branches' },
+                    { key: 'freeze', header: 'Freeze', render: (r: Rule) => (
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium ${
+                        r.freezeOriginal !== false
+                          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                          : 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+                      }`}>
+                        {r.freezeOriginal !== false ? 'Freeze' : 'No freeze'}
+                      </span>
+                    ) },
                     { key: 'enabled', header: '', render: (r: Rule) => <StatusBadge status={r.enabled ? 'ACTIVE' : 'INACTIVE'} /> },
                     {
                       key: 'actions', header: '',
@@ -678,18 +692,19 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
-            <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={[{ value: '', label: 'All branches' }, ...branchOptions]} placeholder="All branches" searchPlaceholder="Search..." />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-app-fg-muted mb-1">Push to</label>
-            <FormSelect id="fu-target-type" value={targetType} onChange={(e) => setTargetType(e.target.value as 'all' | 'branch' | 'group')} options={[
-              { value: 'all', label: 'All branches (round-robin)' },
-              { value: 'branch', label: 'Specific branch' },
-              { value: 'group', label: 'Follow-up group' },
-            ]} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Source branch</label>
+              <SearchableSelect value={sourceBranchId ?? ''} onChange={(v) => setSourceBranchId(v || null)} options={[{ value: '', label: 'All branches' }, ...branchOptions]} placeholder="All branches" searchPlaceholder="Search..." />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Push to</label>
+              <FormSelect id="fu-target-type" value={targetType} onChange={(e) => setTargetType(e.target.value as 'all' | 'branch' | 'group')} options={[
+                { value: 'all', label: 'All branches (round-robin)' },
+                { value: 'branch', label: 'Specific branch' },
+                { value: 'group', label: 'Follow-up group' },
+              ]} />
+            </div>
           </div>
 
           {targetType === 'branch' && (
@@ -704,6 +719,11 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
               <SearchableSelect value={targetGroupId ?? ''} onChange={(v) => setTargetGroupId(v || null)} options={groupOptions} placeholder="Select group" searchPlaceholder="Search..." />
             </div>
           )}
+
+          <label className="flex items-center gap-2 text-sm text-app-fg">
+            <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
+            Freeze original order
+          </label>
 
           <label className="flex items-center gap-2 text-sm text-app-fg">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
@@ -784,6 +804,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             )}
             <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
             <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
+            <ViewRow label="Freeze Original" value={viewRule.freezeOriginal !== false ? 'Yes — original locked' : 'No — both compete'} />
             <ViewRow label="Priority" value={String(viewRule.priority)} />
           </div>
 
