@@ -37,7 +37,7 @@ export const MV_AD_SPEND_SUMMARY = `
     media_buyer_id,
     product_id
   FROM ad_spend_logs
-  WHERE status != 'REJECTED'
+  WHERE status = 'APPROVED'
   GROUP BY spend_date, media_buyer_id, product_id
   WITH DATA
 `;
