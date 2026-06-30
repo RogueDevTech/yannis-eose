@@ -79,8 +79,9 @@ async function _ceoOverviewFetch(params: {
     (hasDateRange || isBranchScoped)
       ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true).catch(logErr('statusCounts'))
       : Promise.resolve(undefined),
-    // CS funnel: servicing branch scope, includes offline orders, excludes follow-up
-    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false).catch(logErr('csStatusCounts')),
+    // CS funnel: servicing branch scope, includes offline orders, excludes
+    // graduated follow-up and cart orders (they have their own funnels).
+    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true).catch(logErr('csStatusCounts')),
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
     financeService!.getInvoiceSummary(effectiveBranchIds).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
@@ -232,6 +233,13 @@ async function _ceoOverviewFetch(params: {
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
     followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+    // Total Orders — everything in the orders table (regular + offline +
+    // graduated follow-ups + graduated cart orders). No exclusions. This is
+    // the CEO's bird's-eye "all orders that entered the system" view.
+    totalOrdersCounts: await ordersService!.getStatusCounts(
+      undefined, startDate, endDate, undefined, undefined, branchId,
+      undefined, undefined, 'servicing', effectiveBranchIds,
+    ).catch(() => ({})),
   };
 }
 
@@ -449,7 +457,10 @@ export const dashboardRouter = router({
     const startIso = nigeriaDayStart(todayWat).toISOString();
     const endIso = nigeriaDayEnd(todayWat).toISOString();
 
-    const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
+    const [todayCounts, totalOrdersCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
+      // CS funnel — excludes graduated follow-up + cart orders
+      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true).catch(() => ({})),
+      // Total orders — everything, no exclusions
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({})),
       ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
@@ -486,6 +497,7 @@ export const dashboardRouter = router({
       pendingApprovals,
       followUpCounts: followUpCounts as Record<string, number>,
       cartOrdersCounts: cartOrdersCounts as Record<string, number>,
+      totalOrdersCounts: (totalOrdersCounts ?? {}) as Record<string, number>,
     };
   }),
 });

@@ -734,6 +734,12 @@ export const ordersRouter = router({
       // CS (servicing-scoped) and marketing (marketing-scoped) pages correctly.
       if (input.branchScope) baseOpts.branchScope = input.branchScope;
       baseOpts.effectiveBranchIds = ctx.effectiveBranchIds;
+      // CS-scoped lists exclude graduated follow-up and cart orders — they have
+      // their own funnels. Marketing lists keep them (graduated = delivered = counts).
+      const effectiveBranchScope = baseOpts.branchScope ?? 'servicing';
+      if (effectiveBranchScope === 'servicing') {
+        (baseOpts as Record<string, unknown>).excludeGraduated = true;
+      }
       const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
       const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
 
@@ -1408,6 +1414,8 @@ export const ordersRouter = router({
           bundleBranchScope,
           ctx.effectiveBranchIds,
           false, // exclude follow-up orders — matches orders.list default
+          undefined,
+          bundleBranchScope === 'servicing', // CS excludes graduated follow-up + cart orders
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(

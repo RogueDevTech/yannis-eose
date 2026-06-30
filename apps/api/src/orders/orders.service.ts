@@ -3490,6 +3490,9 @@ export class OrdersService {
        *  `'marketing'`. */
       branchScope?: 'servicing' | 'marketing';
       effectiveBranchIds?: string[] | null;
+      /** When true, strictly exclude graduated follow-up and cart orders.
+       *  CS surfaces pass true so closers only see orders they worked. */
+      excludeGraduated?: boolean;
     },
   ) {
     // Skip the exclusion gate when explicitly querying DELETED orders —
@@ -3501,14 +3504,19 @@ export class OrdersService {
       ? []
       : [isNull(schema.orders.deletedAt), sql`${schema.orders.status} != 'CANCELLED'`];
 
-    // Follow-up isolation: default excludes follow-up orders from normal list views.
-    // `isFollowUp: true` = show ONLY follow-ups (follow-up batch detail page).
-    // `excludeFollowUp: false` = include follow-ups alongside normal orders (follow-up create page).
-    // Exception: delivered/remitted follow-up orders "graduate" into normal views
-    // so they count toward CS metrics and are visible on orders pages (CEO 2026-06-09).
-    if (input.isFollowUp) {
+    // Follow-up / cart-graduated isolation.
+    if (listOpts?.excludeGraduated) {
+      // Strict exclusion: no follow-up orders, no cart-graduated orders.
+      // CS surfaces use this so closers don't get credit for follow-up
+      // and cart recovery deliveries (CEO 2026-06-30).
+      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`${schema.orders.cartId} IS NULL`);
+    } else if (input.isFollowUp) {
+      // Show ONLY follow-ups (follow-up batch detail page).
       conditions.push(eq(schema.orders.isFollowUp, true));
     } else if (input.excludeFollowUp !== false) {
+      // Default: exclude follow-ups but let delivered/remitted ones "graduate"
+      // into normal views for marketing metrics (CEO 2026-06-09).
       conditions.push(
         sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
       );
@@ -5692,18 +5700,27 @@ export class OrdersService {
     isFollowUp?: boolean,
     /** When true, exclude offline-created orders from counts. Marketing surfaces pass true. */
     excludeOffline?: boolean,
+    /** When true, strictly exclude graduated follow-up orders AND graduated cart
+     *  orders. CS surfaces pass true so closers don't get credit for follow-up
+     *  and cart recovery deliveries (CEO 2026-06-30). */
+    excludeGraduated?: boolean,
   ) {
     // Status counts always include every status (including DELETED) so the
     // stat strip can show the Deleted count. CANCELLED is merged into DELETED
     // post-query (CEO directive 2026-05-23). The frontend excludes DELETED
     // from the "Total" by using `total` from listOrders (which filters them).
     const conditions: Parameters<typeof and>[0][] = [];
-    // Follow-up isolation: when explicitly set, filter by follow-up flag. When undefined, show all.
-    // Delivered/remitted follow-up orders "graduate" into normal counts so CS
-    // metrics stay accurate (CEO 2026-06-09).
-    if (isFollowUp === true) {
+
+    if (excludeGraduated) {
+      // Strict exclusion: no follow-up orders, no cart-graduated orders.
+      // These have their own funnels (Follow-Up Orders, Cart Orders).
+      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`${schema.orders.cartId} IS NULL`);
+    } else if (isFollowUp === true) {
       conditions.push(eq(schema.orders.isFollowUp, true));
     } else if (isFollowUp === false) {
+      // Follow-up isolation: delivered/remitted follow-ups "graduate" into
+      // normal counts so marketing metrics stay accurate (CEO 2026-06-09).
       conditions.push(
         sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
       );
