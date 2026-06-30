@@ -1718,6 +1718,12 @@ export class LogisticsService {
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
         // Order count (not batch count) so the stat strip is consistent with Delivered/Awaiting
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
+        // Deduction breakdown — so the CEO sees where the money goes
+        grossOrderValue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        totalDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        totalCommitmentFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.commitmentFee}, 0)), 0)::text`,
+        totalPosFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.posFee}, 0)), 0)::text`,
+        totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0)), 0)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -1822,12 +1828,20 @@ export class LogisticsService {
       awaitingCount: awaitingSummary?.awaitingCount ?? '0',
       deliveredCount: deliveredSummary?.deliveredCount ?? '0',
       deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
+      // Deduction breakdown for remitted orders
+      grossOrderValue: baseSummary?.grossOrderValue ?? '0',
+      totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
+      totalCommitmentFees: baseSummary?.totalCommitmentFees ?? '0',
+      totalPosFees: baseSummary?.totalPosFees ?? '0',
+      totalFailedDeliveryCosts: baseSummary?.totalFailedDeliveryCosts ?? '0',
     };
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', deliveredCount: '0', deliveredAmount: '0',
+      grossOrderValue: '0', totalDeliveryFees: '0', totalCommitmentFees: '0',
+      totalPosFees: '0', totalFailedDeliveryCosts: '0',
     };
 
     return {
