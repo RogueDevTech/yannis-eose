@@ -236,6 +236,12 @@ export class NotificationsService {
     input: Omit<CreateNotificationInput, 'userId'>,
     groupId?: string | null,
   ): Promise<void> {
+    // SUPPORT users receive every notification that SUPER_ADMIN gets —
+    // they need full visibility for support operations.
+    const roles = role === 'SUPER_ADMIN'
+      ? [role, 'SUPPORT' as typeof role]
+      : [role];
+
     let rows: { id: string }[];
 
     if (groupId) {
@@ -247,7 +253,7 @@ export class NotificationsService {
         .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
         .where(
           and(
-            eq(schema.users.role, role),
+            inArray(schema.users.role, roles),
             eq(schema.users.status, 'ACTIVE'),
             eq(schema.branches.groupId, groupId),
           ),
@@ -258,7 +264,7 @@ export class NotificationsService {
         .from(schema.users)
         .where(
           and(
-            eq(schema.users.role, role),
+            inArray(schema.users.role, roles),
             eq(schema.users.status, 'ACTIVE'),
           ),
         );
