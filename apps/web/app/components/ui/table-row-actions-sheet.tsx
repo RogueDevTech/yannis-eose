@@ -190,32 +190,50 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
   );
 }
 
-/** Compact positioned dropdown for desktop kebab overflow actions. */
+/** Compact positioned dropdown for desktop kebab overflow actions.
+ *  Uses fixed positioning so the menu escapes table overflow containers. */
 function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: TableRowSheetAction[] }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) setOpen(false);
     }
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false);
     }
+    function handleScroll() { setOpen(false); }
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleEsc);
+    window.addEventListener('scroll', handleScroll, true);
     return () => {
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('scroll', handleScroll, true);
     };
   }, [open]);
+
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 4, left: rect.right });
+    }
+    setOpen((v) => !v);
+  };
 
   const close = () => setOpen(false);
 
   return (
-    <div ref={ref} className="relative">
+    <>
       <Button
+        ref={btnRef}
         type="button"
         variant="ghost"
         size="sm"
@@ -223,12 +241,16 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <EllipsisVerticalIcon className="h-4 w-4" />
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-lg border border-app-border-strong bg-app-elevated shadow-xl dark:shadow-black/60" style={{ background: 'rgb(var(--app-elevated))' }}>
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[140px] rounded-lg border border-app-border-strong shadow-xl dark:shadow-black/60"
+          style={{ top: pos.top, left: pos.left, transform: 'translateX(-100%)', background: 'rgb(var(--app-elevated))' }}
+        >
           <div className="py-1">
             {actions.map((a) => {
               if (a.kind === 'custom') {
@@ -258,6 +280,6 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
