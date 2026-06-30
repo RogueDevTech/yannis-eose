@@ -184,6 +184,36 @@ export const cartRouter = router({
     }),
 
   /**
+   * Count ALL abandoned carts (including those already pulled into cart_orders).
+   * The real marketing metric — "how many people started the form but didn't
+   * finish". Independent of the cart-orders pull pipeline. Used by the
+   * dashboard marketing section and marketing overview stat strip.
+   */
+  countAllAbandoned: permissionProcedure('marketing.read')
+    .input(
+      z
+        .object({
+          startDate: z.string().optional(),
+          endDate: z.string().optional(),
+          mediaBuyerId: z.string().uuid().optional(),
+          branchId: z.string().uuid().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const mediaBuyerId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input?.mediaBuyerId;
+      return {
+        count: await getCartService().countAllCarts({
+          mediaBuyerId,
+          branchId: input?.branchId,
+          effectiveBranchIds: !input?.branchId ? ctx.effectiveBranchIds : null,
+          startDate: input?.startDate,
+          endDate: input?.endDate,
+        }),
+      };
+    }),
+
+  /**
    * Reveal the raw customer phone for a dropped-off cart so the rep can
    * Call / SMS / WhatsApp the customer (CEO directive 2026-05-08).
    *
