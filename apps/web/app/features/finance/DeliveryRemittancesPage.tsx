@@ -79,6 +79,8 @@ export interface DeliveryRemittanceSummary {
   pendingCount: string;
   receivedCount: string;
   disputedCount: string;
+  deliveredCount?: string;
+  deliveredAmount?: string;
 }
 
 export interface DeliveryRemittancesPageProps {
@@ -706,51 +708,28 @@ export function DeliveryRemittancesPage({
         mobileGrid
         items={[
           {
-            label: 'Total invoices',
-            value: Number(summary.awaitingCount) + Number(summary.receivedCount) + Number(summary.pendingCount) + Number(summary.disputedCount),
-          },
-          {
-            label: 'Total amount',
-            value: <NairaPrice amount={Number(summary.awaitingAmount) + Number(summary.receivedAmount) + Number(summary.pendingAmount) + Number(summary.disputedAmount)} />,
+            label: `Delivered Orders (${Number(summary.deliveredCount ?? 0)})`,
+            value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
             valueClassName: 'text-app-fg tabular-nums',
+            title: 'Total delivered + remitted orders in this period',
           },
           {
-            label: 'Awaiting',
-            value: Number(summary.awaitingCount),
-            valueClassName: 'text-info-600 dark:text-info-400',
-          },
-          {
-            label: 'Awaiting amount',
+            label: `Awaiting Remittance (${Number(summary.awaitingCount)})`,
             value: <NairaPrice amount={summary.awaitingAmount} />,
             valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
           },
           {
-            label: 'Received',
-            value: Number(summary.receivedCount),
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Received amount',
+            label: `Received (${Number(summary.receivedCount)})`,
             value: <NairaPrice amount={summary.receivedAmount} />,
             valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
           },
           {
-            label: 'Pending',
-            value: Number(summary.pendingCount),
-            valueClassName: 'text-warning-600 dark:text-warning-400',
-          },
-          {
-            label: 'Pending amount',
+            label: `Pending (${Number(summary.pendingCount)})`,
             value: <NairaPrice amount={summary.pendingAmount} />,
             valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
           },
           {
-            label: 'Disputed',
-            value: Number(summary.disputedCount),
-            valueClassName: 'text-danger-600 dark:text-danger-400',
-          },
-          {
-            label: 'Disputed amount',
+            label: `Disputed (${Number(summary.disputedCount)})`,
             value: <NairaPrice amount={summary.disputedAmount} />,
             valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
           },

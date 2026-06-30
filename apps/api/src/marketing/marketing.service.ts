@@ -267,7 +267,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
             branchCampaignIds
               ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
               : undefined,
@@ -340,7 +340,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
             branchCampaignIds
               ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
               : undefined,
@@ -1612,7 +1612,7 @@ export class MarketingService {
         .where(
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
             branchCampaignIds ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId)) : undefined,
           ),
         )
@@ -1638,7 +1638,7 @@ export class MarketingService {
   async listFundingBalances(
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
-    opts?: { activeOnly?: boolean; /** Pre-resolved user IDs to restrict to (e.g. supervisor team scope). */ restrictToUserIds?: string[] },
+    opts?: { activeOnly?: boolean; /** Pre-resolved user IDs to restrict to (e.g. supervisor team scope). */ restrictToUserIds?: string[]; startDate?: string; endDate?: string },
     effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
@@ -1731,6 +1731,18 @@ export class MarketingService {
     // Match the enforcement logic in computeMarketingDisbursableInTx:
     // - Received: COMPLETED only (receiver must mark-received first)
     // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
+    // Date conditions: funding filtered by sentAt, spend filtered by spendDate.
+    const fundingDateConds: SQL[] = [];
+    const spendDateConds: SQL[] = [];
+    if (opts?.startDate) {
+      fundingDateConds.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(opts.startDate)));
+      spendDateConds.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(opts.startDate)));
+    }
+    if (opts?.endDate) {
+      fundingDateConds.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(opts.endDate)));
+      spendDateConds.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(opts.endDate)));
+    }
+
     const [fundingByReceiver, fundingBySender, spendByMediaBuyer, userRows] = await Promise.all([
       this.db
         .select({
@@ -1742,6 +1754,7 @@ export class MarketingService {
           and(
             inArray(schema.marketingFunding.receiverId, recipientUserIds),
             eq(schema.marketingFunding.status, 'COMPLETED'),
+            ...fundingDateConds,
           ),
         )
         .groupBy(schema.marketingFunding.receiverId),
@@ -1755,6 +1768,7 @@ export class MarketingService {
           and(
             inArray(schema.marketingFunding.senderId, recipientUserIds),
             inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+            ...fundingDateConds,
           ),
         )
         .groupBy(schema.marketingFunding.senderId),
@@ -1773,6 +1787,7 @@ export class MarketingService {
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
             eq(schema.adSpendLogs.status, 'APPROVED'),
+            ...spendDateConds,
           ),
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),

@@ -1772,15 +1772,32 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...awaitingConditions));
 
-    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows] = await Promise.all([
+    // Count all delivered orders in the period (both awaiting and on remittance)
+    const deliveredConditions: SQL[] = [
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+    ];
+    if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
+    if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+    const deliveredCountQuery = this.db
+      .select({
+        deliveredCount: sql<string>`COUNT(*)::text`,
+        deliveredAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+      })
+      .from(schema.orders)
+      .where(and(...deliveredConditions));
+
+    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, deliveredRows] = await Promise.all([
       summaryWhere ? baseSummaryQuery.where(summaryWhere) : baseSummaryQuery,
       summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
       awaitingSummaryQuery,
+      deliveredCountQuery,
     ]);
 
     const baseSummary = baseSummaryRows[0];
     const outcomeSummary = outcomeSummaryRows[0];
     const awaitingSummary = awaitingSummaryRows[0];
+    const deliveredSummary = deliveredRows[0];
     const summary = {
       totalRemitted: baseSummary?.totalRemitted ?? '0',
       pendingAmount: baseSummary?.pendingAmount ?? '0',
@@ -1792,12 +1809,14 @@ export class LogisticsService {
       disputedCount: outcomeSummary?.disputedCount ?? '0',
       awaitingAmount: awaitingSummary?.awaitingAmount ?? '0',
       awaitingCount: awaitingSummary?.awaitingCount ?? '0',
+      deliveredCount: deliveredSummary?.deliveredCount ?? '0',
+      deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
     };
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
-      awaitingAmount: '0', awaitingCount: '0',
+      awaitingAmount: '0', awaitingCount: '0', deliveredCount: '0', deliveredAmount: '0',
     };
 
     return {
