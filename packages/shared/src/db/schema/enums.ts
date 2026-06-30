@@ -236,6 +236,7 @@ export const permissionRequestTypeEnum = pgEnum('permission_request_type', [
   'PRODUCT_ARCHIVE',
   'ORDER_LINE_PRICE_CHANGE',
   'ORDER_DELETION',
+  'DELIVERED_ORDER_DELETION',
 ]);
 
 export const permissionRequestStatusEnum = pgEnum('permission_request_status', [

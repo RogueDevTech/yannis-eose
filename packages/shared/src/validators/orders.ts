@@ -259,6 +259,17 @@ export const softDeleteOrderSchema = requestOrderDeletionSchema;
 export type SoftDeleteOrderInput = z.infer<typeof softDeleteOrderSchema>;
 
 /**
+ * Finance-initiated deletion request for DELIVERED/REMITTED orders.
+ * Requires dual approval from HoCS + HoL before execution.
+ */
+export const requestDeliveredOrderDeletionSchema = z.object({
+  orderId: z.string().uuid(),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+});
+
+export type RequestDeliveredOrderDeletionInput = z.infer<typeof requestDeliveredOrderDeletionSchema>;
+
+/**
  * Assign order to Sales closer — manual assignment or bulk reassign.
  */
 export const assignOrderSchema = z.object({

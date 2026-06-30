@@ -138,14 +138,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     hasCode('permission_requests.permission_grant.approve') ||
     hasCode('permission_requests.product_archive.approve') ||
     hasCode('permission_requests.order_line_price.approve') ||
-    hasCode('permission_requests.order_deletion.approve');
+    hasCode('permission_requests.order_deletion.approve') ||
+    hasCode('permission_requests.delivered_order_deletion.approve');
   // PRODUCT_ARCHIVE is locked to SuperAdmin only by default (no role template
   // grants the code). Keep that explicit in the loader so the UI matches.
   const canApproveProductArchive =
     isSuperAdminOnly(user) || hasCode('permission_requests.product_archive.approve');
   const canApproveOrderLinePriceChange =
     hasCode('permission_requests.order_line_price.approve') ||
-    hasCode('permission_requests.order_deletion.approve');
+    hasCode('permission_requests.order_deletion.approve') ||
+    hasCode('permission_requests.delivered_order_deletion.approve');
 
   return {
     requests,
