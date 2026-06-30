@@ -127,7 +127,7 @@ function MarketingTeamMemberCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <MarketingTeamCompactStat
           label="Balance"
           value={formatNaira(balance)}
@@ -135,6 +135,10 @@ function MarketingTeamMemberCard({
         />
         <MarketingTeamCompactStat label="Received" value={formatNaira(Number(member.totalReceived))} />
         <MarketingTeamCompactStat label="Total Spent" value={formatNaira(Number(member.totalSpend))} />
+        <MarketingTeamCompactStat
+          label="Distributed"
+          value={Number(member.totalDistributed) > 0 ? formatNaira(Number(member.totalDistributed)) : '—'}
+        />
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -410,6 +414,18 @@ export function MarketingTeamPage({
         align: 'right',
         nowrap: true,
         render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalSpend))}</span>,
+      },
+      {
+        key: 'distributed',
+        header: 'Distributed',
+        align: 'right',
+        nowrap: true,
+        render: (m) => {
+          const dist = Number(m.totalDistributed);
+          return dist > 0
+            ? <span className="text-app-fg-muted">{formatNaira(dist)}</span>
+            : <span className="text-app-fg-muted">—</span>;
+        },
       },
       {
         key: 'adSpend',

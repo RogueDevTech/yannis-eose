@@ -40,6 +40,9 @@ export const followUpRules = pgTable('follow_up_rules', {
   priority: integer('priority').notNull().default(0),
   /** Disabled rules are skipped during sync. */
   enabled: boolean('enabled').notNull().default(true),
+  /** When true (default), the source order is frozen when the follow-up copy is created.
+   *  When false, the source order stays active — both original and follow-up compete. */
+  freezeOriginal: boolean('freeze_original').notNull().default(true),
   ...temporalColumns,
   ...timestampColumns,
 });
