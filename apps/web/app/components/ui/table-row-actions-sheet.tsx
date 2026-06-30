@@ -126,14 +126,17 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
     );
   };
 
-  // Desktop: show up to maxInline actions inline, rest go into kebab overflow
+  // Desktop: show up to maxInline actions inline, rest go into kebab overflow.
+  // On mid-size screens (md–lg), collapse everything into a single kebab.
+  // On large screens (xl+), show inline actions + kebab for overflow.
   const desktopInline = visible.slice(0, maxInline);
   const desktopOverflow = visible.slice(maxInline);
   const needsDesktopKebab = desktopOverflow.length > 0;
 
   return (
     <>
-      <div className="hidden items-center justify-end gap-1.5 md:flex">
+      {/* Large screens: inline actions + optional kebab overflow */}
+      <div className="hidden items-center justify-end gap-1.5 xl:flex">
         {desktopInline.map(renderDesktop)}
         {needsDesktopKebab && (
           <DesktopDropdown
@@ -142,6 +145,11 @@ export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', action
           />
         )}
       </div>
+      {/* Mid-size screens (md–lg): all actions in a single kebab */}
+      <div className="hidden md:flex xl:hidden justify-end">
+        <DesktopDropdown ariaLabel={ariaLabel} actions={visible} />
+      </div>
+      {/* Mobile: slide-up sheet */}
       <div className="flex justify-end md:hidden">
         <Button
           type="button"
