@@ -51,7 +51,7 @@ function computeMarketingTeamOverview(
   const totalExpenses = mbMembers.reduce((s, m) => s + Number(m.totalSpend), 0);
 
   return {
-    teamMembers: teamMembers.length,
+    teamMembers: mbMembers.length,
     totalOrders: totals.totalOrders,
     averageConfirmationRate:
       totals.totalOrders > 0 ? (totals.confirmedOrders / totals.totalOrders) * 100 : null,
