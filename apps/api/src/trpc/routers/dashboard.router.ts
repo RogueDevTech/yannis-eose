@@ -233,13 +233,27 @@ async function _ceoOverviewFetch(params: {
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
     followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
-    // Total Orders — everything in the orders table (regular + offline +
-    // graduated follow-ups + graduated cart orders). No exclusions. This is
-    // the CEO's bird's-eye "all orders that entered the system" view.
-    totalOrdersCounts: await ordersService!.getStatusCounts(
-      undefined, startDate, endDate, undefined, undefined, branchId,
-      undefined, undefined, 'servicing', effectiveBranchIds,
-    ).catch(() => ({})),
+    // Total Orders — grand total across ALL pipelines. Sums orders table
+    // (regular + offline + graduated) + non-graduated follow-up + non-graduated
+    // cart orders. Graduated orders are already in the orders table so only
+    // non-delivered follow-up/cart pipeline entries are added to avoid double-counting.
+    totalOrdersCounts: await (async () => {
+      const [allOrders, fuCounts, cartCounts] = await Promise.all([
+        ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
+        getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+        getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+      ]);
+      const merged: Record<string, number> = { ...allOrders as Record<string, number> };
+      // Add non-graduated pipeline orders (everything except DELIVERED/REMITTED
+      // which are already counted in the orders table via graduation).
+      for (const counts of [fuCounts, cartCounts] as Record<string, number>[]) {
+        for (const [status, n] of Object.entries(counts)) {
+          if (status === 'DELIVERED' || status === 'REMITTED') continue;
+          merged[status] = (merged[status] ?? 0) + (n ?? 0);
+        }
+      }
+      return merged;
+    })(),
   };
 }
 
@@ -460,7 +474,7 @@ export const dashboardRouter = router({
     const [todayCounts, totalOrdersCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
       // CS funnel — excludes graduated follow-up + cart orders
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true).catch(() => ({})),
-      // Total orders — everything, no exclusions
+      // Total orders — orders table (no exclusions), merged with pipelines below
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({})),
       ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
@@ -497,7 +511,16 @@ export const dashboardRouter = router({
       pendingApprovals,
       followUpCounts: followUpCounts as Record<string, number>,
       cartOrdersCounts: cartOrdersCounts as Record<string, number>,
-      totalOrdersCounts: (totalOrdersCounts ?? {}) as Record<string, number>,
+      totalOrdersCounts: (() => {
+        const merged: Record<string, number> = { ...(totalOrdersCounts ?? {}) as Record<string, number> };
+        for (const counts of [followUpCounts, cartOrdersCounts] as Record<string, number>[]) {
+          for (const [status, n] of Object.entries(counts ?? {})) {
+            if (status === 'DELIVERED' || status === 'REMITTED') continue;
+            merged[status] = (merged[status] ?? 0) + (n ?? 0);
+          }
+        }
+        return merged;
+      })(),
     };
   }),
 });

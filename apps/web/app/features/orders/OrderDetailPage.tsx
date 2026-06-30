@@ -4084,15 +4084,22 @@ export function OrderDetailPage({
           onChange={(e) => setEditStatusTarget(e.target.value)}
           options={(() => {
             const lifecycle = [
-              { value: 'UNPROCESSED', label: 'Unassigned' },
-              { value: 'CS_ASSIGNED', label: 'Assigned' },
-              { value: 'CS_ENGAGED', label: 'Unconfirmed' },
-              { value: 'CONFIRMED', label: 'Confirmed' },
-              { value: 'DELIVERED', label: 'Delivered' },
-              { value: 'REMITTED', label: 'Cash Remitted' },
+              { value: 'UNPROCESSED', label: 'Unassigned', pos: 0 },
+              { value: 'CS_ASSIGNED', label: 'Assigned', pos: 1 },
+              { value: 'CS_ENGAGED', label: 'Unconfirmed', pos: 2 },
+              { value: 'CONFIRMED', label: 'Confirmed', pos: 3 },
+              { value: 'AGENT_ASSIGNED', label: 'Agent Assigned', pos: 4 },
+              { value: 'DISPATCHED', label: 'Dispatched', pos: 5 },
+              { value: 'IN_TRANSIT', label: 'In Transit', pos: 6 },
+              { value: 'DELIVERED', label: 'Delivered', pos: 7 },
+              { value: 'REMITTED', label: 'Cash Remitted', pos: 8 },
             ];
             const currentIdx = lifecycle.findIndex((s) => s.value === order.status);
-            return currentIdx > 0 ? lifecycle.slice(0, currentIdx) : [];
+            if (currentIdx <= 0) return [];
+            // Retrack only allows rolling back to CONFIRMED or later (pos >= 3),
+            // except from CS statuses which can go back to earlier CS statuses
+            const minPos = currentIdx <= 3 ? 0 : 3;
+            return lifecycle.filter((s) => s.pos >= minPos && s.pos < currentIdx);
           })()}
         />
         <Textarea

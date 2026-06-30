@@ -81,6 +81,11 @@ export interface DeliveryRemittanceSummary {
   disputedCount: string;
   deliveredCount?: string;
   deliveredAmount?: string;
+  grossOrderValue?: string;
+  totalDeliveryFees?: string;
+  totalCommitmentFees?: string;
+  totalPosFees?: string;
+  totalFailedDeliveryCosts?: string;
 }
 
 export interface DeliveryRemittancesPageProps {
@@ -735,6 +740,46 @@ export function DeliveryRemittancesPage({
           },
         ]}
       />
+
+      {/* Deduction breakdown — shows where the gap between gross order value and received comes from */}
+      {Number(summary.grossOrderValue ?? 0) > 0 && (
+        <OverviewStatStrip
+          mobileGrid
+          tileClassName="!py-2"
+          items={[
+            {
+              label: 'Gross Order Value',
+              value: <NairaPrice amount={summary.grossOrderValue ?? '0'} />,
+              valueClassName: 'text-app-fg tabular-nums',
+              title: 'Total order value before any deductions (orders on remittances only)',
+            },
+            {
+              label: 'Delivery Fees',
+              value: <NairaPrice amount={summary.totalDeliveryFees ?? '0'} />,
+              valueClassName: 'text-red-500 tabular-nums',
+              title: 'Sum of delivery fees deducted from order totals',
+            },
+            {
+              label: 'Commitment Fees',
+              value: <NairaPrice amount={summary.totalCommitmentFees ?? '0'} />,
+              valueClassName: 'text-red-500 tabular-nums',
+              title: 'Logistics provider commitment fees',
+            },
+            {
+              label: 'POS Fees',
+              value: <NairaPrice amount={summary.totalPosFees ?? '0'} />,
+              valueClassName: 'text-red-500 tabular-nums',
+              title: 'POS transaction fees',
+            },
+            {
+              label: 'Failed Delivery',
+              value: <NairaPrice amount={summary.totalFailedDeliveryCosts ?? '0'} />,
+              valueClassName: 'text-red-500 tabular-nums',
+              title: 'Costs from failed deliveries',
+            },
+          ]}
+        />
+      )}
 
       <Tabs
         variant="underline"

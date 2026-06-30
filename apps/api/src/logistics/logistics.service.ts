@@ -1624,20 +1624,29 @@ export class LogisticsService {
     const locationMap = new Map(locations.map((l) => [l.id, l.name]));
     const locationProviderMap = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
 
-    // Count every order linked to the batch. After Finance marks received, rows move
-    // DELIVERED → REMITTED — they must still count (do not filter on DELIVERED only).
-    const orderSummaries = await Promise.all(
-      records.map((r) =>
-        this.db
+    // Count every order linked to the batch — single grouped query replaces
+    // the previous N+1 (one query per remittance). After Finance marks received,
+    // rows move DELIVERED → REMITTED — they must still count.
+    const remittanceIds = records.map((r) => r.id);
+    const orderSummaryRows = remittanceIds.length > 0
+      ? await this.db
           .select({
+            deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
             count: count(),
             amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
           })
           .from(schema.deliveryRemittanceOrders)
           .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
-          .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id)),
-      ),
+          .where(inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds))
+          .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
+      : [];
+    const orderSummaryMap = new Map(
+      orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount }]),
     );
+    const orderSummaries = records.map((r) => {
+      const s = orderSummaryMap.get(r.id);
+      return [{ count: s?.count ?? 0, amount: s?.amount ?? '0' }];
+    });
 
     const sentByIds = [...new Set(records.map((r) => r.sentBy))];
     const senders =
@@ -1649,7 +1658,6 @@ export class LogisticsService {
         : [];
     const sentByNameMap = new Map(senders.map((u) => [u.id, u.name]));
 
-    const remittanceIds = records.map((r) => r.id);
     const outcomes =
       remittanceIds.length > 0
         ? await this.db
@@ -1708,7 +1716,14 @@ export class LogisticsService {
         totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
         pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
-        pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittances.id} END)::text`,
+        // Order count (not batch count) so the stat strip is consistent with Delivered/Awaiting
+        pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
+        // Deduction breakdown — so the CEO sees where the money goes
+        grossOrderValue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        totalDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        totalCommitmentFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.commitmentFee}, 0)), 0)::text`,
+        totalPosFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.posFee}, 0)), 0)::text`,
+        totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0)), 0)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -1717,12 +1732,14 @@ export class LogisticsService {
       )
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId));
 
+    // Received/Disputed: count orders (not batches) by joining through
+    // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     const outcomeSummaryQuery = this.db
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        receivedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.deliveryRemittanceId} END)::text`,
-        disputedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.deliveryRemittanceId} END)::text`,
+        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED'))::text`,
+        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED'))::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
@@ -1811,12 +1828,20 @@ export class LogisticsService {
       awaitingCount: awaitingSummary?.awaitingCount ?? '0',
       deliveredCount: deliveredSummary?.deliveredCount ?? '0',
       deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
+      // Deduction breakdown for remitted orders
+      grossOrderValue: baseSummary?.grossOrderValue ?? '0',
+      totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
+      totalCommitmentFees: baseSummary?.totalCommitmentFees ?? '0',
+      totalPosFees: baseSummary?.totalPosFees ?? '0',
+      totalFailedDeliveryCosts: baseSummary?.totalFailedDeliveryCosts ?? '0',
     };
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', deliveredCount: '0', deliveredAmount: '0',
+      grossOrderValue: '0', totalDeliveryFees: '0', totalCommitmentFees: '0',
+      totalPosFees: '0', totalFailedDeliveryCosts: '0',
     };
 
     return {
