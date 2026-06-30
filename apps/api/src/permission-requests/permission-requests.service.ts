@@ -9,6 +9,7 @@ import { DRIZZLE } from '../database/database.module';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
 import { withActor } from '../common/db/with-actor';
 import { canonicalPermissionCode, formatOrderNumber } from '@yannis/shared';
 import { ProductsService } from '../products/products.service';
@@ -182,6 +183,40 @@ export class PermissionRequestsService {
     );
   }
 
+  /**
+   * Company-group isolation for permission requests. Org-wide heads and admins
+   * see requests from ALL branches in their company group (not just their
+   * personally assigned branches). Returns undefined when no filter is needed.
+   */
+  private async companyGroupFilter(viewer: SessionUser, effectiveBranchIds?: string[] | null): Promise<SQL | undefined> {
+    if (!effectiveBranchIds || effectiveBranchIds.length === 0) return undefined;
+
+    // Org-wide heads may only be assigned to a subset of company branches,
+    // but they need to see requests from ALL branches in the company.
+    // Expand to all branches in the same group(s).
+    if (isAdminLevel(viewer) || isOrgWideDepartmentHead(viewer)) {
+      const groupRows = await this.db
+        .selectDistinct({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, effectiveBranchIds));
+      const groupIds = groupRows.map((r) => r.groupId).filter(Boolean) as string[];
+      if (groupIds.length > 0) {
+        return sql`${schema.permissionRequests.requesterId} IN (
+          SELECT DISTINCT ub.user_id FROM user_branches ub
+          JOIN branches b ON b.id = ub.branch_id
+          WHERE b.group_id IN (${sql.join(groupIds.map(id => sql`${id}`), sql`, `)})
+        )`;
+      }
+      return undefined;
+    }
+
+    // Branch-scoped users: filter to requesters in their assigned branches
+    return sql`${schema.permissionRequests.requesterId} IN (
+      SELECT DISTINCT user_id FROM user_branches
+      WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
+    )`;
+  }
+
   /** Combines optional status filter with the same viewer scope as {@link list}. */
   private buildListWhere(
     statusFilter: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED',
@@ -274,13 +309,7 @@ export class PermissionRequestsService {
     all: number;
   }> {
     const scope = this.viewerScopeWhere(viewer);
-    // Company-group isolation for counts — must match list() filtering
-    const groupFilter = effectiveBranchIds && effectiveBranchIds.length > 0
-      ? sql`${schema.permissionRequests.requesterId} IN (
-          SELECT DISTINCT user_id FROM user_branches
-          WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
-        )`
-      : undefined;
+    const groupFilter = await this.companyGroupFilter(viewer, effectiveBranchIds);
 
     const countWhere = async (status: 'PENDING' | 'APPROVED' | 'REJECTED') => {
       const cond = and(
@@ -336,13 +365,11 @@ export class PermissionRequestsService {
     const offset = (page - 1) * limit;
 
     let whereClause = this.buildListWhere(statusFilter, viewer);
-    // Company-group isolation: scope by requester's branch membership
-    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
-      const groupFilter = sql`${schema.permissionRequests.requesterId} IN (
-        SELECT DISTINCT user_id FROM user_branches
-        WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
-      )`;
-      whereClause = whereClause ? and(whereClause, groupFilter) : groupFilter;
+    if (viewer) {
+      const groupFilter = await this.companyGroupFilter(viewer, effectiveBranchIds);
+      if (groupFilter) {
+        whereClause = whereClause ? and(whereClause, groupFilter) : groupFilter;
+      }
     }
 
     const [countRow] = await (whereClause
