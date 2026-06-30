@@ -2525,9 +2525,10 @@ function UnifiedDistributingTable({
       {
         key: 'date',
         header: 'Date',
+        nowrap: true,
         render: (entry) => (
           <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
           </span>
         ),
       },
@@ -2928,9 +2929,10 @@ function UnifiedReceivedTable({
       {
         key: 'date',
         header: 'Date',
+        nowrap: true,
         render: (entry) => (
           <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
           </span>
         ),
       },
