@@ -648,10 +648,10 @@ export function MarketingTeamPage({
             title: `Ad spend: ₦${overviewStats.totalAdSpend.toLocaleString()} · CPA: ₦${Math.round(overviewStats.avgCpa).toLocaleString()} (ad spend ÷ orders)`,
           },
           {
-            label: `Total Disbursed (${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount})`,
+            label: 'Total Disbursed',
             value: <NairaPrice amount={parseFloat(fundingSummary.totalSent) + parseFloat(fundingSummary.totalCompleted) + parseFloat(fundingSummary.totalDisputed)} />,
             valueClassName: 'text-app-fg',
-            title: 'Total funding disbursed in this period (sent + completed + disputed)',
+            title: `${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount} transfer${(fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount) !== 1 ? 's' : ''} in this period`,
           },
           {
             label: 'MB Unspent Balance (all-time)',
