@@ -1738,12 +1738,18 @@ export class LogisticsService {
 
     // Received/Disputed: count orders (not batches) by joining through
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
+    // Date-filtered by deliveryRemittances.sentAt to match the base summary scope.
+    const outcomeDateConditions: SQL[] = [];
+    if (input.startDate) outcomeDateConditions.push(sql`dr.sent_at >= ${input.startDate + 'T00:00:00'}::timestamptz`);
+    if (input.endDate) outcomeDateConditions.push(sql`dr.sent_at <= ${input.endDate + 'T23:59:59'}::timestamptz`);
+    const outcomeDateWhere = outcomeDateConditions.length > 0 ? sql` AND ${sql.join(outcomeDateConditions, sql` AND `)}` : sql``;
+
     const outcomeSummaryQuery = this.db
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED'))::text`,
-        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED'))::text`,
+        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeDateWhere})::text`,
+        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeDateWhere})::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
