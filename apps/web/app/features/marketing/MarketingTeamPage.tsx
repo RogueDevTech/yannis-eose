@@ -21,6 +21,7 @@ import { ExportModal } from '~/components/ui/export-modal';
 import { Modal } from '~/components/ui/modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { formatNaira } from '~/lib/format-amount';
+import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import type { FundingBalanceRow, MarketingTeamOverviewStats } from './types';
 import {
   confirmationRateColorClass,
@@ -29,7 +30,7 @@ import {
 
 export interface MarketingTeamPageProps {
   teamMembers: FundingBalanceRow[];
-  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
   dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
   leaderboardPeriod: 'this_month' | 'all_time';
   page?: number;
@@ -385,6 +386,10 @@ export function MarketingTeamPage({
           >
             <CompactUserAvatar name={m.name} />
             <span className="truncate">{m.name}</span>
+            {m.role === 'HEAD_OF_MARKETING' && (
+              <span className="shrink-0 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-micro font-semibold text-purple-700 dark:text-purple-300">HoM</span>
+            )}
+            {m.isTeamSupervisor && <SupervisorBadge size="sm" />}
           </Link>
         ),
       },
@@ -610,17 +615,17 @@ export function MarketingTeamPage({
         showScrollControls={false}
         items={[
           {
-            label: 'Team members',
+            label: `Team Members`,
             value: overviewStats.teamMembers.toLocaleString(),
             valueClassName: 'text-app-fg',
           },
           {
-            label: 'Total orders',
+            label: 'Total Orders',
             value: overviewStats.totalOrders.toLocaleString(),
             valueClassName: 'text-app-fg',
           },
           {
-            label: 'Avg confirmation %',
+            label: 'Avg Confirmation %',
             value:
               overviewStats.averageConfirmationRate != null
                 ? `${Math.round(overviewStats.averageConfirmationRate)}%`
@@ -628,7 +633,7 @@ export function MarketingTeamPage({
             valueClassName: confirmationRateColorClass(overviewStats.averageConfirmationRate),
           },
           {
-            label: 'Avg delivery %',
+            label: 'Avg Delivery %',
             value:
               overviewStats.averageDeliveryRate != null
                 ? `${Math.round(overviewStats.averageDeliveryRate)}%`
@@ -636,20 +641,26 @@ export function MarketingTeamPage({
             valueClassName: deliveryRateColorClass(overviewStats.averageDeliveryRate),
           },
           {
-            label: 'Total Sent',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalSent)} />,
+            label: 'Total Ad Spend',
+            value: <NairaPrice amount={overviewStats.totalAdSpend} />,
+            valueClassName: overviewStats.totalAdSpend > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
+            title: 'Sum of ad spend across all media buyers in this period',
+          },
+          {
+            label: 'Avg CPA',
+            value: overviewStats.avgCpa > 0 ? <NairaPrice amount={Math.round(overviewStats.avgCpa)} /> : '\u2014',
             valueClassName: 'text-app-fg',
+            title: `Total ad spend ÷ total orders = ₦${Math.round(overviewStats.avgCpa).toLocaleString()}`,
           },
           {
-            label: 'Completed',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalCompleted)} />,
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Disputed',
-            value: <NairaPrice amount={parseFloat(fundingSummary.totalDisputed)} />,
-            valueClassName:
-              parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
+            label: 'MB Unspent Balance (all-time)',
+            value: <NairaPrice amount={overviewStats.mbUnspentBalance} />,
+            valueClassName: overviewStats.mbUnspentBalance > 0
+              ? 'text-blue-600 dark:text-blue-400'
+              : overviewStats.mbUnspentBalance < 0
+                ? 'text-danger-600 dark:text-danger-400'
+                : 'text-app-fg',
+            title: 'Cumulative unspent funding across all media buyers (received − ad spend − distributed)',
           },
         ]}
       />

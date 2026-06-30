@@ -21,6 +21,7 @@ export interface FundingBalanceRow {
   userId: string;
   name: string;
   role: string;
+  isTeamSupervisor?: boolean;
   totalReceived: string;
   totalDistributed: string;
   totalSpend: string;
@@ -49,6 +50,12 @@ export interface MarketingTeamOverviewStats {
   totalOrders: number;
   averageConfirmationRate: number | null;
   averageDeliveryRate: number | null;
+  totalAdSpend: number;
+  totalExpenses: number;
+  avgCpa: number;
+  totalDisbursed: number;
+  mbUnspentBalance: number;
+  mbCount: number;
 }
 
 export interface FundingRequestRecord {

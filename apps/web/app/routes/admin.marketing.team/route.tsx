@@ -27,6 +27,7 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
 function computeMarketingTeamOverview(
   teamMembers: FundingBalanceRow[],
   leaderboard: Array<{
+    totalSpend: number;
     totalOrders: number;
     confirmedOrders: number;
     deliveredOrders: number;
@@ -37,18 +38,31 @@ function computeMarketingTeamOverview(
       acc.totalOrders += entry.totalOrders;
       acc.confirmedOrders += entry.confirmedOrders;
       acc.deliveredOrders += entry.deliveredOrders;
+      acc.totalAdSpend += entry.totalSpend;
       return acc;
     },
-    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0 },
+    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0 },
   );
 
+  const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
+  const totalDisbursed = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
+  const mbUnspentBalance = mbMembers.reduce((s, m) => s + Number(m.balance), 0);
+  // totalSpend on balance rows = ALL expenses (ad spend + ad account + recruitment + whatsapp + UGC)
+  const totalExpenses = mbMembers.reduce((s, m) => s + Number(m.totalSpend), 0);
+
   return {
-    teamMembers: teamMembers.length,
+    teamMembers: mbMembers.length,
     totalOrders: totals.totalOrders,
     averageConfirmationRate:
       totals.totalOrders > 0 ? (totals.confirmedOrders / totals.totalOrders) * 100 : null,
     averageDeliveryRate:
       totals.totalOrders > 0 ? (totals.deliveredOrders / totals.totalOrders) * 100 : null,
+    totalAdSpend: totals.totalAdSpend,
+    totalExpenses,
+    avgCpa: totals.totalOrders > 0 ? totals.totalAdSpend / totals.totalOrders : 0,
+    totalDisbursed,
+    mbUnspentBalance,
+    mbCount: mbMembers.length,
   };
 }
 
@@ -81,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   type BundleData = {
     balances: FundingBalanceRow[];
-    fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+    fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
     leaderboard: LeaderboardEntry[];
     profitabilityConfig: { targetRoas: number; greenThreshold: number };
     usersFallback: Array<{ id: string; name: string; role: string }> | null;
@@ -92,7 +106,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const profitabilityConfig = bundle?.profitabilityConfig ?? { targetRoas: 3, greenThreshold: 2.5 };
   let teamMembers: FundingBalanceRow[] = bundle?.balances ?? [];
-  const fundingSummary = bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
+  const fundingSummary = bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 };
 
   if (teamMembers.length === 0 && bundle?.usersFallback?.length) {
     const merged = [...bundle.usersFallback].sort((a, b) => a.name.localeCompare(b.name));
@@ -185,9 +199,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
+  // Role priority: HoMs always appear first regardless of sort column.
+  const rolePriority = (m: FundingBalanceRow) => m.role === 'HEAD_OF_MARKETING' ? 0 : 1;
+
   const sorted = [...afterSearch];
   if (sortBy === 'name') {
     sorted.sort((a, b) => {
+      const rp = rolePriority(a) - rolePriority(b);
+      if (rp !== 0) return rp;
       const c = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
       return sortDir === 'asc' ? c : -c;
     });
@@ -208,6 +227,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
                   : 0;
     const rate = (m: FundingBalanceRow, k: 'confirmationRate' | 'deliveryRate') => m[k];
     sorted.sort((a, b) => {
+      const rp = rolePriority(a) - rolePriority(b);
+      if (rp !== 0) return rp;
       if (
         sortBy === 'balance' ||
         sortBy === 'received' ||

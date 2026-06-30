@@ -1093,117 +1093,114 @@ export class CartOrdersService {
     const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
     const safeIdList = cartIds.map((id) => `'${id}'`).join(', ');
 
-    // ── 2. Single atomic transaction for all writes ─────────────────────
-    // Uses pg.begin() so all 4 steps succeed or none do. No orphaned rows.
-    // The stamp_actor trigger fires on UPDATE — set the actor inside the tx.
-    const pulled = await this.pg.begin(async (tx) => {
-      // Set actor for stamp_actor trigger on any UPDATEs inside this tx
-      await tx.unsafe(`SELECT set_config('yannis.current_user_id', '${SYSTEM_ACTOR_ID}', true)`);
+    // ── 2. Standalone pg.unsafe() calls (simple protocol) ──────────────
+    // pg.begin() uses extended protocol internally which triggers the
+    // "column valid_from does not exist" error even with UPDATE-only triggers.
+    // Standalone pg.unsafe() calls stay on simple protocol and work reliably.
+    // The NOT IN / NOT EXISTS guards on each step prevent duplicates if a
+    // partial failure leaves orphaned rows — the next cron run completes them.
 
-      // Step A: Insert cart_orders from eligible abandoned carts
-      const inserted = await tx.unsafe<Array<{ id: string; source_cart_id: string }>>(`
-        INSERT INTO cart_orders (
-          id, source_cart_id, campaign_id, media_buyer_id, status,
-          customer_name, customer_phone_hash, customer_phone,
-          customer_address, delivery_address, total_amount,
-          delivery_notes, delivery_state, customer_gender,
-          preferred_delivery_date, payment_method, customer_email,
-          order_source, servicing_branch_id, routing_rule_id,
-          custom_fields
+    // Step A: Insert cart_orders from eligible abandoned carts
+    const inserted = await this.pg.unsafe<Array<{ id: string; source_cart_id: string }>>(`
+      INSERT INTO cart_orders (
+        id, source_cart_id, campaign_id, media_buyer_id, status,
+        customer_name, customer_phone_hash, customer_phone,
+        customer_address, delivery_address, total_amount,
+        delivery_notes, delivery_state, customer_gender,
+        preferred_delivery_date, payment_method, customer_email,
+        order_source, servicing_branch_id, routing_rule_id,
+        custom_fields
+      )
+      SELECT
+        gen_random_uuid(), ca.id, ca.campaign_id, ca.media_buyer_id,
+        'UNPROCESSED', ca.customer_name, ca.customer_phone_hash, ca.customer_phone,
+        ca.customer_address, ca.delivery_address, 0,
+        ca.delivery_notes, ca.delivery_state, ca.customer_gender,
+        ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
+        'online', ${branchLiteral}, ${ruleLiteral},
+        ca.custom_field_values
+      FROM cart_abandonments ca
+      WHERE ca.id IN (${safeIdList})
+        AND ca.status IN ('PENDING', 'ABANDONED')
+        AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
+        AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+      RETURNING id, source_cart_id
+    `);
+
+    this.logger.log(`[pull] Step A: inserted ${inserted.length} cart orders`);
+    if (inserted.length === 0) return { pulled: 0 };
+
+    const sourceIdList = inserted.map((r) => `'${r.source_cart_id}'`).join(', ');
+
+    // Step B: Create cart_order_items from product catalog
+    const items = await this.pg.unsafe<Array<{ id: string }>>(`
+      INSERT INTO cart_order_items (
+        id, cart_order_id, product_id, quantity, unit_price, offer_label
+      )
+      SELECT
+        gen_random_uuid(),
+        co.id,
+        ca.product_id,
+        COALESCE(ca.quantity, 1),
+        COALESCE(
+          (SELECT (o->>'price')::numeric
+           FROM jsonb_array_elements(p.offers) AS o
+           WHERE o->>'label' = ca.offer_label
+           LIMIT 1),
+          COALESCE(p.base_sale_price, 0)
+        ),
+        ca.offer_label
+      FROM cart_orders co
+      JOIN cart_abandonments ca ON ca.id = co.source_cart_id
+      LEFT JOIN products p ON p.id = ca.product_id
+      WHERE co.source_cart_id IN (${sourceIdList})
+        AND NOT EXISTS (
+          SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
         )
-        SELECT
-          gen_random_uuid(), ca.id, ca.campaign_id, ca.media_buyer_id,
-          'UNPROCESSED', ca.customer_name, ca.customer_phone_hash, ca.customer_phone,
-          ca.customer_address, ca.delivery_address, 0,
-          ca.delivery_notes, ca.delivery_state, ca.customer_gender,
-          ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
-          'online', ${branchLiteral}, ${ruleLiteral},
-          ca.custom_field_values
-        FROM cart_abandonments ca
-        WHERE ca.id IN (${safeIdList})
-          AND ca.status IN ('PENDING', 'ABANDONED')
-          AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
-          AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
-        RETURNING id, source_cart_id
-      `);
+      RETURNING id
+    `);
+    this.logger.log(`[pull] Step B: created ${items.length} line items`);
 
-      this.logger.log(`[pull] Step A: inserted ${inserted.length} cart orders`);
-      if (inserted.length === 0) return 0;
-
-      const sourceIdList = inserted.map((r) => `'${r.source_cart_id}'`).join(', ');
-
-      // Step B: Create cart_order_items from product catalog
-      const items = await tx.unsafe<Array<{ id: string }>>(`
-        INSERT INTO cart_order_items (
-          id, cart_order_id, product_id, quantity, unit_price, offer_label
+    // Step C: Update total_amount from line items
+    await this.pg.unsafe(`
+      UPDATE cart_orders co
+      SET total_amount = sub.line_total, updated_at = now()
+      FROM (
+        SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
+        FROM cart_order_items coi
+        WHERE coi.cart_order_id IN (
+          SELECT id FROM cart_orders WHERE source_cart_id IN (${sourceIdList})
         )
-        SELECT
-          gen_random_uuid(),
-          co.id,
-          ca.product_id,
-          COALESCE(ca.quantity, 1),
-          COALESCE(
-            (SELECT (o->>'price')::numeric
-             FROM jsonb_array_elements(p.offers) AS o
-             WHERE o->>'label' = ca.offer_label
-             LIMIT 1),
-            COALESCE(p.base_sale_price, 0)
-          ),
-          ca.offer_label
-        FROM cart_orders co
-        JOIN cart_abandonments ca ON ca.id = co.source_cart_id
-        LEFT JOIN products p ON p.id = ca.product_id
-        WHERE co.source_cart_id IN (${sourceIdList})
-          AND NOT EXISTS (
-            SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
-          )
-        RETURNING id
-      `);
-      this.logger.log(`[pull] Step B: created ${items.length} line items`);
+        GROUP BY coi.cart_order_id
+      ) sub
+      WHERE co.id = sub.cart_order_id
+        AND (co.total_amount IS NULL OR co.total_amount = 0)
+    `);
+    this.logger.log(`[pull] Step C: updated totals`);
 
-      // Step C: Update total_amount from line items
-      await tx.unsafe(`
-        UPDATE cart_orders co
-        SET total_amount = sub.line_total, updated_at = now()
-        FROM (
-          SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
-          FROM cart_order_items coi
-          WHERE coi.cart_order_id IN (
-            SELECT id FROM cart_orders WHERE source_cart_id IN (${sourceIdList})
-          )
-          GROUP BY coi.cart_order_id
-        ) sub
-        WHERE co.id = sub.cart_order_id
-          AND (co.total_amount IS NULL OR co.total_amount = 0)
-      `);
-      this.logger.log(`[pull] Step C: updated totals`);
-
-      // Step D: Create timeline events
-      await tx.unsafe(`
-        INSERT INTO cart_order_timeline_events (
-          id, cart_order_id, event_type, actor_name, description, metadata, branch_id
+    // Step D: Create timeline events
+    await this.pg.unsafe(`
+      INSERT INTO cart_order_timeline_events (
+        id, cart_order_id, event_type, actor_name, description, metadata, branch_id
+      )
+      SELECT
+        gen_random_uuid(),
+        co.id,
+        'ORDER_RECEIVED',
+        'System',
+        'Cart order created from abandoned cart.',
+        jsonb_build_object('sourceCartId', co.source_cart_id),
+        co.servicing_branch_id
+      FROM cart_orders co
+      WHERE co.source_cart_id IN (${sourceIdList})
+        AND NOT EXISTS (
+          SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
         )
-        SELECT
-          gen_random_uuid(),
-          co.id,
-          'ORDER_RECEIVED',
-          'System',
-          'Cart order created from abandoned cart.',
-          jsonb_build_object('sourceCartId', co.source_cart_id),
-          co.servicing_branch_id
-        FROM cart_orders co
-        WHERE co.source_cart_id IN (${sourceIdList})
-          AND NOT EXISTS (
-            SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
-          )
-      `);
-      this.logger.log(`[pull] Step D: created timeline events`);
+    `);
+    this.logger.log(`[pull] Step D: created timeline events`);
 
-      return inserted.length;
-    });
-
-    this.logger.log(`pullFromAbandonedCarts: pulled ${pulled} of ${cartIds.length} requested`);
-    return { pulled };
+    this.logger.log(`pullFromAbandonedCarts: pulled ${inserted.length} of ${cartIds.length} requested`);
+    return { pulled: inserted.length };
   }
 
   // ══════════════════════════════════════════════════════════════════════
