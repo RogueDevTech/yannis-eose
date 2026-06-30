@@ -1368,17 +1368,21 @@ export class MarketingService {
       .select({
         status: schema.marketingFundingRequests.status,
         c: count(),
+        total: sql<string>`COALESCE(SUM(${schema.marketingFundingRequests.amount}), 0)`,
       })
       .from(schema.marketingFundingRequests)
       .where(whereClause)
       .groupBy(schema.marketingFundingRequests.status);
 
-    const out = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+    const out = {
+      PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0,
+      PENDING_AMOUNT: '0', APPROVED_AMOUNT: '0', REJECTED_AMOUNT: '0',
+    };
     for (const r of rows) {
       const n = Number(r.c);
-      if (r.status === 'PENDING') out.PENDING = n;
-      else if (r.status === 'APPROVED') out.APPROVED = n;
-      else if (r.status === 'REJECTED') out.REJECTED = n;
+      if (r.status === 'PENDING') { out.PENDING = n; out.PENDING_AMOUNT = String(r.total); }
+      else if (r.status === 'APPROVED') { out.APPROVED = n; out.APPROVED_AMOUNT = String(r.total); }
+      else if (r.status === 'REJECTED') { out.REJECTED = n; out.REJECTED_AMOUNT = String(r.total); }
       out.ALL += n;
     }
     return out;
@@ -1511,15 +1515,15 @@ export class MarketingService {
     const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] =
       await Promise.all([
         this.db
-          .select({ total: sum(schema.marketingFunding.amount) })
+          .select({ total: sum(schema.marketingFunding.amount), c: count() })
           .from(schema.marketingFunding)
           .where(incomingWhere),
         this.db
-          .select({ total: sum(schema.marketingFunding.amount) })
+          .select({ total: sum(schema.marketingFunding.amount), c: count() })
           .from(schema.marketingFunding)
           .where(outgoingWhere),
         this.db
-          .select({ c: count() })
+          .select({ c: count(), total: sum(schema.marketingFunding.amount) })
           .from(schema.marketingFunding)
           .where(
             and(
@@ -1552,8 +1556,11 @@ export class MarketingService {
 
     return {
       totalReceived: received[0]?.total ?? '0',
+      receivedCount: Number(received[0]?.c ?? 0),
       totalDistributed: distributed[0]?.total ?? '0',
+      distributedCount: Number(distributed[0]?.c ?? 0),
       pendingMarkReceived: Number(pendingReceiveRow[0]?.c ?? 0),
+      pendingMarkReceivedAmount: pendingReceiveRow[0]?.total ?? '0',
       disputedAsReceiver: Number(disputedReceiveRow[0]?.c ?? 0),
       disputedAsSender: Number(disputedSendRow[0]?.c ?? 0),
     };
@@ -1638,6 +1645,7 @@ export class MarketingService {
       userId: string;
       name: string;
       role: string;
+      isTeamSupervisor: boolean;
       totalReceived: string;
       totalDistributed: string;
       totalSpend: string;
@@ -1769,7 +1777,7 @@ export class MarketingService {
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),
       this.db
-        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role, isTeamSupervisor: schema.users.isTeamSupervisor })
         .from(schema.users)
         .where(inArray(schema.users.id, recipientUserIds)),
     ]);
@@ -1791,6 +1799,7 @@ export class MarketingService {
       userId: string;
       name: string;
       role: string;
+      isTeamSupervisor: boolean;
       totalReceived: string;
       totalDistributed: string;
       totalSpend: string;
@@ -1807,6 +1816,7 @@ export class MarketingService {
         userId: u.id,
         name: u.name,
         role: u.role,
+        isTeamSupervisor: u.isTeamSupervisor,
         totalReceived,
         totalDistributed,
         totalSpend,

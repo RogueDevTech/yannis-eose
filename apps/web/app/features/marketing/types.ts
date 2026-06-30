@@ -21,6 +21,7 @@ export interface FundingBalanceRow {
   userId: string;
   name: string;
   role: string;
+  isTeamSupervisor?: boolean;
   totalReceived: string;
   totalDistributed: string;
   totalSpend: string;
@@ -49,6 +50,12 @@ export interface MarketingTeamOverviewStats {
   totalOrders: number;
   averageConfirmationRate: number | null;
   averageDeliveryRate: number | null;
+  totalAdSpend: number;
+  totalExpenses: number;
+  avgCpa: number;
+  totalDisbursed: number;
+  mbUnspentBalance: number;
+  mbCount: number;
 }
 
 export interface FundingRequestRecord {
@@ -238,6 +245,9 @@ export interface FundingRequestStatusCounts {
   APPROVED: number;
   REJECTED: number;
   ALL: number;
+  PENDING_AMOUNT?: string;
+  APPROVED_AMOUNT?: string;
+  REJECTED_AMOUNT?: string;
 }
 
 export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -278,8 +288,11 @@ export interface FundingRequestsSliceData {
 /** Per-actor directional summary used by the page top strip. */
 export interface FundingDirectionSummary {
   totalReceived: string;
+  receivedCount?: number;
   totalDistributed: string;
+  distributedCount?: number;
   pendingMarkReceived: number;
+  pendingMarkReceivedAmount?: string;
   disputedAsReceiver: number;
   disputedAsSender: number;
 }

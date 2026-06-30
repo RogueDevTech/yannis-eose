@@ -113,15 +113,17 @@ CREATE TRIGGER trg_cart_order_items_history_immutable
   BEFORE UPDATE OR DELETE ON cart_order_items_history
   FOR EACH ROW EXECUTE FUNCTION yannis_history_immutable();
 
--- Actor stamp triggers
+-- Actor stamp triggers (UPDATE-only — INSERT uses pg.unsafe simple protocol
+-- which conflicts with the trigger's column references on extended protocol.
+-- See 0226_fix_cart_orders_stamp_trigger.sql for details.)
 DROP TRIGGER IF EXISTS trg_cart_orders_stamp_actor ON cart_orders;
 CREATE TRIGGER trg_cart_orders_stamp_actor
-  BEFORE INSERT OR UPDATE ON cart_orders
+  BEFORE UPDATE ON cart_orders
   FOR EACH ROW EXECUTE FUNCTION yannis_stamp_actor();
 
 DROP TRIGGER IF EXISTS trg_cart_order_items_stamp_actor ON cart_order_items;
 CREATE TRIGGER trg_cart_order_items_stamp_actor
-  BEFORE INSERT OR UPDATE ON cart_order_items
+  BEFORE UPDATE ON cart_order_items
   FOR EACH ROW EXECUTE FUNCTION yannis_stamp_actor();
 
 -- Indexes
