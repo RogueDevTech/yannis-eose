@@ -27,6 +27,7 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
 function computeMarketingTeamOverview(
   teamMembers: FundingBalanceRow[],
   leaderboard: Array<{
+    totalSpend: number;
     totalOrders: number;
     confirmedOrders: number;
     deliveredOrders: number;
@@ -37,10 +38,15 @@ function computeMarketingTeamOverview(
       acc.totalOrders += entry.totalOrders;
       acc.confirmedOrders += entry.confirmedOrders;
       acc.deliveredOrders += entry.deliveredOrders;
+      acc.totalAdSpend += entry.totalSpend;
       return acc;
     },
-    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0 },
+    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0 },
   );
+
+  const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
+  const totalDisbursed = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
+  const mbUnspentBalance = mbMembers.reduce((s, m) => s + Number(m.balance), 0);
 
   return {
     teamMembers: teamMembers.length,
@@ -49,6 +55,11 @@ function computeMarketingTeamOverview(
       totals.totalOrders > 0 ? (totals.confirmedOrders / totals.totalOrders) * 100 : null,
     averageDeliveryRate:
       totals.totalOrders > 0 ? (totals.deliveredOrders / totals.totalOrders) * 100 : null,
+    totalAdSpend: totals.totalAdSpend,
+    avgCpa: totals.totalOrders > 0 ? totals.totalAdSpend / totals.totalOrders : 0,
+    totalDisbursed,
+    mbUnspentBalance,
+    mbCount: mbMembers.length,
   };
 }
 

@@ -49,6 +49,11 @@ export interface MarketingTeamOverviewStats {
   totalOrders: number;
   averageConfirmationRate: number | null;
   averageDeliveryRate: number | null;
+  totalAdSpend: number;
+  avgCpa: number;
+  totalDisbursed: number;
+  mbUnspentBalance: number;
+  mbCount: number;
 }
 
 export interface FundingRequestRecord {
