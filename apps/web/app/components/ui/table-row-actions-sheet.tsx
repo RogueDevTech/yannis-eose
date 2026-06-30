@@ -197,7 +197,7 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, flipped: false });
 
   useEffect(() => {
     if (!open) return;
@@ -224,7 +224,15 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
   const toggle = () => {
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.right });
+      // Estimate menu height (~40px per item + 8px padding)
+      const estimatedHeight = actions.length * 40 + 8;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      // Flip upward if not enough room below
+      if (spaceBelow < estimatedHeight + 8) {
+        setPos({ top: rect.top - 4, left: rect.right, flipped: true });
+      } else {
+        setPos({ top: rect.bottom + 4, left: rect.right, flipped: false });
+      }
     }
     setOpen((v) => !v);
   };
@@ -250,7 +258,13 @@ function DesktopDropdown({ ariaLabel, actions }: { ariaLabel: string; actions: T
         <div
           ref={menuRef}
           className="fixed z-[9999] min-w-[140px] rounded-lg border border-app-border-strong shadow-xl dark:shadow-black/60"
-          style={{ top: pos.top, left: pos.left, transform: 'translateX(-100%)', background: 'rgb(var(--app-elevated))' }}
+          style={{
+            ...(pos.flipped
+              ? { bottom: window.innerHeight - pos.top, left: pos.left }
+              : { top: pos.top, left: pos.left }),
+            transform: 'translateX(-100%)',
+            background: 'rgb(var(--app-elevated))',
+          }}
         >
           <div className="py-1">
             {actions.map((a) => {
