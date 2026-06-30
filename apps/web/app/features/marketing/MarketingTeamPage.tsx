@@ -632,16 +632,20 @@ export function MarketingTeamPage({
             valueClassName: deliveryRateColorClass(overviewStats.averageDeliveryRate),
           },
           {
-            label: 'Total Ad Spend',
-            value: <NairaPrice amount={overviewStats.totalAdSpend} />,
-            valueClassName: overviewStats.totalAdSpend > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
-            title: 'Sum of ad spend across all media buyers in period',
+            label: 'Total Expenses (all-time)',
+            value: <NairaPrice amount={overviewStats.totalExpenses} />,
+            valueClassName: overviewStats.totalExpenses > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
+            title: 'All expenses across media buyers: ad spend, ad accounts, recruitment ads, WhatsApp campaigns, UGC',
           },
           {
-            label: 'Avg CPA',
-            value: overviewStats.avgCpa > 0 ? <NairaPrice amount={Math.round(overviewStats.avgCpa)} /> : '\u2014',
+            label: 'Ad Spend · CPA',
+            value: overviewStats.avgCpa > 0
+              ? <><NairaPrice amount={overviewStats.totalAdSpend} /> · <NairaPrice amount={Math.round(overviewStats.avgCpa)} /></>
+              : overviewStats.totalAdSpend > 0
+                ? <NairaPrice amount={overviewStats.totalAdSpend} />
+                : '\u2014',
             valueClassName: 'text-app-fg',
-            title: 'Total ad spend ÷ total orders',
+            title: `Ad spend: ₦${overviewStats.totalAdSpend.toLocaleString()} · CPA: ₦${Math.round(overviewStats.avgCpa).toLocaleString()} (ad spend ÷ orders)`,
           },
           {
             label: `Total Disbursed (${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount})`,

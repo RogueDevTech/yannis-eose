@@ -47,6 +47,8 @@ function computeMarketingTeamOverview(
   const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
   const totalDisbursed = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
   const mbUnspentBalance = mbMembers.reduce((s, m) => s + Number(m.balance), 0);
+  // totalSpend on balance rows = ALL expenses (ad spend + ad account + recruitment + whatsapp + UGC)
+  const totalExpenses = mbMembers.reduce((s, m) => s + Number(m.totalSpend), 0);
 
   return {
     teamMembers: teamMembers.length,
@@ -56,6 +58,7 @@ function computeMarketingTeamOverview(
     averageDeliveryRate:
       totals.totalOrders > 0 ? (totals.deliveredOrders / totals.totalOrders) * 100 : null,
     totalAdSpend: totals.totalAdSpend,
+    totalExpenses,
     avgCpa: totals.totalOrders > 0 ? totals.totalAdSpend / totals.totalOrders : 0,
     totalDisbursed,
     mbUnspentBalance,
@@ -92,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   type BundleData = {
     balances: FundingBalanceRow[];
-    fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+    fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
     leaderboard: LeaderboardEntry[];
     profitabilityConfig: { targetRoas: number; greenThreshold: number };
     usersFallback: Array<{ id: string; name: string; role: string }> | null;
@@ -103,7 +106,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const profitabilityConfig = bundle?.profitabilityConfig ?? { targetRoas: 3, greenThreshold: 2.5 };
   let teamMembers: FundingBalanceRow[] = bundle?.balances ?? [];
-  const fundingSummary = bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
+  const fundingSummary = bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 };
 
   if (teamMembers.length === 0 && bundle?.usersFallback?.length) {
     const merged = [...bundle.usersFallback].sort((a, b) => a.name.localeCompare(b.name));

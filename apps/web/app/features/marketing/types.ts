@@ -50,6 +50,7 @@ export interface MarketingTeamOverviewStats {
   averageConfirmationRate: number | null;
   averageDeliveryRate: number | null;
   totalAdSpend: number;
+  totalExpenses: number;
   avgCpa: number;
   totalDisbursed: number;
   mbUnspentBalance: number;
