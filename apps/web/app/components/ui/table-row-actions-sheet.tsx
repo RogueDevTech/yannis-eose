@@ -56,17 +56,16 @@ export interface TableRowActionsSheetProps {
   /** Title in the slide-up sheet. */
   sheetTitle?: string;
   actions: TableRowSheetAction[];
-  /** Max actions shown inline on desktop. Overflow goes into kebab menu. Default: 3. */
+  /** Max actions shown inline on desktop. Overflow goes into kebab menu. Default: 2. */
   maxInline?: number;
 }
 
 /**
- * Row-level actions: **desktop** shows inline links/buttons (same as {@link CompactTableActionButton});
- * **mobile** (`< md`) collapses into one control that opens the shared {@link Modal} slide-up with full-width actions.
- *
- * Use on funding/finance dense tables first; other modules can adopt the same pattern.
+ * Row-level actions: **desktop** shows up to `maxInline` (default 2) inline buttons;
+ * overflow goes into a compact dropdown. **Mobile** (`< md`) collapses everything
+ * into a slide-up sheet.
  */
-export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', actions, maxInline = 3 }: TableRowActionsSheetProps) {
+export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', actions, maxInline = 2 }: TableRowActionsSheetProps) {
   const visible = actions.filter((a) => a.show !== false);
   const [openSource, setOpenSource] = useState<'mobile' | 'desktop' | null>(null);
   const open = openSource !== null;
