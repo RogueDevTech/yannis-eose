@@ -3509,8 +3509,9 @@ export class OrdersService {
       // Strict exclusion: no follow-up orders, no cart-graduated orders.
       // CS surfaces use this so closers don't get credit for follow-up
       // and cart recovery deliveries (CEO 2026-06-30).
+      // Cart-graduated orders have order_source='online' (set by graduateToOrders).
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`${schema.orders.cartId} IS NULL`);
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
     } else if (input.isFollowUp) {
       // Show ONLY follow-ups (follow-up batch detail page).
       conditions.push(eq(schema.orders.isFollowUp, true));
@@ -5714,8 +5715,12 @@ export class OrdersService {
     if (excludeGraduated) {
       // Strict exclusion: no follow-up orders, no cart-graduated orders.
       // These have their own funnels (Follow-Up Orders, Cart Orders).
+      // Cart-graduated orders have order_source='online' (set by graduateToOrders).
+      // Regular form orders have order_source='edge-form' or NULL — many also have
+      // cart_id set (customer started typing → cart saved → then submitted), so
+      // filtering by cart_id IS NULL would exclude 60% of real orders.
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`${schema.orders.cartId} IS NULL`);
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
     } else if (isFollowUp === true) {
       conditions.push(eq(schema.orders.isFollowUp, true));
     } else if (isFollowUp === false) {
