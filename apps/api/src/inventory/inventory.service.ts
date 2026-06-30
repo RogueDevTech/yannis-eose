@@ -3788,4 +3788,61 @@ export class InventoryService {
       this.scheduleLowStockCheck(productId, logisticsLocationId);
     }
   }
+
+  /**
+   * Reverse DELIVERY stock deductions for a delivered order that is being deleted
+   * (Finance dual-approval flow). Creates offsetting ADJUSTMENT movements and
+   * restores inventory levels at the original fulfillment locations.
+   */
+  async reverseDeliveryForOrder(orderId: string, actor: SessionUser): Promise<void> {
+    // Find all DELIVERY movements for this order
+    const deliveryMovements = await this.db
+      .select()
+      .from(schema.stockMovements)
+      .where(
+        and(
+          eq(schema.stockMovements.referenceId, orderId),
+          eq(schema.stockMovements.movementType, 'DELIVERY'),
+        ),
+      );
+
+    if (deliveryMovements.length === 0) {
+      // No stock was moved — nothing to reverse (e.g. order was pre-shipment)
+      return;
+    }
+
+    await withActor(this.db, actor, async (tx) => {
+      for (const mov of deliveryMovements) {
+        const reverseQty = Math.abs(mov.quantity); // DELIVERY has negative qty
+        const locationId = mov.fromLocationId;
+
+        // Create offsetting ADJUSTMENT movement
+        await tx.insert(schema.stockMovements).values({
+          productId: mov.productId,
+          movementType: 'ADJUSTMENT',
+          quantity: reverseQty,
+          toLocationId: locationId,
+          referenceId: orderId,
+          reason: `Stock reversal — delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
+          actorId: actor.id,
+        });
+
+        // Restore inventory level at the original location
+        if (locationId) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(schema.inventoryLevels.productId, mov.productId),
+                eq(schema.inventoryLevels.locationId, locationId),
+              ),
+            );
+        }
+      }
+    });
+  }
 }

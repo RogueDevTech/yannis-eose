@@ -161,6 +161,8 @@ export interface OrderDetail {
   } | null;
   /** PENDING permission_request id for ORDER_DELETION (archive), if any */
   pendingOrderDeletionRequestId?: string | null;
+  /** PENDING permission_request id for DELIVERED_ORDER_DELETION, if any */
+  pendingDeliveredOrderDeletionRequestId?: string | null;
 }
 
 /**

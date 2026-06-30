@@ -18,6 +18,14 @@ export const permissionRequests = pgTable('permission_requests', {
   approverId: uuid('approver_id').references(() => users.id),
   approvalReason: text('approval_reason'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
+  /** Dual-approval: CS-side (HoCS/BranchAdmin) sign-off for DELIVERED_ORDER_DELETION */
+  csApprovedBy: uuid('cs_approved_by').references(() => users.id),
+  csApprovedAt: timestamp('cs_approved_at', { withTimezone: true }),
+  csNote: text('cs_note'),
+  /** Dual-approval: Logistics-side (HoL) sign-off for DELIVERED_ORDER_DELETION */
+  logiApprovedBy: uuid('logi_approved_by').references(() => users.id),
+  logiApprovedAt: timestamp('logi_approved_at', { withTimezone: true }),
+  logiNote: text('logi_note'),
   payload: jsonb('payload'),
   ...temporalColumns,
   ...timestampColumns,

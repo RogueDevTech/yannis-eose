@@ -565,7 +565,8 @@ function getNavGroupsForUser(
             permSetHas(permSet, 'permission_requests.permission_grant.approve') ||
             permSetHas(permSet, 'permission_requests.product_archive.approve') ||
             permSetHas(permSet, 'permission_requests.order_line_price.approve') ||
-            permSetHas(permSet, 'permission_requests.order_deletion.approve')
+            permSetHas(permSet, 'permission_requests.order_deletion.approve') ||
+            permSetHas(permSet, 'permission_requests.delivered_order_deletion.approve')
           );
         }
         // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
@@ -731,7 +732,8 @@ function getBottomNavItemsForUser(
             permSetHas(permSet, 'permission_requests.permission_grant.approve') ||
             permSetHas(permSet, 'permission_requests.product_archive.approve') ||
             permSetHas(permSet, 'permission_requests.order_line_price.approve') ||
-            permSetHas(permSet, 'permission_requests.order_deletion.approve'))) ||
+            permSetHas(permSet, 'permission_requests.order_deletion.approve') ||
+            permSetHas(permSet, 'permission_requests.delivered_order_deletion.approve'))) ||
         (MARKETING_SUPERVISOR_NAV_HREFS.has(item.href) &&
           user.isMarketingTeamSupervisorOnActiveBranch === true &&
           !!user.currentBranchId);
