@@ -103,6 +103,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     statusCounts: data?.orderPipeline?.statusCounts ?? {},
     offlineCount: data?.orderPipeline?.offlineCount ?? 0,
     csStatusCounts: (data?.orderPipeline as Record<string, unknown> | undefined)?.csStatusCounts as Record<string, number> ?? {},
+    totalOrdersCounts: (data as unknown as Record<string, unknown> | undefined)?.totalOrdersCounts as Record<string, number> ?? {},
   };
   // Deliveries per Brand + Stock Available per Product removed 2026-05-19 per
   // CEO directive; backend still returns them but this view no longer renders.
@@ -167,6 +168,38 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           </div>
         </div>
       </div>
+
+      {/* ── Total Orders: bird's-eye view across all pipelines ── */}
+      {(() => {
+        const tsc = orderPipeline.totalOrdersCounts;
+        const tTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
+        const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0);
+        const tConfirmed = (tsc['CONFIRMED'] ?? 0) + (tsc['AGENT_ASSIGNED'] ?? 0) + (tsc['DISPATCHED'] ?? 0) + (tsc['IN_TRANSIT'] ?? 0);
+        const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
+        const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Total Orders
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="!py-2.5"
+              items={[
+                { label: 'Total', value: tTotal, valueClassName: 'text-app-fg' },
+                { label: 'Unassigned', value: tsc['UNPROCESSED'] ?? 0, valueClassName: 'text-red-500' },
+                { label: 'Assigned', value: tsc['CS_ASSIGNED'] ?? 0 },
+                { label: 'Unconfirmed', value: tsc['CS_ENGAGED'] ?? 0 },
+                { label: 'Confirmed', value: tConfirmed },
+                { label: 'Delivered', value: tDelivered },
+                { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: tCR > 0 ? 'text-green-500' : undefined },
+                { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: tDR > 0 ? 'text-green-500' : undefined },
+                { label: 'Deleted', value: tsc['DELETED'] ?? 0 },
+              ]}
+            />
+          </div>
+        );
+      })()}
 
       {/* ── Order Funnel: full pipeline at a glance ── */}
       {(() => {

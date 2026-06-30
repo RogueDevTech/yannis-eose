@@ -111,18 +111,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-  const [listRes, locationsRes, usersRes, eligibleListRes] = await Promise.all([
+  // Single bundled call replaces 4 parallel HTTP round-trips. Eligible orders
+  // are deferred — loaded on demand when the Create modal opens.
+  const bundleInput = encodeURIComponent(JSON.stringify(listInput));
+  const [bundleRes, eligibleListRes] = await Promise.all([
     apiRequest<unknown>(
-      '/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify(listInput)),
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      '/trpc/logistics.locationOptions?input=' +
-        encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })),
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
+      `/trpc/logistics.deliveryRemittancesPageBundle?input=${bundleInput}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
@@ -144,9 +138,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     receivedCount: string;
     disputedCount: string;
   };
-  const listData = listRes.ok
-    ? (listRes.data as { result?: { data?: { records: DeliveryRemittanceListItem[]; pagination: { total: number; totalPages?: number }; summary?: SummaryData } } })?.result?.data
+
+  type BundleData = {
+    remittances: { records: DeliveryRemittanceListItem[]; pagination: { total: number; totalPages?: number }; summary?: SummaryData };
+    locations: Array<{ id: string; name: string; providerName?: string | null }>;
+    users: Array<{ id: string; name: string; role: string }>;
+  };
+  const bundle = bundleRes.ok
+    ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
     : null;
+
+  const listData = bundle?.remittances ?? null;
   const remittances = listData?.records ?? [];
   const total = listData?.pagination?.total ?? 0;
   const totalPages =
@@ -158,10 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
   };
 
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })?.result?.data
-    : null;
-  const locations = (locationsData ?? []).map((l) => ({
+  const locations = (bundle?.locations ?? []).map((l) => ({
     id: l.id,
     name: l.name,
     providerName: l.providerName ?? null,
@@ -169,24 +168,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Build user name map for sentBy resolution + accountant filter.
   type UserRow = { id: string; name: string; role: string };
-  const usersData = usersRes.ok
-    ? (usersRes.data as { result?: { data?: { users: UserRow[] } } })?.result?.data?.users
-    : null;
+  const usersData: UserRow[] = bundle?.users ?? [];
   const userMap: Record<string, string> = {};
   const sentByOptions: Array<{ id: string; name: string }> = [];
-  if (usersData) {
-    for (const u of usersData) {
-      userMap[u.id] = u.name;
-      // Sent-by filter only lists accountants — primary FINANCE_OFFICER and
-      // admin-class. Non-finance users never appear because they cannot
-      // create remittances.
-      const isFinance =
-        u.role === 'FINANCE_OFFICER' ||
-        u.role === 'SUPER_ADMIN' ||
-        u.role === 'ADMIN';
-      if (isFinance) {
-        sentByOptions.push({ id: u.id, name: u.name });
-      }
+  for (const u of usersData) {
+    userMap[u.id] = u.name;
+    const isFinance =
+      u.role === 'FINANCE_OFFICER' ||
+      u.role === 'SUPER_ADMIN' ||
+      u.role === 'ADMIN';
+    if (isFinance) {
+      sentByOptions.push({ id: u.id, name: u.name });
     }
   }
   sentByOptions.sort((a, b) => a.name.localeCompare(b.name));

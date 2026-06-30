@@ -228,7 +228,7 @@ export function FundingLedgerPage({
               { label: 'Total Credits', value: formatNaira(Number(summary.totalCredits)), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
               { label: 'Total Debits', value: formatNaira(Number(summary.totalDebits)), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
               {
-                label: 'Closing Balance',
+                label: 'Current Balance',
                 value: formatNaira(closingBal),
                 valueClassName: `tabular-nums ${closingBal < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`,
               },
