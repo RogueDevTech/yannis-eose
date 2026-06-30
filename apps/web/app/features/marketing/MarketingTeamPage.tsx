@@ -29,7 +29,7 @@ import {
 
 export interface MarketingTeamPageProps {
   teamMembers: FundingBalanceRow[];
-  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number };
   dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
   leaderboardPeriod: 'this_month' | 'all_time';
   page?: number;
@@ -644,20 +644,20 @@ export function MarketingTeamPage({
             title: 'Total ad spend ÷ total orders',
           },
           {
-            label: `Total Disbursed (${overviewStats.mbCount})`,
-            value: <NairaPrice amount={overviewStats.totalDisbursed} />,
+            label: `Total Disbursed (${fundingSummary.sentCount + fundingSummary.completedCount + fundingSummary.disputedCount})`,
+            value: <NairaPrice amount={parseFloat(fundingSummary.totalSent) + parseFloat(fundingSummary.totalCompleted) + parseFloat(fundingSummary.totalDisputed)} />,
             valueClassName: 'text-app-fg',
-            title: `Total funding received by ${overviewStats.mbCount} media buyers`,
+            title: 'Total funding disbursed in this period (sent + completed + disputed)',
           },
           {
-            label: 'MB Unspent Balance',
+            label: 'MB Unspent Balance (all-time)',
             value: <NairaPrice amount={overviewStats.mbUnspentBalance} />,
             valueClassName: overviewStats.mbUnspentBalance > 0
               ? 'text-blue-600 dark:text-blue-400'
               : overviewStats.mbUnspentBalance < 0
                 ? 'text-danger-600 dark:text-danger-400'
                 : 'text-app-fg',
-            title: 'Undisbursed/unspent funding sitting with media buyers (received − ad spend − expenses)',
+            title: 'Cumulative unspent funding across all media buyers (received − ad spend − distributed)',
           },
         ]}
       />
