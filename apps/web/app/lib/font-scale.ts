@@ -20,7 +20,7 @@ export function isFontScaleId(value: string): value is FontScaleId {
   return (FONT_SCALE_IDS as readonly string[]).includes(value);
 }
 
-export const DEFAULT_FONT_SCALE: FontScaleId = 'large';
+export const DEFAULT_FONT_SCALE: FontScaleId = 'xlarge';
 
 export function parseStoredFontScale(raw: string | null): FontScaleId {
   if (raw && isFontScaleId(raw)) return raw;
@@ -64,5 +64,5 @@ export function persistAndApplyFontScale(id: FontScaleId): void {
 export function getFontScaleBootScript(): string {
   const map: Record<string, number> = {};
   for (const s of FONT_SCALES) map[s.id] = s.rootPx;
-  return `(function(){try{var k=${JSON.stringify(FONT_SCALE_STORAGE_KEY)};var v=localStorage.getItem(k);var m=${JSON.stringify(map)};var id=(v&&m[v])?v:'large';document.documentElement.setAttribute('data-font-scale',id);document.documentElement.style.fontSize=m[id]+'px';}catch(e){}})();`;
+  return `(function(){try{var k=${JSON.stringify(FONT_SCALE_STORAGE_KEY)};var v=localStorage.getItem(k);var m=${JSON.stringify(map)};var id=(v&&m[v])?v:'xlarge';document.documentElement.setAttribute('data-font-scale',id);document.documentElement.style.fontSize=m[id]+'px';}catch(e){}})();`;
 }
