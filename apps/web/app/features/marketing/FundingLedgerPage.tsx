@@ -176,7 +176,7 @@ export function FundingLedgerPage({
         title="Funding Ledger"
         backTo="/admin/marketing/funding"
         mobileInlineActions
-        description={selectedUserName ? `${selectedUserName}` : 'Select a media buyer to view their funding history.'}
+        description={selectedUserName ? `${selectedUserName}` : 'Select a team member to view their funding history.'}
         actions={
           <PageHeaderMobileTools
             sheetTitle="Tools"
@@ -200,7 +200,7 @@ export function FundingLedgerPage({
       {/* MB Picker */}
       {mediaBuyers.length > 1 && (
         <FormSelect
-          label="Media Buyer"
+          label="Team Member"
           value={selectedUserId}
           onChange={(e) => {
             const next = new URLSearchParams(searchParams);
@@ -213,7 +213,7 @@ export function FundingLedgerPage({
             setSearchParams(next);
           }}
           options={[
-            { value: '', label: 'Select a media buyer…' },
+            { value: '', label: 'Select a team member…' },
             ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
           ]}
           wrapperClassName="max-w-xs"
@@ -320,8 +320,8 @@ export function FundingLedgerPage({
         </>
       ) : (
         <EmptyState
-          title="Select a media buyer"
-          description="Pick a media buyer above to view their complete funding history."
+          title="Select a team member"
+          description="Pick a team member above to view their complete funding history."
         />
       )}
 

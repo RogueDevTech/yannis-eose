@@ -1575,10 +1575,22 @@ export class MarketingService {
     userId: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    dateRange?: { startDate?: string; endDate?: string },
   ): Promise<{ totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> {
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return { totalReceived: '0', totalDistributed: '0', totalSpend: '0', balance: '0' };
+    }
+
+    const fundingDateConds: SQL[] = [];
+    const spendDateConds: SQL[] = [];
+    if (dateRange?.startDate) {
+      fundingDateConds.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(dateRange.startDate)));
+      spendDateConds.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(dateRange.startDate)));
+    }
+    if (dateRange?.endDate) {
+      fundingDateConds.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(dateRange.endDate)));
+      spendDateConds.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(dateRange.endDate)));
     }
 
     // Match the enforcement logic in computeMarketingDisbursableInTx:
@@ -1593,6 +1605,7 @@ export class MarketingService {
           and(
             eq(schema.marketingFunding.receiverId, userId),
             eq(schema.marketingFunding.status, 'COMPLETED'),
+            ...fundingDateConds,
           ),
         )
         .then((r) => r[0]),
@@ -1603,6 +1616,7 @@ export class MarketingService {
           and(
             eq(schema.marketingFunding.senderId, userId),
             inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+            ...fundingDateConds,
           ),
         )
         .then((r) => r[0]),
@@ -1614,6 +1628,7 @@ export class MarketingService {
             eq(schema.adSpendLogs.mediaBuyerId, userId),
             inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
             branchCampaignIds ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId)) : undefined,
+            ...spendDateConds,
           ),
         )
         .then((r) => r[0]),
@@ -3649,6 +3664,115 @@ export class MarketingService {
     return rows.map((r) => r.mediaBuyerId);
   }
 
+  /**
+   * Ad spend compliance gaps — scans backwards from today and returns the
+   * first `minGapDays` days that have at least one MB with no logged spend.
+   * Scans up to `scanDays` into the past (default 90) to find enough gaps.
+   */
+  async getAdSpendComplianceGaps(
+    minGapDays: number = 30,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+    restrictToMediaBuyerIds?: string[],
+  ): Promise<
+    Array<{
+      date: string;
+      filledCount: number;
+      totalMBs: number;
+      unfilledMBs: Array<{ id: string; name: string }>;
+    }>
+  > {
+    const scanDays = Math.max(minGapDays, 90);
+
+    // Get all active MBs scoped by branch
+    const allBuyers = await this.db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.users)
+      .where(and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE')));
+
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
+    let eligibleBuyers = branchUserIds
+      ? allBuyers.filter((b) => branchUserIds.includes(b.id))
+      : allBuyers;
+    if (restrictToMediaBuyerIds && restrictToMediaBuyerIds.length > 0) {
+      const allow = new Set(restrictToMediaBuyerIds);
+      eligibleBuyers = eligibleBuyers.filter((b) => allow.has(b.id));
+    }
+
+    if (eligibleBuyers.length === 0) return [];
+
+    // Build date range: last scanDays days (Nigeria time)
+    const now = new Date();
+    const nigeriaFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Lagos',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const dates: string[] = [];
+    for (let i = 0; i < scanDays; i++) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      dates.push(nigeriaFormatter.format(d));
+    }
+
+    const startDate = dates[dates.length - 1]!;
+    const endDate = dates[0]!;
+    const buyerIds = eligibleBuyers.map((b) => b.id);
+
+    // Single query: get all (mediaBuyerId, spendDate) pairs in the range
+    const spendRows = await this.db
+      .select({
+        mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+        spendDay: sql<string>`to_char(${schema.adSpendLogs.spendDate} AT TIME ZONE 'Africa/Lagos', 'YYYY-MM-DD')`,
+      })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          inArray(schema.adSpendLogs.mediaBuyerId, buyerIds),
+          gte(schema.adSpendLogs.spendDate, nigeriaDayStart(startDate)),
+          lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(endDate)),
+        ),
+      )
+      .groupBy(
+        schema.adSpendLogs.mediaBuyerId,
+        sql`to_char(${schema.adSpendLogs.spendDate} AT TIME ZONE 'Africa/Lagos', 'YYYY-MM-DD')`,
+      );
+
+    // Build a set of "buyerId:date" for quick lookup
+    const filledSet = new Set(spendRows.map((r) => `${r.mediaBuyerId}:${r.spendDay}`));
+    const buyerMap = new Map(eligibleBuyers.map((b) => [b.id, b.name]));
+
+    const result: Array<{
+      date: string;
+      filledCount: number;
+      totalMBs: number;
+      unfilledMBs: Array<{ id: string; name: string }>;
+    }> = [];
+
+    for (const date of dates) {
+      const unfilled: Array<{ id: string; name: string }> = [];
+      for (const buyerId of buyerIds) {
+        if (!filledSet.has(`${buyerId}:${date}`)) {
+          unfilled.push({ id: buyerId, name: buyerMap.get(buyerId) ?? 'Unknown' });
+        }
+      }
+      // Only include days with gaps
+      if (unfilled.length > 0) {
+        unfilled.sort((a, b) => a.name.localeCompare(b.name));
+        result.push({
+          date,
+          filledCount: buyerIds.length - unfilled.length,
+          totalMBs: buyerIds.length,
+          unfilledMBs: unfilled,
+        });
+        if (result.length >= minGapDays) break;
+      }
+    }
+
+    return result;
+  }
+
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const buyer = alias(schema.users, 'ad_spend_list_buyer');
     const prod = alias(schema.products, 'ad_spend_list_product');
@@ -4213,6 +4337,86 @@ export class MarketingService {
       if (r.status === 'PENDING') out.PENDING = n;
       else if (r.status === 'APPROVED') out.APPROVED = n;
       else if (r.status === 'REJECTED') out.REJECTED = n;
+      out.ALL += n;
+    }
+    return out;
+  }
+
+  /**
+   * Aggregates counts + total spend for all non-AD_SPEND categories in a
+   * **single query** (replaces the previous 15-call fan-out that saturated the
+   * connection pool and crashed the page).
+   */
+  async getOtherExpensesSummary(
+    input: {
+      mediaBuyerId?: string;
+      startDate?: string;
+      endDate?: string;
+    },
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{
+    PENDING: number;
+    APPROVED: number;
+    REJECTED: number;
+    ALL: number;
+    totalSpend: number;
+    pendingSpend: number;
+  }> {
+    const conditions: SQL[] = [
+      ne(schema.adSpendLogs.category, 'AD_SPEND'),
+    ];
+    if (input.mediaBuyerId) {
+      conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.startDate) {
+      conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
+    }
+    if (input.endDate) {
+      conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
+    }
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+    const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
+    if (branchCampaignIds && branchCampaignIds.length === 0 && branchUserIds && branchUserIds.length === 0) {
+      return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 };
+    }
+    if (branchCampaignIds) {
+      const nullCampaignCondition = branchUserIds && branchUserIds.length > 0
+        ? and(isNull(schema.adSpendLogs.campaignId), inArray(schema.adSpendLogs.mediaBuyerId, branchUserIds))
+        : isNull(schema.adSpendLogs.campaignId);
+      const branchOrDaily = branchCampaignIds.length > 0
+        ? or(
+            inArray(schema.adSpendLogs.campaignId, branchCampaignIds),
+            nullCampaignCondition,
+          )
+        : nullCampaignCondition;
+      if (branchOrDaily) conditions.push(branchOrDaily);
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await this.db
+      .select({
+        status: schema.adSpendLogs.status,
+        c: count(),
+        total: sum(schema.adSpendLogs.spendAmount),
+      })
+      .from(schema.adSpendLogs)
+      .where(whereClause)
+      .groupBy(schema.adSpendLogs.status);
+
+    const out = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 };
+    for (const r of rows) {
+      const n = Number(r.c);
+      const spend = Number(r.total ?? 0);
+      if (r.status === 'PENDING') {
+        out.PENDING = n;
+        out.pendingSpend = spend;
+      } else if (r.status === 'APPROVED') {
+        out.APPROVED = n;
+        out.totalSpend = spend;
+      } else if (r.status === 'REJECTED') {
+        out.REJECTED = n;
+      }
       out.ALL += n;
     }
     return out;

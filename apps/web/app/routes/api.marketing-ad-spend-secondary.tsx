@@ -25,6 +25,7 @@ type SecondaryPayload = {
   groupsPage: number;
   groupsTotalPages: number;
   otherExpensesCounts: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number; totalSpend: number; pendingSpend: number };
+  complianceGaps: Array<{ date: string; filledCount: number; totalMBs: number; unfilledMBs: Array<{ id: string; name: string }> }>;
 };
 
 function emptyPayload(): SecondaryPayload {
@@ -37,6 +38,7 @@ function emptyPayload(): SecondaryPayload {
     groupsPage: 1,
     groupsTotalPages: 1,
     otherExpensesCounts: { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 },
+    complianceGaps: [],
   };
 }
 
@@ -116,57 +118,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
         )
       : Promise.resolve({ ok: false as const, data: null });
 
-    // Fetch status counts + total spend for non-AD_SPEND categories (always, for the "Other Expenses" overview)
-    const otherCategories = ['AD_ACCOUNT', 'RECRUITMENT_AD', 'WHATSAPP_CAMPAIGN', 'UGC_PRODUCTION', 'OTHER'] as const;
-    const otherBaseScope = {
+    // Single query for all non-AD_SPEND category counts + spend totals
+    const otherSummaryInput = encodeURIComponent(JSON.stringify({
       ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
       ...(startDate && !periodAllTime ? { startDate } : {}),
       ...(endDate && !periodAllTime ? { endDate } : {}),
-    };
-    const otherCountsP = Promise.all(
-      otherCategories.map((cat) =>
-        Promise.all([
-          apiRequest<unknown>(
-            `/trpc/marketing.adSpendStatusCounts?input=${encodeURIComponent(JSON.stringify({ ...otherBaseScope, category: cat }))}`,
-            { ...opt, timeoutMs: 10_000 },
-          ).then((res) => {
-            if (!res.ok) return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
-            const d = (res.data as { result?: { data?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number } } })?.result?.data;
-            return d ?? { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
-          }).catch(() => ({ PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 })),
-          // Approved spend total
-          apiRequest<unknown>(
-            `/trpc/marketing.listAdSpend?input=${encodeURIComponent(JSON.stringify({ ...otherBaseScope, category: cat, status: 'APPROVED', page: 1, limit: 1 }))}`,
-            { ...opt, timeoutMs: 10_000 },
-          ).then((res) => {
-            if (!res.ok) return 0;
-            const d = (res.data as { result?: { data?: { totalSpend?: string } } })?.result?.data;
-            return Number(d?.totalSpend ?? 0);
-          }).catch(() => 0),
-          // Pending spend total
-          apiRequest<unknown>(
-            `/trpc/marketing.listAdSpend?input=${encodeURIComponent(JSON.stringify({ ...otherBaseScope, category: cat, status: 'PENDING', page: 1, limit: 1 }))}`,
-            { ...opt, timeoutMs: 10_000 },
-          ).then((res) => {
-            if (!res.ok) return 0;
-            const d = (res.data as { result?: { data?: { totalSpend?: string } } })?.result?.data;
-            return Number(d?.totalSpend ?? 0);
-          }).catch(() => 0),
-        ]),
-      ),
-    ).then((results) => {
-      let counts = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
-      let totalSpend = 0;
-      let pendingSpend = 0;
-      for (const [c, approved, pending] of results) {
-        counts = { PENDING: counts.PENDING + c.PENDING, APPROVED: counts.APPROVED + c.APPROVED, REJECTED: counts.REJECTED + c.REJECTED, ALL: counts.ALL + c.ALL };
-        totalSpend += approved;
-        pendingSpend += pending;
-      }
-      return { ...counts, totalSpend, pendingSpend };
-    });
+    }));
+    const otherCountsP = apiRequest<unknown>(
+      `/trpc/marketing.otherExpensesSummary?input=${otherSummaryInput}`,
+      { ...opt, timeoutMs: 10_000 },
+    ).then((res) => {
+      if (!res.ok) return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 };
+      const d = (res.data as { result?: { data?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number; totalSpend: number; pendingSpend: number } } })?.result?.data;
+      return d ?? { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 };
+    }).catch(() => ({ PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0, totalSpend: 0, pendingSpend: 0 }));
 
-    const [metrics, users, productsRaw, groupedRes, campaignsRes, otherExpensesCounts] = await Promise.all([
+    // Compliance gaps — all roles (backend scopes: MB=self, supervisor=team, admin=all)
+    type ComplianceGapRow = { date: string; filledCount: number; totalMBs: number; unfilledMBs: Array<{ id: string; name: string }> };
+    const complianceP = apiRequest<unknown>(
+      `/trpc/marketing.adSpendComplianceGaps?input=${encodeURIComponent(JSON.stringify({ days: 30 }))}`,
+      { ...opt, timeoutMs: 10_000 },
+    ).then((res) => {
+      if (!res.ok) return [] as ComplianceGapRow[];
+      return ((res.data as { result?: { data?: ComplianceGapRow[] } })?.result?.data) ?? [];
+    }).catch(() => [] as ComplianceGapRow[]);
+
+    const [metrics, users, productsRaw, groupedRes, campaignsRes, otherExpensesCounts, complianceGaps] = await Promise.all([
       apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, opt)
         .then(parseMetrics)
         .catch(() => emptyMetrics()),
@@ -185,6 +162,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ),
       campaignsP,
       otherCountsP,
+      complianceP,
     ]);
 
     // Media buyers only see products referenced by their campaigns.
@@ -269,6 +247,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       groupsPage: resolvedGpage,
       groupsTotalPages,
       otherExpensesCounts,
+      complianceGaps,
     };
     return secondaryCacheJson({ ok: true as const, ...payload });
   } catch (e) {

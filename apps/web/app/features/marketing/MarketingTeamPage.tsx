@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
-import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -498,7 +499,7 @@ export function MarketingTeamPage({
       },
       {
         key: 'profitability',
-        header: 'Profitability',
+        header: 'Profit',
         align: 'right',
         nowrap: true,
         cellClassName: (m) => profitabilityCellColorClass(m, greenThreshold),
@@ -510,30 +511,42 @@ export function MarketingTeamPage({
       },
       {
         key: 'actions',
-        header: 'Actions',
+        header: '',
         align: 'right',
         tight: true,
         nowrap: true,
-        minWidth: 'min-w-[12rem]',
         mobileShowLabel: false,
         render: (m) => (
-          <div className="inline-flex flex-nowrap items-center justify-end gap-1.5 shrink-0">
-            <CompactTableActionButton to={buildOrdersQuery(m.userId, dateFilters)} tone="brand">
-              Orders
-            </CompactTableActionButton>
-            <CompactTableActionButton
-              to={`/admin/marketing/funding/ledger?userId=${m.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`}
-              className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
-            >
-              Ledger
-            </CompactTableActionButton>
-            <CompactTableActionButton
-              to={`/hr/users/${m.userId}`}
-              className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
-            >
-              Profile
-            </CompactTableActionButton>
-          </div>
+          <TableRowActionsSheet
+            ariaLabel={`Actions for ${m.name}`}
+            sheetTitle={m.name}
+            actions={[
+              {
+                key: 'orders',
+                kind: 'link',
+                label: 'Orders',
+                to: buildOrdersQuery(m.userId, dateFilters),
+              },
+              {
+                key: 'ledger',
+                kind: 'link',
+                label: 'Ledger',
+                to: `/admin/marketing/funding/ledger?userId=${m.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`,
+              },
+              {
+                key: 'expenses',
+                kind: 'link',
+                label: 'Expenses',
+                to: `/admin/marketing/expenses?mediaBuyerId=${m.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`,
+              },
+              {
+                key: 'profile',
+                kind: 'link',
+                label: 'Profile',
+                to: `/hr/users/${m.userId}`,
+              },
+            ]}
+          />
         ),
       },
     ];
