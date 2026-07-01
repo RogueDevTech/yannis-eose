@@ -171,6 +171,8 @@ export function FundingLedgerPage({
   );
 
   const closingBal = Number(summary.closingBalance);
+  const openingBal = Number(summary.openingBalance ?? '0');
+  const hasDateFilter = !filters.periodAllTime;
 
   return (
     <div className="space-y-4">
@@ -227,10 +229,15 @@ export function FundingLedgerPage({
           <OverviewStatStrip
             mobileGrid
             items={[
+              ...(hasDateFilter ? [{
+                label: 'Opening Balance',
+                value: formatNaira(openingBal),
+                valueClassName: `tabular-nums ${openingBal < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`,
+              }] : []),
               { label: 'Total Credits', value: formatNaira(Number(summary.totalCredits)), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
               { label: 'Total Debits', value: formatNaira(Number(summary.totalDebits)), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
               {
-                label: 'Current Balance',
+                label: hasDateFilter ? 'Closing Balance' : 'Current Balance',
                 value: formatNaira(closingBal),
                 valueClassName: `tabular-nums ${closingBal < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`,
               },
@@ -248,6 +255,16 @@ export function FundingLedgerPage({
             }}
             tabs={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
           />
+
+          {/* Opening balance row — shown when a date filter is active and on the first page */}
+          {hasDateFilter && page === 1 && selectedUserId && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-app-border bg-app-hover/40 px-4 py-2.5">
+              <span className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Opening Balance</span>
+              <span className={`text-sm font-semibold tabular-nums ${openingBal < 0 ? 'text-danger-600 dark:text-danger-400' : openingBal > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>
+                <NairaPrice amount={openingBal} />
+              </span>
+            </div>
+          )}
 
           {entries.length === 0 ? (
             <EmptyState
