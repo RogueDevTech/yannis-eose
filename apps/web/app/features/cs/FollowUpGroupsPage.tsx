@@ -54,6 +54,7 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
+            saveFilterKey
             desktop={
               <>
                 <Link to="/admin/cs/follow-up" className="btn-secondary btn-sm inline-flex items-center gap-1.5">

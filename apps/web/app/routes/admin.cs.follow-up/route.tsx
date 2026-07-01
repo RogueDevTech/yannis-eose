@@ -8,6 +8,7 @@ import {
   requirePermissionOrRoles,
   safeStatus,
   parsePerPage,
+  defaultThisMonthRange,
   DEFERRED_LOADER_TIMEOUT_MS,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
 } from '~/lib/api.server';
@@ -58,8 +59,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
     const ruleId = url.searchParams.get('ruleId') || undefined;
-    const startDate = url.searchParams.get('startDate') || undefined;
-    const endDate = url.searchParams.get('endDate') || undefined;
+    const periodAllTime = url.searchParams.get('period') === 'all_time';
+    const defaultDates = periodAllTime ? { startDate: undefined, endDate: undefined } : defaultThisMonthRange();
+    const startDate = url.searchParams.get('startDate') || (periodAllTime ? undefined : defaultDates.startDate);
+    const endDate = url.searchParams.get('endDate') || (periodAllTime ? undefined : defaultDates.endDate);
     const branchId = url.searchParams.get('branchId') || undefined;
     const backToParam = url.searchParams.get('backTo') || undefined;
 

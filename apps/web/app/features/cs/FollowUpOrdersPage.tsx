@@ -171,6 +171,7 @@ export function FollowUpOrdersPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
+            saveFilterKey
             desktop={<PageRefreshButton />}
           />
         }

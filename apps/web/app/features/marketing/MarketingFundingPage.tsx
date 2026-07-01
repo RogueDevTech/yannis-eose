@@ -879,6 +879,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Filters and funding actions"
+            saveFilterKey
             filtersBadgeCount={(() => {
               const s =
                 displaySection === 'distributing' ? unifiedDistributingSlice : unifiedReceivedSlice;

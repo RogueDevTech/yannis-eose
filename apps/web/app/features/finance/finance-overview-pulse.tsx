@@ -211,9 +211,12 @@ export function FinanceCashRemittanceSection({
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
-          description="Total order value of all orders that are on a remittance batch (any status). This is before any deductions. Only batched orders are included — orders still awaiting a batch are not counted here."
+          description="Total order value of all orders on a remittance batch (any status). Before deductions. Only batched orders — orders awaiting a batch are not counted."
           lines={[
-            { label: 'Sum of order totals on remittance batches', amount: pulse.grossOrderValue, type: 'value' },
+            { label: 'Received batches', amount: pulse.receivedAmount, type: 'value', count: pulse.receivedCount },
+            { label: 'Pending batches', amount: pulse.pendingRemittanceAmount, type: 'value', count: pulse.pendingRemittanceBatchCount },
+            { label: 'Disputed batches', amount: pulse.disputedRemittanceAmount, type: 'value', count: pulse.disputedRemittanceBatchCount },
+            { label: 'Gross Order Value', amount: pulse.grossOrderValue, type: 'result' },
           ]}
         />
         <FormulaBreakdownModal

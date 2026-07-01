@@ -395,6 +395,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Category toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

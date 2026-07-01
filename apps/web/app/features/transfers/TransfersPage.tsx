@@ -672,6 +672,7 @@ export function TransfersPage({
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
             filters={mobileTransferFiltersBody}
             filtersBadgeCount={(fromLocationFilter ? 1 : 0) + (toLocationFilter ? 1 : 0) + (productFilter ? 1 : 0)}
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

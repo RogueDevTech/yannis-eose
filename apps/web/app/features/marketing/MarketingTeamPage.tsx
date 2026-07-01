@@ -562,6 +562,7 @@ export function MarketingTeamPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Team analysis toolbar and date range"
+            saveFilterKey
             filtersBadgeCount={teamToolbarFilterBadge}
             filters={
               <SortMenu

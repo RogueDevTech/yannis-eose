@@ -36,6 +36,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
             sheetTitle="Actions"
             triggerAriaLabel="Product toolbar"
             mobileLeading={<span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>{product.status}</span>}
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

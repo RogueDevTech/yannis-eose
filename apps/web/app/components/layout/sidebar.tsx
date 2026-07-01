@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { NavLink } from '@remix-run/react';
 import { getAppLogoSrc } from '~/lib/theme';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
+import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 
 /**
  * Order list pages whose URL carries filter params. Clicking their sidebar
@@ -308,6 +309,9 @@ function SidebarNavLink({
   resolvedActiveHref?: string;
   badge?: number;
 }) {
+  const resolveHref = useResolveFilterHref();
+  const hrefWithFilters = resolveHref(item.href);
+
   const anchorRef = useRef<HTMLDivElement>(null);
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [tooltipPos, setTooltipPos] = useState({ left: 0, top: 0 });
@@ -352,7 +356,7 @@ function SidebarNavLink({
       onMouseLeave={() => isExpanded && setTooltipVisible(false)}
     >
       <NavLink
-      to={item.href}
+      to={hrefWithFilters}
       end={item.href === '/admin'}
       // CEO directive 2026-05-08: every sidebar destination prefetches on render
       // so clicking from anywhere feels instant — by the time the user clicks,

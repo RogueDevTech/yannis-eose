@@ -265,6 +265,7 @@ export function RoleTemplatesPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Role template toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

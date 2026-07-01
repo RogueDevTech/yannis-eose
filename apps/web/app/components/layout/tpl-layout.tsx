@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Form, useLocation, useNavigation } from '@remix-run/react';
+import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 import { Button } from '~/components/ui/button';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
@@ -57,6 +58,7 @@ export function TplLayout({
 }: TplLayoutProps) {
   const location = useLocation();
   const navigation = useNavigation();
+  const resolveHref = useResolveFilterHref();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
@@ -330,7 +332,7 @@ export function TplLayout({
               return (
                 <NavLink
                   key={item.href}
-                  to={item.href}
+                  to={resolveHref(item.href)}
                   end={item.href === '/tpl'}
                   prefetch="render"
                   onClick={closeMobileNav}

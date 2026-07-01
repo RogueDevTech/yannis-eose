@@ -534,6 +534,7 @@ export function FollowUpPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
+            saveFilterKey
             filtersBadgeCount={activeFilterCount}
             desktop={<PageRefreshButton />}
             filters={

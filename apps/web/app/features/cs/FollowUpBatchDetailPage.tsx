@@ -328,6 +328,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Batch tools"
+            saveFilterKey
             desktop={
               <>
                 {selectedItemIds.size > 0 && canAssign && (

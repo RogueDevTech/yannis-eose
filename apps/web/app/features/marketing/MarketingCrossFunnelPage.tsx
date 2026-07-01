@@ -302,6 +302,7 @@ export function MarketingCrossFunnelPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Duplicate attempts toolbar"
+            saveFilterKey
             filtersBadgeCount={filterBadgeCount}
             desktop={
               <>

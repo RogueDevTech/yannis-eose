@@ -239,6 +239,7 @@ export function DeliveryRemittanceDetailPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Cash remittance toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

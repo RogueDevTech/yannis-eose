@@ -33,28 +33,28 @@ export function FormulaBreakdownModal({
   lines: FormulaLine[];
 }) {
   return (
-    <Modal open={open} onClose={onClose}>
-      <div className="space-y-4">
+    <Modal open={open} onClose={onClose} maxWidth="max-w-md">
+      <div className="space-y-5 p-1">
         <div>
-          <h2 className="text-lg font-semibold text-app-fg">{title}</h2>
-          <p className="text-sm text-app-fg-muted mt-1">{description}</p>
+          <h2 className="text-base font-semibold text-app-fg">{title}</h2>
+          <p className="text-sm text-app-fg-muted mt-1.5 leading-relaxed">{description}</p>
         </div>
-        <div className="space-y-1.5">
+        <div className="rounded-lg border border-app-border divide-y divide-app-border overflow-hidden">
           {lines.map((line, i) => {
             const isResult = line.type === 'result';
             const isDeduction = line.type === 'deduction';
             return (
               <div
                 key={i}
-                className={`flex items-center justify-between gap-3 text-sm px-2 py-1.5 rounded ${
-                  isResult ? 'bg-app-hover/80 border border-app-border font-semibold' : ''
+                className={`flex items-center justify-between gap-4 text-sm px-4 py-3 ${
+                  isResult ? 'bg-app-hover/80 font-semibold' : ''
                 }`}
               >
-                <span className={`${isResult ? 'text-app-fg font-semibold' : 'text-app-fg-muted'}`}>
+                <span className={`min-w-0 ${isResult ? 'text-app-fg font-semibold' : 'text-app-fg-muted'}`}>
                   {isDeduction ? '− ' : isResult ? '= ' : ''}{line.label}
-                  {line.count != null && <span className="ml-1 text-app-fg-muted/60">({line.count})</span>}
+                  {line.count != null && <span className="ml-1 opacity-60">({line.count})</span>}
                 </span>
-                <span className={`tabular-nums font-medium ${
+                <span className={`tabular-nums font-medium whitespace-nowrap ${
                   isResult
                     ? line.amount >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'
                     : isDeduction
