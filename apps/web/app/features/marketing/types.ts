@@ -512,6 +512,7 @@ export interface FundingLedgerLoaderData {
     totalCredits: string;
     totalDebits: string;
     closingBalance: string;
+    openingBalance?: string;
   };
   selectedUserId: string;
   selectedUserName: string;
