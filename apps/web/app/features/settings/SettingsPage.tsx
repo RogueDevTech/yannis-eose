@@ -710,38 +710,25 @@ export function SettingsPage({
             </Collapsible>
           </div>
 
-          {/* Filter Preferences */}
-          <div className="card">
-            <Collapsible
-              contentClassName="mt-4"
-              trigger={
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-app-fg">Filter Preferences</h3>
-                    <p className="text-sm text-app-fg-muted">Set default filters for each page</p>
-                  </div>
-                </div>
-              }
-            >
-              <div className="rounded-lg border border-app-border p-4 space-y-3">
-                <p className="text-sm text-app-fg-muted">
-                  Save your preferred filters (date range, status, pagination, etc.) per page so they apply automatically on every visit.
-                </p>
-                <Link
-                  to="/admin/settings/filter-preferences"
-                  prefetch="intent"
-                  className="btn-primary btn-sm inline-flex"
-                >
-                  Manage filter defaults
-                </Link>
-              </div>
-            </Collapsible>
-          </div>
+          {/* Filter Preferences — direct link, no accordion */}
+          <Link
+            to="/admin/settings/filter-preferences"
+            prefetch="intent"
+            className="card flex items-center gap-3 hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-lg font-semibold text-app-fg">Filter Preferences</h3>
+              <p className="text-sm text-app-fg-muted">Set default filters for each page</p>
+            </div>
+            <svg className="w-5 h-5 text-app-fg-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            </svg>
+          </Link>
 
           {/* Install App */}
           {!isInstalled && (

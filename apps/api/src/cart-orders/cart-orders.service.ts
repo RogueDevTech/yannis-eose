@@ -225,11 +225,13 @@ export class CartOrdersService {
     // milestone timestamp so "delivered this month" shows orders delivered in
     // the period, not just created in it.
     const dateCol =
-      input.status === 'DELIVERED' || input.status === 'REMITTED'
-        ? schema.cartOrders.deliveredAt
-        : input.status === 'CONFIRMED' || input.status === 'AGENT_ASSIGNED' || input.status === 'DISPATCHED' || input.status === 'IN_TRANSIT'
-          ? schema.cartOrders.confirmedAt
-          : schema.cartOrders.createdAt;
+      input.showDeleted
+        ? schema.cartOrders.deletedAt
+        : input.status === 'DELIVERED' || input.status === 'REMITTED'
+          ? schema.cartOrders.deliveredAt
+          : input.status === 'CONFIRMED' || input.status === 'AGENT_ASSIGNED' || input.status === 'DISPATCHED' || input.status === 'IN_TRANSIT'
+            ? schema.cartOrders.confirmedAt
+            : schema.cartOrders.createdAt;
     if (input.startDate) conditions.push(gte(dateCol, nigeriaDayStart(input.startDate)));
     if (input.endDate) conditions.push(lte(dateCol, nigeriaDayEnd(input.endDate)));
 
@@ -1173,6 +1175,7 @@ export class CartOrdersService {
     // partial failure leaves orphaned rows — the next cron run completes them.
 
     // Step A: Insert cart_orders from eligible abandoned carts
+    this.logger.log(`[pull] Step A: starting INSERT for ${cartIds.length} cart(s), branch=${branchLiteral}, rule=${ruleLiteral}`);
     const inserted = await this.pg.unsafe<Array<{ id: string; source_cart_id: string }>>(`
       INSERT INTO cart_orders (
         id, source_cart_id, campaign_id, media_buyer_id, status,
@@ -1483,7 +1486,7 @@ export class CartOrdersService {
         const result = await this.pullFromAbandonedCarts(batch, null, actor);
         totalPulled += result.pulled;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = err instanceof Error ? (err as Error).stack ?? err.message : String(err);
         this.logger.error(`[runAutoSync] Batch ${i / BATCH_SIZE + 1} failed (${batch.length} carts): ${msg}`);
         errorMessage = errorMessage ? `${errorMessage}; ${msg}` : msg;
         // Continue with next batch — don't let one bad batch block everything

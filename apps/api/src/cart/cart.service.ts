@@ -7,6 +7,7 @@ import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
 
 type CartDbOrTx =
@@ -928,8 +929,8 @@ export class CartService {
           ? inArray(schema.campaigns.branchId, effectiveBranchIds)
           : undefined);
     const dateConds: SQL[] = [];
-    if (startDate) dateConds.push(gte(schema.cartAbandonments.updatedAt, new Date(`${startDate}T00:00:00`)));
-    if (endDate) dateConds.push(lte(schema.cartAbandonments.updatedAt, new Date(`${endDate}T23:59:59`)));
+    if (startDate) dateConds.push(gte(schema.cartAbandonments.updatedAt, nigeriaDayStart(startDate)));
+    if (endDate) dateConds.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(endDate)));
     const pendingRes = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
@@ -991,10 +992,10 @@ export class CartService {
       conditions.push(inArray(schema.campaigns.branchId, opts.effectiveBranchIds));
     }
     if (opts.startDate) {
-      conditions.push(gte(schema.cartAbandonments.updatedAt, new Date(`${opts.startDate}T00:00:00`)));
+      conditions.push(gte(schema.cartAbandonments.updatedAt, nigeriaDayStart(opts.startDate)));
     }
     if (opts.endDate) {
-      conditions.push(lte(schema.cartAbandonments.updatedAt, new Date(`${opts.endDate}T23:59:59`)));
+      conditions.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(opts.endDate)));
     }
     return conditions;
   }
@@ -1069,10 +1070,10 @@ export class CartService {
       conditions.push(inArray(schema.campaigns.branchId, opts.effectiveBranchIds));
     }
     if (opts.startDate) {
-      conditions.push(gte(schema.cartAbandonments.updatedAt, new Date(`${opts.startDate}T00:00:00`)));
+      conditions.push(gte(schema.cartAbandonments.updatedAt, nigeriaDayStart(opts.startDate)));
     }
     if (opts.endDate) {
-      conditions.push(lte(schema.cartAbandonments.updatedAt, new Date(`${opts.endDate}T23:59:59`)));
+      conditions.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(opts.endDate)));
     }
     const res = await this.db
       .select({ count: count() })

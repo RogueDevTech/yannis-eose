@@ -94,6 +94,8 @@ interface StatusBadgeProps {
   showDot?: boolean;
   /** Render only a colored dot (no text/border). Tooltip shows status on tap/hover. */
   dotOnly?: boolean;
+  /** Dot + colored text, no pill background/border. */
+  textOnly?: boolean;
   size?: BadgeSize;
   className?: string;
 }
@@ -105,17 +107,42 @@ function formatStatusLabel(status: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const textColorClasses: Record<BadgeVariant, string> = {
+  success: 'text-success-600 dark:text-success-400',
+  warning: 'text-warning-600 dark:text-warning-400',
+  danger: 'text-danger-600 dark:text-danger-400',
+  info: 'text-info-600 dark:text-info-400',
+  neutral: 'text-app-fg-muted',
+  brand: 'text-brand-600 dark:text-brand-400',
+};
+
 export function StatusBadge({
   status,
   variant,
   label,
   showDot = false,
   dotOnly = false,
+  textOnly = false,
   size = 'md',
   className = '',
 }: StatusBadgeProps) {
   const resolvedVariant = variant ?? STATUS_VARIANT_MAP[status.toLowerCase()] ?? 'neutral';
   const displayLabel = label ?? ORDER_STATUS_LABELS[status] ?? formatStatusLabel(status);
+
+  if (textOnly) {
+    return (
+      <span
+        className={[
+          'inline-flex items-center gap-1.5 text-xs font-medium',
+          textColorClasses[resolvedVariant],
+          className,
+        ].filter(Boolean).join(' ')}
+      >
+        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dotColorClasses[resolvedVariant]}`} />
+        {displayLabel}
+      </span>
+    );
+  }
 
   if (dotOnly) {
     return (
