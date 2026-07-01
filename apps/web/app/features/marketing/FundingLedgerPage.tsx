@@ -123,8 +123,10 @@ export function FundingLedgerPage({
             <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
               -<NairaPrice amount={Math.abs(e.balanceEffect)} />
             </span>
-          ) : e.entryType === 'request' ? (
-            <span className="text-sm text-app-fg-muted">—</span>
+          ) : e.balanceEffect === 0 && (e.entryType === 'expense' || e.entryType === 'transfer_out') ? (
+            <span className="text-sm font-medium text-app-fg-muted tabular-nums">
+              <NairaPrice amount={0} />
+            </span>
           ) : (
             <span className="text-sm text-app-fg-muted">—</span>
           ),
