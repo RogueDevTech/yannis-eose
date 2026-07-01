@@ -9,6 +9,7 @@ import {
   gte,
   lte,
   gt,
+  lt,
   count,
   sum,
   inArray,
@@ -6636,27 +6637,60 @@ export class MarketingService {
       });
     }
 
-    // Sort newest first
-    entries.sort((a, b) => b.eventDate.getTime() - a.eventDate.getTime());
+    // Sort oldest-first so the ledger reads chronologically (opening balance → transactions → closing)
+    entries.sort((a, b) => a.eventDate.getTime() - b.eventDate.getTime());
 
     const total = entries.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const offset = (page - 1) * limit;
     const paged = entries.slice(offset, offset + limit);
 
-    // Compute running balance — sum of all balance effects from the start up to each entry
-    // We walk from oldest to newest to build the running balance, then slice.
-    // For efficiency with large datasets, compute the "tail balance" (sum of effects after this page)
-    // and walk backwards, or compute cumulative from the start.
-    const allBalanceEffects = entries.map((e) => e.balanceEffect);
-    // Running balance at position i = sum of effects from end (newest=index 0 is latest)
-    // Actually, running balance should show: after this transaction, what's the balance?
-    // Since entries are newest-first, running balance at i = sum of effects from i to end
-    const suffixSums: number[] = new Array(entries.length);
-    let cumulative = 0;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      cumulative += allBalanceEffects[i]!;
-      suffixSums[i] = cumulative;
+    // Opening balance: sum of all balance effects for transactions BEFORE the date range.
+    // When no date filter is applied (all-time), opening balance is 0.
+    let openingBalance = 0;
+    if (dStart) {
+      // We need to query all transactions before dStart to compute the opening balance.
+      // Since we already have the filtered entries (within range), we compute the
+      // opening balance from a separate query-free approach: use the all-time
+      // cumulative minus the in-range effects.
+      // Actually, the entries array only has in-range items. We need a separate calc.
+      // Use getFundingBalance-style logic but only for pre-startDate transactions.
+      const preRangeTransfersIn = await this.db
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(and(
+          eq(schema.marketingFunding.receiverId, userId),
+          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+          lt(schema.marketingFunding.sentAt, dStart),
+        ));
+      const preRangeTransfersOut = await this.db
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(and(
+          eq(schema.marketingFunding.senderId, userId),
+          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+          lt(schema.marketingFunding.sentAt, dStart),
+        ));
+      const preRangeExpenses = await this.db
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(and(
+          eq(schema.adSpendLogs.mediaBuyerId, userId),
+          inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
+          lt(schema.adSpendLogs.spendDate, dStart),
+        ));
+      const preIn = Number(preRangeTransfersIn[0]?.total ?? 0);
+      const preOut = Number(preRangeTransfersOut[0]?.total ?? 0);
+      const preExp = Number(preRangeExpenses[0]?.total ?? 0);
+      openingBalance = preIn - preOut - preExp;
+    }
+
+    // Running balance: opening balance + cumulative effects oldest→newest
+    const prefixSums: number[] = new Array(entries.length);
+    let cumulative = openingBalance;
+    for (let i = 0; i < entries.length; i++) {
+      cumulative += entries[i]!.balanceEffect;
+      prefixSums[i] = cumulative;
     }
 
     // Summary
@@ -6670,7 +6704,7 @@ export class MarketingService {
         eventDate: e.eventDate.toISOString(),
         amount: String(e.amount),
         balanceEffect: e.balanceEffect,
-        runningBalance: suffixSums[offset + i] ?? 0,
+        runningBalance: prefixSums[offset + i] ?? 0,
         status: e.status,
         description: e.description,
         counterpartyName: e.counterpartyName,
@@ -6682,6 +6716,7 @@ export class MarketingService {
         totalCredits: String(totalCredits),
         totalDebits: String(totalDebits),
         closingBalance: String(cumulative),
+        openingBalance: String(openingBalance),
       },
     };
   }
