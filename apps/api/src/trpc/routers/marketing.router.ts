@@ -867,7 +867,7 @@ export const marketingRouter = router({
           restrictMbIds,
           ctx.effectiveBranchIds,
         ),
-        getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds: restrictMbIds ?? undefined, startDate: input.startDate, endDate: input.endDate }, ctx.effectiveBranchIds),
+        getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds: restrictMbIds ?? undefined }, ctx.effectiveBranchIds),
         getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
         getCartService().countAllCarts({
@@ -1863,11 +1863,11 @@ export const marketingRouter = router({
                   if (!restrictToUserIds.includes(ctx.user.id)) restrictToUserIds.push(ctx.user.id);
                 }
               }
-              return getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds, ...dateRange }, ctx.effectiveBranchIds);
+              return getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds }, ctx.effectiveBranchIds);
             })().catch(() => null)
           : Promise.resolve(null),
         showFundingBalance
-          ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds, dateRange)
+          ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
         ctx.currentBranchId
           ? listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>)

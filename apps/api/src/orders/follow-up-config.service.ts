@@ -35,6 +35,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   async onApplicationBootstrap() {
     setTimeout(() => {
       this.backfillFollowUpMbAttribution()
+        .then(() => this.retryFailedGraduations())
         .then(() => this.runSync('cron'))
         .catch((err) =>
           this.logger.error(`Boot sync failed: ${err instanceof Error ? err.message : err}`),
@@ -1657,9 +1658,15 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
     }
 
-    // Graduation: when DELIVERED, copy into orders table
+    // Graduation: when DELIVERED, copy into orders table.
+    // Wrapped in try/catch so the DELIVERED status (already committed above)
+    // is never rolled back. Failed graduations are retried by the boot sweep.
     if (newStatus === 'DELIVERED') {
-      await this.graduateToOrders(orderId);
+      try {
+        await this.graduateToOrders(orderId);
+      } catch (err) {
+        this.logger.error(`Follow-up graduation failed for ${orderId} — will be retried by boot sweep: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     return { success: true };
@@ -1719,6 +1726,50 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   // ── Graduation ─────────────────────────────────────────────────────
+
+  /**
+   * Boot sweep: find DELIVERED follow-up orders that never graduated into the
+   * orders table (graduation threw after the DELIVERED status committed) and
+   * retry them. Also retries cart-origin follow-ups that graduated via the
+   * follow-up pipeline.
+   */
+  /**
+   * Retry orphaned follow-up graduations. Called on boot and can be
+   * triggered manually. Cart order graduations are handled separately
+   * by CartOrdersService.retryFailedGraduations().
+   */
+  async retryFailedGraduations(): Promise<void> {
+    const orphaned = await this.db.execute<{ id: string }>(sql`
+      SELECT fo.id
+      FROM follow_up_orders fo
+      WHERE fo.status = 'DELIVERED'
+        AND fo.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM orders o
+          WHERE o.is_follow_up = true
+            AND o.customer_phone_hash = fo.customer_phone_hash
+            AND (
+              (fo.source_order_id IS NOT NULL AND o.follow_up_source_order_id = fo.source_order_id)
+              OR (fo.cart_id IS NOT NULL AND o.cart_id = fo.cart_id)
+            )
+        )
+      LIMIT 200
+    `);
+
+    if (orphaned.length === 0) return;
+
+    this.logger.log(`Retrying graduation for ${orphaned.length} orphaned follow-up order(s)`);
+    let succeeded = 0;
+    for (const row of orphaned) {
+      try {
+        await this.graduateToOrders(row.id);
+        succeeded++;
+      } catch (err) {
+        this.logger.error(`Retry graduation failed for follow-up ${row.id}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    this.logger.log(`Follow-up graduation retry: ${succeeded}/${orphaned.length} succeeded`);
+  }
 
   private async graduateToOrders(followUpOrderId: string) {
     const [fuOrder] = await this.db
