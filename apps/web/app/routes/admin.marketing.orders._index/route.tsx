@@ -229,45 +229,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
           ...(mediaBuyerId ? { mediaBuyerId } : {}),
         }),
       );
-      const cartsRes = await apiRequest<unknown>(`/trpc/cartOrders.list?input=${cartsInput}`, {
+      const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
         method: 'GET',
         cookie,
       });
-      type CartOrder = {
+      type AbandonedCart = {
         id: string;
-        orderNumber: number;
         customerName: string;
-        status: string;
-        totalAmount: string | null;
-        createdAt: string;
-        assignedCsId: string | null;
-        assignedCsName: string | null;
+        customerPhoneDisplay: string;
+        productId: string;
+        productName: string | null;
+        campaignId: string;
+        campaignName: string | null;
         mediaBuyerId: string | null;
         mediaBuyerName: string | null;
-        campaignId: string | null;
-        campaignName: string | null;
-        orderItems: Array<{ productId: string; productName: string | null; quantity: number; unitPrice: string }>;
+        offerLabel: string | null;
+        updatedAt: string;
+        recovered: boolean;
       };
       const cartsData = cartsRes.ok
-        ? (cartsRes.data as { result?: { data?: { orders: CartOrder[]; total: number; totalPages: number } } })?.result?.data
+        ? (cartsRes.data as { result?: { data?: { items: AbandonedCart[]; total: number; page: number; limit: number } } })?.result?.data
         : null;
       const total = cartsData?.total ?? 0;
-      const totalPages = cartsData?.totalPages ?? (total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE));
-      const orders: Order[] = (cartsData?.orders ?? []).map((c) => ({
+      const totalPages = total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE);
+      const orders: Order[] = (cartsData?.items ?? []).map((c) => ({
         id: c.id,
-        orderNumber: c.orderNumber,
+        orderNumber: 0,
         customerName: c.customerName,
-        customerPhoneDisplay: '',
-        status: c.status,
-        totalAmount: c.totalAmount,
-        createdAt: c.createdAt,
-        assignedCsId: c.assignedCsId,
-        assignedCsName: c.assignedCsName,
+        customerPhoneDisplay: c.customerPhoneDisplay ?? '',
+        status: c.recovered ? 'RECOVERED' : 'ABANDONED',
+        totalAmount: null,
+        createdAt: c.updatedAt,
+        assignedCsId: null,
+        assignedCsName: null,
         mediaBuyerId: c.mediaBuyerId,
         mediaBuyerName: c.mediaBuyerName,
-        primaryProductId: c.orderItems[0]?.productId ?? null,
-        primaryProductName: c.orderItems[0]?.productName ?? null,
-        itemCount: c.orderItems.length,
+        primaryProductId: c.productId,
+        primaryProductName: c.productName,
+        itemCount: 1,
         campaignId: c.campaignId,
         campaignName: c.campaignName,
       }));

@@ -16,6 +16,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { SaveFilterPrefsButton } from '~/components/ui/save-filter-prefs-button';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
@@ -604,6 +605,7 @@ export function MarketingOrdersPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
+                <SaveFilterPrefsButton pageKey="admin.marketing.orders" />
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}

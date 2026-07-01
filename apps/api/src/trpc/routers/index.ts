@@ -23,6 +23,7 @@ import { roleTemplatesRouter } from './role-templates.router';
 import { permissionsRouter } from './permissions.router';
 import { onboardingRouter } from './onboarding.router';
 import { cartOrdersRouter } from './cart-orders.router';
+import { userFilterPreferencesRouter } from './user-filter-preferences.router';
 
 /**
  * Root tRPC router — merges all module routers.
@@ -53,6 +54,7 @@ export const appRouter = router({
   permissions: permissionsRouter,
   onboarding: onboardingRouter,
   cartOrders: cartOrdersRouter,
+  filterPreferences: userFilterPreferencesRouter,
 });
 
 export type AppRouter = typeof appRouter;

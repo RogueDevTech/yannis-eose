@@ -23,23 +23,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw redirect('/admin/finance/delivery-remittances');
   }
 
-  // Fetch eligible orders — pass a large limit so we get all selected IDs.
-  // The eligible endpoint returns DELIVERED orders not yet on a remittance.
+  // Fetch exactly the selected eligible orders by ID
   const eligibleRes = await apiRequest<unknown>(
     '/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' +
-      encodeURIComponent(JSON.stringify({ page: 1, limit: 500 })),
+      encodeURIComponent(JSON.stringify({ orderIds, page: 1, limit: orderIds.length })),
     { method: 'GET', cookie },
   );
 
-  let allEligible: EligibleOrder[] = [];
+  let selectedOrders: EligibleOrder[] = [];
   if (eligibleRes.ok) {
     const data = (eligibleRes.data as { result?: { data?: { orders: EligibleOrder[] } } })?.result?.data;
-    allEligible = data?.orders ?? [];
+    selectedOrders = data?.orders ?? [];
   }
-
-  // Filter to only the requested order IDs
-  const requestedSet = new Set(orderIds);
-  const selectedOrders = allEligible.filter((o) => requestedSet.has(o.id));
 
   return { selectedOrders, userId: user.id, userRole: user.role };
 }

@@ -10,7 +10,8 @@
     "./validators": "./src/validators/index.ts",
     "./enums": "./src/enums/index.ts",
     "./trpc": "./src/trpc/index.ts",
-    "./migrations": "./src/migrations/run-sql-migrations.ts"
+    "./migrations": "./src/migrations/run-sql-migrations.ts",
+    "./page-registry": "./src/page-registry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

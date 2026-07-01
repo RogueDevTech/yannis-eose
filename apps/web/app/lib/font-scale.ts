@@ -4,9 +4,9 @@
  */
 
 export const FONT_SCALES = [
-  { id: 'base', label: 'Default', sample: 'Aa', rootPx: 14 },
-  { id: 'large', label: 'Large', sample: 'Aa', rootPx: 15.75 },
-  { id: 'xlarge', label: 'Extra large', sample: 'Aa', rootPx: 17.5 },
+  { id: 'base', label: 'Small', sample: 'Aa', rootPx: 14 },
+  { id: 'large', label: 'Medium', sample: 'Aa', rootPx: 15.75 },
+  { id: 'xlarge', label: 'Large (default)', sample: 'Aa', rootPx: 17.5 },
 ] as const;
 
 export type FontScaleId = (typeof FONT_SCALES)[number]['id'];
