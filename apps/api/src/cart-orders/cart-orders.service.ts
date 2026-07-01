@@ -225,11 +225,13 @@ export class CartOrdersService {
     // milestone timestamp so "delivered this month" shows orders delivered in
     // the period, not just created in it.
     const dateCol =
-      input.status === 'DELIVERED' || input.status === 'REMITTED'
-        ? schema.cartOrders.deliveredAt
-        : input.status === 'CONFIRMED' || input.status === 'AGENT_ASSIGNED' || input.status === 'DISPATCHED' || input.status === 'IN_TRANSIT'
-          ? schema.cartOrders.confirmedAt
-          : schema.cartOrders.createdAt;
+      input.showDeleted
+        ? schema.cartOrders.deletedAt
+        : input.status === 'DELIVERED' || input.status === 'REMITTED'
+          ? schema.cartOrders.deliveredAt
+          : input.status === 'CONFIRMED' || input.status === 'AGENT_ASSIGNED' || input.status === 'DISPATCHED' || input.status === 'IN_TRANSIT'
+            ? schema.cartOrders.confirmedAt
+            : schema.cartOrders.createdAt;
     if (input.startDate) conditions.push(gte(dateCol, nigeriaDayStart(input.startDate)));
     if (input.endDate) conditions.push(lte(dateCol, nigeriaDayEnd(input.endDate)));
 

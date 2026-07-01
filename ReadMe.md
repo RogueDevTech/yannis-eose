@@ -9,13 +9,23 @@ pnpm turbo dev
 
 docker restart yannis-eose-api-1
 
+   
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
  -->
 
 
+docker exec yannis-eose-api-1 grep -c "Step A: starting INSERT" /app/dist/cart-orders/cart-orders.service.js 2>/dev/null || echo "not found"  
+
+docker compose pull && docker compose up -d --force-recreate                     
+
+      cd /opt/yannis-eose && docker compose pull api && docker compose up -d api                     
+
 sudo docker logs yannis-eose-api-1 --since 30m 2>&1 | grep -i "migration\|cart\|error\|failed" | tail -20       
 
 sudo docker logs yannis-eose-api-1 --since 3m 2>&1 | grep -i "\[Cart\]"   
+
+
+
 
 
   cd ~/yannis-eose && git pull origin main && sudo docker compose build api && sudo docker compose up -d api   

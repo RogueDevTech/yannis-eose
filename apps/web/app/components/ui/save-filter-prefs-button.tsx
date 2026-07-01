@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useContext } from 'react';
 import { useSearchParams } from '@remix-run/react';
+import { FilterPrefsContext } from '~/hooks/useFilterPreferences';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { useToast } from '~/components/ui/toast';
@@ -49,6 +50,7 @@ export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsPro
   // localHasSaved mirrors the prop; mutations flip it locally for instant feedback.
   const [localHasSaved, setLocalHasSaved] = useState(hasSavedPrefsProp);
   const { toast } = useToast();
+  const { setPagePrefs } = useContext(FilterPrefsContext);
 
   // Keep in sync when the prop changes (e.g. after context hydrates or a save
   // in a sibling hook updates the context).
@@ -76,10 +78,10 @@ export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsPro
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ intent: 'upsert', pageKey, filters }),
     })
-      .then(() => { setLocalHasSaved(true); toast.success('Filter defaults saved'); setShowModal(false); })
+      .then(() => { setLocalHasSaved(true); setPagePrefs(pageKey, filters); toast.success('Filter defaults saved'); setShowModal(false); })
       .catch(() => toast.error('Failed to save'))
       .finally(() => setSaving(false));
-  }, [searchParams, pageKey, toast]);
+  }, [searchParams, pageKey, toast, setPagePrefs]);
 
   const doClear = useCallback(() => {
     setSaving(true);
@@ -89,10 +91,10 @@ export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsPro
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ intent: 'delete', pageKey }),
     })
-      .then(() => { setLocalHasSaved(false); toast.info('Filter defaults cleared'); setShowModal(false); })
+      .then(() => { setLocalHasSaved(false); setPagePrefs(pageKey, null); toast.info('Filter defaults cleared'); setShowModal(false); })
       .catch(() => toast.error('Failed to clear'))
       .finally(() => setSaving(false));
-  }, [pageKey, toast]);
+  }, [pageKey, toast, setPagePrefs]);
 
   const handleClick = () => {
     setShowModal(true);
