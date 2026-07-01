@@ -5,6 +5,8 @@ import { useState, useCallback } from 'react';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
+import { Modal } from '~/components/ui/modal';
 import { EmptyState } from '~/components/ui/empty-state';
 import { useToast } from '~/components/ui/toast';
 import {
@@ -72,11 +74,6 @@ const SORT_BY_OPTIONS = [
   { value: 'preferredDeliveryDate', label: 'Delivery date' },
 ];
 
-// ── Shared select class ─────────────────────────────────────────────
-
-const selectCls = 'h-10 md:h-9 w-full text-sm rounded-md border border-app-border bg-app-elevated px-3 text-app-fg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 appearance-none';
-const inputCls = 'h-10 md:h-9 w-full text-sm rounded-md border border-app-border bg-app-elevated px-3 text-app-fg focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
-
 // ── Options lookup by key ───────────────────────────────────────────
 
 function getOptions(filterKey: string): { value: string; label: string }[] | null {
@@ -104,47 +101,70 @@ function FilterEditor({
   const label = FILTER_LABELS[filterKey] ?? filterKey;
   const options = getOptions(filterKey);
 
+  if (options) {
+    return (
+      <FormSelect
+        label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        options={options}
+      />
+    );
+  }
+
   return (
     <div className="space-y-1">
       <label className="block text-xs font-medium text-app-fg-muted">{label}</label>
-      {options ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={selectCls}>
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      ) : (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={inputCls}
-        />
-      )}
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10 md:h-9 w-full text-sm rounded-md border border-app-border bg-app-elevated px-3 text-app-fg focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+      />
     </div>
   );
 }
 
 // ── Tree rendering ──────────────────────────────────────────────────
 
-function FilterPrefsTree({
-  nodes,
+/**
+ * Renders the full page list — groups are subtle section headers,
+ * pages are tappable cards underneath.
+ */
+function FilterPrefsList({
+  tree,
   allPrefs,
   onSave,
   onReset,
-  depth = 0,
 }: {
-  nodes: PageTreeNode[];
+  tree: PageTreeNode[];
   allPrefs: Record<string, Record<string, string>>;
   onSave: (pageKey: string, filters: Record<string, string>) => void;
   onReset: (pageKey: string) => void;
-  depth?: number;
 }) {
   return (
-    <div className={depth > 0 ? 'pl-6' : ''}>
-      {nodes.map((node) => (
-        <FilterPrefsNode key={node.key} node={node} allPrefs={allPrefs} onSave={onSave} onReset={onReset} depth={depth} />
-      ))}
+    <div className="space-y-6">
+      {tree.map((group) => {
+        const isGroup = group.children.length > 0;
+        if (!isGroup) {
+          // Top-level leaf page (Products, Returns, etc.)
+          return (
+            <FilterPrefsNode key={group.key} node={group} allPrefs={allPrefs} onSave={onSave} onReset={onReset} depth={0} />
+          );
+        }
+        return (
+          <div key={group.key}>
+            <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-2 px-1">
+              {group.label}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {group.children.map((child) => (
+                <FilterPrefsNode key={child.key} node={child} allPrefs={allPrefs} onSave={onSave} onReset={onReset} depth={1} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -163,11 +183,9 @@ function FilterPrefsNode({
   depth: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const isGroup = node.children.length > 0;
   const userPrefs = allPrefs[node.key];
   const hasUserPrefs = userPrefs && Object.keys(userPrefs).length > 0;
   const hasDefaults = node.defaultFilters && Object.keys(node.defaultFilters).length > 0;
-  const isLeaf = !isGroup;
 
   // Local editing state — starts from user prefs or system defaults.
   // When user prefs have explicit date params, drop the registry's datePreset
@@ -186,8 +204,6 @@ function FilterPrefsNode({
   });
   const [dirty, setDirty] = useState(false);
 
-  const overrideCount = isGroup ? countOverrides(node, allPrefs) : 0;
-
   const handleChange = (key: string, value: string) => {
     setEditValues((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
@@ -204,104 +220,103 @@ function FilterPrefsNode({
     setDirty(false);
   };
 
+  // Leaf page: tappable card → opens modal
+  const filterCount = Object.keys(editValues).length;
+  const visibleFilters = Object.entries(editValues)
+    .sort(([a], [b]) => {
+      const order = ['datePreset', 'startDate', 'endDate', 'period', 'status', 'perPage', 'sortBy', 'sortOrder', 'sortDir'];
+      return (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b));
+    })
+    .filter(([k]) => {
+      if (k === 'period' && 'datePreset' in editValues) return false;
+      if ((k === 'startDate' || k === 'endDate') && 'datePreset' in editValues) return false;
+      if ((k === 'startDate' || k === 'endDate') && editValues.period === 'all_time') return false;
+      return true;
+    });
+
   return (
-    <div className="py-1">
+    <>
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className={`w-full flex items-center gap-2 py-2.5 px-3 rounded-lg text-left transition-colors ${
-          expanded && isLeaf
-            ? 'bg-brand-50/50 dark:bg-brand-900/10'
-            : 'hover:bg-app-bg-hover'
-        }`}
+        onClick={() => setExpanded(true)}
+        className="w-full h-full rounded-lg border border-app-border bg-app-elevated p-3 text-left hover:border-brand-300 dark:hover:border-brand-700 transition-colors flex flex-col"
       >
-        <svg
-          className={`h-3.5 w-3.5 shrink-0 text-app-fg-muted transition-transform ${expanded ? 'rotate-90' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-        </svg>
-
-        <span className={`text-sm flex-1 ${isGroup ? 'font-semibold text-app-fg' : 'text-app-fg'}`}>
-          {node.label}
-        </span>
-
-        {isGroup && overrideCount > 0 && (
-          <span className="text-micro text-brand-500 dark:text-brand-400 tabular-nums">
-            {overrideCount} customized
-          </span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-app-fg">{node.label}</span>
+          {hasUserPrefs ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900/30 px-2 py-0.5 text-micro font-medium text-brand-600 dark:text-brand-400">
+              Customized
+            </span>
+          ) : hasDefaults ? (
+            <span className="inline-flex items-center rounded-full bg-app-bg-hover px-2 py-0.5 text-micro text-app-fg-muted">
+              Default
+            </span>
+          ) : null}
+        </div>
+        {filterCount > 0 && (
+          <div className="mt-2 space-y-0.5">
+            {visibleFilters.slice(0, 2).map(([k, v]) => {
+              const options = getOptions(k);
+              const displayVal = options?.find((o) => o.value === v)?.label ?? v;
+              return (
+                <p key={k} className="text-micro text-app-fg-muted truncate">
+                  {FILTER_LABELS[k] ?? k}: <span className="text-app-fg">{displayVal}</span>
+                </p>
+              );
+            })}
+            {visibleFilters.length > 2 && (
+              <p className="text-micro text-app-fg-muted">+{visibleFilters.length - 2} more</p>
+            )}
+          </div>
         )}
-        {isLeaf && hasUserPrefs && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900/30 px-2 py-0.5 text-micro font-medium text-brand-600 dark:text-brand-400">
-            Customized
-          </span>
-        )}
-        {isLeaf && !hasUserPrefs && hasDefaults && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-app-bg-hover px-2 py-0.5 text-micro text-app-fg-muted">
-            Default
-          </span>
-        )}
+        <div className="flex items-center gap-1 mt-auto pt-2 text-micro text-brand-500 dark:text-brand-400 font-medium">
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" />
+          </svg>
+          Edit filters
+        </div>
       </button>
 
-      {expanded && isGroup && (
-        <FilterPrefsTree nodes={node.children} allPrefs={allPrefs} onSave={onSave} onReset={onReset} depth={depth + 1} />
-      )}
+      <Modal open={expanded} onClose={() => setExpanded(false)} maxWidth="max-w-md" contentClassName="p-5 md:p-6">
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-app-fg">{node.label}</h3>
+            <p className="text-sm text-app-fg-muted mt-1">Set default filters for this page.</p>
+          </div>
 
-      {expanded && isLeaf && (
-        <div className="mt-1 mb-2 rounded-lg border border-app-border bg-app-elevated overflow-hidden">
-          {Object.keys(editValues).length > 0 ? (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-3 md:p-4">
-                {Object.entries(editValues)
-                  .sort(([a], [b]) => {
-                    const order = ['datePreset', 'startDate', 'endDate', 'period', 'status', 'perPage', 'sortBy', 'sortOrder', 'sortDir'];
-                    const ai = order.indexOf(a);
-                    const bi = order.indexOf(b);
-                    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-                  })
-                  .filter(([k]) => {
-                    // Hide period when datePreset is present (All Time is a datePreset option)
-                    if (k === 'period' && 'datePreset' in editValues) return false;
-                    // Hide raw startDate/endDate when datePreset drives the range
-                    if ((k === 'startDate' || k === 'endDate') && 'datePreset' in editValues) return false;
-                    // Hide raw startDate/endDate when period=all_time (no dates)
-                    if ((k === 'startDate' || k === 'endDate') && editValues.period === 'all_time') return false;
-                    return true;
-                  })
-                  .map(([k, v]) => (
-                  <FilterEditor
-                    key={k}
-                    filterKey={k}
-                    value={v}
-                    onChange={(newVal) => handleChange(k, newVal)}
-                  />
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2 px-3 md:px-4 py-2.5 bg-app-bg-hover border-t border-app-border">
-                <Button size="sm" variant="primary" onClick={handleSave} disabled={!dirty}>
-                  {dirty ? 'Save changes' : 'Saved'}
-                </Button>
-                {hasUserPrefs && (
-                  <Button size="sm" variant="ghost" onClick={handleReset}>
-                    Reset to default
-                  </Button>
-                )}
-                {dirty && (
-                  <span className="text-xs text-warning-600 dark:text-warning-400 ml-auto">Unsaved</span>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="px-4 py-6 text-center">
-              <p className="text-sm text-app-fg-muted">
-                No configurable filters for this page.
-              </p>
+          {filterCount > 0 ? (
+            <div className="space-y-4">
+              {visibleFilters.map(([k, v]) => (
+                <FilterEditor
+                  key={k}
+                  filterKey={k}
+                  value={v}
+                  onChange={(newVal) => handleChange(k, newVal)}
+                />
+              ))}
             </div>
+          ) : (
+            <p className="text-sm text-app-fg-muted py-6 text-center">
+              No configurable filters for this page.
+            </p>
           )}
+
+          <div className="flex items-center gap-3 pt-4 border-t border-app-border">
+            <Button size="sm" variant="primary" onClick={() => { handleSave(); setExpanded(false); }} disabled={!dirty}>
+              {dirty ? 'Save changes' : 'Saved'}
+            </Button>
+            {hasUserPrefs && (
+              <Button size="sm" variant="ghost" onClick={() => { handleReset(); setExpanded(false); }}>
+                Reset to default
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => setExpanded(false)} className="ml-auto">
+              Cancel
+            </Button>
+          </div>
         </div>
-      )}
-    </div>
+      </Modal>
+    </>
   );
 }
 
@@ -384,11 +399,7 @@ export default function FilterPreferencesPage() {
       {tree.length === 0 ? (
         <EmptyState title="No pages available" description="You don't have access to any filterable pages." />
       ) : (
-        <div className="card divide-y divide-app-border">
-          {tree.map((group) => (
-            <FilterPrefsTree key={group.key} nodes={[group]} allPrefs={allPrefs} onSave={handleSave} onReset={handleReset} />
-          ))}
-        </div>
+        <FilterPrefsList tree={tree} allPrefs={allPrefs} onSave={handleSave} onReset={handleReset} />
       )}
     </div>
   );

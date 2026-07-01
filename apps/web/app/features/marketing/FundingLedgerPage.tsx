@@ -4,16 +4,18 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { Tabs } from '~/components/ui/tabs';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { SearchInput } from '~/components/ui/search-input';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { FundingLedgerEntry, FundingLedgerLoaderData } from './types';
 
 const ENTRY_TYPE_TABS = [
@@ -62,14 +64,35 @@ export function FundingLedgerPage({
 }: FundingLedgerLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [detailEntry, setDetailEntry] = useState<FundingLedgerEntry | null>(null);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') ?? '');
+  const [showExport, setShowExport] = useState(false);
 
   const columns = useMemo(
     (): CompactTableColumn<FundingLedgerEntry>[] => [
+      {
+        key: 'txnId',
+        header: 'Transaction ID',
+        nowrap: true,
+        render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
+          const shortId = `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
+          return <OrderIdBadge id={shortId} length={20} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />;
+        },
+      },
       {
         key: 'date',
         header: 'Date',
         nowrap: true,
         render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') {
+            if (!e.eventDate) return null;
+            const d = new Date(e.eventDate);
+            return (
+              <span className="text-xs text-brand-600 dark:text-brand-400">
+                {d.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
+            );
+          }
           const d = new Date(e.eventDate);
           return (
             <span className="text-xs text-app-fg-muted">
@@ -86,40 +109,67 @@ export function FundingLedgerPage({
         header: 'Type',
         nowrap: true,
         minWidth: 'min-w-[6rem]',
-        render: (e) => (
-          <span className={`text-xs font-medium ${TYPE_COLORS[e.entryType] ?? 'text-app-fg'}`}>
-            {TYPE_LABELS[e.entryType] ?? e.entryType}
-          </span>
-        ),
+        render: (e) => {
+          if (e.id === '__opening_balance__') {
+            return <span className="text-xs font-medium text-brand-600 dark:text-brand-400">Opening</span>;
+          }
+          if (e.id === '__closing_balance__') {
+            return <span className="text-xs font-medium text-brand-600 dark:text-brand-400">Closing</span>;
+          }
+          return (
+            <span className={`text-xs font-medium ${TYPE_COLORS[e.entryType] ?? 'text-app-fg'}`}>
+              {TYPE_LABELS[e.entryType] ?? e.entryType}
+            </span>
+          );
+        },
       },
       {
         key: 'description',
         header: 'Description',
-        render: (e) => (
-          <span className="text-sm text-app-fg truncate block max-w-[20rem]" title={e.description}>{e.description}</span>
-        ),
+        render: (e) => {
+          if (e.id === '__opening_balance__') {
+            return <span className="text-xs font-semibold text-brand-600 dark:text-brand-400 uppercase tracking-wider">Opening Balance</span>;
+          }
+          if (e.id === '__closing_balance__') {
+            return <span className="text-xs font-semibold text-brand-600 dark:text-brand-400 uppercase tracking-wider">Closing Balance</span>;
+          }
+          return <span className="text-sm text-app-fg truncate block max-w-[8rem] sm:max-w-[14rem] lg:max-w-[20rem]" title={e.description}>{e.description}</span>;
+        },
+      },
+      {
+        key: 'counterparty',
+        header: 'Counterparty',
+        render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
+          return e.counterpartyName
+            ? <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={e.counterpartyName}>{e.counterpartyName}</span>
+            : <span className="text-sm text-app-fg-muted">—</span>;
+        },
       },
       {
         key: 'credit',
         header: 'Credit',
         align: 'right',
         nowrap: true,
-        render: (e) =>
-          e.balanceEffect > 0 ? (
+        render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
+          return e.balanceEffect > 0 ? (
             <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">
               +<NairaPrice amount={e.balanceEffect} />
             </span>
           ) : (
             <span className="text-sm text-app-fg-muted">—</span>
-          ),
+          );
+        },
       },
       {
         key: 'debit',
         header: 'Debit',
         align: 'right',
         nowrap: true,
-        render: (e) =>
-          e.balanceEffect < 0 ? (
+        render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
+          return e.balanceEffect < 0 ? (
             <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
               -<NairaPrice amount={Math.abs(e.balanceEffect)} />
             </span>
@@ -129,12 +179,13 @@ export function FundingLedgerPage({
             </span>
           ) : (
             <span className="text-sm text-app-fg-muted">—</span>
-          ),
+          );
+        },
       },
       {
         key: 'status',
         header: 'Status',
-        render: (e) => <StatusBadge status={e.status} />,
+        render: (e) => (e.id === '__opening_balance__' || e.id === '__closing_balance__') ? null : <StatusBadge status={e.status} textOnly />,
       },
       {
         key: 'balance',
@@ -142,6 +193,13 @@ export function FundingLedgerPage({
         align: 'right',
         nowrap: true,
         render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') {
+            return (
+              <span className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">
+                <NairaPrice amount={e.runningBalance} />
+              </span>
+            );
+          }
           if (e.entryType === 'request') return <span className="text-sm text-app-fg-muted">—</span>;
           const bal = e.runningBalance;
           return (
@@ -162,7 +220,7 @@ export function FundingLedgerPage({
         header: '',
         align: 'right',
         tight: true,
-        render: (e) => (
+        render: (e) => (e.id === '__opening_balance__' || e.id === '__closing_balance__') ? null : (
           <TableActionButton onClick={() => setDetailEntry(e)}>View</TableActionButton>
         ),
       },
@@ -195,6 +253,18 @@ export function FundingLedgerPage({
                   chrome="pill"
                 />
                 <PageRefreshButton />
+                {entries.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowExport(true)}
+                    className="btn-secondary btn-sm gap-1.5"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Export
+                  </button>
+                )}
               </>
             }
             sheet={<PageRefreshButton />}
@@ -202,41 +272,23 @@ export function FundingLedgerPage({
         }
       />
 
-      {/* MB Picker */}
-      {mediaBuyers.length > 1 && (
-        <FormSelect
-          label="Team Member"
-          value={selectedUserId}
-          onChange={(e) => {
-            const next = new URLSearchParams(searchParams);
-            if (e.target.value) {
-              next.set('userId', e.target.value);
-            } else {
-              next.delete('userId');
-            }
-            next.delete('page');
-            setSearchParams(next);
-          }}
-          options={[
-            { value: '', label: 'Select a team member…' },
-            ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
-          ]}
-          wrapperClassName="max-w-xs"
-        />
-      )}
-
       {selectedUserId ? (
         <>
           <OverviewStatStrip
             mobileGrid
             items={[
-              ...(hasDateFilter ? [{
-                label: 'Opening Balance',
+              {
+                label: hasDateFilter ? 'Opening Balance' : 'Starting Balance',
                 value: formatNaira(openingBal),
                 valueClassName: `tabular-nums ${openingBal < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`,
-              }] : []),
+              },
               { label: 'Total Credits', value: formatNaira(Number(summary.totalCredits)), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
               { label: 'Total Debits', value: formatNaira(Number(summary.totalDebits)), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
+              {
+                label: 'Net Movement',
+                value: formatNaira(Number(summary.totalCredits) - Number(summary.totalDebits)),
+                valueClassName: `tabular-nums ${Number(summary.totalCredits) - Number(summary.totalDebits) >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`,
+              },
               {
                 label: hasDateFilter ? 'Closing Balance' : 'Current Balance',
                 value: formatNaira(closingBal),
@@ -246,26 +298,71 @@ export function FundingLedgerPage({
             ]}
           />
 
-          <Tabs
-            value={entryTypeFilter}
-            onChange={(v) => {
-              const next = new URLSearchParams(searchParams);
-              next.set('entryType', v);
-              next.delete('page');
-              setSearchParams(next);
-            }}
-            tabs={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
-          />
-
-          {/* Opening balance row — shown when a date filter is active and on the first page */}
-          {hasDateFilter && page === 1 && selectedUserId && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-app-border bg-app-hover/40 px-4 py-2.5">
-              <span className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Opening Balance</span>
-              <span className={`text-sm font-semibold tabular-nums ${openingBal < 0 ? 'text-danger-600 dark:text-danger-400' : openingBal > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>
-                <NairaPrice amount={openingBal} />
-              </span>
-            </div>
-          )}
+          <div className="flex flex-col sm:flex-row gap-2">
+            {mediaBuyers.length > 1 && (
+              <FormSelect
+                label=""
+                value={selectedUserId}
+                onChange={(e) => {
+                  const next = new URLSearchParams(searchParams);
+                  if (e.target.value) next.set('userId', e.target.value);
+                  else next.delete('userId');
+                  next.delete('page');
+                  setSearchParams(next);
+                }}
+                options={[
+                  { value: '', label: 'All team members' },
+                  ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
+                ]}
+                wrapperClassName="w-full sm:w-52"
+              />
+            )}
+            <FormSelect
+              label=""
+              value={entryTypeFilter}
+              onChange={(e) => {
+                const next = new URLSearchParams(searchParams);
+                next.set('entryType', e.target.value);
+                next.delete('page');
+                setSearchParams(next);
+              }}
+              options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
+              wrapperClassName="w-full sm:w-44"
+            />
+            <form
+              method="get"
+              className="flex min-w-0 flex-1 gap-2 items-center"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  next.set('page', '1');
+                  if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                  else next.delete('search');
+                  return next;
+                });
+              }}
+            >
+              <SearchInput
+                name="search"
+                placeholder="Search by name or description..."
+                value={searchQuery}
+                onChange={(val) => {
+                  setSearchQuery(val);
+                  if (!val.trim() && searchParams.get('search')) {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.delete('search');
+                      next.set('page', '1');
+                      return next;
+                    });
+                  }
+                }}
+                withSubmitButton
+                wrapperClassName="min-w-0 w-full flex-1"
+              />
+            </form>
+          </div>
 
           {entries.length === 0 ? (
             <EmptyState
@@ -275,8 +372,45 @@ export function FundingLedgerPage({
           ) : (
             <CompactTable<FundingLedgerEntry>
               columns={columns}
-              rows={entries}
+              rows={(() => {
+                if (page !== 1 || !selectedUserId) return entries;
+                // Date: filter start date when date-filtered, or first transaction date for all-time
+                const openingDate = hasDateFilter && filters.startDate
+                  ? new Date(filters.startDate + 'T00:00:00').toISOString()
+                  : entries.length > 0 ? entries[0]!.eventDate : '';
+                const openingRow: FundingLedgerEntry = {
+                  id: '__opening_balance__',
+                  entryType: 'transfer_in' as const,
+                  eventDate: openingDate,
+                  amount: String(openingBal),
+                  balanceEffect: 0,
+                  runningBalance: openingBal,
+                  status: '',
+                  description: 'OPENING BALANCE',
+                  counterpartyName: null,
+                };
+                // Closing balance row — shown on the last page
+                const isLastPage = page >= totalPages;
+                const closingDate = hasDateFilter && filters.endDate
+                  ? new Date(filters.endDate + 'T23:59:59').toISOString()
+                  : entries.length > 0 ? entries[entries.length - 1]!.eventDate : '';
+                const closingRow: FundingLedgerEntry = {
+                  id: '__closing_balance__',
+                  entryType: 'transfer_in' as const,
+                  eventDate: closingDate,
+                  amount: String(closingBal),
+                  balanceEffect: 0,
+                  runningBalance: closingBal,
+                  status: '',
+                  description: 'CLOSING BALANCE',
+                  counterpartyName: null,
+                };
+                const rows = [openingRow, ...entries];
+                if (isLastPage) rows.push(closingRow);
+                return rows;
+              })()}
               rowKey={(e) => `${e.entryType}-${e.id}`}
+              rowClassName={(e) => (e.id === '__opening_balance__' || e.id === '__closing_balance__') ? 'bg-brand-50/40 dark:bg-brand-900/10' : ''}
               renderMobileCard={(e) => (
                 <button
                   type="button"
@@ -322,7 +456,7 @@ export function FundingLedgerPage({
                       </span>
                     )}
                   </div>
-                  <StatusBadge status={e.status} />
+                  <StatusBadge status={e.status} textOnly />
                 </div>
                 </button>
               )}
@@ -339,29 +473,56 @@ export function FundingLedgerPage({
           )}
         </>
       ) : (
-        <EmptyState
-          title="Select a team member"
-          description="Pick a team member above to view their complete funding history."
-        />
+        <>
+          {mediaBuyers.length > 1 && (
+            <FormSelect
+              label="Team Member"
+              value=""
+              onChange={(e) => {
+                const next = new URLSearchParams(searchParams);
+                if (e.target.value) next.set('userId', e.target.value);
+                next.delete('page');
+                setSearchParams(next);
+              }}
+              options={[
+                { value: '', label: 'Select a team member…' },
+                ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
+              ]}
+              wrapperClassName="max-w-xs"
+            />
+          )}
+          <EmptyState
+            title="Select a team member"
+            description="Pick a team member to view their funding history."
+          />
+        </>
       )}
 
       {/* Detail modal */}
       <Modal
         open={!!detailEntry}
         onClose={() => setDetailEntry(null)}
+        maxWidth="max-w-md"
+        contentClassName="p-5 md:p-6"
       >
         {detailEntry && (
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold text-app-fg">Transaction Detail</h2>
-            <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="space-y-5">
+            <div>
+              <h2 className="text-base font-semibold text-app-fg">Transaction Detail</h2>
+              <div className="mt-1">
+                <OrderIdBadge id={`TXN-${detailEntry.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`} length={20} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm">
               <div>
-                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Type</p>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Type</p>
                 <p className={`font-medium ${TYPE_COLORS[detailEntry.entryType] ?? 'text-app-fg'}`}>
                   {TYPE_LABELS[detailEntry.entryType] ?? detailEntry.entryType}
                 </p>
               </div>
               <div>
-                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Date</p>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Date</p>
                 <p className="text-app-fg">
                   {new Date(detailEntry.eventDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
                   {' '}
@@ -369,18 +530,18 @@ export function FundingLedgerPage({
                 </p>
               </div>
               <div>
-                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Amount</p>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Amount</p>
                 <p className="font-medium tabular-nums text-app-fg">
                   <NairaPrice amount={Number(detailEntry.amount)} />
                 </p>
               </div>
               <div>
-                <p className="text-app-fg-muted text-xs uppercase tracking-wider">Status</p>
+                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Status</p>
                 <StatusBadge status={detailEntry.status} />
               </div>
               {detailEntry.balanceEffect !== 0 && (
                 <div>
-                  <p className="text-app-fg-muted text-xs uppercase tracking-wider">
+                  <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">
                     {detailEntry.balanceEffect > 0 ? 'Credit' : 'Debit'}
                   </p>
                   <p className={`font-medium tabular-nums ${detailEntry.balanceEffect > 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
@@ -391,23 +552,47 @@ export function FundingLedgerPage({
               )}
               {detailEntry.entryType !== 'request' && (
                 <div>
-                  <p className="text-app-fg-muted text-xs uppercase tracking-wider">Running Balance</p>
+                  <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Running Balance</p>
                   <p className={`font-semibold tabular-nums ${detailEntry.runningBalance < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
                     <NairaPrice amount={detailEntry.runningBalance} />
                   </p>
                 </div>
               )}
             </div>
-            {detailEntry.description && (
-              <div>
-                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Description</p>
-                <p className="text-sm text-app-fg">{detailEntry.description}</p>
-              </div>
-            )}
-            {detailEntry.counterpartyName && (
-              <div>
-                <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Counterparty</p>
-                <p className="text-sm text-app-fg">{detailEntry.counterpartyName}</p>
+
+            {(detailEntry.description || detailEntry.counterpartyName) && (
+              <div className="space-y-3 pt-3 border-t border-app-border">
+                {detailEntry.counterpartyName && (detailEntry.entryType === 'transfer_in' || detailEntry.entryType === 'transfer_out') ? (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                    <div>
+                      <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">From</p>
+                      <p className="text-sm font-medium text-app-fg">
+                        {detailEntry.entryType === 'transfer_in' ? detailEntry.counterpartyName : selectedUserName}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">To</p>
+                      <p className="text-sm font-medium text-app-fg">
+                        {detailEntry.entryType === 'transfer_out' ? detailEntry.counterpartyName : selectedUserName}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {detailEntry.description && (
+                      <div>
+                        <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Description</p>
+                        <p className="text-sm text-app-fg">{detailEntry.description}</p>
+                      </div>
+                    )}
+                    {detailEntry.counterpartyName && (
+                      <div>
+                        <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">Counterparty</p>
+                        <p className="text-sm text-app-fg">{detailEntry.counterpartyName}</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>

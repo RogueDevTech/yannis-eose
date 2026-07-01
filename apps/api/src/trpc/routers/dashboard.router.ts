@@ -9,6 +9,7 @@ import { CacheService } from '../../common/cache/cache.service';
 import { nigeriaToday, nigeriaDayStart, nigeriaDayEnd } from '../../common/utils/date-range';
 import { getFollowUpConfigService } from './orders.router';
 import { getCartOrdersService } from './cart-orders.router';
+import { getCartService } from './cart.router';
 
 // Factory pattern: services injected from NestJS module
 let ordersService: OrdersService | null = null;
@@ -236,6 +237,7 @@ async function _ceoOverviewFetch(params: {
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
     followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+    cartAbandonmentCount: await getCartService().countAllCarts({ branchId, effectiveBranchIds, startDate, endDate }).catch(() => 0),
     // Total Orders — true marketing counts: regular + offline + graduated
     // follow-up/cart orders (delivered only). Non-delivered follow-up/cart
     // pipeline orders are excluded — they inflate counts without representing
