@@ -174,8 +174,16 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       {/* ── Total Orders: bird's-eye view across all pipelines ── */}
       {(() => {
         const tsc = orderPipeline.totalOrdersCounts;
-        const tTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
-        const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0);
+        // Follow-up + cart orders graduate into Total Orders only when delivered
+        const fuCounts = data?.followUpCounts ?? {};
+        const fuDelivered = (fuCounts['DELIVERED'] ?? 0) + (fuCounts['REMITTED'] ?? 0);
+        const cartCounts = data?.cartOrdersCounts ?? {};
+        const cartDelivered = (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0);
+        const graduatedDelivered = fuDelivered + cartDelivered;
+
+        const baseTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
+        const tTotal = baseTotal + graduatedDelivered;
+        const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0) + graduatedDelivered;
         const tConfirmed = (tsc['CONFIRMED'] ?? 0) + (tsc['AGENT_ASSIGNED'] ?? 0) + (tsc['DISPATCHED'] ?? 0) + (tsc['IN_TRANSIT'] ?? 0);
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
@@ -631,49 +639,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     value: `${marginPct.toFixed(1)}%`,
                     valueClassName: marginPct >= 20 ? 'text-success-600 dark:text-success-400' : marginPct >= 0 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
                     title: 'True profit ÷ revenue',
-                  },
-                ]}
-              />
-            </div>
-            <div>
-              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-                Cost Breakdown
-              </h2>
-              <OverviewStatStrip
-                mobileGrid
-                tileClassName="!py-2.5"
-                items={[
-                  {
-                    label: 'Landed Cost',
-                    value: fmt(costs.landedCost),
-                    valueClassName: 'text-app-fg',
-                    title: 'FIFO cost of goods sold',
-                  },
-                  {
-                    label: 'Delivery Fees',
-                    value: fmt(costs.deliveryFee),
-                    valueClassName: 'text-app-fg',
-                  },
-                  {
-                    label: 'Ad Spend',
-                    value: fmt(costs.adSpend),
-                    valueClassName: 'text-app-fg',
-                    to: '/admin/marketing/expenses',
-                  },
-                  {
-                    label: 'Commission',
-                    value: fmt(costs.commission),
-                    valueClassName: 'text-app-fg',
-                  },
-                  {
-                    label: 'Fulfillment',
-                    value: fmt(costs.fulfillmentCost),
-                    valueClassName: 'text-app-fg',
-                  },
-                  {
-                    label: 'Losses',
-                    value: fmt(costs.operationalLoss),
-                    valueClassName: costs.operationalLoss > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted',
                   },
                 ]}
               />

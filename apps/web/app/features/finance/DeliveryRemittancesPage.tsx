@@ -23,6 +23,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { RemittanceInfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { SearchInput } from '~/components/ui/search-input';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -193,6 +194,7 @@ export function DeliveryRemittancesPage({
     () => new Map(),
   );
   const [eligibleSearchDraft, setEligibleSearchDraft] = useState(filters.eligibleQ);
+  const [infoModal, setInfoModal] = useState<string | null>(null);
   useEffect(() => {
     setEligibleSearchDraft(filters.eligibleQ);
   }, [filters.eligibleQ]);
@@ -713,77 +715,181 @@ export function DeliveryRemittancesPage({
         defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt']}
       />
 
-      <OverviewStatStrip
-        mobileGrid
-        items={[
-          {
-            label: `Delivered Orders (${Number(summary.deliveredCount ?? 0)})`,
-            value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
-            valueClassName: 'text-app-fg tabular-nums',
-            title: 'Total delivered + remitted orders in this period',
-          },
-          {
-            label: `Awaiting Remittance (${Number(summary.awaitingCount)})`,
-            value: <NairaPrice amount={summary.awaitingAmount} />,
-            valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
-          },
-          {
-            label: `Received (${Number(summary.receivedCount)})`,
-            value: <NairaPrice amount={summary.receivedAmount} />,
-            valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
-          },
-          {
-            label: `Pending (${Number(summary.pendingCount)})`,
-            value: <NairaPrice amount={summary.pendingAmount} />,
-            valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
-          },
-          {
-            label: `Disputed (${Number(summary.disputedCount)})`,
-            value: <NairaPrice amount={summary.disputedAmount} />,
-            valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
-          },
-        ]}
-      />
-
-      {/* Deduction breakdown — shows where the gap between gross order value and received comes from */}
-      {Number(summary.grossOrderValue ?? 0) > 0 && (
+      {(() => {
+        const grossVal = Number(summary.grossOrderValue ?? 0);
+        const deliveryFees = Number(summary.totalDeliveryFees ?? 0);
+        const commitmentFees = Number(summary.totalCommitmentFees ?? 0);
+        const posFees = Number(summary.totalPosFees ?? 0);
+        const failedDelivery = Number(summary.totalFailedDeliveryCosts ?? 0);
+        const netRemittable = grossVal - deliveryFees - commitmentFees - posFees - failedDelivery;
+        return (
+        <>
         <OverviewStatStrip
           mobileGrid
-          tileClassName="!py-2"
           items={[
             {
-              label: 'Gross Order Value',
-              value: <NairaPrice amount={summary.grossOrderValue ?? '0'} />,
+              label: <span className="flex items-center">Delivered Orders ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
+              value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
               valueClassName: 'text-app-fg tabular-nums',
-              title: 'Total order value before any deductions (orders on remittances only)',
+              title: 'Gross value of all delivered + remitted orders in this period',
+              onClick: () => { setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
+              active: viewTab === 'eligible' && !pendingStatus,
             },
             {
-              label: `Delivery Fees (${Number(summary.deliveryFeeCount ?? 0)})`,
-              value: <NairaPrice amount={summary.totalDeliveryFees ?? '0'} />,
-              valueClassName: 'text-red-500 tabular-nums',
-              title: 'Orders with delivery fees deducted',
+              label: <span className="flex items-center">Awaiting Remittance ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
+              value: <NairaPrice amount={summary.awaitingAmount} />,
+              valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
+              title: 'Net value (minus delivery fees) of delivered orders not yet on any remittance batch',
+              onClick: () => { setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
+              active: viewTab === 'eligible' && !pendingStatus,
             },
             {
-              label: `Commitment Fees (${Number(summary.commitmentFeeCount ?? 0)})`,
-              value: <NairaPrice amount={summary.totalCommitmentFees ?? '0'} />,
-              valueClassName: 'text-red-500 tabular-nums',
-              title: 'Remittance batches with commitment fees',
+              label: <span className="flex items-center">Received ({Number(summary.receivedCount)} orders)<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
+              value: <NairaPrice amount={summary.receivedAmount} />,
+              valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
+              title: 'Net value of orders on batches marked as received by Finance',
+              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('page', '1'); return n; }, { replace: true }); },
+              active: viewTab === 'remittances' && pendingStatus === 'RECEIVED',
             },
             {
-              label: `POS Fees (${Number(summary.posFeeCount ?? 0)})`,
-              value: <NairaPrice amount={summary.totalPosFees ?? '0'} />,
-              valueClassName: 'text-red-500 tabular-nums',
-              title: 'Remittance batches with POS fees',
+              label: <span className="flex items-center">Pending ({Number(summary.pendingCount)} orders)<RemittanceInfoIcon onClick={() => setInfoModal('pending')} /></span>,
+              value: <NairaPrice amount={summary.pendingAmount} />,
+              valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
+              title: 'Net value of orders on batches sent but not yet received',
+              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'SENT'); n.set('page', '1'); return n; }, { replace: true }); },
+              active: viewTab === 'remittances' && pendingStatus === 'SENT',
             },
             {
-              label: `Failed Delivery (${Number(summary.failedDeliveryCount ?? 0)})`,
-              value: <NairaPrice amount={summary.totalFailedDeliveryCosts ?? '0'} />,
-              valueClassName: 'text-red-500 tabular-nums',
-              title: 'Remittance batches with failed delivery costs',
+              label: <span className="flex items-center">Disputed ({Number(summary.disputedCount)} orders)<RemittanceInfoIcon onClick={() => setInfoModal('disputed')} /></span>,
+              value: <NairaPrice amount={summary.disputedAmount} />,
+              valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
+              title: 'Net value of orders on batches flagged as disputed',
+              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'DISPUTED'); n.set('page', '1'); return n; }, { replace: true }); },
+              active: viewTab === 'remittances' && pendingStatus === 'DISPUTED',
             },
           ]}
         />
-      )}
+
+        {/* Deduction breakdown — batched orders only */}
+        {grossVal > 0 && (
+          <OverviewStatStrip
+            mobileGrid
+            tileClassName="!py-2"
+            items={[
+              {
+                label: <span className="flex items-center">Gross Order Value<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
+                value: <NairaPrice amount={summary.grossOrderValue ?? '0'} />,
+                valueClassName: 'text-app-fg tabular-nums',
+                title: 'Total order value before any deductions (batched orders only)',
+              },
+              {
+                label: `Delivery Fees (${Number(summary.deliveryFeeCount ?? 0)})`,
+                value: <NairaPrice amount={summary.totalDeliveryFees ?? '0'} />,
+                valueClassName: 'text-red-500 tabular-nums',
+                title: 'Per-order delivery fee deducted from gross value',
+              },
+              {
+                label: `Commitment Fees (${Number(summary.commitmentFeeCount ?? 0)})`,
+                value: <NairaPrice amount={summary.totalCommitmentFees ?? '0'} />,
+                valueClassName: 'text-red-500 tabular-nums',
+                title: 'Per-batch commitment fee charged by logistics partner',
+              },
+              {
+                label: `POS Fees (${Number(summary.posFeeCount ?? 0)})`,
+                value: <NairaPrice amount={summary.totalPosFees ?? '0'} />,
+                valueClassName: 'text-red-500 tabular-nums',
+                title: 'Per-batch POS transaction fee',
+              },
+              {
+                label: `Failed Delivery (${Number(summary.failedDeliveryCount ?? 0)})`,
+                value: <NairaPrice amount={summary.totalFailedDeliveryCosts ?? '0'} />,
+                valueClassName: 'text-red-500 tabular-nums',
+                title: 'Per-batch cost of failed delivery attempts',
+              },
+              {
+                label: <span className="flex items-center">Net Remittable<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,
+                value: <NairaPrice amount={netRemittable} />,
+                valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
+                title: 'Gross Order Value minus all deductions',
+              },
+            ]}
+          />
+        )}
+
+        {/* Info modals */}
+        <FormulaBreakdownModal
+          open={infoModal === 'delivered'}
+          onClose={() => setInfoModal(null)}
+          title="Delivered Orders"
+          description="Gross value of all orders with status DELIVERED or REMITTED in the selected period. This is the total amount customers paid — before any delivery fees or other deductions."
+          lines={[
+            { label: 'All delivered + remitted orders', amount: Number(summary.deliveredAmount ?? 0), type: 'value', count: Number(summary.deliveredCount ?? 0) },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'remitted'}
+          onClose={() => setInfoModal(null)}
+          title="Received"
+          description="Net value of orders on remittance batches that Finance has marked as received. This is the actual cash collected — order value minus delivery fees."
+          lines={[
+            { label: 'Orders on received batches (gross)', amount: Number(summary.receivedAmount ?? 0) + deliveryFees, type: 'value' },
+            { label: 'Delivery fees already deducted', amount: deliveryFees, type: 'deduction' },
+            { label: 'Received (net)', amount: Number(summary.receivedAmount ?? 0), type: 'result', count: Number(summary.receivedCount ?? 0) },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'awaiting'}
+          onClose={() => setInfoModal(null)}
+          title="Awaiting Remittance"
+          description="Net value of delivered orders that have not been placed on any remittance batch yet. Delivery fees are already deducted. These orders are waiting for an accountant to create a remittance."
+          lines={[
+            { label: 'Delivered orders not on any batch (net)', amount: Number(summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'pending'}
+          onClose={() => setInfoModal(null)}
+          title="Pending"
+          description="Net value of orders on remittance batches that have been sent but not yet marked as received by Finance. Delivery fees are already deducted."
+          lines={[
+            { label: 'Orders on SENT batches (net)', amount: Number(summary.pendingAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'disputed'}
+          onClose={() => setInfoModal(null)}
+          title="Disputed"
+          description="Net value of orders on remittance batches that have been flagged as disputed — the amount was not received as expected."
+          lines={[
+            { label: 'Orders on DISPUTED batches', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'gross'}
+          onClose={() => setInfoModal(null)}
+          title="Gross Order Value"
+          description="Total order value of all orders that are on a remittance batch (any status). This is before any deductions. Only batched orders are included — orders awaiting a batch are not counted here."
+          lines={[
+            { label: 'Sum of order totals on remittance batches', amount: grossVal, type: 'value' },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'net'}
+          onClose={() => setInfoModal(null)}
+          title="Net Remittable"
+          description="What should be received after all deductions are applied to the gross order value. Compare this to Received + Pending to verify the numbers tally."
+          lines={[
+            { label: 'Gross Order Value', amount: grossVal, type: 'value' },
+            { label: 'Delivery Fees', amount: deliveryFees, type: 'deduction', count: Number(summary.deliveryFeeCount ?? 0) },
+            { label: 'Commitment Fees', amount: commitmentFees, type: 'deduction', count: Number(summary.commitmentFeeCount ?? 0) },
+            { label: 'POS Fees', amount: posFees, type: 'deduction', count: Number(summary.posFeeCount ?? 0) },
+            { label: 'Failed Delivery', amount: failedDelivery, type: 'deduction', count: Number(summary.failedDeliveryCount ?? 0) },
+            { label: 'Net Remittable', amount: netRemittable, type: 'result' },
+          ]}
+        />
+        </>
+        );
+      })()}
 
       <Tabs
         variant="underline"

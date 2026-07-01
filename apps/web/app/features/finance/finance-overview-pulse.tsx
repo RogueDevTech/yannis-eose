@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { formatNaira } from '~/lib/format-amount';
+import { RemittanceInfoIcon as InfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import type { FinanceOverviewPulse, FundingSummary, RemittanceBreakdownRow } from './types';
 
 export function FinanceCashRemittanceSection({
@@ -13,9 +15,12 @@ export function FinanceCashRemittanceSection({
   byProduct?: RemittanceBreakdownRow[];
   byLocation?: RemittanceBreakdownRow[];
 }) {
+  const [infoModal, setInfoModal] = useState<string | null>(null);
+
   // Use the actual delivered count/amount from the query — matches the Cash Remittances page
   const totalDelivered = pulse.deliveredAmount || (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
   const totalDeliveredOrders = pulse.deliveredCount || (pulse.awaitingOrderCount + pulse.totalRemittedCount);
+  const netRemittable = pulse.grossOrderValue - pulse.totalDeliveryFees - pulse.totalCommitmentFees - pulse.totalPosFees - pulse.totalFailedDeliveryCosts;
 
   return (
     <Card>
@@ -27,7 +32,10 @@ export function FinanceCashRemittanceSection({
         {/* Headline totals */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
-            <p className="text-xs font-medium text-app-fg-muted">Total delivered</p>
+            <p className="text-xs font-medium text-app-fg-muted flex items-center">
+              Total delivered
+              <InfoIcon onClick={() => setInfoModal('delivered')} />
+            </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
               {formatNaira(Math.round(totalDelivered))}
             </p>
@@ -36,19 +44,25 @@ export function FinanceCashRemittanceSection({
             </p>
           </div>
           <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
-            <p className="text-xs font-medium text-app-fg-muted">Remitted</p>
+            <p className="text-xs font-medium text-app-fg-muted flex items-center">
+              Remitted
+              <InfoIcon onClick={() => setInfoModal('remitted')} />
+            </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-success-600 dark:text-success-400">
               {formatNaira(Math.round(pulse.receivedAmount))}
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">
-              {pulse.receivedCount} batch(es) received
+              {pulse.receivedCount} order(s) received
             </p>
           </div>
           <Link
             to="/admin/finance/delivery-remittances"
             className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
           >
-            <p className="text-xs font-medium text-app-fg-muted">Awaiting batch</p>
+            <p className="text-xs font-medium text-app-fg-muted flex items-center">
+              Awaiting batch
+              <InfoIcon onClick={() => setInfoModal('awaiting')} />
+            </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
               {formatNaira(Math.round(pulse.awaitingCash))}
             </p>
@@ -60,32 +74,42 @@ export function FinanceCashRemittanceSection({
             to="/admin/finance/delivery-remittances?tab=remittances"
             className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
           >
-            <p className="text-xs font-medium text-app-fg-muted">Pending batches</p>
+            <p className="text-xs font-medium text-app-fg-muted flex items-center">
+              Pending
+              <InfoIcon onClick={() => setInfoModal('pending')} />
+            </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
               <NairaPrice amount={pulse.pendingRemittanceAmount} />
             </p>
-            <p className="text-xs text-app-fg-muted mt-0.5">{pulse.pendingRemittanceBatchCount} batch(es) SENT</p>
+            <p className="text-xs text-app-fg-muted mt-0.5">{pulse.pendingRemittanceBatchCount} order(s) sent</p>
           </Link>
           <Link
             to="/admin/finance/delivery-remittances?tab=remittances&status=DISPUTED"
             className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
           >
-            <p className="text-xs font-medium text-app-fg-muted">Disputed</p>
+            <p className="text-xs font-medium text-app-fg-muted flex items-center">
+              Disputed
+              <InfoIcon onClick={() => setInfoModal('disputed')} />
+            </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-danger-600 dark:text-danger-400">
               {formatNaira(Math.round(pulse.disputedRemittanceAmount))}
             </p>
-            <p className="text-xs text-app-fg-muted mt-0.5">{pulse.disputedRemittanceBatchCount} batch(es) need attention</p>
+            <p className="text-xs text-app-fg-muted mt-0.5">{pulse.disputedRemittanceBatchCount} order(s) disputed</p>
           </Link>
         </div>
 
-        {/* Deduction breakdown */}
+        {/* Deduction breakdown — batched orders only */}
         {pulse.grossOrderValue > 0 && (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
-              <p className="text-xs font-medium text-app-fg-muted">Gross Order Value</p>
+              <p className="text-xs font-medium text-app-fg-muted flex items-center">
+                Gross Order Value
+                <InfoIcon onClick={() => setInfoModal('gross')} />
+              </p>
               <p className="mt-1 text-base font-semibold tabular-nums text-app-fg">
                 {formatNaira(Math.round(pulse.grossOrderValue))}
               </p>
+              <p className="text-xs text-app-fg-muted mt-0.5">before deductions</p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted">Delivery Fees ({pulse.deliveryFeeCount})</p>
@@ -111,6 +135,16 @@ export function FinanceCashRemittanceSection({
                 {formatNaira(Math.round(pulse.totalFailedDeliveryCosts))}
               </p>
             </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted flex items-center">
+                Net Remittable
+                <InfoIcon onClick={() => setInfoModal('net')} />
+              </p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-success-600 dark:text-success-400">
+                {formatNaira(Math.round(netRemittable))}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-0.5">after all deductions</p>
+            </div>
           </div>
         )}
 
@@ -125,6 +159,77 @@ export function FinanceCashRemittanceSection({
             )}
           </div>
         )}
+        {/* Info modals */}
+        <FormulaBreakdownModal
+          open={infoModal === 'delivered'}
+          onClose={() => setInfoModal(null)}
+          title="Total Delivered"
+          description="Gross value of all orders with status DELIVERED or REMITTED in the selected period. This is the total amount customers paid — before any delivery fees or other deductions."
+          lines={[
+            { label: 'All delivered + remitted orders', amount: totalDelivered, type: 'value', count: totalDeliveredOrders },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'remitted'}
+          onClose={() => setInfoModal(null)}
+          title="Remitted"
+          description="Net value of orders on remittance batches that Finance has marked as received. This is the actual cash collected — order value minus delivery fees."
+          lines={[
+            { label: 'Orders on received batches (gross)', amount: pulse.receivedAmount + pulse.totalDeliveryFees, type: 'value' },
+            { label: 'Delivery fees already deducted', amount: pulse.totalDeliveryFees, type: 'deduction' },
+            { label: 'Remitted (net received)', amount: pulse.receivedAmount, type: 'result', count: pulse.receivedCount },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'awaiting'}
+          onClose={() => setInfoModal(null)}
+          title="Awaiting Batch"
+          description="Net value of delivered orders that have not been placed on any remittance batch yet. These orders are waiting for an accountant to create a remittance."
+          lines={[
+            { label: 'Delivered orders not on any batch (net of delivery fees)', amount: pulse.awaitingCash, type: 'value', count: pulse.awaitingOrderCount },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'pending'}
+          onClose={() => setInfoModal(null)}
+          title="Pending"
+          description="Net value of orders on remittance batches that have been sent but not yet marked as received by Finance."
+          lines={[
+            { label: 'Orders on SENT batches (net of delivery fees)', amount: pulse.pendingRemittanceAmount, type: 'value', count: pulse.pendingRemittanceBatchCount },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'disputed'}
+          onClose={() => setInfoModal(null)}
+          title="Disputed"
+          description="Net value of orders on remittance batches that have been flagged as disputed — the amount was not received as expected."
+          lines={[
+            { label: 'Orders on DISPUTED batches', amount: pulse.disputedRemittanceAmount, type: 'value', count: pulse.disputedRemittanceBatchCount },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'gross'}
+          onClose={() => setInfoModal(null)}
+          title="Gross Order Value"
+          description="Total order value of all orders that are on a remittance batch (any status). This is before any deductions. Only batched orders are included — orders still awaiting a batch are not counted here."
+          lines={[
+            { label: 'Sum of order totals on remittance batches', amount: pulse.grossOrderValue, type: 'value' },
+          ]}
+        />
+        <FormulaBreakdownModal
+          open={infoModal === 'net'}
+          onClose={() => setInfoModal(null)}
+          title="Net Remittable"
+          description="What should be received after all deductions are applied to the gross order value. Compare this to Remitted + Pending to verify the numbers tally."
+          lines={[
+            { label: 'Gross Order Value', amount: pulse.grossOrderValue, type: 'value' },
+            { label: 'Delivery Fees', amount: pulse.totalDeliveryFees, type: 'deduction', count: pulse.deliveryFeeCount },
+            { label: 'Commitment Fees', amount: pulse.totalCommitmentFees, type: 'deduction', count: pulse.commitmentFeeCount },
+            { label: 'POS Fees', amount: pulse.totalPosFees, type: 'deduction', count: pulse.posFeeCount },
+            { label: 'Failed Delivery', amount: pulse.totalFailedDeliveryCosts, type: 'deduction', count: pulse.failedDeliveryCount },
+            { label: 'Net Remittable', amount: netRemittable, type: 'result' },
+          ]}
+        />
       </CardBody>
     </Card>
   );

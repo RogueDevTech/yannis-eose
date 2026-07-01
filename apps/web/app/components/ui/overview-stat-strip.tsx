@@ -15,7 +15,7 @@ function stableValueKey(node: ReactNode): string {
 }
 
 export type OverviewStatStripItem = {
-  label: string;
+  label: ReactNode;
   value: ReactNode;
   valueClassName?: string;
   title?: string;
@@ -173,7 +173,8 @@ export function OverviewStatStrip({
             typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
               ? String(v)
               : `n${i}`;
-          return `${item.label}:${vPart}`;
+          const lPart = typeof item.label === 'string' ? item.label : `l${i}`;
+          return `${lPart}:${vPart}`;
         })
         .join('|'),
     [items],
