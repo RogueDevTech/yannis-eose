@@ -929,8 +929,8 @@ export class CartService {
           ? inArray(schema.campaigns.branchId, effectiveBranchIds)
           : undefined);
     const dateConds: SQL[] = [];
-    if (startDate) dateConds.push(gte(schema.cartAbandonments.updatedAt, new Date(`${startDate}T00:00:00`)));
-    if (endDate) dateConds.push(lte(schema.cartAbandonments.updatedAt, new Date(`${endDate}T23:59:59`)));
+    if (startDate) dateConds.push(gte(schema.cartAbandonments.updatedAt, nigeriaDayStart(startDate)));
+    if (endDate) dateConds.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(endDate)));
     const pendingRes = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)

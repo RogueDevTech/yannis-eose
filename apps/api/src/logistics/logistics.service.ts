@@ -49,6 +49,7 @@ import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { OrdersService } from '../orders/orders.service';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
 @Injectable()
 export class LogisticsService {
@@ -1571,10 +1572,10 @@ export class LogisticsService {
       conditions.push(eq(schema.deliveryRemittances.status, input.status));
     }
     if (input.startDate) {
-      conditions.push(gte(schema.deliveryRemittances.sentAt, new Date(input.startDate + 'T00:00:00')));
+      conditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      conditions.push(lte(schema.deliveryRemittances.sentAt, new Date(input.endDate + 'T23:59:59')));
+      conditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
     }
     // Company-group isolation: only remittances from locations in this group's providers
     if (groupId) {
@@ -1699,10 +1700,10 @@ export class LogisticsService {
       summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
     if (input.startDate) {
-      summaryConditions.push(gte(schema.deliveryRemittances.sentAt, new Date(input.startDate + 'T00:00:00')));
+      summaryConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      summaryConditions.push(lte(schema.deliveryRemittances.sentAt, new Date(input.endDate + 'T23:59:59')));
+      summaryConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
     }
     if (input.sentBy) {
       summaryConditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
@@ -1740,8 +1741,8 @@ export class LogisticsService {
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     // Date-filtered by deliveryRemittances.sentAt to match the base summary scope.
     const outcomeDateConditions: SQL[] = [];
-    if (input.startDate) outcomeDateConditions.push(sql`dr.sent_at >= ${input.startDate + 'T00:00:00'}::timestamptz`);
-    if (input.endDate) outcomeDateConditions.push(sql`dr.sent_at <= ${input.endDate + 'T23:59:59'}::timestamptz`);
+    if (input.startDate) outcomeDateConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeDateConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     const outcomeDateWhere = outcomeDateConditions.length > 0 ? sql` AND ${sql.join(outcomeDateConditions, sql` AND `)}` : sql``;
 
     const outcomeSummaryQuery = this.db
@@ -1782,10 +1783,10 @@ export class LogisticsService {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
     if (input.startDate) {
-      awaitingConditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
+      awaitingConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      awaitingConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+      awaitingConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
@@ -1803,8 +1804,8 @@ export class LogisticsService {
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
-    if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
-    if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+    if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
@@ -2112,8 +2113,8 @@ export class LogisticsService {
          ORDER BY ${schema.deliveryRemittances.sentAt} DESC
          LIMIT 1),
         ${schema.orders.deliveredAt})`;
-      if (startDate) conditions.push(sql`${effectiveDate} >= ${new Date(startDate + 'T00:00:00')}`);
-      if (endDate) conditions.push(sql`${effectiveDate} <= ${new Date(endDate + 'T23:59:59')}`);
+      if (startDate) conditions.push(sql`${effectiveDate} >= ${nigeriaDayStart(startDate)}`);
+      if (endDate) conditions.push(sql`${effectiveDate} <= ${nigeriaDayEnd(endDate)}`);
     }
 
     const rows = await this.db
@@ -2158,8 +2159,8 @@ export class LogisticsService {
          ORDER BY ${schema.deliveryRemittances.sentAt} DESC
          LIMIT 1),
         ${schema.orders.deliveredAt})`;
-      if (startDate) conditions.push(sql`${effectiveDate} >= ${new Date(startDate + 'T00:00:00')}`);
-      if (endDate) conditions.push(sql`${effectiveDate} <= ${new Date(endDate + 'T23:59:59')}`);
+      if (startDate) conditions.push(sql`${effectiveDate} >= ${nigeriaDayStart(startDate)}`);
+      if (endDate) conditions.push(sql`${effectiveDate} <= ${nigeriaDayEnd(endDate)}`);
     }
 
     const rows = await this.db
@@ -2221,10 +2222,10 @@ export class LogisticsService {
     }
 
     if (input.startDate) {
-      conditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
+      conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      conditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+      conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     }
     // Company-group isolation via order's servicing branch
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
@@ -2897,8 +2898,8 @@ export class LogisticsService {
     let effectiveStart: Date | null = null;
     let effectiveEnd: Date | null = null;
     if (startDate || endDate) {
-      if (startDate) effectiveStart = new Date(`${startDate}T00:00:00.000Z`);
-      if (endDate) effectiveEnd = new Date(`${endDate}T23:59:59.999Z`);
+      if (startDate) effectiveStart = nigeriaDayStart(startDate);
+      if (endDate) effectiveEnd = nigeriaDayEnd(endDate);
     } else {
       const now = new Date();
       effectiveStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
@@ -3297,8 +3298,8 @@ export class LogisticsService {
     let effectiveStart: Date | null = null;
     let effectiveEnd: Date | null = null;
     if (startDate || endDate) {
-      if (startDate) effectiveStart = new Date(`${startDate}T00:00:00.000Z`);
-      if (endDate) effectiveEnd = new Date(`${endDate}T23:59:59.999Z`);
+      if (startDate) effectiveStart = nigeriaDayStart(startDate);
+      if (endDate) effectiveEnd = nigeriaDayEnd(endDate);
     } else {
       const now = new Date();
       effectiveStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));

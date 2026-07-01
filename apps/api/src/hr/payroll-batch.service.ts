@@ -25,6 +25,7 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules } from './commission-rules-math';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
 /**
  * Maps the four payroll departments to the staff roles each contains.
@@ -167,10 +168,9 @@ export class PayrollBatchService {
       });
     }
 
-    const periodStart = new Date(`${input.periodMonth}T00:00:00.000Z`);
-    const periodEnd = new Date(periodStart);
-    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
-    periodEnd.setUTCMilliseconds(periodEnd.getUTCMilliseconds() - 1);
+    const periodStart = nigeriaDayStart(`${input.periodMonth}-01`);
+    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
 
     return withActorAndBranch(this.db, { id: actor.id, currentBranchId: input.branchId }, async (tx) => {
       // Look up existing batch in this slot
@@ -250,10 +250,9 @@ export class PayrollBatchService {
    * Existing slots (any status, including DRAFT) are skipped — use `generateBatch` to refresh a single DRAFT.
    */
   async generateBatchesBulk(input: GenerateBatchesBulkInput, actor: SessionUser) {
-    const periodStart = new Date(`${input.periodMonth}T00:00:00.000Z`);
-    const periodEnd = new Date(periodStart);
-    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
-    periodEnd.setUTCMilliseconds(periodEnd.getUTCMilliseconds() - 1);
+    const periodStart = nigeriaDayStart(`${input.periodMonth}-01`);
+    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
 
     const created: Array<{ batchId: string; branchId: string; department: PayrollDepartment }> =
       [];
@@ -415,10 +414,9 @@ export class PayrollBatchService {
         message: `You cannot preview payroll for ${input.department} on this branch.`,
       });
     }
-    const periodStart = new Date(`${input.periodMonth}T00:00:00.000Z`);
-    const periodEnd = new Date(periodStart);
-    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
-    periodEnd.setUTCMilliseconds(periodEnd.getUTCMilliseconds() - 1);
+    const periodStart = nigeriaDayStart(`${input.periodMonth}-01`);
+    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
 
     return withActorAndBranch(this.db, { id: actor.id, currentBranchId: input.branchId }, async (tx) => {
       const departmentRoles = DEPARTMENT_ROLES[input.department];
