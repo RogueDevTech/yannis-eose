@@ -2036,12 +2036,12 @@ function FundingMetricsStrip({
     ...(mbBalance != null
       ? [
           {
-            label: `MB Balance (${mbCount})`,
+            label: `MB Balance · all-time (${mbCount})`,
             value: <NairaPrice amount={mbBalance} />,
             valueClassName: mbBalance > 0
               ? 'text-blue-600 dark:text-blue-400'
               : 'text-app-fg',
-            title: `Unspent funding across ${mbCount} Media Buyer${mbCount !== 1 ? 's' : ''} (received − distributed − expenses) in selected period.`,
+            title: `Cumulative unspent funding across ${mbCount} Media Buyer${mbCount !== 1 ? 's' : ''} (all-time received − expenses).`,
           },
         ]
       : []),

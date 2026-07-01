@@ -49,6 +49,12 @@ export class CartOrdersService {
     this.backfillMissingCartOrderItems().catch((err) =>
       this.logger.warn(`Cart order items backfill failed: ${err.message}`),
     );
+    // Retry orphaned graduations 60s after boot
+    setTimeout(() => {
+      this.retryFailedGraduations().catch((err) =>
+        this.logger.error(`Cart graduation retry failed: ${err instanceof Error ? err.message : err}`),
+      );
+    }, 60_000);
   }
 
   private async backfillMissingMediaBuyers() {
@@ -607,9 +613,15 @@ export class CartOrdersService {
       }
     }
 
-    // Graduate to orders on DELIVERED
+    // Graduate to orders on DELIVERED.
+    // Wrapped in try/catch so the DELIVERED status (already committed above)
+    // is never rolled back. Failed graduations are retried by the boot sweep.
     if (newStatus === 'DELIVERED') {
-      await this.graduateToOrders(orderId);
+      try {
+        await this.graduateToOrders(orderId);
+      } catch (err) {
+        this.logger.error(`Cart order graduation failed for ${orderId} — will be retried by boot sweep: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     return { success: true };
@@ -666,6 +678,45 @@ export class CartOrdersService {
         status: 'DRAFT',
       });
     });
+  }
+
+  // ── Graduation Retry ─────────────────────────────────────────────────
+
+  /**
+   * Retry orphaned cart order graduations — DELIVERED in cart_orders but
+   * no matching row in the orders table. Called on boot by the follow-up
+   * service's sweep (which delegates here).
+   */
+  async retryFailedGraduations(): Promise<void> {
+    const orphaned = await this.db.execute<{ id: string }>(sql`
+      SELECT co.id
+      FROM cart_orders co
+      WHERE co.status = 'DELIVERED'
+        AND co.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM orders o
+          WHERE o.order_source = 'online'
+            AND (
+              (co.source_cart_id IS NOT NULL AND o.cart_id = co.source_cart_id)
+              OR o.customer_phone_hash = co.customer_phone_hash
+            )
+        )
+      LIMIT 200
+    `);
+
+    if (orphaned.length === 0) return;
+
+    this.logger.log(`Retrying graduation for ${orphaned.length} orphaned cart order(s)`);
+    let succeeded = 0;
+    for (const row of orphaned) {
+      try {
+        await this.graduateToOrders(row.id);
+        succeeded++;
+      } catch (err) {
+        this.logger.error(`Retry graduation failed for cart order ${row.id}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    this.logger.log(`Cart order graduation retry: ${succeeded}/${orphaned.length} succeeded`);
   }
 
   // ── Graduate to Orders ───────────────────────────────────────────────
@@ -891,6 +942,27 @@ export class CartOrdersService {
       ? (await this.db.select({ name: schema.campaigns.name }).from(schema.campaigns).where(eq(schema.campaigns.id, order.campaignId)).limit(1))[0]?.name ?? null
       : null;
 
+    // Synthetic ORDER_RECEIVED fallback — mirrors the orders service behaviour.
+    // Cart orders pulled before Step D was added (or hit a race) may have no
+    // timeline events at all.
+    const hasOrderReceived = timeline.some((t) => t.eventType === 'ORDER_RECEIVED');
+    const finalTimeline = hasOrderReceived
+      ? timeline
+      : [
+          {
+            id: `derived:${order.id}:order_received`,
+            cartOrderId: order.id,
+            eventType: 'ORDER_RECEIVED' as const,
+            actorId: null,
+            actorName: 'System',
+            description: 'Cart order created from abandoned cart.',
+            metadata: { sourceCartId: order.sourceCartId, derivedFromOrderRow: true },
+            branchId: order.servicingBranchId,
+            createdAt: order.createdAt,
+          },
+          ...timeline,
+        ];
+
     return {
       ...order,
       assignedCsName: order.assignedCsId ? userMap.get(order.assignedCsId) ?? null : null,
@@ -904,7 +976,7 @@ export class CartOrdersService {
       } : null,
       campaignName,
       orderItems: items,
-      timeline,
+      timeline: finalTimeline,
     };
   }
 
@@ -1108,7 +1180,7 @@ export class CartOrdersService {
         customer_address, delivery_address, total_amount,
         delivery_notes, delivery_state, customer_gender,
         preferred_delivery_date, payment_method, customer_email,
-        order_source, servicing_branch_id, routing_rule_id,
+        order_source, branch_id, servicing_branch_id, routing_rule_id,
         custom_fields
       )
       SELECT
@@ -1117,9 +1189,10 @@ export class CartOrdersService {
         ca.customer_address, ca.delivery_address, 0,
         ca.delivery_notes, ca.delivery_state, ca.customer_gender,
         ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
-        'online', ${branchLiteral}, ${ruleLiteral},
+        'online', camp.branch_id, ${branchLiteral}, ${ruleLiteral},
         ca.custom_field_values
       FROM cart_abandonments ca
+      LEFT JOIN campaigns camp ON camp.id = ca.campaign_id
       WHERE ca.id IN (${safeIdList})
         AND ca.status IN ('PENDING', 'ABANDONED')
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)

@@ -39,6 +39,9 @@ export interface CEODashboardData {
   // Marketing
   marketing: {
     totalSpend: number;
+    totalOrders: number;
+    confirmedOrders: number;
+    deliveredOrders: number;
     cpa: number;
     roas: number;
     deliveryRate: number;

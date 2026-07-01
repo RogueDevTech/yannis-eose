@@ -497,16 +497,16 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
           to: q('/admin/marketing/orders?status=UNPROCESSED'),
         },
         {
+          label: 'Confirmed',
+          value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(),
+          valueClassName: 'text-brand-600 dark:text-brand-400',
+          to: q('/admin/marketing/orders?status=CONFIRMED'),
+        },
+        {
           label: 'Delivered',
           value: metrics.deliveredOrders.toString(),
           valueClassName: 'text-success-600 dark:text-success-400',
           to: q('/admin/marketing/orders?status=DELIVERED'),
-        },
-        {
-          label: 'Confirmed',
-          value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(),
-          valueClassName: 'text-success-600 dark:text-success-400',
-          to: q('/admin/marketing/orders?status=CONFIRMED'),
         },
         { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
         {

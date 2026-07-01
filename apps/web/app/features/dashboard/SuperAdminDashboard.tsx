@@ -92,7 +92,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     totalSpend: data?.marketing?.totalSpend ?? 0,
     approvedSpend: (data?.marketing as Record<string, number> | undefined)?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
     deliveredRevenue: (data?.marketing as Record<string, number> | undefined)?.deliveredRevenue ?? 0,
-    totalOrders: (data?.marketing as Record<string, number> | undefined)?.totalOrders ?? 0,
+    totalOrders: data?.marketing?.totalOrders ?? 0,
+    confirmedOrders: data?.marketing?.confirmedOrders ?? 0,
+    deliveredOrders: data?.marketing?.deliveredOrders ?? 0,
     cpa: data?.marketing?.cpa ?? 0,
     roas: data?.marketing?.roas ?? 0,
     confirmationRate: (data?.marketing as Record<string, number> | undefined)?.confirmationRate ?? 0,
@@ -187,14 +189,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               tileClassName="!py-2.5"
               items={[
                 { label: 'Total', value: tTotal, valueClassName: 'text-app-fg' },
-                { label: 'Unassigned', value: tsc['UNPROCESSED'] ?? 0, valueClassName: 'text-red-500' },
-                { label: 'Assigned', value: tsc['CS_ASSIGNED'] ?? 0 },
-                { label: 'Unconfirmed', value: tsc['CS_ENGAGED'] ?? 0 },
-                { label: 'Confirmed', value: tConfirmed },
-                { label: 'Delivered', value: tDelivered },
-                { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: tCR > 0 ? 'text-green-500' : undefined },
-                { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: tDR > 0 ? 'text-green-500' : undefined },
-                { label: 'Deleted', value: tsc['DELETED'] ?? 0 },
+                { label: 'Unassigned', value: tsc['UNPROCESSED'] ?? 0, valueClassName: 'text-warning-600 dark:text-warning-400' },
+                { label: 'Assigned', value: tsc['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
+                { label: 'Unconfirmed', value: tsc['CS_ENGAGED'] ?? 0, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+                { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                { label: 'Delivered', value: tDelivered, valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(tCR) },
+                { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(tDR) },
+                { label: 'Deleted', value: tsc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
               ]}
             />
           </div>
@@ -585,24 +587,125 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         />
       </div>
 
-      {/* ── Revenue Generated ── */}
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Revenue Generated
-        </h2>
-        <OverviewStatStrip
-          mobileGrid
-          tileClassName="!py-2.5"
-          items={[
-            {
-              label: 'Revenue',
-              value: fmt(revenue),
-              valueClassName: 'text-success-600 dark:text-success-400',
-              title: 'Revenue from delivered orders in selected period',
-            },
-          ]}
-        />
-      </div>
+      {/* ── Revenue & Profit ── */}
+      {(() => {
+        const trueProfit = data?.trueProfit ?? 0;
+        const marginPct = data?.margin ?? 0;
+        const costs = data?.costBreakdown ?? { landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0 };
+        const totalExpenses = costs.landedCost + costs.deliveryFee + costs.adSpend + costs.commission + costs.fulfillmentCost + costs.operationalLoss;
+        const remitted = orderPipeline.statusCounts['REMITTED'] ?? 0;
+        const delivered = orderPipeline.statusCounts['DELIVERED'] ?? 0;
+        return (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                Revenue & Profit
+              </h2>
+              <OverviewStatStrip
+                mobileGrid
+                tileClassName="!py-2.5"
+                items={[
+                  {
+                    label: 'Revenue',
+                    value: fmt(revenue),
+                    valueClassName: 'text-success-600 dark:text-success-400',
+                    title: 'Total revenue from delivered orders',
+                    to: '/admin/finance/overview',
+                  },
+                  {
+                    label: 'Total Expenses',
+                    value: fmt(totalExpenses),
+                    valueClassName: 'text-danger-600 dark:text-danger-400',
+                    title: 'COGS + delivery + ads + commission + fulfillment + losses',
+                    to: '/admin/finance/overview',
+                  },
+                  {
+                    label: 'True Profit',
+                    value: fmt(trueProfit),
+                    valueClassName: trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400',
+                    title: 'Revenue minus all costs',
+                    to: '/admin/finance/overview',
+                  },
+                  {
+                    label: 'Margin',
+                    value: `${marginPct.toFixed(1)}%`,
+                    valueClassName: marginPct >= 20 ? 'text-success-600 dark:text-success-400' : marginPct >= 0 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
+                    title: 'True profit ÷ revenue',
+                  },
+                ]}
+              />
+            </div>
+            <div>
+              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                Cost Breakdown
+              </h2>
+              <OverviewStatStrip
+                mobileGrid
+                tileClassName="!py-2.5"
+                items={[
+                  {
+                    label: 'Landed Cost',
+                    value: fmt(costs.landedCost),
+                    valueClassName: 'text-app-fg',
+                    title: 'FIFO cost of goods sold',
+                  },
+                  {
+                    label: 'Delivery Fees',
+                    value: fmt(costs.deliveryFee),
+                    valueClassName: 'text-app-fg',
+                  },
+                  {
+                    label: 'Ad Spend',
+                    value: fmt(costs.adSpend),
+                    valueClassName: 'text-app-fg',
+                    to: '/admin/marketing/expenses',
+                  },
+                  {
+                    label: 'Commission',
+                    value: fmt(costs.commission),
+                    valueClassName: 'text-app-fg',
+                  },
+                  {
+                    label: 'Fulfillment',
+                    value: fmt(costs.fulfillmentCost),
+                    valueClassName: 'text-app-fg',
+                  },
+                  {
+                    label: 'Losses',
+                    value: fmt(costs.operationalLoss),
+                    valueClassName: costs.operationalLoss > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted',
+                  },
+                ]}
+              />
+            </div>
+            <div>
+              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                Remittance
+              </h2>
+              <OverviewStatStrip
+                mobileGrid
+                tileClassName="!py-2.5"
+                items={[
+                  {
+                    label: 'Remitted',
+                    value: remitted.toLocaleString(),
+                    valueClassName: 'text-success-600 dark:text-success-400',
+                    title: 'Orders fully remitted',
+                    to: '/admin/finance/cash-remittances',
+                  },
+                  {
+                    label: 'Awaiting Remittance',
+                    value: delivered.toLocaleString(),
+                    valueClassName: delivered > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted',
+                    title: 'Delivered but not yet remitted',
+                    to: '/admin/finance/cash-remittances',
+                  },
+                ]}
+              />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Quick Navigation ─────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
