@@ -776,7 +776,7 @@ export function DeliveryRemittancesPage({
             tileClassName="!py-2"
             items={[
               {
-                label: <span className="flex items-center">Gross Order Value<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
+                label: <span className="flex items-center">Gross Order Value ({Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
                 value: <NairaPrice amount={summary.grossOrderValue ?? '0'} />,
                 valueClassName: 'text-app-fg tabular-nums',
                 title: 'Total order value before any deductions (batched orders only)',
@@ -806,7 +806,7 @@ export function DeliveryRemittancesPage({
                 title: 'Per-batch cost of failed delivery attempts',
               },
               {
-                label: <span className="flex items-center">Net Remittable<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,
+                label: <span className="flex items-center">Net Remittable ({Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,
                 value: <NairaPrice amount={netRemittable} />,
                 valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
                 title: 'Gross Order Value minus all deductions',
