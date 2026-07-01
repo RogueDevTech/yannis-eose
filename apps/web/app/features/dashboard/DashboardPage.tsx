@@ -72,6 +72,7 @@ export function DashboardPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Dashboard toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

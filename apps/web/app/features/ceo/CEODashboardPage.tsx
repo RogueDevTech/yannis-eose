@@ -282,6 +282,7 @@ export function CEODashboardPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Executive overview toolbar"
+            saveFilterKey
             desktop={
               <>
                 <button

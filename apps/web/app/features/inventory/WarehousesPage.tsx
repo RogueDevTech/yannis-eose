@@ -379,6 +379,7 @@ export function WarehousesPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Warehouse toolbar"
+            saveFilterKey
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />

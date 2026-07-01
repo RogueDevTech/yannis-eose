@@ -173,6 +173,7 @@ export function FollowUpBatchesPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
+            saveFilterKey
             desktop={
               <>
                 <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />

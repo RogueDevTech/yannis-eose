@@ -109,6 +109,7 @@ export function HRPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="HR toolbar"
+            saveFilterKey
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />

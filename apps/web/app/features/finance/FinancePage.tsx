@@ -62,6 +62,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Finance toolbar and filters"
+            saveFilterKey
             filtersBadgeCount={filtersBadgeCount}
             desktop={
               <>

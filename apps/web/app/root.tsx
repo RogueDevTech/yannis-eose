@@ -1,7 +1,10 @@
-import type { LinksFunction } from '@remix-run/node';
+import type { LinksFunction, LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '~/components/ui/button';
+import { FilterPreferencesProvider } from '~/components/ui/filter-preferences-provider';
+import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import type { AllFilterPrefs } from '~/hooks/useFilterPreferences';
 import {
   Links,
   Meta,
@@ -45,8 +48,29 @@ declare global {
   }
 }
 
-export async function loader() {
+export async function loader({ request }: LoaderFunctionArgs) {
+  // Fetch all saved filter preferences in one server-side call so per-page
+  // hooks read from context instead of each firing a separate network request.
+  let filterPrefs: AllFilterPrefs = {};
+  try {
+    const user = await getCurrentUser(request);
+    if (user) {
+      const cookie = getSessionCookie(request);
+      const res = await apiRequest<unknown>('/trpc/filterPreferences.getAll', {
+        method: 'GET',
+        cookie,
+      });
+      if (res.ok) {
+        const data = (res.data as { result?: { data?: AllFilterPrefs } })?.result?.data;
+        filterPrefs = data ?? {};
+      }
+    }
+  } catch {
+    // Fail-safe: pages still work with no saved prefs.
+  }
+
   return json({
+    filterPrefs,
     ENV: {
       // PUBLIC_API_URL is the browser-reachable API URL (e.g. https://api-yannis.roguedevtech.com).
       // Empty string: client uses `getBrowserApiBaseUrl()` → same-origin (Vite /trpc + /socket.io proxy in dev).
@@ -129,7 +153,7 @@ export const links: LinksFunction = () => [
 ];
 
 export default function App() {
-  const { ENV } = useLoaderData<typeof loader>();
+  const { ENV, filterPrefs } = useLoaderData<typeof loader>();
   const location = useLocation();
   const { install, canPromptInstall, isIosManualInstall } = usePwaInstall();
   const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
@@ -207,7 +231,9 @@ export default function App() {
             />
           </div>
         ) : null}
-        <Outlet />
+        <FilterPreferencesProvider initialPrefs={filterPrefs}>
+          <Outlet />
+        </FilterPreferencesProvider>
         <PwaInstallPrompt
           open={installPromptOpen}
           isIosInstructions={isIosManualInstall}

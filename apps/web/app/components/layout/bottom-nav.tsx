@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink } from '@remix-run/react';
+import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 
 export interface BottomNavItem {
   label: string;
@@ -61,6 +62,7 @@ export function BottomNavMoreModal({
   currentPathname,
   footer,
 }: BottomNavMoreModalProps) {
+  const resolveHref = useResolveFilterHref();
   const openedAtRef = useRef<number | null>(null);
   const [overlayCanClose, setOverlayCanClose] = useState(false);
 
@@ -141,7 +143,7 @@ export function BottomNavMoreModal({
                     {group.items.map((item) => (
                       <li key={item.href}>
                         <NavLink
-                          to={item.href}
+                          to={resolveHref(item.href)}
                           end={item.href === '/admin' || item.href === '/tpl'}
                           prefetch="render"
                           onClick={onClose}
@@ -202,6 +204,7 @@ export function BottomNav({
   moreOpen: moreOpenProp,
   onMoreOpenChange,
 }: BottomNavProps) {
+  const resolveHref = useResolveFilterHref();
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = moreOpenProp !== undefined && onMoreOpenChange !== undefined;
   const moreOpen = isControlled ? moreOpenProp : internalOpen;
@@ -248,7 +251,7 @@ export function BottomNav({
           return (
             <NavLink
               key={item.href}
-              to={item.href}
+              to={resolveHref(item.href)}
               end={item.href === '/admin' || item.href === '/tpl'}
               prefetch="render"
               className={({ isPending }) => {

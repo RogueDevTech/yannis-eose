@@ -7,6 +7,8 @@ import { SYSTEM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { CacheService } from '../common/cache/cache.service';
+import { FollowUpConfigService } from './follow-up-config.service';
+import { CartOrdersService } from '../cart-orders/cart-orders.service';
 
 /**
  * Order statuses that have NOT moved any inventory yet. Test orders past
@@ -65,6 +67,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly cache: CacheService,
+    private readonly followUpService: FollowUpConfigService,
+    private readonly cartOrdersService: CartOrdersService,
   ) {}
 
   /**
@@ -124,6 +128,16 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       await this.purgeUniversalDuplicates();
     } catch (err) {
       this.logger.error(`Universal duplicate purge run failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.followUpService.retryFailedGraduations();
+    } catch (err) {
+      this.logger.error(`Follow-up graduation retry failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.cartOrdersService.retryFailedGraduations();
+    } catch (err) {
+      this.logger.error(`Cart order graduation retry failed: ${(err as Error)?.message ?? err}`);
     }
   }
 

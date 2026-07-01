@@ -16,7 +16,6 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { SaveFilterPrefsButton } from '~/components/ui/save-filter-prefs-button';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
@@ -360,8 +359,8 @@ export function MarketingOrdersPage({
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
           : (order) =>
-              order.status === 'CART' ? (
-                // Cart rows have no order detail page — copyable id only.
+              order.status === 'CART' || order.status === 'ABANDONED' || order.status === 'RECOVERED' ? (
+                // Cart / abandoned rows have no order detail page — copyable id only.
                 <OrderIdBadge id={order.id} orderNumber={order.orderNumber} />
               ) : (
                 <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />
@@ -488,7 +487,11 @@ export function MarketingOrdersPage({
                   {order.lastCsComment && (
                     <CsCommentIcon comment={order.lastCsComment.comment} actorName={order.lastCsComment.actorName} />
                   )}
-                  <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
+                  {order.status === 'ABANDONED' || order.status === 'RECOVERED' ? (
+                    <CompactTableActionButton onClick={() => openCartDetail?.(order.id)}>View</CompactTableActionButton>
+                  ) : (
+                    <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
+                  )}
                 </div>
               ),
       },
@@ -595,6 +598,7 @@ export function MarketingOrdersPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Marketing orders tools"
+            saveFilterKey
             mobileLeading={
               liveEvents != null && liveEvents.length > 0 ? (
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
@@ -605,7 +609,6 @@ export function MarketingOrdersPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
-                <SaveFilterPrefsButton pageKey="admin.marketing.orders" />
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
@@ -1304,6 +1307,7 @@ export function MarketingOrdersPage({
               </div>
 
               {/* Actions */}
+              {o.status !== 'ABANDONED' && o.status !== 'RECOVERED' && (
               <div className="flex items-center gap-2 pt-1 border-t border-app-border">
                 <Link
                   to={orderDetailHref('/admin/orders', o.id, 'marketing')}
@@ -1314,6 +1318,7 @@ export function MarketingOrdersPage({
                   View order
                 </Link>
               </div>
+              )}
             </div>
           );
         })()}

@@ -56,6 +56,7 @@ export function CSLeaderboardPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="CS leaderboard date range"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

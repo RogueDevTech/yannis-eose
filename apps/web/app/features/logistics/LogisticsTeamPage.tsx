@@ -698,6 +698,7 @@ export function LogisticsTeamPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Logistics agent toolbar and date range"
+            saveFilterKey
             filtersBadgeCount={logisticsTeamToolbarFilterBadge}
             filters={
               <SortMenu

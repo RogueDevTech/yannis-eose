@@ -577,6 +577,7 @@ export function StaffOnboardingPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Onboarding toolbar"
+            saveFilterKey
             desktop={
               <div className="flex items-center gap-2">
                 <StatusBadge status={record.status} label={formatStatusLabel(record.status)} />

@@ -634,6 +634,7 @@ function LogisticsOrdersPageImpl({
             <PageHeaderMobileTools
               sheetTitle="Actions"
               triggerAriaLabel="Logistics orders tools"
+              saveFilterKey
               filtersBadgeCount={logisticsOrdersToolbarFilterBadge}
               desktop={
                 <>

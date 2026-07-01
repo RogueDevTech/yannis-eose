@@ -846,6 +846,7 @@ export function DisbursementsPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Disbursement toolbar"
+            saveFilterKey
             filtersBadgeCount={activeFilterBadge}
             desktop={
               <div className="flex flex-wrap items-center gap-2">

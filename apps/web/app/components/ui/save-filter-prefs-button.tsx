@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useSearchParams } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { useToast } from '~/components/ui/toast';
-import { useFilterPreferences } from '~/hooks/useFilterPreferences';
 
 function BookmarkOutlineIcon({ className = 'h-4 w-4' }: { className?: string }) {
   return (
@@ -20,71 +20,120 @@ function BookmarkFilledIcon({ className = 'h-4 w-4' }: { className?: string }) {
   );
 }
 
+const PERSISTABLE_PARAMS = new Set([
+  'startDate', 'endDate', 'period', 'status', 'mediaBuyerId', 'csCloserId',
+  'productId', 'campaignId', 'fromLocationId', 'toLocationId', 'locationId',
+  'branchId', 'perPage', 'fromCart', 'testOrders', 'sortBy', 'sortOrder', 'sortDir',
+]);
+
+const API_PATH = '/api/filter-preferences';
+
 interface SaveFilterPrefsButtonProps {
   pageKey: string;
-  /** Additional class names for the button. */
+  /** Pass from useFilterPreferences hook to avoid duplicate fetches. */
+  hasSavedPrefs?: boolean;
+  /** Whether current URL filters differ from saved prefs. */
+  filtersChanged?: boolean;
   className?: string;
 }
 
 /**
- * Small bookmark icon for page headers. Saves/clears the current URL filter
- * params as the user's default for this page. Shows filled when prefs exist.
+ * Standalone save button — does NOT fetch preferences on mount.
+ * Only saves/clears via direct API calls when user clicks.
+ * No duplicate network requests.
  */
-export function SaveFilterPrefsButton({ pageKey, className = '' }: SaveFilterPrefsButtonProps) {
-  const { hasSavedPrefs, saveCurrentFilters, clearSavedFilters, isSaving } = useFilterPreferences(pageKey);
+export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsProp = false, filtersChanged = false, className = '' }: SaveFilterPrefsButtonProps) {
+  const [searchParams] = useSearchParams();
   const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  // localHasSaved mirrors the prop; mutations flip it locally for instant feedback.
+  const [localHasSaved, setLocalHasSaved] = useState(hasSavedPrefsProp);
   const { toast } = useToast();
 
-  const handleSave = () => {
-    saveCurrentFilters();
-    setShowModal(false);
-    toast.success('Filter defaults saved');
-  };
+  // Keep in sync when the prop changes (e.g. after context hydrates or a save
+  // in a sibling hook updates the context).
+  useEffect(() => {
+    setLocalHasSaved(hasSavedPrefsProp);
+  }, [hasSavedPrefsProp]);
 
-  const handleClear = () => {
-    clearSavedFilters();
-    setShowModal(false);
-    toast.info('Filter defaults cleared');
+  const doSave = useCallback(() => {
+    const filters: Record<string, string> = {};
+    for (const key of PERSISTABLE_PARAMS) {
+      const value = searchParams.get(key);
+      if (value) filters[key] = value;
+    }
+    // Normalize: period=all_time makes startDate/endDate redundant
+    if (filters.period === 'all_time') {
+      delete filters.startDate;
+      delete filters.endDate;
+    }
+    if (Object.keys(filters).length === 0) return;
+
+    setSaving(true);
+    fetch(API_PATH, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent: 'upsert', pageKey, filters }),
+    })
+      .then(() => { setLocalHasSaved(true); toast.success('Filter defaults saved'); setShowModal(false); })
+      .catch(() => toast.error('Failed to save'))
+      .finally(() => setSaving(false));
+  }, [searchParams, pageKey, toast]);
+
+  const doClear = useCallback(() => {
+    setSaving(true);
+    fetch(API_PATH, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent: 'delete', pageKey }),
+    })
+      .then(() => { setLocalHasSaved(false); toast.info('Filter defaults cleared'); setShowModal(false); })
+      .catch(() => toast.error('Failed to clear'))
+      .finally(() => setSaving(false));
+  }, [pageKey, toast]);
+
+  const handleClick = () => {
+    setShowModal(true);
   };
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setShowModal(true)}
-        disabled={isSaving}
-        className={`inline-flex items-center justify-center rounded-md p-1.5 text-app-fg-muted hover:text-brand-500 dark:hover:text-brand-400 hover:bg-app-bg-hover transition-colors ${className}`}
-        title={hasSavedPrefs ? 'Saved filter defaults (click to manage)' : 'Save current filters as default'}
+        onClick={handleClick}
+        disabled={saving}
+        className={`btn-secondary btn-sm gap-1.5 ${className}`}
+        title={localHasSaved ? 'Manage saved filter defaults' : 'Save current filters as default'}
       >
-        {hasSavedPrefs ? (
+        {localHasSaved && !filtersChanged ? (
           <BookmarkFilledIcon className="h-4 w-4 text-brand-500 dark:text-brand-400" />
         ) : (
           <BookmarkOutlineIcon className="h-4 w-4" />
         )}
+        <span>{localHasSaved && !filtersChanged ? 'Saved filters' : 'Save filters'}</span>
       </button>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)}>
-        <div className="space-y-4">
-          <h3 className="text-base font-semibold text-app-fg">Filter Defaults</h3>
-          <p className="text-sm text-app-fg-muted">
-            {hasSavedPrefs
-              ? 'This page has saved filter defaults. You can update them with your current filters or clear them.'
-              : 'Save your current filters as the default for this page. They will be applied automatically when you visit without specific filters.'}
-          </p>
-
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={handleSave} disabled={isSaving}>
-              {hasSavedPrefs ? 'Update defaults' : 'Save as default'}
+      <Modal open={showModal} onClose={() => setShowModal(false)} maxWidth="max-w-sm" contentClassName="p-5">
+        <h3 className="text-base font-semibold text-app-fg">Filter Defaults</h3>
+        <p className="mt-2 text-sm text-app-fg-muted">
+          {localHasSaved
+            ? 'Update your saved defaults with the current filters, or clear them to use system defaults.'
+            : 'Save your current filters as the default for this page. They will be applied automatically when you visit.'}
+        </p>
+        <div className="mt-5 flex items-center gap-3">
+          <Button size="sm" onClick={() => doSave()} disabled={saving}>
+            {saving ? 'Saving…' : 'Save filters'}
+          </Button>
+          {localHasSaved && (
+            <Button size="sm" variant="secondary" onClick={() => doClear()} disabled={saving}>
+              Clear defaults
             </Button>
-            {hasSavedPrefs && (
-              <Button size="sm" variant="ghost" onClick={handleClear} disabled={isSaving}>
-                Clear defaults
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => setShowModal(false)}>
-              Cancel
-            </Button>
-          </div>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setShowModal(false)} disabled={saving}>
+            Cancel
+          </Button>
         </div>
       </Modal>
     </>

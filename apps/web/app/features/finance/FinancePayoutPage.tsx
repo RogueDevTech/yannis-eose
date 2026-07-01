@@ -199,6 +199,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Payout toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />
