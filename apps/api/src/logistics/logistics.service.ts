@@ -1721,9 +1721,13 @@ export class LogisticsService {
         // Deduction breakdown — so the CEO sees where the money goes
         grossOrderValue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
         totalDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        deliveryFeeCount: sql<string>`COUNT(CASE WHEN COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
         totalCommitmentFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.commitmentFee}, 0)), 0)::text`,
+        commitmentFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
         totalPosFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.posFee}, 0)), 0)::text`,
+        posFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
         totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0)), 0)::text`,
+        failedDeliveryCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -1734,12 +1738,18 @@ export class LogisticsService {
 
     // Received/Disputed: count orders (not batches) by joining through
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
+    // Date-filtered by deliveryRemittances.sentAt to match the base summary scope.
+    const outcomeDateConditions: SQL[] = [];
+    if (input.startDate) outcomeDateConditions.push(sql`dr.sent_at >= ${input.startDate + 'T00:00:00'}::timestamptz`);
+    if (input.endDate) outcomeDateConditions.push(sql`dr.sent_at <= ${input.endDate + 'T23:59:59'}::timestamptz`);
+    const outcomeDateWhere = outcomeDateConditions.length > 0 ? sql` AND ${sql.join(outcomeDateConditions, sql` AND `)}` : sql``;
+
     const outcomeSummaryQuery = this.db
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED'))::text`,
-        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED'))::text`,
+        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeDateWhere})::text`,
+        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeDateWhere})::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
@@ -1831,17 +1841,23 @@ export class LogisticsService {
       // Deduction breakdown for remitted orders
       grossOrderValue: baseSummary?.grossOrderValue ?? '0',
       totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
+      deliveryFeeCount: baseSummary?.deliveryFeeCount ?? '0',
       totalCommitmentFees: baseSummary?.totalCommitmentFees ?? '0',
+      commitmentFeeCount: baseSummary?.commitmentFeeCount ?? '0',
       totalPosFees: baseSummary?.totalPosFees ?? '0',
+      posFeeCount: baseSummary?.posFeeCount ?? '0',
       totalFailedDeliveryCosts: baseSummary?.totalFailedDeliveryCosts ?? '0',
+      failedDeliveryCount: baseSummary?.failedDeliveryCount ?? '0',
     };
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', deliveredCount: '0', deliveredAmount: '0',
-      grossOrderValue: '0', totalDeliveryFees: '0', totalCommitmentFees: '0',
-      totalPosFees: '0', totalFailedDeliveryCosts: '0',
+      grossOrderValue: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
+      totalCommitmentFees: '0', commitmentFeeCount: '0',
+      totalPosFees: '0', posFeeCount: '0',
+      totalFailedDeliveryCosts: '0', failedDeliveryCount: '0',
     };
 
     return {

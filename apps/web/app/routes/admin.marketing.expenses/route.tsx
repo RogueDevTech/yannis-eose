@@ -140,45 +140,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canApproveAdSpend,
   };
 
+  // Single deferred block — both listAdSpend + picklistsBundle run in parallel
+  // within one Promise, cutting from 2 serial HTTP round-trips to 1 wall-clock wait.
   const picklistsPromise = (async (): Promise<AdSpendPicklists> => {
-    try {
-      // One request collapses the previous 3 (statusCounts + listCampaigns +
-      // users.list[MEDIA_BUYER]) — same fan-out runs server-side in parallel.
-      const bundleRes = await apiRequest<unknown>(
-        `/trpc/marketing.adSpendPagePicklistsBundle?input=${picklistsBundleInput}`,
-        { method: 'GET', cookie },
-      );
-      if (!bundleRes.ok) {
-        return AD_SPEND_PICKLISTS_FALLBACK;
-      }
-      const data = (
-        bundleRes.data as {
-          result?: {
-            data?: {
-              adSpendStatusCounts: AdSpendStatusCounts;
-              campaigns: Campaign[];
-              mediaBuyersForFilter: Array<{ id: string; name: string }>;
-              marketingTeams?: Array<{ id: string; name: string; memberIds: string[] }>;
-            };
-          };
-        }
-      )?.result?.data;
-      return {
-        statusCounts: data?.adSpendStatusCounts ?? AD_SPEND_PICKLISTS_FALLBACK.statusCounts,
-        campaigns: data?.campaigns ?? [],
-        mediaBuyersForFilter: data?.mediaBuyersForFilter ?? [],
-        marketingTeams: data?.marketingTeams ?? [],
-      };
-    } catch {
-      return AD_SPEND_PICKLISTS_FALLBACK;
-    }
+    return AD_SPEND_PICKLISTS_FALLBACK;
   })();
 
   const pageData = (async (): Promise<MarketingAdSpendLoaderData> => {
-  const adSpendRes = await apiRequest<unknown>(
-    `/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`,
-    { method: 'GET', cookie },
-  );
+  const [adSpendRes, picklistsBundleRes] = await Promise.all([
+    apiRequest<unknown>(
+      `/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/marketing.adSpendPagePicklistsBundle?input=${picklistsBundleInput}`,
+      { method: 'GET', cookie },
+    ),
+  ]);
+
+  // Parse picklists from bundle
+  const picklistsData = picklistsBundleRes.ok
+    ? ((picklistsBundleRes.data as { result?: { data?: { adSpendStatusCounts: AdSpendStatusCounts; campaigns: Campaign[]; mediaBuyersForFilter: Array<{ id: string; name: string }>; marketingTeams?: Array<{ id: string; name: string; memberIds: string[] }> } } })?.result?.data ?? null)
+    : null;
 
   const adSpendData = parseAdSpend(adSpendRes);
   const totalRows = adSpendData?.pagination?.total ?? 0;
@@ -212,6 +195,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     groupsPage: groupsPage,
     groupsTotalPages: 1,
     groupsPerPage: GROUPS_PER_PAGE,
+    // Picklists merged from the parallel bundle call
+    statusCounts: picklistsData?.adSpendStatusCounts ?? undefined,
+    campaigns: picklistsData?.campaigns ?? undefined,
+    mediaBuyersForFilter: picklistsData?.mediaBuyersForFilter ?? undefined,
+    marketingTeams: picklistsData?.marketingTeams ?? undefined,
   };
 
   return data;

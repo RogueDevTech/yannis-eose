@@ -85,6 +85,11 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - Never revert PageBundle to N parallel calls
 - Never regress Postgres pool config (max:30, idle:300s, warmup)
 
+## Git Workflow
+- Default push target is `dev` branch. When the user says "push" or "push to GitHub", push to `dev`.
+- Always create PRs against `dev`, never `main`.
+- Never push directly to `main`.
+
 ## Infra
 - Prod: GCP `europe-west2`, `e2-standard-4` VM. Cloud SQL must be same region.
 - Ingress: Cloudflare Proxy → nginx → web:3000 / api:4444. SSL Full (strict).
