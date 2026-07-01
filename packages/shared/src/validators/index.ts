@@ -543,6 +543,21 @@ export type {
   ListCartOrderRoutingRulesInput,
 } from './cart-orders';
 
+// User filter preferences validators
+export {
+  pageKeySchema,
+  filterValueSchema,
+  upsertFilterPreferenceSchema,
+  deleteFilterPreferenceSchema,
+  getFilterPreferenceSchema,
+} from './user-filter-preferences';
+
+export type {
+  UpsertFilterPreferenceInput,
+  DeleteFilterPreferenceInput,
+  GetFilterPreferenceInput,
+} from './user-filter-preferences';
+
 export type {
   SavePushSubscriptionInput,
   RemovePushSubscriptionInput,

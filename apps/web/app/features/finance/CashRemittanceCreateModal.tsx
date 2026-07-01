@@ -55,7 +55,7 @@ export function CashRemittanceCreateModal({
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
   const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
   const [notes, setNotes] = useState('');
-  const [markReceivedNow, setMarkReceivedNow] = useState(false);
+  const [markReceivedNow, setMarkReceivedNow] = useState(true);
   const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
   const [commitmentFee, setCommitmentFee] = useState('');
   const [posFee, setPosFee] = useState('');

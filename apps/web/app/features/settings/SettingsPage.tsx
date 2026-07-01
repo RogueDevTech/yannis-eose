@@ -526,179 +526,279 @@ export function SettingsPage({
         />
       )}
 
-      {/* Profile Tab */}
+      {/* Profile Tab — accordion layout matching System tab */}
       {activeTab === 'profile' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">
+          {/* Account Information — open by default */}
           <div className="card">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Account Information</h3>
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-16 h-16 rounded-full bg-brand-100 dark:bg-brand-700/30 flex items-center justify-center">
-                  <span className="text-xl font-bold text-brand-600 dark:text-brand-400">
-                    {(user?.name ?? '?').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
-                  </span>
+            <Collapsible
+              defaultOpen
+              contentClassName="mt-4"
+              trigger={
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Account Information</h3>
+                    <p className="text-sm text-app-fg-muted">Profile details and display name</p>
+                  </div>
                 </div>
+              }
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-lg border border-app-border p-4 space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-full bg-brand-100 dark:bg-brand-700/30 flex items-center justify-center">
+                      <span className="text-lg font-bold text-brand-600 dark:text-brand-400">
+                        {(user?.name ?? '?').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-base font-semibold text-app-fg">{user?.name ?? 'Unknown'}</p>
+                      <p className="text-sm text-app-fg-muted">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Email</label>
+                    <p className="text-sm text-app-fg mt-1">{user?.email ?? '—'}</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Role</label>
+                    <p className="text-sm text-app-fg mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}</p>
+                  </div>
+                </div>
+
+                <fetcher.Form method="post" className="rounded-lg border border-app-border p-4 space-y-4">
+                  <h4 className="text-sm font-semibold text-app-fg">Edit Profile</h4>
+                  <input type="hidden" name="intent" value="updateProfile" />
+                  <TextInput
+                    id="name"
+                    name="name"
+                    label="Display Name"
+                    type="text"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    required
+                  />
+                  <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
+                    Save Changes
+                  </Button>
+                </fetcher.Form>
+              </div>
+            </Collapsible>
+          </div>
+
+          {/* Appearance */}
+          <div className="card">
+            <Collapsible
+              contentClassName="mt-4"
+              trigger={
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.098 19.902a3.75 3.75 0 0 0 5.304 0l6.401-6.402M6.75 21A3.75 3.75 0 0 1 3 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 0 0 3.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008Z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Appearance</h3>
+                    <p className="text-sm text-app-fg-muted">Theme and text size</p>
+                  </div>
+                </div>
+              }
+            >
+              <div className="space-y-6">
                 <div>
-                  <p className="text-lg font-semibold text-app-fg">{user?.name ?? 'Unknown'}</p>
-                  <p className="text-sm text-app-fg-muted">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
+                  <p className="text-xs text-app-fg-muted mb-3">
+                    Current theme: <span className="font-medium text-app-fg">{activeTheme.label}</span>
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {APP_THEMES.map((t) => (
+                      <ThemeAppearanceOption
+                        key={t.id}
+                        theme={t}
+                        selected={themeId === t.id}
+                        onSelect={() => setTheme(t.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-app-fg-muted mb-3">
+                    Text size: <span className="font-medium text-app-fg">{activeScale.label}</span>
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {FONT_SCALES.map((s) => {
+                      const selected = fontScaleId === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => setFontScale(s.id)}
+                          className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border px-3 py-4 transition ${
+                            selected
+                              ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-500/30'
+                              : 'border-app-border bg-app-elevated hover:border-app-border-strong'
+                          }`}
+                          aria-pressed={selected}
+                        >
+                          <span
+                            className="font-semibold text-app-fg leading-none"
+                            style={{ fontSize: `${s.rootPx + 6}px` }}
+                          >
+                            {s.sample}
+                          </span>
+                          <span className="text-xs text-app-fg-muted">{s.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-
-              <div>
-                <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Email</label>
-                <p className="text-sm text-app-fg mt-1">{user?.email ?? '—'}</p>
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Role</label>
-                <p className="text-sm text-app-fg mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}</p>
-              </div>
-            </div>
+            </Collapsible>
           </div>
 
-          <fetcher.Form method="post" className="card">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Edit Profile</h3>
-            <input type="hidden" name="intent" value="updateProfile" />
-            <div className="space-y-4">
-              <div>
-                <TextInput
-                  id="name"
-                  name="name"
-                  label="Display Name"
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
-                Save Changes
-              </Button>
-            </div>
-          </fetcher.Form>
-
-          <div className="card lg:col-span-2">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Appearance</h3>
-            <p className="text-xs text-app-fg-muted mb-3">
-              Current: <span className="font-medium text-app-fg">{activeTheme.label}</span>
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {APP_THEMES.map((t) => (
-                <ThemeAppearanceOption
-                  key={t.id}
-                  theme={t}
-                  selected={themeId === t.id}
-                  onSelect={() => setTheme(t.id)}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="card lg:col-span-2">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Text size</h3>
-            <p className="text-xs text-app-fg-muted mb-3">
-              Adjusts text and spacing across the app on this device and any device you sign in to. Current: <span className="font-medium text-app-fg">{activeScale.label}</span>
-            </p>
-            <div className="grid grid-cols-3 gap-3">
-              {FONT_SCALES.map((s) => {
-                const selected = fontScaleId === s.id;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setFontScale(s.id)}
-                    className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border px-3 py-4 transition ${
-                      selected
-                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-500/30'
-                        : 'border-app-border bg-app-elevated hover:border-app-border-strong'
-                    }`}
-                    aria-pressed={selected}
-                  >
-                    <span
-                      className="font-semibold text-app-fg leading-none"
-                      style={{ fontSize: `${s.rootPx + 6}px` }}
-                    >
-                      {s.sample}
-                    </span>
-                    <span className="text-xs text-app-fg-muted">{s.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="card lg:col-span-2">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Notification sound</h3>
-            <p className="text-xs text-app-fg-muted mb-3">
-              Play a chime when new notifications arrive. Saved on this device.
-            </p>
-            <div className="flex items-center justify-between rounded-lg border border-app-border px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-app-fg">{soundEnabled ? 'Sound on' : 'Sound off'}</p>
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  {soundEnabled ? 'You will hear a chime for new notifications.' : 'Notifications arrive silently.'}
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={soundEnabled}
-                onClick={() => {
-                  const next = !soundEnabled;
-                  setSoundEnabled(next);
-                  setNotificationSoundEnabled(next);
-                  if (next) playNotificationSound();
-                }}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
-                  soundEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
-                    soundEnabled ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
-
-          {!isInstalled && <div ref={installAnchorRef} id="install-app" className="card lg:col-span-2 scroll-mt-24">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Install app</h3>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between rounded-lg border border-app-border px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-app-fg">Add to home screen</p>
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  {isIosManualInstall
-                    ? 'On iPhone or iPad (Safari or Chrome), use Share, then Add to Home Screen.'
-                    : 'Install Yannis for faster launch and better offline behavior.'}
-                </p>
-                {isIosManualInstall ? (
-                  <details className="mt-2 rounded-lg border border-app-border bg-app-hover px-2.5 py-2">
-                    <summary className="cursor-pointer text-xs font-semibold text-app-fg-muted">
-                      Show steps
-                    </summary>
-                    <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-app-fg-muted">
-                      <li>Tap Share in the browser toolbar (often at the bottom on iPhone).</li>
-                      <li>Tap Add to Home Screen.</li>
-                      <li>Tap Add to finish.</li>
-                    </ol>
-                  </details>
-                ) : null}
-              </div>
-              {isIosManualInstall ? null : (
-                <Button
+          {/* Notification Sound */}
+          <div className="card">
+            <Collapsible
+              contentClassName="mt-4"
+              trigger={
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Notification Sound</h3>
+                    <p className="text-sm text-app-fg-muted">{soundEnabled ? 'Sound on' : 'Sound off'}</p>
+                  </div>
+                </div>
+              }
+            >
+              <div className="flex items-center justify-between rounded-lg border border-app-border px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-app-fg">{soundEnabled ? 'Sound on' : 'Sound off'}</p>
+                  <p className="text-xs text-app-fg-muted mt-0.5">
+                    {soundEnabled ? 'You will hear a chime for new notifications.' : 'Notifications arrive silently.'}
+                  </p>
+                </div>
+                <button
                   type="button"
-                  variant="primary"
-                  size="sm"
-                  className="shrink-0 self-end sm:self-start"
-                  disabled={!canInstall && !canPromptInstall}
-                  onClick={() => void install()}
+                  role="switch"
+                  aria-checked={soundEnabled}
+                  onClick={() => {
+                    const next = !soundEnabled;
+                    setSoundEnabled(next);
+                    setNotificationSoundEnabled(next);
+                    if (next) playNotificationSound();
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+                    soundEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                  }`}
                 >
-                  Install App
-                </Button>
-              )}
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                      soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </Collapsible>
+          </div>
+
+          {/* Filter Preferences */}
+          <div className="card">
+            <Collapsible
+              contentClassName="mt-4"
+              trigger={
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Filter Preferences</h3>
+                    <p className="text-sm text-app-fg-muted">Set default filters for each page</p>
+                  </div>
+                </div>
+              }
+            >
+              <div className="rounded-lg border border-app-border p-4 space-y-3">
+                <p className="text-sm text-app-fg-muted">
+                  Save your preferred filters (date range, status, pagination, etc.) per page so they apply automatically on every visit.
+                </p>
+                <Link
+                  to="/admin/settings/filter-preferences"
+                  prefetch="intent"
+                  className="btn-primary btn-sm inline-flex"
+                >
+                  Manage filter defaults
+                </Link>
+              </div>
+            </Collapsible>
+          </div>
+
+          {/* Install App */}
+          {!isInstalled && (
+            <div ref={installAnchorRef} id="install-app" className="card scroll-mt-24">
+              <Collapsible
+                contentClassName="mt-4"
+                trigger={
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-app-fg">Install App</h3>
+                      <p className="text-sm text-app-fg-muted">Add to home screen for faster access</p>
+                    </div>
+                  </div>
+                }
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between rounded-lg border border-app-border px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-app-fg">Add to home screen</p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">
+                      {isIosManualInstall
+                        ? 'On iPhone or iPad (Safari or Chrome), use Share, then Add to Home Screen.'
+                        : 'Install Yannis for faster launch and better offline behavior.'}
+                    </p>
+                    {isIosManualInstall ? (
+                      <details className="mt-2 rounded-lg border border-app-border bg-app-hover px-2.5 py-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-app-fg-muted">
+                          Show steps
+                        </summary>
+                        <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-app-fg-muted">
+                          <li>Tap Share in the browser toolbar (often at the bottom on iPhone).</li>
+                          <li>Tap Add to Home Screen.</li>
+                          <li>Tap Add to finish.</li>
+                        </ol>
+                      </details>
+                    ) : null}
+                  </div>
+                  {isIosManualInstall ? null : (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="shrink-0 self-end sm:self-start"
+                      disabled={!canInstall && !canPromptInstall}
+                      onClick={() => void install()}
+                    >
+                      Install App
+                    </Button>
+                  )}
+                </div>
+              </Collapsible>
             </div>
-          </div>}
+          )}
         </div>
       )}
 

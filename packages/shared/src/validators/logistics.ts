@@ -203,6 +203,7 @@ export const listDeliveryRemittanceEligibleOrdersSchema = z.object({
   search: z.string().trim().max(200).optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  orderIds: z.array(z.string().uuid()).max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(500).default(100),
 });

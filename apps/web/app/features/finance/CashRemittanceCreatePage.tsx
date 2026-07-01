@@ -28,7 +28,7 @@ export function CashRemittanceCreatePage({
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [markReceivedNow, setMarkReceivedNow] = useState(false);
+  const [markReceivedNow, setMarkReceivedNow] = useState(true);
   const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
   // Batch-level extra costs (single input for the whole remittance)
   const [commitmentFee, setCommitmentFee] = useState('');
