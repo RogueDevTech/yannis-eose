@@ -91,6 +91,9 @@ import { setSettingsCacheService } from './routers/settings.router';
 import { CartOrdersModule } from '../cart-orders/cart-orders.module';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
 import { setCartOrdersService } from './routers/cart-orders.router';
+import { UserFilterPreferencesModule } from '../user-filter-preferences/user-filter-preferences.module';
+import { UserFilterPreferencesService } from '../user-filter-preferences/user-filter-preferences.service';
+import { setUserFilterPreferencesService } from './routers/user-filter-preferences.router';
 
 @Module({
   imports: [
@@ -105,6 +108,7 @@ import { setCartOrdersService } from './routers/cart-orders.router';
     ReportsModule,
     OnboardingModule,
     CartOrdersModule,
+    UserFilterPreferencesModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -138,6 +142,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly roleTemplatesService: RoleTemplatesService,
     private readonly onboardingService: OnboardingService,
     private readonly cartOrdersService: CartOrdersService,
+    private readonly userFilterPreferencesService: UserFilterPreferencesService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -198,6 +203,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setPermissionsCacheService(this.cacheService);
     setOnboardingService(this.onboardingService);
     setCartOrdersService(this.cartOrdersService);
+    setUserFilterPreferencesService(this.userFilterPreferencesService);
   }
 
   configure(consumer: MiddlewareConsumer) {

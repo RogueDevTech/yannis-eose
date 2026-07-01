@@ -2231,17 +2231,15 @@ export class LogisticsService {
       conditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
 
-    // Anti-join: skip orders already on any remittance. Cleaner than fetch-all
-    // + filter-in-JS when the table grows.
-    const remittedOrderIds = (
-      await this.db
-        .select({ orderId: schema.deliveryRemittanceOrders.orderId })
-        .from(schema.deliveryRemittanceOrders)
-    ).map((r) => r.orderId);
-
-    if (remittedOrderIds.length > 0) {
-      conditions.push(sql`${schema.orders.id} NOT IN ${remittedOrderIds}`);
+    // When specific order IDs are requested, scope to exactly those
+    if (input.orderIds && input.orderIds.length > 0) {
+      conditions.push(inArray(schema.orders.id, input.orderIds));
     }
+
+    // Anti-join: exclude orders already on any remittance batch.
+    conditions.push(
+      sql`NOT EXISTS (SELECT 1 FROM ${schema.deliveryRemittanceOrders} WHERE ${schema.deliveryRemittanceOrders.orderId} = ${schema.orders.id})`,
+    );
 
     const locAlias = alias(schema.logisticsLocations, 'eligible_loc');
     const provAlias = alias(schema.logisticsProviders, 'eligible_loc_provider');

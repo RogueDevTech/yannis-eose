@@ -732,15 +732,13 @@ export function DeliveryRemittancesPage({
               value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
               valueClassName: 'text-app-fg tabular-nums',
               title: 'Gross value of all delivered + remitted orders in this period',
-              onClick: () => { setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
-              active: viewTab === 'eligible' && !pendingStatus,
             },
             {
               label: <span className="flex items-center">Awaiting Remittance ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
               value: <NairaPrice amount={summary.awaitingAmount} />,
               valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
               title: 'Net value (minus delivery fees) of delivered orders not yet on any remittance batch',
-              onClick: () => { setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
+              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
               active: viewTab === 'eligible' && !pendingStatus,
             },
             {
