@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (usersRes.ok) {
       const rows = (usersRes.data as { result?: { data?: Array<{ userId: string; name: string; role: string }> } })?.result?.data ?? [];
       for (const r of rows) {
-        if (r.role === 'MEDIA_BUYER') mediaBuyers.push({ id: r.userId, name: r.name });
+        if (r.role === 'MEDIA_BUYER' || r.role === 'HEAD_OF_MARKETING') mediaBuyers.push({ id: r.userId, name: r.name });
       }
     }
   } else if (user.role === 'MEDIA_BUYER') {

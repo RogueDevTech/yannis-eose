@@ -83,9 +83,13 @@ export interface DeliveryRemittanceSummary {
   deliveredAmount?: string;
   grossOrderValue?: string;
   totalDeliveryFees?: string;
+  deliveryFeeCount?: string;
   totalCommitmentFees?: string;
+  commitmentFeeCount?: string;
   totalPosFees?: string;
+  posFeeCount?: string;
   totalFailedDeliveryCosts?: string;
+  failedDeliveryCount?: string;
 }
 
 export interface DeliveryRemittancesPageProps {
@@ -754,28 +758,28 @@ export function DeliveryRemittancesPage({
               title: 'Total order value before any deductions (orders on remittances only)',
             },
             {
-              label: 'Delivery Fees',
+              label: `Delivery Fees (${Number(summary.deliveryFeeCount ?? 0)})`,
               value: <NairaPrice amount={summary.totalDeliveryFees ?? '0'} />,
               valueClassName: 'text-red-500 tabular-nums',
-              title: 'Sum of delivery fees deducted from order totals',
+              title: 'Orders with delivery fees deducted',
             },
             {
-              label: 'Commitment Fees',
+              label: `Commitment Fees (${Number(summary.commitmentFeeCount ?? 0)})`,
               value: <NairaPrice amount={summary.totalCommitmentFees ?? '0'} />,
               valueClassName: 'text-red-500 tabular-nums',
-              title: 'Logistics provider commitment fees',
+              title: 'Remittance batches with commitment fees',
             },
             {
-              label: 'POS Fees',
+              label: `POS Fees (${Number(summary.posFeeCount ?? 0)})`,
               value: <NairaPrice amount={summary.totalPosFees ?? '0'} />,
               valueClassName: 'text-red-500 tabular-nums',
-              title: 'POS transaction fees',
+              title: 'Remittance batches with POS fees',
             },
             {
-              label: 'Failed Delivery',
+              label: `Failed Delivery (${Number(summary.failedDeliveryCount ?? 0)})`,
               value: <NairaPrice amount={summary.totalFailedDeliveryCosts ?? '0'} />,
               valueClassName: 'text-red-500 tabular-nums',
-              title: 'Costs from failed deliveries',
+              title: 'Remittance batches with failed delivery costs',
             },
           ]}
         />

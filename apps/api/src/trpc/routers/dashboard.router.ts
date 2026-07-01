@@ -233,27 +233,11 @@ async function _ceoOverviewFetch(params: {
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
     followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
-    // Total Orders — grand total across ALL pipelines. Sums orders table
-    // (regular + offline + graduated) + non-graduated follow-up + non-graduated
-    // cart orders. Graduated orders are already in the orders table so only
-    // non-delivered follow-up/cart pipeline entries are added to avoid double-counting.
-    totalOrdersCounts: await (async () => {
-      const [allOrders, fuCounts, cartCounts] = await Promise.all([
-        ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
-        getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
-        getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
-      ]);
-      const merged: Record<string, number> = { ...allOrders as Record<string, number> };
-      // Add non-graduated pipeline orders (everything except DELIVERED/REMITTED
-      // which are already counted in the orders table via graduation).
-      for (const counts of [fuCounts, cartCounts] as Record<string, number>[]) {
-        for (const [status, n] of Object.entries(counts)) {
-          if (status === 'DELIVERED' || status === 'REMITTED') continue;
-          merged[status] = (merged[status] ?? 0) + (n ?? 0);
-        }
-      }
-      return merged;
-    })(),
+    // Total Orders — true marketing counts: regular + offline + graduated
+    // follow-up/cart orders (delivered only). Non-delivered follow-up/cart
+    // pipeline orders are excluded — they inflate counts without representing
+    // real marketing conversions (CEO 2026-07-01).
+    totalOrdersCounts: await ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
   };
 }
 

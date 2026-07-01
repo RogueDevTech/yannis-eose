@@ -68,6 +68,7 @@ type SecondaryOk = {
   groupsPage: number;
   groupsTotalPages: number;
   otherExpensesCounts?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number; totalSpend: number; pendingSpend: number };
+  complianceGaps?: Array<{ date: string; filledCount: number; totalMBs: number; unfilledMBs: Array<{ id: string; name: string }> }>;
 };
 type SecondaryErr = {
   ok: false;
@@ -204,6 +205,26 @@ export function MarketingAdSpendPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const secondaryFetcher = useFetcher<SecondaryResponse>();
+  type ComplianceGap = { date: string; filledCount: number; totalMBs: number; unfilledMBs: Array<{ id: string; name: string }> };
+  const [complianceModalDay, setComplianceModalDay] = useState<ComplianceGap | null>(null);
+  const complianceScrollRef = useRef<HTMLDivElement>(null);
+  const [complianceCanScrollLeft, setComplianceCanScrollLeft] = useState(false);
+  const [complianceCanScrollRight, setComplianceCanScrollRight] = useState(false);
+  const updateComplianceScrollState = useCallback(() => {
+    const el = complianceScrollRef.current;
+    if (!el) return;
+    setComplianceCanScrollLeft(el.scrollLeft > 1);
+    setComplianceCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
+  useEffect(() => {
+    const el = complianceScrollRef.current;
+    if (!el) return;
+    updateComplianceScrollState();
+    el.addEventListener('scroll', updateComplianceScrollState, { passive: true });
+    const ro = new ResizeObserver(updateComplianceScrollState);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', updateComplianceScrollState); ro.disconnect(); };
+  }, [updateComplianceScrollState, secondaryFetcher.data]);
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
@@ -1162,6 +1183,121 @@ export function MarketingAdSpendPage({
               },
             ]}
           />
+        );
+      })()}
+
+      {/* Ad spend compliance gaps */}
+      {(() => {
+        const gaps = secondary?.complianceGaps ?? [];
+        if (gaps.length === 0 && secondaryFetcher.state !== 'loading') return null;
+        return (
+          <>
+            <div className="flex items-center gap-1">
+              {complianceCanScrollLeft && (
+                <button
+                  type="button"
+                  onClick={() => complianceScrollRef.current?.scrollBy({ left: -240, behavior: 'smooth' })}
+                  className="shrink-0 p-1 rounded-md border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors"
+                  aria-label="Scroll left"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+              )}
+              <div ref={complianceScrollRef} className="flex gap-1.5 overflow-x-auto scrollbar-hide flex-1">
+                {secondaryFetcher.state === 'loading' && gaps.length === 0 ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="shrink-0 w-28 rounded-md border border-app-border bg-app-elevated px-2 py-1.5 animate-pulse">
+                      <div className="h-2.5 w-12 bg-app-hover rounded mb-1" />
+                      <div className="h-3 w-16 bg-app-hover rounded" />
+                    </div>
+                  ))
+                ) : (
+                  gaps.map((gap) => {
+                    const isSelfOnly = viewMode === 'media_buyer';
+                    const pct = gap.totalMBs > 0 ? Math.round((gap.filledCount / gap.totalMBs) * 100) : 0;
+                    const missing = gap.totalMBs - gap.filledCount;
+                    const isToday = gap.date === new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos' }).format(new Date());
+                    const toneClass = isSelfOnly
+                      ? 'border-danger-300 dark:border-danger-700 bg-danger-50/50 dark:bg-danger-900/10'
+                      : pct >= 80
+                        ? 'border-warning-300 dark:border-warning-700 bg-warning-50/50 dark:bg-warning-900/10'
+                        : 'border-danger-300 dark:border-danger-700 bg-danger-50/50 dark:bg-danger-900/10';
+                    const dayLabel = isToday ? 'Today' : new Date(gap.date + 'T12:00:00').toLocaleDateString('en-NG', { weekday: 'short', day: 'numeric', month: 'short' });
+                    if (isSelfOnly) {
+                      return (
+                        <Link
+                          key={gap.date}
+                          to={`/admin/marketing/expenses/new?date=${gap.date}`}
+                          className={`shrink-0 w-24 rounded-md border px-2 py-1.5 text-left transition-colors hover:opacity-90 ${toneClass}`}
+                        >
+                          <p className="text-[10px] font-medium text-app-fg-muted leading-tight">{dayLabel}</p>
+                          <p className="text-[10px] font-semibold text-danger-600 dark:text-danger-400 leading-tight mt-0.5">Not logged</p>
+                        </Link>
+                      );
+                    }
+                    return (
+                      <button
+                        key={gap.date}
+                        type="button"
+                        onClick={() => setComplianceModalDay(gap)}
+                        className={`shrink-0 w-28 rounded-md border px-2 py-1.5 text-left transition-colors hover:opacity-90 ${toneClass}`}
+                      >
+                        <p className="text-[10px] font-medium text-app-fg-muted leading-tight">{dayLabel}</p>
+                        <p className="text-xs font-semibold text-app-fg leading-tight">
+                          {gap.filledCount}/{gap.totalMBs} filled
+                        </p>
+                        <p className="text-[10px] text-danger-600 dark:text-danger-400 leading-tight">
+                          {missing} missing
+                        </p>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              {complianceCanScrollRight && (
+                <button
+                  type="button"
+                  onClick={() => complianceScrollRef.current?.scrollBy({ left: 240, behavior: 'smooth' })}
+                  className="shrink-0 p-1 rounded-md border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors"
+                  aria-label="Scroll right"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {complianceModalDay && (
+              <Modal open onClose={() => setComplianceModalDay(null)} maxWidth="max-w-sm" contentClassName="p-5 bg-app-elevated">
+                <h3 className="text-base font-semibold text-app-fg mb-1">
+                  Unrecorded Ad Spend — {new Date(complianceModalDay.date + 'T12:00:00').toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
+                </h3>
+                <p className="text-xs text-app-fg-muted mb-3">
+                  {complianceModalDay.filledCount} of {complianceModalDay.totalMBs} media buyers logged spend. {complianceModalDay.unfilledMBs.length} missing:
+                </p>
+                <ul className="space-y-1.5 max-h-60 overflow-y-auto">
+                  {complianceModalDay.unfilledMBs.map((mb) => (
+                    <li key={mb.id} className="flex items-center gap-2 text-sm">
+                      <span className="w-6 h-6 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0">
+                        <span className="text-[9px] font-bold text-danger-600 dark:text-danger-400">
+                          {mb.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                        </span>
+                      </span>
+                      <span className="text-app-fg">{mb.name}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex justify-end mt-4 pt-3 border-t border-app-border">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setComplianceModalDay(null)}>
+                    Close
+                  </Button>
+                </div>
+              </Modal>
+            )}
+          </>
         );
       })()}
 

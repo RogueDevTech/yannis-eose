@@ -867,7 +867,7 @@ export const marketingRouter = router({
           restrictMbIds,
           ctx.effectiveBranchIds,
         ),
-        getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds: restrictMbIds ?? undefined }, ctx.effectiveBranchIds),
+        getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds: restrictMbIds ?? undefined, startDate: input.startDate, endDate: input.endDate }, ctx.effectiveBranchIds),
         getOrdersService().list(recentOrdersInput, branchId, { ...buildOrdersListOpts(ctx.user), effectiveBranchIds: eIds }),
         fetchLiveActivity(),
         getCartService().countAllCarts({
@@ -1407,6 +1407,52 @@ export const marketingRouter = router({
    * `users.list[MEDIA_BUYER]` (only fetched for non-MB viewers). Page itself is
    * gated by `marketing.read`; we mirror that here.
    */
+  otherExpensesSummary: permissionProcedure('marketing.read')
+    .input(
+      z.object({
+        mediaBuyerId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }).optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getOtherExpensesSummary(
+        {
+          mediaBuyerId: input?.mediaBuyerId,
+          startDate: input?.startDate,
+          endDate: input?.endDate,
+        },
+        ctx.currentBranchId,
+        ctx.effectiveBranchIds,
+      );
+    }),
+
+  adSpendComplianceGaps: permissionProcedure('marketing.read')
+    .input(
+      z.object({
+        days: z.number().int().min(1).max(90).default(30),
+      }).optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      // MB → self only; supervisor → team; admin/HoM → all
+      let restrictMediaBuyerIds: string[] | undefined;
+      if (seesFullMarketingTeamSurfaces(ctx.user)) {
+        // admin / HoM — no restriction
+      } else if (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true) {
+        const viewer = await resolveMarketingTeamViewerScope(ctx);
+        restrictMediaBuyerIds = viewer.restrictMediaBuyerIds;
+      } else {
+        // Plain MB — scope to self
+        restrictMediaBuyerIds = [ctx.user.id];
+      }
+      return getMarketingService().getAdSpendComplianceGaps(
+        input?.days ?? 30,
+        ctx.currentBranchId,
+        ctx.effectiveBranchIds,
+        restrictMediaBuyerIds,
+      );
+    }),
+
   adSpendPagePicklistsBundle: permissionProcedure('marketing.read')
     .input(
       z.object({
@@ -1783,9 +1829,7 @@ export const marketingRouter = router({
         distributingTransfers,
         distributingRequests,
       ] = await Promise.all([
-        // Strip stats are always all-time so they tally with the all-time Current Balance.
-        // The date filter only scopes the transaction list below the strip.
-        getMarketingService().fundingByDirectionSummary(ctx.user.id, {}, ctx.effectiveBranchIds),
+        getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange, ctx.effectiveBranchIds),
         isFundingAdmin
           ? (async () => {
               // Supervisors see only their team members as funding recipients
@@ -1819,11 +1863,11 @@ export const marketingRouter = router({
                   if (!restrictToUserIds.includes(ctx.user.id)) restrictToUserIds.push(ctx.user.id);
                 }
               }
-              return getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds }, ctx.effectiveBranchIds);
+              return getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds, ...dateRange }, ctx.effectiveBranchIds);
             })().catch(() => null)
           : Promise.resolve(null),
         showFundingBalance
-          ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds)
+          ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds, dateRange)
           : Promise.resolve(null),
         ctx.currentBranchId
           ? listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>)
