@@ -293,23 +293,36 @@ export class CartService {
   }
 
   /**
-   * Cron: mark PENDING carts as ABANDONED every 10 minutes.
-   * Carts not updated in 5+ minutes are considered abandoned.
+   * Cron: mark PENDING carts as ABANDONED every 2 minutes.
+   * Carts not updated in 2+ minutes are considered abandoned.
    * If the user later completes the order, we still convert the cart (CONVERTED) via convert() / convertByPhoneAndProduct().
    */
-  @Cron('0 */10 * * * *') // Every 10 minutes at :00 seconds
+  @Cron('0 */2 * * * *') // Every 2 minutes at :00 seconds
   async handleAbandonedCarts(): Promise<void> {
-    const thresholdMinutes = 5;
-    const count = await this.markAbandoned(thresholdMinutes, SYSTEM_ACTOR_ID);
-    if (count > 0) {
-      console.log(`[Cart] Marked ${count} cart(s) as abandoned`);
+    const thresholdMinutes = 2;
+
+    // Each step is isolated — a failure in marking or merging must never
+    // block the auto-pull, which is the critical path for cart recovery.
+    try {
+      const count = await this.markAbandoned(thresholdMinutes, SYSTEM_ACTOR_ID);
+      if (count > 0) {
+        console.log(`[Cart] Marked ${count} cart(s) as abandoned`);
+      }
+    } catch (err) {
+      console.error(`[Cart] markAbandoned failed:`, err instanceof Error ? err.stack : err);
     }
+
     // Collapse any duplicate carts (e.g. from a save race) so one customer
     // never shows twice in the cart-abandonment backlog.
-    const merged = await this.mergeDuplicateAbandonedCarts(SYSTEM_ACTOR_ID);
-    if (merged > 0) {
-      console.log(`[Cart] Merged ${merged} duplicate cart(s)`);
+    try {
+      const merged = await this.mergeDuplicateAbandonedCarts(SYSTEM_ACTOR_ID);
+      if (merged > 0) {
+        console.log(`[Cart] Merged ${merged} duplicate cart(s)`);
+      }
+    } catch (err) {
+      console.error(`[Cart] mergeDuplicateAbandonedCarts failed:`, err instanceof Error ? err.stack : err);
     }
+
     // Auto-pull newly abandoned carts into Cart Orders via the shared
     // runAutoSync path (applies routing rules + writes sync logs).
     try {
