@@ -331,6 +331,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                 variant={SHIPMENT_STATUS_VARIANT[status]}
               />
             }
+            saveFilterKey
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge

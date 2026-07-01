@@ -534,6 +534,7 @@ export function UsersListPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Filters and actions"
+            saveFilterKey
             filtersBadgeCount={filtersToolbarBadge}
             filters={
               <>

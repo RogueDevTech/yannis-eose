@@ -1225,6 +1225,7 @@ export function AuditPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Audit toolbar and date range"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

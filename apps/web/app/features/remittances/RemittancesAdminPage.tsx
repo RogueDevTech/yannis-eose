@@ -603,6 +603,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
             filters={mobileFiltersBody}
             filtersBadgeCount={hasNonSearchFilters ? 1 : 0}
             sheetCloseLabel="Done"
+            saveFilterKey
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />

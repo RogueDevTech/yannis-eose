@@ -423,6 +423,7 @@ export function MarketingOverviewPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Marketing overview tools"
+            saveFilterKey
             mobileLeading={
               liveEvents != null && liveEvents.length > 0 ? (
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />

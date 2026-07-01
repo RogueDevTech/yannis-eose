@@ -1,7 +1,10 @@
 import { useCallback, useId, useState, type ReactNode } from 'react';
+import { useLocation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { SaveFilterPrefsButton } from '~/components/ui/save-filter-prefs-button';
+import { useFilterPreferences } from '~/hooks/useFilterPreferences';
 
 export type PageHeaderMobileToolsSheetRender = (api: { closeSheet: () => void }) => ReactNode;
 
@@ -56,6 +59,11 @@ export interface PageHeaderMobileToolsProps {
   sheetBodyMaxHeightClassName?: string;
   /** Rendered before refresh + kebab below `md` only (e.g. live indicator). */
   mobileLeading?: ReactNode;
+  /**
+   * When `true`, renders a bookmark button to save/clear filter defaults.
+   * Pass a string to use a custom page key; `true` derives it from the pathname.
+   */
+  saveFilterKey?: boolean | string;
 }
 
 /**
@@ -78,10 +86,20 @@ export function PageHeaderMobileTools({
   sheetCloseLabel = 'Close',
   sheetBodyMaxHeightClassName = 'max-h-[min(75dvh,560px)]',
   mobileLeading,
+  saveFilterKey,
 }: PageHeaderMobileToolsProps) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const closeSheet = useCallback(() => setOpen(false), []);
+  const { pathname } = useLocation();
+  const resolvedFilterKey = saveFilterKey === true
+    ? pathname.replace(/^\//, '').replace(/\//g, '.')
+    : typeof saveFilterKey === 'string' ? saveFilterKey : null;
+
+  // Apply saved filter preferences on mount (replaces loader defaults)
+  const filterPrefs = useFilterPreferences(resolvedFilterKey ?? '__noop__');
+  const hasSavedPrefs = resolvedFilterKey ? filterPrefs.hasSavedPrefs : false;
+  const filtersChanged = resolvedFilterKey ? filterPrefs.hasChanges : false;
 
   const sheetContent = typeof sheet === 'function' ? sheet({ closeSheet }) : sheet;
   const hasSheet = sheetContent != null && sheetContent !== false;
@@ -93,7 +111,10 @@ export function PageHeaderMobileTools({
 
   return (
     <>
-      <div className="hidden shrink-0 flex-wrap items-center gap-2 md:flex">{desktop}</div>
+      <div className="hidden shrink-0 flex-wrap items-center gap-2 md:flex">
+        {desktop}
+        {resolvedFilterKey && <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} filtersChanged={filtersChanged} />}
+      </div>
       <div className="flex shrink-0 items-center justify-end gap-0.5 md:hidden">
         {mobileLeading}
         {showMobileRefresh ? <PageRefreshButton iconOnly /> : null}
@@ -164,6 +185,9 @@ export function PageHeaderMobileTools({
               </>
             ) : (
               sheetContent
+            )}
+            {resolvedFilterKey && (
+              <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} className="w-full" />
             )}
           </div>
           <div className="border-t border-app-border p-3 pt-2">

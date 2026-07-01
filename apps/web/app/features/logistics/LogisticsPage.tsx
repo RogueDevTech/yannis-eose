@@ -703,6 +703,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Logistics toolbar"
+            saveFilterKey
             filtersBadgeCount={
               activeTab === 'locations'
                 ? (filterProviderId ? 1 : 0) + (filterState ? 1 : 0) + (filterHasStock ? 1 : 0)

@@ -296,6 +296,7 @@ export function FormsPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Forms toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

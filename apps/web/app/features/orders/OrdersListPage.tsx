@@ -1632,6 +1632,7 @@ function OrdersListPageImpl({
           <PageHeaderMobileTools
               sheetTitle="Actions"
               triggerAriaLabel="Sales orders toolbar"
+              saveFilterKey
               filtersBadgeCount={ordersListToolbarFilterBadge}
               filters={
                 <>

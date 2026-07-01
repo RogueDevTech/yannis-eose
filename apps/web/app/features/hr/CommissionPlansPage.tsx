@@ -279,6 +279,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Commission plan toolbar"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

@@ -601,6 +601,7 @@ function CSQueueStaticHeader({
         <PageHeaderMobileTools
           sheetTitle="Actions"
           triggerAriaLabel="Sales queue tools"
+          saveFilterKey
           mobileLeading={
             liveEvents != null && liveEvents.length > 0 ? (
               <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />

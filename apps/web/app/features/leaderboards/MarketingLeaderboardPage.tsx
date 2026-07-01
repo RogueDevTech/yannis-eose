@@ -61,6 +61,7 @@ export function MarketingLeaderboardPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Marketing leaderboard date range"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

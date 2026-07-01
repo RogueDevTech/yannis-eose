@@ -301,6 +301,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Config tools"
+            saveFilterKey
             desktop={
               <>
                 <Button size="sm" variant="secondary" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading || isSyncRunning} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>

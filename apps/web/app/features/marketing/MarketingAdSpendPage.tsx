@@ -1002,6 +1002,7 @@ export function MarketingAdSpendPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Filters and actions"
+            saveFilterKey
             filtersBadgeCount={adSpendToolbarFilterBadge}
             filters={(() => {
               const boxClass = 'relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';

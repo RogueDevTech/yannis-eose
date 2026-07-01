@@ -529,6 +529,7 @@ export function CSTeamPage({
             <PageHeaderMobileTools
               sheetTitle="Actions"
               triggerAriaLabel="Sales team toolbar and date range"
+              saveFilterKey
               filtersBadgeCount={filtersBadgeCount}
               filters={
                 <>

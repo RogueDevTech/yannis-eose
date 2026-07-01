@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link } from '@remix-run/react';
 
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
+import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 
 /** Recursively serialize a ReactNode into a stable comparison key (primitives only). */
 function stableValueKey(node: ReactNode): string {
@@ -159,6 +160,7 @@ export function OverviewStatStrip({
   liveFlash = false,
   loading = false,
 }: OverviewStatStripProps) {
+  const resolveHref = useResolveFilterHref();
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = useCallback((delta: number) => {
     scrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
@@ -324,7 +326,7 @@ export function OverviewStatStrip({
         const activeClass = item.active ? activeTileClass : '';
         const itemCls = item.itemClassName ?? '';
         return item.to ? (
-          <Link key={i} to={item.to} onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} ${itemCls}`} title={item.title}>
+          <Link key={i} to={resolveHref(item.to!)} onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} ${itemCls}`} title={item.title}>
             {inner}
           </Link>
         ) : item.onClick ? (
@@ -369,7 +371,7 @@ export function OverviewStatStrip({
           const activeClass = item.active ? activeTileClass : '';
           const itemCls = item.itemClassName ?? '';
           return item.to ? (
-            <Link key={i} to={item.to} onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass} ${itemCls}`} title={item.title}>
+            <Link key={i} to={resolveHref(item.to!)} onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass} ${itemCls}`} title={item.title}>
               {inner}
             </Link>
           ) : item.onClick ? (

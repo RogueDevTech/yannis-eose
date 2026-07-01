@@ -359,6 +359,7 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Import tools"
+            saveFilterKey
             desktop={
               <Button
                 variant="secondary"

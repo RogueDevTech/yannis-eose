@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -120,6 +121,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Dashboard date range"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />
@@ -684,9 +686,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 }
 
 function QuickJump({ to, label }: { to: string; label: string }) {
+  const resolveHref = useResolveFilterHref();
   return (
     <Link
-      to={to}
+      to={resolveHref(to)}
       className="card text-center py-4 hover:bg-app-hover/40 transition-colors"
     >
       <span className="text-sm font-medium text-app-fg">{label}</span>

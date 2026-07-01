@@ -42,6 +42,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="TPL dashboard date range"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />

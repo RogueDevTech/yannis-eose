@@ -495,6 +495,7 @@ export function LogisticsProviderDetailPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Provider toolbar"
+            saveFilterKey
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />

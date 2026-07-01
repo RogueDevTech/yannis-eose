@@ -185,6 +185,7 @@ export function FundingLedgerPage({
           <PageHeaderMobileTools
             sheetTitle="Tools"
             triggerAriaLabel="Ledger tools"
+            saveFilterKey
             desktop={
               <>
                 <DateFilterBar

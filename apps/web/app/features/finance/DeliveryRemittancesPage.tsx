@@ -581,6 +581,7 @@ export function DeliveryRemittancesPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Cash remittances toolbar and date range"
+            saveFilterKey
             filtersBadgeCount={viewTab === 'remittances' ? remittanceToolbarFilterBadge : 0}
             filters={
               <>
@@ -866,9 +867,12 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
-          description="Total order value of all orders that are on a remittance batch (any status). This is before any deductions. Only batched orders are included — orders awaiting a batch are not counted here."
+          description="Total order value of all orders on a remittance batch (any status). Before deductions. Only batched orders — orders awaiting a batch are not counted."
           lines={[
-            { label: 'Sum of order totals on remittance batches', amount: grossVal, type: 'value' },
+            { label: 'Received batches', amount: Number(summary.receivedAmount ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) },
+            { label: 'Pending batches', amount: Number(summary.pendingAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
+            { label: 'Disputed batches', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
+            { label: 'Gross Order Value', amount: grossVal, type: 'result' },
           ]}
         />
         <FormulaBreakdownModal

@@ -798,6 +798,7 @@ export function InventoryPage(props: InventoryStreamData) {
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Inventory toolbar"
+            saveFilterKey
             filtersBadgeCount={
               activeTab === 'levels' && levelsShowToolbar ? levelsFilterBadgeCount : 0
             }
