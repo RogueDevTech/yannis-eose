@@ -5,6 +5,7 @@ import { TestOrderPurgeService } from './test-order-purge.service';
 import { FollowUpConfigService } from './follow-up-config.service';
 import { SettingsModule } from '../settings/settings.module';
 import { CartModule } from '../cart/cart.module';
+import { CartOrdersModule } from '../cart-orders/cart-orders.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
@@ -15,6 +16,7 @@ import { CacheModule } from '../common/cache/cache.module';
   imports: [
     SettingsModule,
     CartModule,
+    CartOrdersModule,
     NotificationsModule,
     InventoryModule,
     BranchesModule,
