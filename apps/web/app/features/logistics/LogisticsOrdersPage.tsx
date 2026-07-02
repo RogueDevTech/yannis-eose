@@ -344,7 +344,7 @@ function LogisticsOrdersPageImpl({
   const allocatedCount = statusCounts['AGENT_ASSIGNED'] ?? 0;
   const dispatchedCount = statusCounts['DISPATCHED'] ?? 0;
   const inTransitCount = statusCounts['IN_TRANSIT'] ?? 0;
-  const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+  const deliveredCount = statusCounts['DELIVERED'] ?? 0;
   const remittedCount = statusCounts['REMITTED'] ?? 0;
   const overdueCount = statusCounts['__OVERDUE'] ?? 0;
   const totalOrdersCount = Object.entries(statusCounts)
