@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';

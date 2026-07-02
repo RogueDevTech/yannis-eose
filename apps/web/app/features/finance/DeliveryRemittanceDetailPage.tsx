@@ -5,7 +5,6 @@ import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import { ReceiptPreviewModal } from '~/components/ui/receipt-preview-modal';
 import type { OrderInvoice } from '~/features/orders/types';
 import { Button } from '~/components/ui/button';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -209,21 +208,10 @@ export function DeliveryRemittanceDetailPage({
     ];
   }, []);
 
-  const breadcrumbCurrent =
-    detail.status === 'SENT' ? 'Review remittance' : `Remittance · ${detail.id.slice(0, 8)}…`;
-
   return (
     <div className="space-y-5 w-full min-w-0">
-      <Breadcrumb
-        className="mb-1"
-        items={[
-          { label: 'Finance', to: '/admin/finance/overview' },
-          { label: 'Cash remittances', to: listBackHref },
-          { label: breadcrumbCurrent },
-        ]}
-      />
-
       <PageHeader
+        backTo={listBackHref}
         title={detail.status === 'SENT' ? 'Review cash remittance' : 'Cash remittance'}
         mobileInlineActions
         description={
@@ -240,19 +228,8 @@ export function DeliveryRemittanceDetailPage({
             sheetTitle="Actions"
             triggerAriaLabel="Cash remittance toolbar"
             saveFilterKey
-            desktop={
-              <>
-                <PageRefreshButton />
-                <Link to={listBackHref} className="btn-secondary btn-sm inline-flex">
-                  Back to list
-                </Link>
-              </>
-            }
-            sheet={
-              <Link to={listBackHref} className="btn-secondary btn-sm w-full justify-center">
-                Back to list
-              </Link>
-            }
+            desktop={<PageRefreshButton />}
+            sheet={<PageRefreshButton />}
           />
         }
       />

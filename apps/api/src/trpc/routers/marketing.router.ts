@@ -52,6 +52,7 @@ import {
 import { getProductsService } from './products.router';
 import { getUsersService } from './users.router';
 import { getCartService } from './cart.router';
+import { getSettingsService } from './settings.router';
 
 import { isAdminLevel } from '../../common/authz';
 import { hasFinanceAccess } from '../../common/utils/strip-finance-fields';
@@ -1451,6 +1452,28 @@ export const marketingRouter = router({
         ctx.effectiveBranchIds,
         restrictMediaBuyerIds,
       );
+    }),
+
+  /**
+   * Lightweight self-check for the current Media Buyer's ad spend backlog.
+   * Called on every admin page load (deferred) to gate the blocking modal.
+   * Returns early with no backlog for non-MB roles or when strict mode is off.
+   */
+  myAdSpendBacklog: authedProcedure
+    .query(async ({ ctx }) => {
+      // Non-MBs are never blocked
+      if (ctx.user.role !== 'MEDIA_BUYER') {
+        return { missingDates: [] as string[], isBlocked: false };
+      }
+
+      // Check the system toggle — default true (null = never configured = enabled)
+      const setting = await getSettingsService().get('STRICT_AD_SPEND_MODE', ctx.activeGroupId);
+      const enabled = setting ? setting['enabled'] !== false : true;
+      if (!enabled) {
+        return { missingDates: [] as string[], isBlocked: false };
+      }
+
+      return getMarketingService().getMyAdSpendBacklog(ctx.user.id);
     }),
 
   adSpendPagePicklistsBundle: permissionProcedure('marketing.read')

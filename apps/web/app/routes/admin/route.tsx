@@ -101,8 +101,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => [] as BranchGroupEntry[])
     : Promise.resolve([] as BranchGroupEntry[]);
 
+  // Ad spend backlog check — only for Media Buyers (deferred, non-blocking)
+  type AdSpendBacklogData = { missingDates: string[]; isBlocked: boolean };
+  const adSpendBacklogPromise: Promise<AdSpendBacklogData> = user?.role === 'MEDIA_BUYER'
+    ? apiRequest<unknown>('/trpc/marketing.myAdSpendBacklog', { method: 'GET', cookie })
+        .then((res) => {
+          if (!res.ok) return { missingDates: [], isBlocked: false };
+          const data = (res.data as { result?: { data?: AdSpendBacklogData } })?.result?.data;
+          return data ?? { missingDates: [], isBlocked: false };
+        })
+        .catch(() => ({ missingDates: [] as string[], isBlocked: false }))
+    : Promise.resolve({ missingDates: [], isBlocked: false });
+
   // Stream branches like notifications — avoids blocking the document on branches.list
-  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise });
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise, adSpendBacklog: adSpendBacklogPromise });
 }
 
 /**
@@ -215,7 +227,7 @@ export async function action({ request }: ActionFunctionArgs) {
  * Single mount + state bridge keeps the Outlet alive across resolution.
  */
 export default function AdminLayout() {
-  const { user, notifications, branches, branchGroups } = useLoaderData<typeof loader>();
+  const { user, notifications, branches, branchGroups, adSpendBacklog } = useLoaderData<typeof loader>();
   // Marketing supervisors are locked to their primary branch to prevent
   // scope confusion — they must not switch branches.
   const isSupervisorLockedToBranch =
@@ -226,6 +238,7 @@ export default function AdminLayout() {
     Array<{ id: string; name: string; code: string; status?: string; groupId?: string | null }> | null
   >(null);
   const [resolvedGroups, setResolvedGroups] = useState<Array<{ id: string; name: string }>>([]);
+  const [resolvedAdSpendBacklog, setResolvedAdSpendBacklog] = useState<{ missingDates: string[]; isBlocked: boolean } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +248,9 @@ export default function AdminLayout() {
     // the switcher out; the next loader run refills it.
     Promise.resolve(branchGroups)
       .then((groups) => { if (!cancelled && Array.isArray(groups)) setResolvedGroups(groups); })
+      .catch(() => {});
+    Promise.resolve(adSpendBacklog)
+      .then((data) => { if (!cancelled && data) setResolvedAdSpendBacklog(data); })
       .catch(() => {});
     const apply = (value: Array<{ id: string; name: string; code: string; status?: string; groupId?: string | null }>) => {
       if (cancelled) return;
@@ -248,7 +264,7 @@ export default function AdminLayout() {
     return () => {
       cancelled = true;
     };
-  }, [branches, branchGroups]);
+  }, [branches, branchGroups, adSpendBacklog]);
 
   return (
     <DashboardLayout
@@ -262,6 +278,7 @@ export default function AdminLayout() {
       branchesHydrationReady={resolvedBranches !== null}
       notificationsPromise={notifications}
       notificationsActionUrl="/admin"
+      adSpendBacklog={resolvedAdSpendBacklog}
     />
   );
 }

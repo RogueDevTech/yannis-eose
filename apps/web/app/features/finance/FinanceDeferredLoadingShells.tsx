@@ -1176,3 +1176,61 @@ export function FinancePayoutLoadingShell({
     </div>
   );
 }
+
+/** General Ledger — matches GeneralLedgerPage chrome. */
+export function GeneralLedgerLoadingShell({
+  filters,
+}: {
+  filters: { startDate: string; endDate: string; periodAllTime: boolean };
+}) {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="General Ledger"
+        mobileInlineActions
+        description="Company-wide financial transactions."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Tools"
+            triggerAriaLabel="General Ledger tools"
+            saveFilterKey
+            desktop={
+              <>
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
+                <PageRefreshButton />
+              </>
+            }
+            sheet={<PageRefreshButton />}
+          />
+        }
+      />
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          { label: 'Total Credits', value: <StatValuePulse className="min-w-[3.5rem]" /> },
+          { label: 'Total Debits', value: <StatValuePulse className="min-w-[3.5rem]" /> },
+          { label: 'Net', value: <StatValuePulse className="min-w-[3.5rem]" /> },
+          { label: 'Transactions', value: <StatValuePulse className="min-w-[2rem]" /> },
+        ]}
+      />
+      {/* Desktop filter row — mirrors the loaded page's user + type selects */}
+      <div className="hidden md:flex flex-row gap-2">
+        <div className="h-10 md:h-9 w-52 rounded-md bg-app-hover/60 animate-pulse" aria-hidden />
+        <div className="h-10 md:h-9 w-48 rounded-md bg-app-hover/60 animate-pulse" aria-hidden />
+      </div>
+      {/* Search bar */}
+      <div className="h-10 md:h-9 w-full rounded-md bg-app-hover/60 animate-pulse" aria-hidden />
+      {/* Table rows skeleton */}
+      <div className="space-y-2">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="h-12 w-full rounded-md bg-app-hover/40 animate-pulse" aria-hidden />
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -19,6 +19,7 @@ import {
   FinanceDisbursementsLoadingShell,
   FinanceOverviewLoadingShell,
   FinancePayoutLoadingShell,
+  GeneralLedgerLoadingShell,
 } from '~/features/finance/FinanceDeferredLoadingShells';
 import {
   CommissionPlansLoadingShell,
@@ -325,6 +326,13 @@ const entries: ShellEntry[] = [
           }}
         />
       );
+    },
+  },
+  {
+    match: /^\/admin\/finance\/ledger$/,
+    render: (_m, sp) => {
+      const dates = parseFinanceDefaultMonthDateFilters(sp);
+      return <GeneralLedgerLoadingShell filters={dates} />;
     },
   },
   {

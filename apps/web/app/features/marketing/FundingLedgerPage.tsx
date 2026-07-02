@@ -14,6 +14,7 @@ import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Modal } from '~/components/ui/modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { FundingLedgerEntry, FundingLedgerLoaderData } from './types';
@@ -138,54 +139,45 @@ export function FundingLedgerPage({
       },
       {
         key: 'counterparty',
-        header: 'Counterparty',
+        header: 'From / To',
         render: (e) => {
           if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
-          return e.counterpartyName
-            ? <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={e.counterpartyName}>{e.counterpartyName}</span>
-            : <span className="text-sm text-app-fg-muted">—</span>;
-        },
-      },
-      {
-        key: 'credit',
-        header: 'Credit',
-        align: 'right',
-        nowrap: true,
-        render: (e) => {
-          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
-          return e.balanceEffect > 0 ? (
-            <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">
-              +<NairaPrice amount={e.balanceEffect} />
-            </span>
-          ) : (
-            <span className="text-sm text-app-fg-muted">—</span>
-          );
-        },
-      },
-      {
-        key: 'debit',
-        header: 'Debit',
-        align: 'right',
-        nowrap: true,
-        render: (e) => {
-          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
-          return e.balanceEffect < 0 ? (
-            <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
-              -<NairaPrice amount={Math.abs(e.balanceEffect)} />
-            </span>
-          ) : e.balanceEffect === 0 && (e.entryType === 'expense' || e.entryType === 'transfer_out') ? (
-            <span className="text-sm font-medium text-app-fg-muted tabular-nums">
-              <NairaPrice amount={0} />
-            </span>
-          ) : (
-            <span className="text-sm text-app-fg-muted">—</span>
-          );
+          if (e.counterpartyName) {
+            return <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={e.counterpartyName}>{e.counterpartyName}</span>;
+          }
+          if (e.entryType === 'expense') return <span className="text-sm text-app-fg-muted">Ad platform</span>;
+          if (e.entryType === 'request') return <span className="text-sm text-app-fg-muted">HoM</span>;
+          return <span className="text-sm text-app-fg-muted">—</span>;
         },
       },
       {
         key: 'status',
         header: 'Status',
         render: (e) => (e.id === '__opening_balance__' || e.id === '__closing_balance__') ? null : <StatusBadge status={e.status} textOnly />,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        nowrap: true,
+        render: (e) => {
+          if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
+          if (e.balanceEffect > 0) {
+            return (
+              <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">
+                +<NairaPrice amount={e.balanceEffect} />
+              </span>
+            );
+          }
+          if (e.balanceEffect < 0) {
+            return (
+              <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
+                -<NairaPrice amount={Math.abs(e.balanceEffect)} />
+              </span>
+            );
+          }
+          return <span className="text-sm text-app-fg-muted tabular-nums"><NairaPrice amount={0} /></span>;
+        },
       },
       {
         key: 'balance',
@@ -300,22 +292,25 @@ export function FundingLedgerPage({
 
           <div className="flex flex-col sm:flex-row gap-2">
             {mediaBuyers.length > 1 && (
-              <FormSelect
-                label=""
-                value={selectedUserId}
-                onChange={(e) => {
-                  const next = new URLSearchParams(searchParams);
-                  if (e.target.value) next.set('userId', e.target.value);
-                  else next.delete('userId');
-                  next.delete('page');
-                  setSearchParams(next);
-                }}
-                options={[
-                  { value: '', label: 'All team members' },
-                  ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
-                ]}
-                wrapperClassName="w-full sm:w-52"
-              />
+              <div className="w-full sm:w-56">
+                <SearchableSelect
+                  id="ledger-user-filter"
+                  value={selectedUserId}
+                  onChange={(val) => {
+                    const next = new URLSearchParams(searchParams);
+                    if (val) next.set('userId', val);
+                    else next.delete('userId');
+                    next.delete('page');
+                    setSearchParams(next);
+                  }}
+                  options={[
+                    { value: '', label: 'All users' },
+                    ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
+                  ]}
+                  placeholder="All users"
+                  clearable
+                />
+              </div>
             )}
             <FormSelect
               label=""
@@ -411,55 +406,78 @@ export function FundingLedgerPage({
               })()}
               rowKey={(e) => `${e.entryType}-${e.id}`}
               rowClassName={(e) => (e.id === '__opening_balance__' || e.id === '__closing_balance__') ? 'bg-brand-50/40 dark:bg-brand-900/10' : ''}
-              renderMobileCard={(e) => (
-                <button
-                  type="button"
-                  onClick={() => setDetailEntry(e)}
-                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 text-left"
-                >
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`text-xs font-medium ${TYPE_COLORS[e.entryType] ?? ''}`}>
-                      {TYPE_LABELS[e.entryType]}
-                    </span>
-                    <span className="text-xs text-app-fg-muted">
-                      {new Date(e.eventDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                      <span className="ml-1 text-app-fg-muted/60">
-                        {new Date(e.eventDate).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+              renderMobileCard={(e) => {
+                // Opening / Closing balance — branded standalone card
+                if (e.id === '__opening_balance__' || e.id === '__closing_balance__') {
+                  return (
+                    <div className="-mx-3 -my-2.5 w-[calc(100%+1.5rem)] px-3 py-3 bg-brand-50/40 dark:bg-brand-900/10 border-l-2 border-brand-500">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-brand-600 dark:text-brand-400 uppercase tracking-wider">
+                          {e.id === '__opening_balance__' ? 'Opening Balance' : 'Closing Balance'}
+                        </span>
+                        {e.eventDate && (
+                          <span className="text-xs text-brand-500 dark:text-brand-400">
+                            {new Date(e.eventDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-base font-bold tabular-nums text-brand-600 dark:text-brand-400 mt-1 block">
+                        <NairaPrice amount={e.runningBalance} />
                       </span>
-                    </span>
+                    </div>
+                  );
+                }
+                // Regular transaction card
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setDetailEntry(e)}
+                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 text-left"
+                  >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-xs font-medium ${TYPE_COLORS[e.entryType] ?? ''}`}>
+                        {TYPE_LABELS[e.entryType]}
+                      </span>
+                      <span className="text-xs text-app-fg-muted">
+                        {new Date(e.eventDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                        <span className="ml-1 text-app-fg-muted/60">
+                          {new Date(e.eventDate).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </span>
+                      </span>
+                    </div>
+                    <p className="text-sm text-app-fg truncate">{e.description}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      {e.balanceEffect > 0 ? (
+                        <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">
+                          +<NairaPrice amount={e.balanceEffect} />
+                        </span>
+                      ) : e.balanceEffect < 0 ? (
+                        <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
+                          -<NairaPrice amount={Math.abs(e.balanceEffect)} />
+                        </span>
+                      ) : (
+                        <span className="text-sm text-app-fg-muted">
+                          <NairaPrice amount={Number(e.amount)} />
+                        </span>
+                      )}
+                      {e.entryType !== 'request' && (
+                        <span
+                          className={`text-xs font-semibold tabular-nums ${
+                            e.runningBalance < 50000
+                              ? 'text-danger-600 dark:text-danger-400'
+                              : 'text-success-600 dark:text-success-400'
+                          }`}
+                        >
+                          Bal: <NairaPrice amount={e.runningBalance} />
+                        </span>
+                      )}
+                    </div>
+                    <StatusBadge status={e.status} textOnly />
                   </div>
-                  <p className="text-sm text-app-fg truncate">{e.description}</p>
-                  <div className="flex items-center justify-between gap-2">
-                    {e.balanceEffect > 0 ? (
-                      <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">
-                        +<NairaPrice amount={e.balanceEffect} />
-                      </span>
-                    ) : e.balanceEffect < 0 ? (
-                      <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
-                        -<NairaPrice amount={Math.abs(e.balanceEffect)} />
-                      </span>
-                    ) : (
-                      <span className="text-sm text-app-fg-muted">
-                        <NairaPrice amount={Number(e.amount)} />
-                      </span>
-                    )}
-                    {e.entryType !== 'request' && (
-                      <span
-                        className={`text-xs font-semibold tabular-nums ${
-                          e.runningBalance < 50000
-                            ? 'text-danger-600 dark:text-danger-400'
-                            : 'text-success-600 dark:text-success-400'
-                        }`}
-                      >
-                        Bal: <NairaPrice amount={e.runningBalance} />
-                      </span>
-                    )}
-                  </div>
-                  <StatusBadge status={e.status} textOnly />
-                </div>
-                </button>
-              )}
+                  </button>
+                );
+              }}
             />
           )}
 
@@ -475,21 +493,21 @@ export function FundingLedgerPage({
       ) : (
         <>
           {mediaBuyers.length > 1 && (
-            <FormSelect
-              label="Team Member"
-              value=""
-              onChange={(e) => {
-                const next = new URLSearchParams(searchParams);
-                if (e.target.value) next.set('userId', e.target.value);
-                next.delete('page');
-                setSearchParams(next);
-              }}
-              options={[
-                { value: '', label: 'Select a team member…' },
-                ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
-              ]}
-              wrapperClassName="max-w-xs"
-            />
+            <div className="max-w-xs">
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Team Member</label>
+              <SearchableSelect
+                id="ledger-user-select"
+                value=""
+                onChange={(val) => {
+                  const next = new URLSearchParams(searchParams);
+                  if (val) next.set('userId', val);
+                  next.delete('page');
+                  setSearchParams(next);
+                }}
+                options={mediaBuyers.map((m) => ({ value: m.id, label: m.name }))}
+                placeholder="Select a team member…"
+              />
+            </div>
           )}
           <EmptyState
             title="Select a team member"
@@ -497,6 +515,36 @@ export function FundingLedgerPage({
           />
         </>
       )}
+
+      {/* Export modal */}
+      <LocalExportModal
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        title="Export Funding Ledger"
+        description={`${selectedUserName ?? 'All members'} — ${filters.periodAllTime ? 'All time' : `${filters.startDate} to ${filters.endDate}`}`}
+        rows={entries.map((e) => ({
+          txnId: `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`,
+          date: new Date(e.eventDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }),
+          type: TYPE_LABELS[e.entryType] ?? e.entryType,
+          description: e.description,
+          counterparty: e.counterpartyName ?? '',
+          amount: e.balanceEffect > 0 ? `+₦${Math.abs(e.balanceEffect).toLocaleString()}` : e.balanceEffect < 0 ? `-₦${Math.abs(e.balanceEffect).toLocaleString()}` : '₦0',
+          status: e.status,
+          balance: e.runningBalance,
+        }))}
+        columns={[
+          { key: 'txnId', label: 'Transaction ID' },
+          { key: 'date', label: 'Date' },
+          { key: 'type', label: 'Type' },
+          { key: 'description', label: 'Description' },
+          { key: 'counterparty', label: 'Counterparty' },
+          { key: 'amount', label: 'Amount' },
+          { key: 'status', label: 'Status' },
+          { key: 'balance', label: 'Balance' },
+        ]}
+        defaultColumns={['txnId', 'date', 'type', 'description', 'counterparty', 'status', 'amount', 'balance']}
+        filenamePrefix={`funding-ledger-${selectedUserName?.replace(/\s+/g, '-').toLowerCase() ?? 'all'}`}
+      />
 
       {/* Detail modal */}
       <Modal

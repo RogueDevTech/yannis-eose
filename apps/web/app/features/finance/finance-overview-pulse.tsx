@@ -103,7 +103,7 @@ export function FinanceCashRemittanceSection({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted flex items-center">
-                Gross Order Value
+                Gross Order Value ({pulse.receivedCount + pulse.pendingRemittanceBatchCount + pulse.disputedRemittanceBatchCount})
                 <InfoIcon onClick={() => setInfoModal('gross')} />
               </p>
               <p className="mt-1 text-base font-semibold tabular-nums text-app-fg">
@@ -137,7 +137,7 @@ export function FinanceCashRemittanceSection({
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted flex items-center">
-                Net Remittable
+                Net Remittable ({pulse.receivedCount + pulse.pendingRemittanceBatchCount + pulse.disputedRemittanceBatchCount})
                 <InfoIcon onClick={() => setInfoModal('net')} />
               </p>
               <p className="mt-1 text-base font-semibold tabular-nums text-success-600 dark:text-success-400">

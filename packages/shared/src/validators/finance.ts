@@ -88,6 +88,23 @@ export const profitByShipmentSchema = z.object({
 });
 export type ProfitByShipmentInput = z.infer<typeof profitByShipmentSchema>;
 
+// ============================================
+// General Ledger Validators
+// ============================================
+
+export const generalLedgerSchema = z.object({
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+  entryType: z
+    .enum(['all', 'revenue', 'remittance_in', 'remittance_out', 'disbursement', 'ad_spend', 'payroll', 'funding_transfer'])
+    .default('all'),
+  userId: z.string().uuid().optional(),
+  search: z.string().trim().max(200).optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(500).default(100),
+});
+export type GeneralLedgerInput = z.infer<typeof generalLedgerSchema>;
+
 /** Delivered-order lines + product ad spend + proportional shared costs (commission, fulfillment, ops). */
 export interface ProductProfitBreakdownRow {
   productId: string;
