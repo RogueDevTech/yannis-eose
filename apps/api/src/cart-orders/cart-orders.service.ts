@@ -359,6 +359,9 @@ export class CartOrdersService {
     }
     if (assignedCsId) deletedConditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerId) deletedConditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+    // Date-scope deleted count by deletedAt so the pill matches the list rows.
+    if (startDate) deletedConditions.push(gte(schema.cartOrders.deletedAt, nigeriaDayStart(startDate)));
+    if (endDate) deletedConditions.push(lte(schema.cartOrders.deletedAt, nigeriaDayEnd(endDate)));
 
     const [deletedRow] = await this.db
       .select({ count: sql<number>`COUNT(*)::int` })
@@ -875,7 +878,7 @@ export class CartOrdersService {
             totalAmount: totalAmount.toFixed(2),
             dueDate: null,
             status: 'DRAFT',
-          });
+          }).onConflictDoNothing();
         }
       }
 

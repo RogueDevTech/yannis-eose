@@ -3774,6 +3774,79 @@ export class MarketingService {
     return result;
   }
 
+  /**
+   * Returns the list of Nigeria-TZ dates for which a single Media Buyer has
+   * NOT logged any ad spend entry. Dates within the 2-day grace window
+   * (yesterday + today) are excluded — only older dates count as backlog.
+   */
+  async getMyAdSpendBacklog(userId: string): Promise<{ missingDates: string[]; isBlocked: boolean }> {
+    const GRACE_DAYS = 2;
+
+    // 1. Get user's creation date
+    const [user] = await this.db
+      .select({ createdAt: schema.users.createdAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) return { missingDates: [], isBlocked: false };
+
+    // 2. Compute date boundaries in Nigeria TZ
+    const now = new Date();
+    const nigeriaFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Lagos',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+
+    // User's first required date = day AFTER creation (in Nigeria TZ)
+    const createdDateNigeria = nigeriaFormatter.format(user.createdAt);
+    const firstRequiredDate = new Date(`${createdDateNigeria}T00:00:00+01:00`);
+    firstRequiredDate.setDate(firstRequiredDate.getDate() + 1);
+    const firstRequired = nigeriaFormatter.format(firstRequiredDate);
+
+    // Cutoff = today minus GRACE_DAYS (inclusive). Dates up to and including cutoff must be filled.
+    const cutoffDate = new Date(now);
+    cutoffDate.setDate(cutoffDate.getDate() - GRACE_DAYS);
+    const cutoff = nigeriaFormatter.format(cutoffDate);
+
+    // If the user is too new (first required date > cutoff), no backlog possible
+    if (firstRequired > cutoff) return { missingDates: [], isBlocked: false };
+
+    // 3. Generate all expected dates (firstRequired .. cutoff inclusive)
+    const expectedDates: string[] = [];
+    const cursor = new Date(`${firstRequired}T12:00:00+01:00`);
+    const cutoffEnd = new Date(`${cutoff}T12:00:00+01:00`);
+    while (cursor <= cutoffEnd) {
+      expectedDates.push(nigeriaFormatter.format(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    if (expectedDates.length === 0) return { missingDates: [], isBlocked: false };
+
+    // 4. Query distinct spend dates for this user in the range
+    const spendRows = await this.db
+      .selectDistinct({
+        spendDay: sql<string>`to_char(${schema.adSpendLogs.spendDate} AT TIME ZONE 'Africa/Lagos', 'YYYY-MM-DD')`,
+      })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, userId),
+          gte(schema.adSpendLogs.spendDate, nigeriaDayStart(expectedDates[0]!)),
+          lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(expectedDates[expectedDates.length - 1]!)),
+        ),
+      );
+
+    const filledSet = new Set(spendRows.map((r) => r.spendDay));
+
+    // 5. Set difference — dates without any entry
+    const missingDates = expectedDates.filter((d) => !filledSet.has(d));
+
+    return { missingDates, isBlocked: missingDates.length > 0 };
+  }
+
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const buyer = alias(schema.users, 'ad_spend_list_buyer');
     const prod = alias(schema.products, 'ad_spend_list_product');

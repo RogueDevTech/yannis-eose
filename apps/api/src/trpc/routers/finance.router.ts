@@ -8,6 +8,7 @@ import {
   listApprovalRequestsSchema,
   setBudgetSchema,
   canonicalPermissionCode,
+  generalLedgerSchema,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -252,6 +253,17 @@ export const financeRouter = router({
     }).optional())
     .query(async ({ input, ctx }) => {
       return getFinanceService().getFastProfitReport(input?.startDate, input?.endDate, ctx.effectiveBranchIds);
+    }),
+
+  generalLedger: permissionProcedure('finance.read')
+    .input(generalLedgerSchema)
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().getGeneralLedger(input, ctx.currentBranchId, ctx.effectiveBranchIds);
+    }),
+
+  generalLedgerUsers: permissionProcedure('finance.read')
+    .query(async ({ ctx }) => {
+      return getFinanceService().getGeneralLedgerUsers(ctx.effectiveBranchIds);
     }),
 
   /**

@@ -351,6 +351,7 @@ export {
   setBudgetSchema,
   profitReportSchema,
   profitByShipmentSchema,
+  generalLedgerSchema,
 } from './finance';
 
 export type {
@@ -363,6 +364,7 @@ export type {
   ProfitReportInput,
   ProfitByShipmentInput,
   ProductProfitBreakdownRow,
+  GeneralLedgerInput,
 } from './finance';
 
 // Notification validators
