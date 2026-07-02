@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { NavLink, Outlet, useLocation, useNavigation } from '@remix-run/react';
+import { Link, NavLink, Outlet, useLocation, useNavigation } from '@remix-run/react';
 import { Sidebar, SidebarIcons, type SidebarGroup } from './sidebar';
 import { Header } from './header';
 import {
@@ -78,6 +78,8 @@ interface DashboardLayoutProps {
    * skeleton and org-wide branch guard does not attach submit interception yet.
    */
   branchesHydrationReady?: boolean;
+  /** When set with `isBlocked: true`, shows a non-dismissable modal forcing the MB to fill ad spend. */
+  adSpendBacklog?: { missingDates: string[]; isBlocked: boolean } | null;
 }
 
 interface NavItemDef {
@@ -334,6 +336,12 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/finance/disbursements',
         icon: SidebarIcons.disbursements,
         permission: 'finance.disburse',
+      },
+      {
+        label: 'Ledger',
+        href: '/admin/finance/ledger',
+        icon: SidebarIcons.remittances,
+        permission: 'finance.read',
       },
       {
         // Sidebar gate is OR(permission, roles). Listing `permission: 'users.read'`
@@ -775,6 +783,7 @@ function DashboardLayoutInner({
   branches,
   branchGroups,
   branchesHydrationReady = true,
+  adSpendBacklog,
 }: DashboardLayoutProps) {
   const { onboardingGate } = useLoginModalGate();
   const [collapsed, setCollapsed] = useState(false);
@@ -1072,6 +1081,7 @@ function DashboardLayoutInner({
   // switching are exempt.
   const isReadOnly = isSupportRole || isMirroring;
   const [readOnlyBlockModalOpen, setReadOnlyBlockModalOpen] = useState(false);
+  const [backlogExpanded, setBacklogExpanded] = useState(false);
 
   useEffect(() => {
     if (!isReadOnly || typeof document === 'undefined') return;
@@ -1148,6 +1158,83 @@ function DashboardLayoutInner({
           </Button>
         </div>
       </Modal>
+      {/* Ad Spend Backlog — non-dismissable modal for Media Buyers with unfilled dates */}
+      {(() => {
+        const isOnAllowedPage =
+          location.pathname.startsWith('/admin/marketing/expenses') ||
+          location.pathname.startsWith('/admin/marketing/funding');
+        // TODO: remove `|| isMirroring` — temporary bypass for testing via mirror mode
+        const showAdSpendBlock =
+          adSpendBacklog?.isBlocked === true &&
+          !isOnAllowedPage &&
+          (user?.role === 'MEDIA_BUYER' || isMirroring);
+        if (!showAdSpendBlock) return null;
+        const dates = adSpendBacklog!.missingDates;
+        const displayLimit = 10;
+        const shown = backlogExpanded ? dates : dates.slice(0, displayLimit);
+        const remaining = backlogExpanded ? 0 : dates.length - displayLimit;
+        const fmt = new Intl.DateTimeFormat('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
+        return (
+          <>
+          {/* Heavy overlay so page content is fully obscured */}
+          <div className="fixed inset-0 z-[89] bg-black/80 backdrop-blur-sm" aria-hidden />
+          <Modal open onClose={() => {}} maxWidth="max-w-md" contentClassName="p-6">
+            <div className="flex flex-col items-center text-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-warning-100 dark:bg-warning-900/30 flex items-center justify-center">
+                <svg className="w-6 h-6 text-warning-600 dark:text-warning-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-app-fg">Ad Spend Backlog</h3>
+                <p className="text-sm text-app-fg-muted mt-1">
+                  You have {dates.length} unfilled ad expense {dates.length === 1 ? 'date' : 'dates'}. Please fill them before continuing.
+                </p>
+              </div>
+              <div className="w-full max-h-48 overflow-y-auto rounded-lg border border-app-border bg-app-hover/50 p-3">
+                <ul className="space-y-1 text-sm">
+                  {shown.map((d) => (
+                    <li key={d}>
+                      <Link
+                        to={`/admin/marketing/expenses/new?date=${d}`}
+                        className="flex items-center gap-2 rounded-md px-2 py-1.5 -mx-2 text-brand-400 hover:bg-brand-600/10 hover:text-brand-300 transition-colors"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-warning-500 flex-shrink-0" />
+                        {fmt.format(new Date(`${d}T12:00:00+01:00`))}
+                        <span className="ml-auto text-xs font-medium text-brand-400 flex-shrink-0">Record</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {remaining > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setBacklogExpanded(true)}
+                    className="text-xs text-brand-400 hover:text-brand-300 mt-2 transition-colors"
+                  >
+                    + {remaining} more {remaining === 1 ? 'date' : 'dates'}
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 w-full">
+                <Link
+                  to="/admin/marketing/expenses"
+                  className="flex-1 inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
+                >
+                  Go to Expenses
+                </Link>
+                <Link
+                  to="/admin/marketing/funding"
+                  className="flex-1 inline-flex items-center justify-center rounded-lg border border-app-border bg-app-elevated px-4 py-2.5 text-sm font-medium text-app-fg hover:bg-app-hover transition-colors"
+                >
+                  Go to Funding
+                </Link>
+              </div>
+            </div>
+          </Modal>
+          </>
+        );
+      })()}
       {isMirrorTransition && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"

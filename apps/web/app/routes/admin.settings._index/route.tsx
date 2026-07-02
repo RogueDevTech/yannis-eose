@@ -263,6 +263,20 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
+    // 5. Strict Ad Spend Mode
+    const strictAdSpendEnabled = formData.get('strictAdSpendEnabled')?.toString() === 'true';
+    const strictRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: 'STRICT_AD_SPEND_MODE', value: { enabled: strictAdSpendEnabled } },
+    });
+    if (!strictRes.ok) {
+      return json(
+        { error: extractApiErrorMessage(strictRes.data, 'Failed to update strict ad spend setting') },
+        { status: safeStatus(strictRes.status) },
+      );
+    }
+
     return json({ success: true, message: 'System settings saved' });
   }
 

@@ -807,10 +807,32 @@ export function MarketingAdSpendPage({
   const isFilteringNonAdSpend = selectedCategory !== 'AD_SPEND';
 
   const legacyAdSpendColumns = useMemo((): CompactTableColumn<AdSpendRecord>[] => {
+    const selectableIds = patchedAdSpend.filter((s) => (s.status ?? 'PENDING') === 'PENDING').map((s) => s.id);
+    const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+    const someSelected = selectableIds.some((id) => selectedIds.has(id));
+
     const cols: CompactTableColumn<AdSpendRecord>[] = [
       {
         key: 'date',
-        header: 'Date',
+        header: canApproveAdSpend && selectableIds.length > 0 ? (
+          <span className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+              onChange={() => {
+                if (allSelected) {
+                  clearSelection();
+                } else {
+                  setSelectedIds(new Set(selectableIds));
+                }
+              }}
+              className="rounded border-app-border text-brand-600 focus:ring-brand-500 shrink-0"
+              aria-label="Select all"
+            />
+            Date
+          </span>
+        ) : 'Date',
         nowrap: true,
         render: (s) => {
           const isPending = (s.status ?? 'PENDING') === 'PENDING';
@@ -951,7 +973,8 @@ export function MarketingAdSpendPage({
       },
     );
     return cols;
-  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData, selectedIds, toggleSelect]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- setSelectedIds is stable
+  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData, selectedIds, toggleSelect, patchedAdSpend, clearSelection]);
 
   const adSpendToolbarFilterBadge = useMemo(() => {
     let n = 0;

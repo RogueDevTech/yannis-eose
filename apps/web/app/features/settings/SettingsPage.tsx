@@ -373,6 +373,12 @@ export function SettingsPage({
   const [localProfitabilityTarget, setLocalProfitabilityTarget] = useState<number>(profitabilityTargetSaved);
   const [localProfitabilityThreshold, setLocalProfitabilityThreshold] = useState<number>(profitabilityThresholdSaved);
 
+  // Strict Ad Spend Mode — blocks MBs from using the app when they have unfilled ad spend dates.
+  // Default is true (enabled) — `enabled !== false` so null/missing = enabled.
+  const strictAdSpendSetting = systemSettings.find((s) => s.key === 'STRICT_AD_SPEND_MODE');
+  const isStrictAdSpendEnabled = strictAdSpendSetting?.value?.['enabled'] !== false;
+  const [localStrictAdSpend, setLocalStrictAdSpend] = useState(isStrictAdSpendEnabled);
+
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
 
@@ -467,6 +473,9 @@ export function SettingsPage({
   useEffect(() => {
     setLocalProfitabilityThreshold(profitabilityThresholdSaved);
   }, [profitabilityThresholdSaved]);
+  useEffect(() => {
+    setLocalStrictAdSpend(isStrictAdSpendEnabled);
+  }, [isStrictAdSpendEnabled]);
 
   useEffect(() => {
     if (location.hash !== '#install-app') return;
@@ -482,7 +491,8 @@ export function SettingsPage({
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
     localClaimCap !== claimCapFromSettings ||
     localProfitabilityTarget !== profitabilityTargetSaved ||
-    localProfitabilityThreshold !== profitabilityThresholdSaved;
+    localProfitabilityThreshold !== profitabilityThresholdSaved ||
+    localStrictAdSpend !== isStrictAdSpendEnabled;
 
   return (
     <div className="space-y-4">
@@ -1006,6 +1016,7 @@ export function SettingsPage({
                 name="profitabilityGreenThreshold"
                 value={String(localProfitabilityThreshold)}
               />
+              <input type="hidden" name="strictAdSpendEnabled" value={String(localStrictAdSpend)} />
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
@@ -1344,6 +1355,69 @@ export function SettingsPage({
                     {(localProfitabilityTarget !== profitabilityTargetSaved ||
                       localProfitabilityThreshold !== profitabilityThresholdSaved) && ' — you have unsaved changes'}
                   </p>
+                </div>
+                </Collapsible>
+              </div>
+
+              {/* Strict Ad Spend Mode — blocks MBs with unfilled dates */}
+              <div className="card lg:col-span-2">
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">Strict ad spend mode</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          Block Media Buyers from using the app until they fill all missing ad spend dates.
+                        </p>
+                      </div>
+                    </div>
+                  }
+                >
+                <div className="rounded-lg border border-app-border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-sm font-semibold text-app-fg">Enforce ad spend logging</p>
+                        {localStrictAdSpend ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-app-hover px-2.5 py-0.5 text-xs font-medium text-app-fg-muted">
+                            <span className="w-1.5 h-1.5 rounded-full bg-surface-400" /> Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-app-fg-muted leading-relaxed">
+                        {localStrictAdSpend
+                          ? 'Media Buyers with unfilled ad spend dates (older than 2 days) are blocked with a modal until they fill all missing dates. They can only access Expenses and Funding pages.'
+                          : 'Media Buyers can use the app freely without filling ad spend backlog.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalStrictAdSpend(!localStrictAdSpend)}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
+                        localStrictAdSpend ? 'bg-brand-600' : 'bg-app-border'
+                      }`}
+                      disabled={fetcher.state === 'submitting'}
+                      role="switch"
+                      aria-checked={localStrictAdSpend}
+                      aria-label="Toggle strict ad spend mode"
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          localStrictAdSpend ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
                 </Collapsible>
               </div>

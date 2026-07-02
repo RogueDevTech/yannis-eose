@@ -120,6 +120,38 @@ export interface FundingSummary {
   disputedCount: number;
 }
 
+// ── General Ledger ───────────────────────────────────────────
+
+export interface GeneralLedgerEntry {
+  id: string;
+  entryType: 'revenue' | 'remittance_in' | 'remittance_out' | 'disbursement' | 'ad_spend' | 'payroll' | 'funding_transfer';
+  eventDate: string;
+  amount: string;
+  balanceEffect: number;
+  status: string;
+  description: string;
+  counterpartyName: string | null;
+  userName: string | null;
+}
+
+export interface GeneralLedgerLoaderData {
+  entries: GeneralLedgerEntry[];
+  total: number;
+  page: number;
+  totalPages: number;
+  limit: number;
+  summary: {
+    totalCredits: string;
+    totalDebits: string;
+  };
+  users: Array<{ id: string; name: string; role: string }>;
+  selectedUserId: string;
+  selectedUserName: string;
+  filters: { startDate: string; endDate: string; periodAllTime: boolean };
+  entryTypeFilter: string;
+  searchFilter: string;
+}
+
 /** `/admin/finance/overview` loader shape */
 export interface FinanceOverviewLoaderData {
   profit: ProfitReport;
