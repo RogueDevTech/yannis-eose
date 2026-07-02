@@ -78,7 +78,7 @@ async function _ceoOverviewFetch(params: {
       ? Promise.resolve(null)
       : financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
     (hasDateRange || isBranchScoped)
-      ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true).catch(logErr('statusCounts'))
+      ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true, true).catch(logErr('statusCounts'))
       : Promise.resolve(undefined),
     // CS funnel: servicing branch scope, includes offline orders, excludes
     // graduated follow-up and cart orders (they have their own funnels).
@@ -136,7 +136,7 @@ async function _ceoOverviewFetch(params: {
   if (hasDateRange || isBranchScoped) {
     statusCounts = (statusCountsWhenDated ?? {}) as Record<string, number>;
   } else {
-    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true).catch(logErr('statusCounts'));
+    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true, true).catch(logErr('statusCounts'));
     statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
   }
 
@@ -238,11 +238,11 @@ async function _ceoOverviewFetch(params: {
     followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartAbandonmentCount: await getCartService().countAllCarts({ branchId, effectiveBranchIds, startDate, endDate }).catch(() => 0),
-    // Total Orders — true marketing counts: regular + offline + graduated
-    // follow-up/cart orders (delivered only). Non-delivered follow-up/cart
-    // pipeline orders are excluded — they inflate counts without representing
-    // real marketing conversions (CEO 2026-07-01).
-    totalOrdersCounts: await ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
+    // Total Orders — form-submitted orders only; graduated follow-up/cart
+    // orders are excluded so they don't inflate the main funnel (they have
+    // their own strips). Remittance/finance/logistics still see graduated
+    // rows — this only affects the dashboard stat strip.
+    totalOrdersCounts: await ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true).catch(() => ({})),
   };
 }
 
@@ -460,11 +460,9 @@ export const dashboardRouter = router({
     const startIso = nigeriaDayStart(todayWat).toISOString();
     const endIso = nigeriaDayEnd(todayWat).toISOString();
 
-    const [todayCounts, totalOrdersCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
+    const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
       // CS funnel — excludes graduated follow-up + cart orders
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true).catch(() => ({})),
-      // Total orders — orders table (no exclusions), merged with pipelines below
-      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({})),
       ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
       getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, undefined, undefined, ctx.effectiveBranchIds).catch(() => ({})),
@@ -500,16 +498,6 @@ export const dashboardRouter = router({
       pendingApprovals,
       followUpCounts: followUpCounts as Record<string, number>,
       cartOrdersCounts: cartOrdersCounts as Record<string, number>,
-      totalOrdersCounts: (() => {
-        const merged: Record<string, number> = { ...(totalOrdersCounts ?? {}) as Record<string, number> };
-        for (const counts of [followUpCounts, cartOrdersCounts] as Record<string, number>[]) {
-          for (const [status, n] of Object.entries(counts ?? {})) {
-            if (status === 'DELIVERED' || status === 'REMITTED') continue;
-            merged[status] = (merged[status] ?? 0) + (n ?? 0);
-          }
-        }
-        return merged;
-      })(),
     };
   }),
 });
