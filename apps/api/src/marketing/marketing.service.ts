@@ -3685,9 +3685,9 @@ export class MarketingService {
   > {
     const scanDays = Math.max(minGapDays, 90);
 
-    // Get all active MBs scoped by branch
+    // Get all active MBs scoped by branch (include createdAt to skip pre-creation dates)
     const allBuyers = await this.db
-      .select({ id: schema.users.id, name: schema.users.name })
+      .select({ id: schema.users.id, name: schema.users.name, createdAt: schema.users.createdAt })
       .from(schema.users)
       .where(and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE')));
 
@@ -3743,6 +3743,15 @@ export class MarketingService {
     // Build a set of "buyerId:date" for quick lookup
     const filledSet = new Set(spendRows.map((r) => `${r.mediaBuyerId}:${r.spendDay}`));
     const buyerMap = new Map(eligibleBuyers.map((b) => [b.id, b.name]));
+    // Map each buyer to their first required date (day AFTER creation in Nigeria TZ)
+    const buyerFirstRequiredDate = new Map(
+      eligibleBuyers.map((b) => {
+        const createdDay = nigeriaFormatter.format(b.createdAt);
+        const nextDay = new Date(`${createdDay}T00:00:00+01:00`);
+        nextDay.setDate(nextDay.getDate() + 1);
+        return [b.id, nigeriaFormatter.format(nextDay)];
+      }),
+    );
 
     const result: Array<{
       date: string;
@@ -3753,7 +3762,9 @@ export class MarketingService {
 
     for (const date of dates) {
       const unfilled: Array<{ id: string; name: string }> = [];
-      for (const buyerId of buyerIds) {
+      // Only count MBs whose first required date is on or before this date
+      const eligibleForDate = buyerIds.filter((id) => (buyerFirstRequiredDate.get(id) ?? '9999') <= date);
+      for (const buyerId of eligibleForDate) {
         if (!filledSet.has(`${buyerId}:${date}`)) {
           unfilled.push({ id: buyerId, name: buyerMap.get(buyerId) ?? 'Unknown' });
         }
@@ -3763,8 +3774,8 @@ export class MarketingService {
         unfilled.sort((a, b) => a.name.localeCompare(b.name));
         result.push({
           date,
-          filledCount: buyerIds.length - unfilled.length,
-          totalMBs: buyerIds.length,
+          filledCount: eligibleForDate.length - unfilled.length,
+          totalMBs: eligibleForDate.length,
           unfilledMBs: unfilled,
         });
         if (result.length >= minGapDays) break;
