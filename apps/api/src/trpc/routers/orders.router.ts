@@ -1051,6 +1051,10 @@ export const ordersRouter = router({
 
       const isFollowUp = input?.isFollowUp;
 
+      // Exclude graduated follow-up + cart orders from funnel counts — they
+      // have their own pipelines and must not inflate the main order funnel.
+      const excludeGraduated = !isFollowUp;
+
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
           narrowed.mediaBuyerId,
@@ -1064,6 +1068,8 @@ export const ordersRouter = router({
           branchScope,
           ctx.effectiveBranchIds,
           isFollowUp,
+          undefined,
+          excludeGraduated,
         );
       }
 
@@ -1092,6 +1098,8 @@ export const ordersRouter = router({
           branchScope,
           ctx.effectiveBranchIds,
           isFollowUp,
+          undefined,
+          excludeGraduated,
         ),
       );
     }),
@@ -1415,7 +1423,7 @@ export const ordersRouter = router({
           ctx.effectiveBranchIds,
           false, // exclude follow-up orders — matches orders.list default
           undefined,
-          bundleBranchScope === 'servicing', // CS excludes graduated follow-up + cart orders
+          true, // exclude graduated follow-up + cart orders from all funnel counts
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(

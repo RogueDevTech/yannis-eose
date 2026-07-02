@@ -228,7 +228,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { perPage: limit } = parsePerPage(url.searchParams);
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
-  const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: ALL_FOLLOW_UP_STATUSES }));
+  const countsInputStr = encodeURIComponent(JSON.stringify({ statuses: ALL_FOLLOW_UP_STATUSES, isFollowUp: true }));
 
   // Build the order list input upfront so it can be serialized for deep-select.
   const listInput: Record<string, unknown> = { page, limit, sortBy: 'createdAt', sortOrder: 'desc', excludeFollowUp: false };

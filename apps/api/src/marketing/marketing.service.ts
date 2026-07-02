@@ -4667,9 +4667,9 @@ export class MarketingService {
       // Exclude DELETED orders (editorial) from all marketing metrics.
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
-      // Exclude offline orders — marketing metrics only count edge-form orders.
-      // Follow-up orders are included — MB spent to acquire the lead (CEO 2026-06-19).
-      ...(includeAllSources ? [] : [sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`]),
+      // Exclude offline + graduated follow-up orders. Cart-graduated orders
+      // (order_source='online') are real sales and stay in marketing metrics.
+      ...(includeAllSources ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4685,7 +4685,7 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      ...(includeAllSources ? [] : [sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`]),
+      ...(includeAllSources ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -4711,7 +4711,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
-      ...(includeAllSources ? [] : [sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.isFollowUp} = true)`]),
+      ...(includeAllSources ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -4949,6 +4949,10 @@ export class MarketingService {
           and(
             inArray(schema.orders.mediaBuyerId, buyerIds),
             sql`${schema.orders.status} != 'DELETED'`,
+            // Exclude graduated follow-up orders — they are re-engagement on
+            // existing leads, not new acquisitions. Cart-graduated orders
+            // (order_source='online', is_follow_up=false) are real sales and stay.
+            eq(schema.orders.isFollowUp, false),
             branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
           ),
         )

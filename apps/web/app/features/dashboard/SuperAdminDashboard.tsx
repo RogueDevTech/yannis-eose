@@ -176,16 +176,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       {/* ── Total Orders: bird's-eye view across all pipelines ── */}
       {(() => {
         const tsc = orderPipeline.totalOrdersCounts;
-        // Follow-up + cart orders graduate into Total Orders only when delivered
-        const fuCounts = data?.followUpCounts ?? {};
-        const fuDelivered = (fuCounts['DELIVERED'] ?? 0) + (fuCounts['REMITTED'] ?? 0);
-        const cartCounts = data?.cartOrdersCounts ?? {};
-        const cartDelivered = (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0);
-        const graduatedDelivered = fuDelivered + cartDelivered;
+        // totalOrdersCounts already includes graduated follow-up (is_follow_up=true)
+        // and graduated cart orders (order_source='online') — do NOT add them again
+        // from the pipeline tables, that was double-counting delivered numbers.
 
-        const baseTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
-        const tTotal = baseTotal + graduatedDelivered;
-        const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0) + graduatedDelivered;
+        const tTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
+        const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0);
         const tConfirmed = (tsc['CONFIRMED'] ?? 0) + (tsc['AGENT_ASSIGNED'] ?? 0) + (tsc['DISPATCHED'] ?? 0) + (tsc['IN_TRANSIT'] ?? 0);
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;

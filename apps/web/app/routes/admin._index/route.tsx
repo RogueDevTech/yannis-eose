@@ -52,7 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' && user?.id ? { assignedCsId: user.id } : {};
-  const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
+  const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam, isFollowUp: false });
 
   // SuperAdmin: full CEO metrics directly on /admin (CEO directive 2026-05-18).
   // Uses ceoOverview which includes ROAS, revenue by period, deliveries by product,
