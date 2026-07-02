@@ -1125,6 +1125,9 @@ export const marketingRouter = router({
           // Exclude offline orders — marketing metrics only count edge-form orders.
           // Offline orders affect Sales metrics only (CEO 2026-06-05).
           true,
+          // Exclude graduated follow-up + cart orders — they have their own
+          // funnels and must not inflate the Marketing Order Funnel.
+          true,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,

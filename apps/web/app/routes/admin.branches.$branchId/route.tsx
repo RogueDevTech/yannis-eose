@@ -754,7 +754,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       ),
       apiRequest<{ result?: { data?: Record<string, number> } }>(
-        `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify({ branchId, ...dateRange }))}`,
+        `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify({ branchId, ...dateRange, isFollowUp: false }))}`,
         { method: 'GET', cookie },
       ),
     ]);
