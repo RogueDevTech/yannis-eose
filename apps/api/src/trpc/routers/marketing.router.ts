@@ -314,7 +314,7 @@ export const marketingRouter = router({
     .meta({ branchScopedMutation: true })
     .input(
       z.object({
-        amount: z.coerce.number().min(0),
+        amount: z.coerce.number().positive('Funding amount must be greater than zero'),
         reason: z.string().max(500).optional().default(''),
         branchId: z.string().uuid().optional(),
         /**
@@ -590,6 +590,7 @@ export const marketingRouter = router({
         spendInput,
         ctx.user,
         branchId ?? ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 

@@ -1807,8 +1807,8 @@ export class FinanceService {
         })()
       : entries;
 
-    // Sort oldest-first for chronological running balance
-    filteredEntries.sort((a, b) => a.eventDate.getTime() - b.eventDate.getTime());
+    // Sort newest-first so the latest transactions appear at the top
+    filteredEntries.sort((a, b) => b.eventDate.getTime() - a.eventDate.getTime());
 
     const total = filteredEntries.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));

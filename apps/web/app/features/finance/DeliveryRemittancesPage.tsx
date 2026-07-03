@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import type { OrderInvoice } from '~/features/orders/types';
-import { useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -317,6 +317,7 @@ export function DeliveryRemittancesPage({
     });
   };
 
+  const remittedOrderCount = Number(summary.pendingCount ?? 0) + Number(summary.receivedCount ?? 0) + Number(summary.disputedCount ?? 0);
   const hasFilters = !!filters.location || !!filters.sentBy;
   const hasEligibleFilters = !!filters.location || !!filters.eligibleQ;
 
@@ -954,7 +955,7 @@ export function DeliveryRemittancesPage({
                 </span>
               ) : null,
           },
-          { value: 'remittances', label: `Remitted (${Number(summary.totalCount)})` },
+          { value: 'remittances', label: `Remitted (${Number(summary.pendingCount ?? 0) + Number(summary.receivedCount ?? 0) + Number(summary.disputedCount ?? 0)} orders)` },
         ]}
       />
 
@@ -995,7 +996,7 @@ export function DeliveryRemittancesPage({
                       id="delivery-remittance-sent-by-filter"
                       value={filters.sentBy}
                       onChange={handleSentByChange}
-                      wrapperClassName="w-full min-w-0 sm:w-56"
+                      wrapperClassName="w-full min-w-0 sm:w-48"
                       placeholder="Sent by anyone"
                       searchPlaceholder="Search accountants..."
                       options={[
@@ -1004,6 +1005,32 @@ export function DeliveryRemittancesPage({
                       ]}
                     />
                   </div>
+                  <FormSelect
+                    value={pendingStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={[
+                      { value: '', label: `All (${remittedOrderCount} orders)` },
+                      { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
+                      { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
+                      { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
+                    ]}
+                    wrapperClassName="w-full sm:w-52"
+                  />
+                  <FormSelect
+                    value={viewMode}
+                    onChange={(e) => {
+                      const params = new URLSearchParams(location.search);
+                      if (e.target.value === 'orders') params.set('view', 'orders');
+                      else params.delete('view');
+                      params.set('page', '1');
+                      setSearchParams(params);
+                    }}
+                    options={[
+                      { value: 'batches', label: 'Batches' },
+                      { value: 'orders', label: 'Orders' },
+                    ]}
+                    wrapperClassName="w-full sm:w-32"
+                  />
                 </>
               }
               sheetFilterBody={
@@ -1051,57 +1078,35 @@ export function DeliveryRemittancesPage({
                       />
                     </div>
                   </div>
+                  <FormSelect
+                    value={pendingStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={[
+                      { value: '', label: `All (${remittedOrderCount} orders)` },
+                      { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
+                      { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
+                      { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
+                    ]}
+                    wrapperClassName="w-full"
+                  />
+                  <FormSelect
+                    value={viewMode}
+                    onChange={(e) => {
+                      const params = new URLSearchParams(location.search);
+                      if (e.target.value === 'orders') params.set('view', 'orders');
+                      else params.delete('view');
+                      params.set('page', '1');
+                      setSearchParams(params);
+                    }}
+                    options={[
+                      { value: 'batches', label: 'Batches' },
+                      { value: 'orders', label: 'Orders' },
+                    ]}
+                    wrapperClassName="w-full"
+                  />
                 </>
               }
             />
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <FormSelect
-              value={pendingStatus}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              options={[
-                { value: '', label: `All statuses (${Number(summary.totalCount)})` },
-                { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
-                { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
-                { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
-              ]}
-              wrapperClassName="w-full sm:w-56"
-            />
-            {/* View mode toggle — Batches (grouped) vs Orders (flat) */}
-            <div className="inline-flex rounded-lg border border-app-border overflow-hidden text-xs font-medium">
-              <button
-                type="button"
-                onClick={() => {
-                  const params = new URLSearchParams(location.search);
-                  params.delete('view');
-                  params.set('page', '1');
-                  setSearchParams(params);
-                }}
-                className={`px-3 py-1.5 transition-colors ${
-                  viewMode === 'batches'
-                    ? 'bg-brand-600 text-white'
-                    : 'text-app-fg-muted hover:bg-app-hover'
-                }`}
-              >
-                Batches
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const params = new URLSearchParams(location.search);
-                  params.set('view', 'orders');
-                  params.set('page', '1');
-                  setSearchParams(params);
-                }}
-                className={`px-3 py-1.5 transition-colors ${
-                  viewMode === 'orders'
-                    ? 'bg-brand-600 text-white'
-                    : 'text-app-fg-muted hover:bg-app-hover'
-                }`}
-              >
-                Orders
-              </button>
-            </div>
           </div>
 
           {viewMode === 'orders' ? (
@@ -1170,6 +1175,17 @@ export function DeliveryRemittancesPage({
                     </span>
                   ),
                 },
+                {
+                  key: 'actions',
+                  header: '',
+                  align: 'right',
+                  tight: true,
+                  render: (r) => (
+                    <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}`}>
+                      View
+                    </CompactTableActionButton>
+                  ),
+                },
               ]}
               rows={remittanceOrders}
               rowKey={(r) => r.id}
@@ -1198,7 +1214,11 @@ export function DeliveryRemittancesPage({
                 const statusLabel = r.remittanceStatus === 'SENT' ? 'Pending' : r.remittanceStatus === 'RECEIVED' ? 'Received' : r.remittanceStatus === 'DISPUTED' ? 'Disputed' : r.remittanceStatus;
                 const net = Number(r.totalAmount || 0) - Number(r.deliveryFee || 0);
                 return (
-                  <div className="space-y-1.5">
+                  <Link
+                    to={`/admin/finance/delivery-remittances/${r.remittanceId}`}
+                    prefetch="intent"
+                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
+                  >
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-app-fg truncate">{r.customerName}</p>
@@ -1219,7 +1239,7 @@ export function DeliveryRemittancesPage({
                       </div>
                     </div>
                     <StatusBadge status={r.remittanceStatus} label={statusLabel} />
-                  </div>
+                  </Link>
                 );
               }}
             />

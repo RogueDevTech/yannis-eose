@@ -1783,14 +1783,15 @@ export class LogisticsService {
           .where(eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id)),
       ),
     ];
-    // Company-group isolation on awaiting orders — scope via logistics location's provider group
+    // Company-group isolation on awaiting orders — scope via logistics location's provider group.
+    // Include orders with NULL logisticsLocationId (not yet assigned to a 3PL).
     if (groupId) {
       awaitingConditions.push(
-        sql`${schema.orders.logisticsLocationId} IN (
+        sql`(${schema.orders.logisticsLocationId} IS NULL OR ${schema.orders.logisticsLocationId} IN (
           SELECT ll.id FROM logistics_locations ll
           JOIN logistics_providers lp ON lp.id = ll.provider_id
           WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
-        )`,
+        ))`,
       );
     }
     if (isTplCaller && !canListGlobal) {
@@ -1820,18 +1821,21 @@ export class LogisticsService {
       .where(and(...awaitingConditions));
 
     // Count all delivered orders in the period (both awaiting and on remittance).
-    // Must mirror the same location / group / branch scoping as awaitingConditions
+    // Uses the SAME scoping as awaitingConditions (minus the status + notExists filters)
     // so the stat strip reconciles: delivered = awaiting + remitted.
+    // Include orders with NULL logisticsLocationId — they're still delivered/remitted
+    // and must count toward the total.
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
     if (groupId) {
+      // Include orders with NULL logisticsLocationId (not yet assigned to a 3PL)
       deliveredConditions.push(
-        sql`${schema.orders.logisticsLocationId} IN (
+        sql`(${schema.orders.logisticsLocationId} IS NULL OR ${schema.orders.logisticsLocationId} IN (
           SELECT ll.id FROM logistics_locations ll
           JOIN logistics_providers lp ON lp.id = ll.provider_id
           WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
-        )`,
+        ))`,
       );
     }
     if (isTplCaller && !canListGlobal) {

@@ -3416,6 +3416,7 @@ export class MarketingService {
     input: LogDailyAdSpendInput,
     actor: SessionUser,
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const mediaBuyerId = actor.id;
     const orderCount = await this.getOrderCountForDate(mediaBuyerId, input.spendDate, branchId);
@@ -3440,7 +3441,15 @@ export class MarketingService {
     if (existing) {
       const wasApproved = existing.status === 'APPROVED';
       const wasRejected = existing.status === 'REJECTED';
+      // Balance check on the delta: if the new amount is higher than the old,
+      // the MB needs enough balance to cover the increase.
+      const oldAmount = wasRejected ? 0 : Number(existing.spendAmount);
+      const delta = input.spendAmount - oldAmount;
       const row = await withActor(this.db, actor, async (tx) => {
+        if (delta > 0) {
+          const balance = await this.computeMbBalanceInTx(tx, mediaBuyerId, branchId ?? null, effectiveBranchIds);
+          this.assertSufficientMbBalance(balance, delta);
+        }
         const [updated] = await tx
           .update(schema.adSpendLogs)
           .set({
@@ -3469,8 +3478,10 @@ export class MarketingService {
       return { record: row!, orderCount, cpa, isUpdate: true };
     }
 
-    // Insert new record
+    // Insert new record — enforce balance check
     const row = await withActor(this.db, actor, async (tx) => {
+      const balance = await this.computeMbBalanceInTx(tx, mediaBuyerId, branchId ?? null, effectiveBranchIds);
+      this.assertSufficientMbBalance(balance, input.spendAmount);
       const [inserted] = await tx
         .insert(schema.adSpendLogs)
         .values({
@@ -6671,12 +6682,15 @@ export class MarketingService {
 
     for (const t of transfersIn) {
       const amt = Number(t.amount);
+      // Only COMPLETED transfers credit the receiver's balance.
+      // SENT transfers are in-flight — deducted from sender, not yet available to receiver.
+      const isCompleted = t.status === 'COMPLETED';
       entries.push({
         id: t.id,
         entryType: 'transfer_in',
         eventDate: t.sentAt,
         amount: amt,
-        balanceEffect: amt,
+        balanceEffect: isCompleted ? amt : 0,
         status: t.status,
         description: `From ${t.senderName ?? 'Unknown'}`,
         counterpartyName: t.senderName ?? null,
@@ -6743,12 +6757,13 @@ export class MarketingService {
       // cumulative minus the in-range effects.
       // Actually, the entries array only has in-range items. We need a separate calc.
       // Use getFundingBalance-style logic but only for pre-startDate transactions.
+      // Only COMPLETED transfers credit the receiver (matches computeMarketingDisbursableInTx)
       const preRangeTransfersIn = await this.db
         .select({ total: sum(schema.marketingFunding.amount) })
         .from(schema.marketingFunding)
         .where(and(
           eq(schema.marketingFunding.receiverId, userId),
-          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
+          eq(schema.marketingFunding.status, 'COMPLETED'),
           lt(schema.marketingFunding.sentAt, dStart),
         ));
       const preRangeTransfersOut = await this.db
