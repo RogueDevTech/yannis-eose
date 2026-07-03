@@ -1902,6 +1902,18 @@ export class OrdersService {
       });
     }
 
+    // 60-day duplicate guard — block creating offline orders for a phone+product
+    // that already has an active order (any status). Catches closers who re-enter
+    // customers weeks after the original order (fraud report Jul 2026).
+    const deliveredDup = await this.findDeliveredDuplicateOrder(customerPhoneHash, productIds);
+    if (deliveredDup) {
+      const orderLabel = deliveredDup.orderNumber ? `YNS-${deliveredDup.orderNumber}` : deliveredDup.id.slice(0, 8);
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `This customer already has an order for ${deliveredDup.productName ?? 'this product'} (order ${orderLabel}, status: ${deliveredDup.status}). Cannot create a duplicate offline order for the same product within 60 days.`,
+      });
+    }
+
     // When recovering from a cart, pull attribution (MB + campaign) from the
     // cart row if the Sales rep didn't explicitly set it on the modal.
     if (input.cartId && (!input.campaignId || !input.mediaBuyerId)) {
@@ -8369,6 +8381,80 @@ export class OrdersService {
       mediaBuyerId: winner.mediaBuyerId,
       status: winner.status,
       createdAt: winner.createdAt,
+    };
+  }
+
+  /**
+   * Check if an order with the same phone + any overlapping product already
+   * exists within the last 60 days (any active status — not just delivered).
+   * Returns the matching order if found, null otherwise. Used to block
+   * duplicate offline entries and duplicate cart graduations.
+   *
+   * Complements the 7-day `findExistingOrderForDedup` by extending coverage
+   * to 60 days, catching closers who re-enter customers weeks after the
+   * original order.
+   */
+  async findDeliveredDuplicateOrder(
+    phoneHash: string,
+    productIds: string[],
+    /** Exclude this order ID from the check (e.g. the graduating cart order itself). */
+    excludeOrderId?: string,
+  ): Promise<{ id: string; orderNumber: number | null; status: string; deliveredAt: Date | null; productName: string | null } | null> {
+    if (!phoneHash || productIds.length === 0) return null;
+
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const conditions = [
+      eq(schema.orders.customerPhoneHash, phoneHash),
+      notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+      isNull(schema.orders.deletedAt),
+      gte(schema.orders.createdAt, sixtyDaysAgo),
+    ];
+    if (excludeOrderId) {
+      conditions.push(sql`${schema.orders.id} != ${excludeOrderId}`);
+    }
+
+    const candidates = await this.db
+      .select({
+        id: schema.orders.id,
+        orderNumber: schema.orders.orderNumber,
+        status: schema.orders.status,
+        deliveredAt: schema.orders.deliveredAt,
+      })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .orderBy(desc(schema.orders.createdAt))
+      .limit(20);
+
+    if (candidates.length === 0) return null;
+
+    const candidateIds = candidates.map((c) => c.id);
+    const matchingItems = await this.db
+      .select({
+        orderId: schema.orderItems.orderId,
+        productName: schema.products.name,
+      })
+      .from(schema.orderItems)
+      .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+      .where(
+        and(
+          inArray(schema.orderItems.orderId, candidateIds),
+          inArray(schema.orderItems.productId, productIds),
+        ),
+      )
+      .limit(1);
+
+    if (matchingItems.length === 0) return null;
+
+    const matchId = matchingItems[0].orderId;
+    const winner = candidates.find((c) => c.id === matchId);
+    if (!winner) return null;
+
+    return {
+      id: winner.id,
+      orderNumber: winner.orderNumber,
+      status: winner.status,
+      deliveredAt: winner.deliveredAt,
+      productName: matchingItems[0].productName,
     };
   }
 

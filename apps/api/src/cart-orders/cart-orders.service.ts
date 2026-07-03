@@ -739,6 +739,41 @@ export class CartOrdersService {
       .from(schema.cartOrderItems)
       .where(eq(schema.cartOrderItems.cartOrderId, cartOrderId));
 
+    // Dedup guard: skip graduation if the same phone+product already has an
+    // active order in the last 60 days. Prevents duplicate deliveries when a
+    // cart order and a form/offline order both exist for the same customer.
+    if (co.customerPhoneHash && coItems.length > 0) {
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+      const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
+      if (productIds.length > 0) {
+        const existing = await this.db
+          .select({ id: schema.orders.id })
+          .from(schema.orders)
+          .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+          .where(
+            and(
+              eq(schema.orders.customerPhoneHash, co.customerPhoneHash),
+              sql`${schema.orders.status} NOT IN ('CANCELLED', 'DELETED')`,
+              isNull(schema.orders.deletedAt),
+              gte(schema.orders.createdAt, sixtyDaysAgo),
+              inArray(schema.orderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existing.length > 0) {
+          this.logger.warn(
+            `Cart order ${cartOrderId} skipped graduation: duplicate delivery found (order ${existing[0].id}) for same phone+product`,
+          );
+          // Mark cart order as CONVERTED without creating a duplicate order
+          await this.db
+            .update(schema.cartOrders)
+            .set({ status: 'CONVERTED', notes: `Skipped graduation — duplicate delivery exists (${existing[0].id})` })
+            .where(eq(schema.cartOrders.id, cartOrderId));
+          return;
+        }
+      }
+    }
+
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       const [graduated] = await tx
         .insert(schema.orders)
