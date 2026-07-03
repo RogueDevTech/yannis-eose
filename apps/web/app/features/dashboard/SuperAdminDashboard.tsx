@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
@@ -7,8 +8,57 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import type { CEODashboardData } from '~/features/ceo/types';
+
+function FunnelInfoIcon({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors"
+      aria-label="View breakdown"
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="10" />
+        <path strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+      </svg>
+    </button>
+  );
+}
+
+function FunnelBreakdownModal({
+  open,
+  onClose,
+  title,
+  description,
+  lines,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  description: string;
+  lines: Array<{ label: string; value: number; bold?: boolean; muted?: boolean }>;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} maxWidth="max-w-sm" contentClassName="p-5">
+      <h2 className="text-base font-semibold text-app-fg mb-1">{title}</h2>
+      <p className="text-sm text-app-fg-muted mb-4">{description}</p>
+      <div className="space-y-0.5">
+        {lines.map((l, i) => (
+          <div
+            key={i}
+            className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}
+          >
+            <span className={`text-sm ${l.muted ? 'text-app-fg-muted' : 'text-app-fg'}`}>{l.label}</span>
+            <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
 
 function fmt(n: number): string {
   return formatNaira(Math.round(n));
@@ -33,6 +83,7 @@ export interface SuperAdminDashboardProps {
 
 export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
+  const [breakdownModal, setBreakdownModal] = useState<'total' | 'totalDelivered' | 'mktTotal' | 'mktDelivered' | 'csTotal' | 'csDelivered' | null>(null);
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -180,6 +231,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         // and graduated cart orders (order_source='online') — do NOT add them again
         // from the pipeline tables, that was double-counting delivered numbers.
 
+        const fuCounts = data?.followUpCounts ?? {};
+        const cartCounts = data?.cartOrdersCounts ?? {};
+        const fuDelivered = (fuCounts['DELIVERED'] ?? 0) + (fuCounts['REMITTED'] ?? 0);
+        const fuTotal = Object.entries(fuCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        const cartDelivered = (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0);
+        const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+
         const tTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
         const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0);
         const tConfirmed = (tsc['CONFIRMED'] ?? 0) + (tsc['AGENT_ASSIGNED'] ?? 0) + (tsc['DISPATCHED'] ?? 0) + (tsc['IN_TRANSIT'] ?? 0);
@@ -194,15 +252,41 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               mobileGrid
               tileClassName="!py-2.5"
               items={[
-                { label: 'Total', value: tTotal, valueClassName: 'text-app-fg' },
+                { label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('total')} /></span>, value: tTotal, valueClassName: 'text-app-fg' },
                 { label: 'Unassigned', value: tsc['UNPROCESSED'] ?? 0, valueClassName: 'text-warning-600 dark:text-warning-400' },
                 { label: 'Assigned', value: tsc['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
                 { label: 'Unconfirmed', value: tsc['CS_ENGAGED'] ?? 0, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
-                { label: 'Delivered', value: tDelivered, valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>, value: tDelivered, valueClassName: 'text-success-600 dark:text-success-400' },
                 { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(tCR) },
                 { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(tDR) },
                 { label: 'Deleted', value: tsc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
+              ]}
+            />
+            <FunnelBreakdownModal
+              open={breakdownModal === 'total'}
+              onClose={() => setBreakdownModal(null)}
+              title="Total Orders — Breakdown"
+              description="All orders across all pipelines. Includes form orders, graduated follow-up, and graduated cart orders."
+              lines={[
+                { label: 'Form orders (orders table)', value: tTotal - fuDelivered - cartDelivered },
+                { label: 'Follow-up graduated (delivered)', value: fuDelivered, muted: true },
+                { label: 'Cart graduated (delivered)', value: cartDelivered, muted: true },
+                { label: 'Total', value: tTotal, bold: true },
+              ]}
+            />
+            <FunnelBreakdownModal
+              open={breakdownModal === 'totalDelivered'}
+              onClose={() => setBreakdownModal(null)}
+              title="Total Delivered — Breakdown"
+              description="All delivered + remitted orders across all pipelines."
+              lines={[
+                { label: 'Form orders delivered', value: tDelivered - fuDelivered - cartDelivered },
+                { label: 'Follow-up graduated (delivered)', value: fuDelivered, muted: true },
+                { label: 'Cart graduated (delivered)', value: cartDelivered, muted: true },
+                { label: 'Total Delivered', value: tDelivered, bold: true },
+                { label: 'Follow-up pipeline (own strip)', value: fuTotal, muted: true },
+                { label: 'Cart pipeline (own strip)', value: cartTotal, muted: true },
               ]}
             />
           </div>
@@ -242,7 +326,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 tileClassName="!py-2.5"
                 items={[
                   {
-                    label: 'Total',
+                    label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('mktTotal')} /></span>,
                     value: ordersTotal,
                     valueClassName: 'text-app-fg',
                     to: marketingLink(),
@@ -272,7 +356,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     to: marketingLink({ status: 'CONFIRMED' }),
                   },
                   {
-                    label: 'Delivered',
+                    label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('mktDelivered')} /></span>,
                     value: delivered,
                     valueClassName: 'text-success-600 dark:text-success-400',
                     to: marketingLink({ status: 'DELIVERED' }),
@@ -303,6 +387,28 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   },
                 ]}
               />
+              <FunnelBreakdownModal
+                open={breakdownModal === 'mktTotal'}
+                onClose={() => setBreakdownModal(null)}
+                title="Marketing Total — Breakdown"
+                description="Form orders + cart-graduated orders. Excludes offline and follow-up graduated orders."
+                lines={[
+                  { label: 'Form orders (edge-form)', value: ordersTotal - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
+                  { label: 'Cart graduated (delivered)', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
+                  { label: 'Marketing Total', value: ordersTotal, bold: true },
+                ]}
+              />
+              <FunnelBreakdownModal
+                open={breakdownModal === 'mktDelivered'}
+                onClose={() => setBreakdownModal(null)}
+                title="Marketing Delivered — Breakdown"
+                description="Form orders delivered + cart-graduated orders delivered. Cart orders are real MB-attributable sales."
+                lines={[
+                  { label: 'Form orders delivered', value: delivered - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
+                  { label: 'Cart graduated (delivered)', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
+                  { label: 'Marketing Delivered', value: delivered, bold: true },
+                ]}
+              />
             </div>
             {(() => {
               const csSc = orderPipeline.csStatusCounts;
@@ -330,7 +436,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     tileClassName="!py-2.5"
                     items={[
                       {
-                        label: 'Total',
+                        label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('csTotal')} /></span>,
                         value: csTotal,
                         valueClassName: 'text-app-fg',
                         to: salesLink(),
@@ -360,7 +466,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         to: salesLink({ status: 'CONFIRMED' }),
                       },
                       {
-                        label: 'Delivered',
+                        label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('csDelivered')} /></span>,
                         value: csDelivered,
                         valueClassName: 'text-success-600 dark:text-success-400',
                         to: salesLink({ status: 'DELIVERED' }),
@@ -392,6 +498,37 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       },
                     ]}
                   />
+                  <FunnelBreakdownModal
+                    open={breakdownModal === 'csTotal'}
+                    onClose={() => setBreakdownModal(null)}
+                    title="CS Total — Breakdown"
+                    description="Form orders + offline orders. Excludes graduated follow-up and cart orders (they have their own strips)."
+                    lines={[
+                      { label: 'Form orders', value: csTotal - offlineCount },
+                      { label: 'Offline orders', value: offlineCount, muted: true },
+                      { label: 'CS Total', value: csTotal, bold: true },
+                    ]}
+                  />
+                  {(() => {
+                    const fuC = data?.followUpCounts ?? {};
+                    const caC = data?.cartOrdersCounts ?? {};
+                    const fuDel = (fuC['DELIVERED'] ?? 0) + (fuC['REMITTED'] ?? 0);
+                    const caDel = (caC['DELIVERED'] ?? 0) + (caC['REMITTED'] ?? 0);
+                    return (
+                      <FunnelBreakdownModal
+                        open={breakdownModal === 'csDelivered'}
+                        onClose={() => setBreakdownModal(null)}
+                        title="CS Delivered — Breakdown"
+                        description="Form + offline orders delivered. Follow-up and cart deliveries are in their own strips below."
+                        lines={[
+                          { label: 'Form + offline delivered', value: csDelivered },
+                          { label: 'Follow-up delivered (own strip)', value: fuDel, muted: true },
+                          { label: 'Cart delivered (own strip)', value: caDel, muted: true },
+                          { label: 'CS Delivered', value: csDelivered, bold: true },
+                        ]}
+                      />
+                    );
+                  })()}
                 </div>
               );
             })()}
