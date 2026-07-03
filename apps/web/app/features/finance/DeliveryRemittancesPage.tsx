@@ -770,50 +770,40 @@ export function DeliveryRemittancesPage({
         const netRemittable = grossVal - deliveryFees - commitmentFees - posFees - failedDelivery;
         return (
         <>
-        {/* Main stats — simple: delivered, awaiting, collected, pending, disputed */}
-        <OverviewStatStrip
-          mobileGrid
-          items={[
-            {
-              label: <span className="flex items-center">Delivered ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
-              value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
-              valueClassName: 'text-app-fg tabular-nums',
-              title: 'Total value of all delivered orders',
-            },
-            {
-              label: <span className="flex items-center">Awaiting ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
-              value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
-              valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
-              title: 'Not yet on any remittance batch',
-              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
-              active: viewTab === 'eligible' && !pendingStatus,
-            },
-            {
-              label: <span className="flex items-center">Collected ({Number(summary.receivedCount)})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
-              value: <NairaPrice amount={summary.receivedAmount} />,
-              valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
-              title: 'Cash collected and confirmed by Finance',
-              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('page', '1'); return n; }, { replace: true }); },
-              active: viewTab === 'remittances' && pendingStatus === 'RECEIVED',
-            },
-            {
-              label: <span className="flex items-center">Pending ({Number(summary.pendingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('pending')} /></span>,
-              value: <NairaPrice amount={summary.pendingAmount} />,
-              valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
-              title: 'Sent but not yet confirmed by Finance',
-              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'SENT'); n.set('page', '1'); return n; }, { replace: true }); },
-              active: viewTab === 'remittances' && pendingStatus === 'SENT',
-            },
-            {
-              label: <span className="flex items-center">Disputed ({Number(summary.disputedCount)})<RemittanceInfoIcon onClick={() => setInfoModal('disputed')} /></span>,
-              value: <NairaPrice amount={summary.disputedAmount} />,
-              valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
-              title: 'Needs resolution',
-              onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'DISPUTED'); n.set('page', '1'); return n; }, { replace: true }); },
-              active: viewTab === 'remittances' && pendingStatus === 'DISPUTED',
-            },
-          ]}
-        />
+        {/* Main stats — Delivered = Awaiting + Remitted */}
+        {(() => {
+          const remittedCount = Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0);
+          const remittedAmount = Number(summary.grossOrderValue ?? 0);
+          return (
+            <OverviewStatStrip
+              mobileGrid
+              items={[
+                {
+                  label: <span className="flex items-center">Delivered ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
+                  value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
+                  valueClassName: 'text-app-fg tabular-nums',
+                  title: 'Total value of all delivered orders = Awaiting + Remitted',
+                },
+                {
+                  label: <span className="flex items-center">Awaiting ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
+                  value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
+                  valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
+                  title: 'Not yet on any remittance batch',
+                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
+                  active: viewTab === 'eligible' && !pendingStatus,
+                },
+                {
+                  label: <span className="flex items-center">Remitted ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
+                  value: <NairaPrice amount={remittedAmount} />,
+                  valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
+                  title: 'Orders placed on remittance batches (received + pending + disputed)',
+                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
+                  active: viewTab === 'remittances' && !pendingStatus,
+                },
+              ]}
+            />
+          );
+        })()}
 
         {/* Deductions — only show when there are batched orders */}
         {grossVal > 0 && (
@@ -859,23 +849,24 @@ export function DeliveryRemittancesPage({
         <FormulaBreakdownModal
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
-          title="Delivered Orders"
-          description="Gross value of all delivered + remitted orders. Equals Awaiting + On Batches."
+          title="Delivered"
+          description="Total value of all delivered orders. Equals Awaiting + Remitted."
           lines={[
-            { label: 'Awaiting remittance', amount: Number(summary.awaitingGrossAmount ?? summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
-            { label: 'On batches', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0) },
-            { label: 'Delivered Orders', amount: Number(summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
+            { label: 'Awaiting', amount: Number(summary.awaitingGrossAmount ?? summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
+            { label: 'Remitted', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0) },
+            { label: 'Delivered', amount: Number(summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
           ]}
         />
         <FormulaBreakdownModal
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
-          title="Settled"
-          description="The amount Finance recorded when marking batches as received. This is the actual cash collected after deductions."
+          title="Remitted"
+          description="Orders placed on remittance batches. Gross value before deductions."
           lines={[
-            { label: 'Amount settled by Finance', amount: Number(summary.receivedAmount ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) },
-            { label: 'Expected Net (computed)', amount: netRemittable, type: 'value' },
-            { label: 'Variance', amount: Number(summary.receivedAmount ?? 0) - netRemittable, type: Math.abs(Number(summary.receivedAmount ?? 0) - netRemittable) < 1 ? 'result' : 'deduction' },
+            { label: 'Received by Finance', amount: Number(summary.receivedAmount ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) },
+            { label: 'Pending (sent, not confirmed)', amount: Number(summary.pendingAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
+            { label: 'Disputed', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
+            { label: 'Gross total on batches', amount: Number(summary.grossOrderValue ?? 0), type: 'result', count: Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0) },
           ]}
         />
         <FormulaBreakdownModal
