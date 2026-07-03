@@ -34,6 +34,11 @@ import {
   logDailyAdSpendWithBranchSchema,
   updateDailyAdSpendSchema,
   fundingLedgerSchema,
+  createMbFundTransferSchema,
+  approveMbFundTransferSchema,
+  rejectMbFundTransferSchema,
+  acceptMbFundTransferSchema,
+  listMbFundTransfersSchema,
   type ListFundingInput,
   type ListFundingRequestsInput,
 } from '@yannis/shared';
@@ -1845,6 +1850,7 @@ export const marketingRouter = router({
         usersResult,
         balancesList,
         fundingBalance,
+        allTimeBalance,
         branches,
         fundingRequestRecipients,
         incomingCounts,
@@ -1894,6 +1900,11 @@ export const marketingRouter = router({
             })().catch(() => null)
           : Promise.resolve(null),
         showFundingBalance
+          ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds, dateRange)
+          : Promise.resolve(null),
+        // Current balance is always all-time so it reflects the true running balance
+        // even when the page is date-filtered.
+        showFundingBalance && (dateRange.startDate || dateRange.endDate)
           ? getMarketingService().getFundingBalance(ctx.user.id, branchId, ctx.effectiveBranchIds)
           : Promise.resolve(null),
         ctx.currentBranchId
@@ -1965,6 +1976,9 @@ export const marketingRouter = router({
           : [],
         balancesList,
         fundingBalance,
+        // When date-filtered, allTimeBalance carries the true running balance;
+        // when no date filter, fundingBalance is already all-time so this is null.
+        allTimeBalance: allTimeBalance ?? undefined,
         branches,
         fundingRequestRecipients,
         incomingCounts,
@@ -2045,5 +2059,37 @@ export const marketingRouter = router({
     .input(z.object({ campaignId: z.string().uuid() }))
     .query(async ({ input }) => {
       return getMarketingService().getPublicCampaign(input.campaignId);
+    }),
+
+  // ── MB Fund Transfers ─────────────────────────────────────────────────
+
+  createMbFundTransfer: authedProcedure
+    .input(createMbFundTransferSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getMarketingService().createMbFundTransfer(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
+    }),
+
+  approveMbFundTransfer: authedProcedure
+    .input(approveMbFundTransferSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getMarketingService().approveMbFundTransfer(input.transferId, ctx.user, ctx.currentBranchId);
+    }),
+
+  rejectMbFundTransfer: authedProcedure
+    .input(rejectMbFundTransferSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getMarketingService().rejectMbFundTransfer(input.transferId, input.rejectionReason, ctx.user);
+    }),
+
+  acceptMbFundTransfer: authedProcedure
+    .input(acceptMbFundTransferSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getMarketingService().acceptMbFundTransfer(input.transferId, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
+    }),
+
+  listMbFundTransfers: authedProcedure
+    .input(listMbFundTransfersSchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listMbFundTransfers(input, ctx.user.id, ctx.user.role, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 });

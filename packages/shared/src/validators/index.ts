@@ -296,6 +296,11 @@ export {
   formConfigSchema,
   getMissingRequiredCustomFormLabels,
   FORM_FIELD_TYPES,
+  createMbFundTransferSchema,
+  approveMbFundTransferSchema,
+  rejectMbFundTransferSchema,
+  acceptMbFundTransferSchema,
+  listMbFundTransfersSchema,
 } from './marketing';
 
 export type {
@@ -339,13 +344,8 @@ export type {
   CustomFormField,
   FormConfig,
   FormFieldType,
-  createMbFundTransferSchema,
-  approveMbFundTransferSchema,
-  rejectMbFundTransferSchema,
-  acceptMbFundTransferSchema,
-  listMbFundTransfersSchema,
-  type CreateMbFundTransferInput,
-  type ListMbFundTransfersInput,
+  CreateMbFundTransferInput,
+  ListMbFundTransfersInput,
 } from './marketing';
 
 // Finance validators

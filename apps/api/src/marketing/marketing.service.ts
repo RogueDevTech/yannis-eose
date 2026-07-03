@@ -3350,6 +3350,303 @@ export class MarketingService {
     });
   }
 
+  // ── MB Fund Transfers (peer-to-peer within a branch) ───────────────────────
+
+  async createMbFundTransfer(
+    input: { receiverMbId: string; amount: number; reason?: string },
+    actor: SessionUser,
+    branchId: string | null,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    if (actor.id === input.receiverMbId) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot send funds to yourself' });
+    }
+
+    return withActor(this.db, actor, async (tx) => {
+      // Validate both are MEDIA_BUYER
+      const [sender, receiver] = await Promise.all([
+        tx.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, actor.id)).limit(1),
+        tx.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, input.receiverMbId)).limit(1),
+      ]);
+      if (!sender[0] || sender[0].role !== 'MEDIA_BUYER') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only media buyers can send funds' });
+      }
+      if (!receiver[0] || receiver[0].role !== 'MEDIA_BUYER') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Recipient must be a media buyer' });
+      }
+
+      // Validate same branch
+      if (branchId) {
+        const [senderBranch, receiverBranch] = await Promise.all([
+          tx.select({ branchId: schema.userBranches.branchId }).from(schema.userBranches).where(and(eq(schema.userBranches.userId, actor.id), eq(schema.userBranches.branchId, branchId))).limit(1),
+          tx.select({ branchId: schema.userBranches.branchId }).from(schema.userBranches).where(and(eq(schema.userBranches.userId, input.receiverMbId), eq(schema.userBranches.branchId, branchId))).limit(1),
+        ]);
+        if (!senderBranch[0] || !receiverBranch[0]) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Both media buyers must be in the same branch' });
+        }
+      }
+
+      // Balance check
+      const balance = await this.computeMbBalanceInTx(tx, actor.id, branchId, effectiveBranchIds);
+      this.assertSufficientMbBalance(balance, input.amount);
+
+      const [transfer] = await tx
+        .insert(schema.mbFundTransfers)
+        .values({
+          senderMbId: actor.id,
+          receiverMbId: input.receiverMbId,
+          amount: String(input.amount),
+          reason: input.reason ?? null,
+          status: 'PENDING',
+          branchId: branchId ?? undefined,
+        })
+        .returning();
+
+      // Notify HoM + supervisors for approval
+      if (this.notifications && branchId && transfer) {
+        this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+          type: 'mb_fund_transfer:pending' as const,
+          title: 'MB fund transfer pending',
+          body: `${sender[0].name} wants to send ₦${input.amount.toLocaleString()} to ${receiver[0].name}`,
+          data: { transferId: transfer.id },
+        });
+      }
+
+      return transfer!;
+    });
+  }
+
+  async approveMbFundTransfer(transferId: string, actor: SessionUser, _branchId: string | null) {
+    return withActor(this.db, actor, async (tx) => {
+      const [transfer] = await tx
+        .select()
+        .from(schema.mbFundTransfers)
+        .where(eq(schema.mbFundTransfers.id, transferId))
+        .limit(1);
+
+      if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      if (transfer.status !== 'PENDING') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is not pending' });
+
+      const [updated] = await tx
+        .update(schema.mbFundTransfers)
+        .set({
+          status: 'APPROVED',
+          approvedBy: actor.id,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.mbFundTransfers.id, transferId))
+        .returning();
+
+      // Notify receiver to accept
+      if (this.notifications) {
+        const [sender] = await tx.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, transfer.senderMbId)).limit(1);
+        this.notifications.enqueueCreate({
+          userId: transfer.receiverMbId,
+          type: 'mb_fund_transfer:approved' as const,
+          title: 'Fund transfer received',
+          body: `${sender?.name ?? 'A media buyer'} sent you ₦${Number(transfer.amount).toLocaleString()} — tap to accept`,
+          data: { transferId },
+        });
+        this.notifications.enqueueCreate({
+          userId: transfer.senderMbId,
+          type: 'mb_fund_transfer:approved' as const,
+          title: 'Transfer approved',
+          body: `Your fund transfer of ₦${Number(transfer.amount).toLocaleString()} has been approved`,
+          data: { transferId },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  async rejectMbFundTransfer(transferId: string, rejectionReason: string, actor: SessionUser) {
+    return withActor(this.db, actor, async (tx) => {
+      const [transfer] = await tx
+        .select()
+        .from(schema.mbFundTransfers)
+        .where(eq(schema.mbFundTransfers.id, transferId))
+        .limit(1);
+
+      if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      if (transfer.status !== 'PENDING') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is not pending' });
+
+      const [updated] = await tx
+        .update(schema.mbFundTransfers)
+        .set({
+          status: 'REJECTED',
+          rejectedBy: actor.id,
+          rejectedAt: new Date(),
+          rejectionReason,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.mbFundTransfers.id, transferId))
+        .returning();
+
+      // Notify sender of rejection
+      if (this.notifications) {
+        this.notifications.enqueueCreate({
+          userId: transfer.senderMbId,
+          type: 'mb_fund_transfer:rejected' as const,
+          title: 'Transfer rejected',
+          body: `Your fund transfer of ₦${Number(transfer.amount).toLocaleString()} was rejected: ${rejectionReason}`,
+          data: { transferId },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  async acceptMbFundTransfer(transferId: string, actor: SessionUser, branchId: string | null, effectiveBranchIds?: string[] | null) {
+    return withActor(this.db, actor, async (tx) => {
+      const [transfer] = await tx
+        .select()
+        .from(schema.mbFundTransfers)
+        .where(eq(schema.mbFundTransfers.id, transferId))
+        .limit(1);
+
+      if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      if (transfer.status !== 'APPROVED') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer must be approved before accepting' });
+      if (transfer.receiverMbId !== actor.id) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the recipient can accept' });
+
+      // Re-check sender balance inside transaction
+      const senderBalance = await this.computeMbBalanceInTx(tx, transfer.senderMbId, branchId, effectiveBranchIds);
+      this.assertSufficientMbBalance(senderBalance, Number(transfer.amount));
+
+      // Create ledger entry: sender→receiver, COMPLETED (both parties agreed)
+      const [ledgerEntry] = await tx
+        .insert(schema.marketingFunding)
+        .values({
+          senderId: transfer.senderMbId,
+          receiverId: transfer.receiverMbId,
+          amount: transfer.amount,
+          status: 'COMPLETED',
+          sentAt: new Date(),
+          verifiedAt: new Date(),
+        })
+        .returning();
+
+      // Mark transfer as accepted
+      const [updated] = await tx
+        .update(schema.mbFundTransfers)
+        .set({
+          status: 'ACCEPTED',
+          acceptedAt: new Date(),
+          ledgerEntryId: ledgerEntry?.id ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.mbFundTransfers.id, transferId))
+        .returning();
+
+      // Notify sender
+      if (this.notifications) {
+        const [receiver] = await tx.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, actor.id)).limit(1);
+        this.notifications.enqueueCreate({
+          userId: transfer.senderMbId,
+          type: 'mb_fund_transfer:accepted' as const,
+          title: 'Transfer accepted',
+          body: `${receiver?.name ?? 'Recipient'} accepted your fund transfer of ₦${Number(transfer.amount).toLocaleString()}`,
+          data: { transferId },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  async listMbFundTransfers(
+    input: { direction: string; status?: string; page: number; limit: number; startDate?: string; endDate?: string },
+    actorId: string,
+    actorRole: string,
+    branchId: string | null,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const conditions: Parameters<typeof and>[0][] = [];
+
+    // Role-based scoping
+    if (actorRole === 'MEDIA_BUYER') {
+      if (input.direction === 'sent') {
+        conditions.push(eq(schema.mbFundTransfers.senderMbId, actorId));
+      } else if (input.direction === 'received') {
+        conditions.push(eq(schema.mbFundTransfers.receiverMbId, actorId));
+      } else {
+        // 'all' — show sent and received
+        conditions.push(
+          or(
+            eq(schema.mbFundTransfers.senderMbId, actorId),
+            eq(schema.mbFundTransfers.receiverMbId, actorId),
+          )!,
+        );
+      }
+    } else if (actorRole === 'HEAD_OF_MARKETING' || input.direction === 'pending_approval') {
+      // HoM sees all transfers in their branch
+      if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
+      if (effectiveBranchIds?.length) {
+        conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
+      }
+    } else {
+      // Admin — all transfers, optionally filtered by branch
+      if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
+      if (effectiveBranchIds?.length) {
+        conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
+      }
+    }
+
+    if (input.status) conditions.push(eq(schema.mbFundTransfers.status, input.status as 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACCEPTED'));
+    if (input.startDate) conditions.push(gte(schema.mbFundTransfers.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) conditions.push(lte(schema.mbFundTransfers.createdAt, nigeriaDayEnd(input.endDate)));
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const senderAlias = alias(schema.users, 'mb_ft_sender');
+    const receiverAlias = alias(schema.users, 'mb_ft_receiver');
+    const approverAlias = alias(schema.users, 'mb_ft_approver');
+
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select({
+          id: schema.mbFundTransfers.id,
+          senderMbId: schema.mbFundTransfers.senderMbId,
+          senderName: senderAlias.name,
+          receiverMbId: schema.mbFundTransfers.receiverMbId,
+          receiverName: receiverAlias.name,
+          amount: schema.mbFundTransfers.amount,
+          reason: schema.mbFundTransfers.reason,
+          status: schema.mbFundTransfers.status,
+          branchId: schema.mbFundTransfers.branchId,
+          createdAt: schema.mbFundTransfers.createdAt,
+          approvedBy: schema.mbFundTransfers.approvedBy,
+          approverName: approverAlias.name,
+          approvedAt: schema.mbFundTransfers.approvedAt,
+          rejectedAt: schema.mbFundTransfers.rejectedAt,
+          rejectionReason: schema.mbFundTransfers.rejectionReason,
+          acceptedAt: schema.mbFundTransfers.acceptedAt,
+        })
+        .from(schema.mbFundTransfers)
+        .leftJoin(senderAlias, eq(senderAlias.id, schema.mbFundTransfers.senderMbId))
+        .leftJoin(receiverAlias, eq(receiverAlias.id, schema.mbFundTransfers.receiverMbId))
+        .leftJoin(approverAlias, eq(approverAlias.id, schema.mbFundTransfers.approvedBy))
+        .where(whereClause)
+        .orderBy(desc(schema.mbFundTransfers.createdAt))
+        .limit(input.limit)
+        .offset(offset),
+      this.db.select({ count: count() }).from(schema.mbFundTransfers).where(whereClause),
+    ]);
+
+    return {
+      transfers: rows,
+      pagination: {
+        page: input.page,
+        limit: input.limit,
+        total: totalRows[0]?.count ?? 0,
+        totalPages: Math.ceil((totalRows[0]?.count ?? 0) / input.limit),
+      },
+    };
+  }
+
   // ── Daily Ad Spend (Simplified Flow — 2026-05) ─────────────────────────────
 
   /** Count non-DELETED orders created on a single Nigeria-timezone day for this MB. */
