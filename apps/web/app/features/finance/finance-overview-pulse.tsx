@@ -137,7 +137,7 @@ export function FinanceCashRemittanceSection({
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted flex items-center">
-                Net Remittable ({pulse.receivedCount + pulse.pendingRemittanceBatchCount + pulse.disputedRemittanceBatchCount})
+                Expected Net ({pulse.receivedCount + pulse.pendingRemittanceBatchCount + pulse.disputedRemittanceBatchCount})
                 <InfoIcon onClick={() => setInfoModal('net')} />
               </p>
               <p className="mt-1 text-base font-semibold tabular-nums text-success-600 dark:text-success-400">
@@ -222,15 +222,15 @@ export function FinanceCashRemittanceSection({
         <FormulaBreakdownModal
           open={infoModal === 'net'}
           onClose={() => setInfoModal(null)}
-          title="Net Remittable"
-          description="What should be received after all deductions are applied to the gross order value. Compare this to Remitted + Pending to verify the numbers tally."
+          title="Expected Net"
+          description="Computed amount the company should receive after all deductions. Compare this to the Actual Received to spot variances."
           lines={[
             { label: 'Gross Order Value', amount: pulse.grossOrderValue, type: 'value' },
             { label: 'Delivery Fees', amount: pulse.totalDeliveryFees, type: 'deduction', count: pulse.deliveryFeeCount },
             { label: 'Commitment Fees', amount: pulse.totalCommitmentFees, type: 'deduction', count: pulse.commitmentFeeCount },
             { label: 'POS Fees', amount: pulse.totalPosFees, type: 'deduction', count: pulse.posFeeCount },
             { label: 'Failed Delivery', amount: pulse.totalFailedDeliveryCosts, type: 'deduction', count: pulse.failedDeliveryCount },
-            { label: 'Net Remittable', amount: netRemittable, type: 'result' },
+            { label: 'Expected Net', amount: netRemittable, type: 'result' },
           ]}
         />
       </CardBody>

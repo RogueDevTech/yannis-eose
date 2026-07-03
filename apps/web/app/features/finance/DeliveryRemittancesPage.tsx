@@ -21,7 +21,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
-import { FilterPills } from '~/components/ui/filter-pills';
+import { FormSelect } from '~/components/ui/form-select';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { RemittanceInfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
@@ -125,6 +125,24 @@ export interface DeliveryRemittancesPageProps {
   canCreateRemittance: boolean;
   /** Phase 21 — true when the actor can mark a remittance Received (cascades DELIVERED→REMITTED). */
   canMarkReceived: boolean;
+  viewMode?: 'batches' | 'orders';
+  remittanceOrders?: RemittanceOrderRow[];
+  remittanceOrdersPagination?: { total: number; totalPages: number };
+}
+
+export interface RemittanceOrderRow {
+  id: string;
+  customerName: string;
+  orderNumber: string | null;
+  totalAmount: string;
+  deliveryFee: string | null;
+  deliveredAt: string | null;
+  status: string;
+  remittanceId: string;
+  remittanceStatus: string;
+  sentAt: string;
+  locationName: string | null;
+  providerName: string | null;
 }
 
 function formatDeliveredAt(iso: string | null): string {
@@ -168,6 +186,9 @@ export function DeliveryRemittancesPage({
   eligibleTotal,
   summary,
   canCreateRemittance,
+  viewMode = 'batches',
+  remittanceOrders = [],
+  remittanceOrdersPagination,
 }: DeliveryRemittancesPageProps) {
   const [, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -768,7 +789,7 @@ export function DeliveryRemittancesPage({
               label: <span className="flex items-center">Received ({Number(summary.receivedCount)} orders)<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
               value: <NairaPrice amount={summary.receivedAmount} />,
               valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
-              title: 'Net value of orders on batches marked as received by Finance',
+              title: 'Actual amount recorded by Finance when marking batches as received — may differ from the computed Expected Net',
               onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('page', '1'); return n; }, { replace: true }); },
               active: viewTab === 'remittances' && pendingStatus === 'RECEIVED',
             },
@@ -828,10 +849,10 @@ export function DeliveryRemittancesPage({
                 title: 'Per-batch cost of failed delivery attempts',
               },
               {
-                label: <span className="flex items-center">Net Remittable ({Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,
+                label: <span className="flex items-center">Expected Net ({Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,
                 value: <NairaPrice amount={netRemittable} />,
                 valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
-                title: 'Gross Order Value minus all deductions',
+                title: 'Computed: Gross Order Value minus all deductions (delivery fees, commitment, POS, failed delivery)',
               },
             ]}
           />
@@ -850,11 +871,12 @@ export function DeliveryRemittancesPage({
         <FormulaBreakdownModal
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
-          title="Received"
-          description="Net value of orders on remittance batches that Finance has marked as received. This is the actual cash collected — order value minus delivery fees."
+          title="Actual Received"
+          description="The amount Finance recorded when marking batches as received. This is the actual cash collected and may differ slightly from the computed Expected Net if adjustments were made during settlement."
           lines={[
-            { label: 'Orders on received batches (gross)', amount: Number(summary.receivedAmount ?? 0) + deliveryFees, type: 'value' },
-            { label: 'Delivery fees already deducted', amount: deliveryFees, type: 'deduction' },
+            { label: 'Actual amount recorded by Finance', amount: Number(summary.receivedAmount ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) },
+            { label: 'Expected Net (computed)', amount: netRemittable, type: 'value' },
+            { label: 'Variance', amount: Number(summary.receivedAmount ?? 0) - netRemittable, type: Math.abs(Number(summary.receivedAmount ?? 0) - netRemittable) < 1 ? 'result' : 'deduction' },
             { label: 'Received (net)', amount: Number(summary.receivedAmount ?? 0), type: 'result', count: Number(summary.receivedCount ?? 0) },
           ]}
         />
@@ -902,15 +924,15 @@ export function DeliveryRemittancesPage({
         <FormulaBreakdownModal
           open={infoModal === 'net'}
           onClose={() => setInfoModal(null)}
-          title="Net Remittable"
-          description="What should be received after all deductions are applied to the gross order value. Compare this to Received + Pending to verify the numbers tally."
+          title="Expected Net"
+          description="Computed amount the company should receive after all deductions. Compare this to the Actual Received to spot variances."
           lines={[
             { label: 'Gross Order Value', amount: grossVal, type: 'value' },
             { label: 'Delivery Fees', amount: deliveryFees, type: 'deduction', count: Number(summary.deliveryFeeCount ?? 0) },
             { label: 'Commitment Fees', amount: commitmentFees, type: 'deduction', count: Number(summary.commitmentFeeCount ?? 0) },
             { label: 'POS Fees', amount: posFees, type: 'deduction', count: Number(summary.posFeeCount ?? 0) },
             { label: 'Failed Delivery', amount: failedDelivery, type: 'deduction', count: Number(summary.failedDeliveryCount ?? 0) },
-            { label: 'Net Remittable', amount: netRemittable, type: 'result' },
+            { label: 'Expected Net', amount: netRemittable, type: 'result' },
           ]}
         />
         </>
@@ -1033,21 +1055,175 @@ export function DeliveryRemittancesPage({
               }
             />
           </div>
-          {/* Status filter pills — narrow the Remitted list to a single
-              lifecycle stage. Counts come from the summary (status-agnostic),
-              so they don't reshuffle as the user clicks between pills. */}
-          <FilterPills
-            size="sm"
-            value={pendingStatus}
-            onChange={handleStatusChange}
-            options={[
-              { value: '', label: 'All', count: Number(summary.totalCount) },
-              { value: 'SENT', label: 'Pending', count: Number(summary.pendingCount), dotColor: 'bg-warning-500' },
-              { value: 'RECEIVED', label: 'Received', count: Number(summary.receivedCount), dotColor: 'bg-success-500' },
-              { value: 'DISPUTED', label: 'Disputed', count: Number(summary.disputedCount), dotColor: 'bg-danger-500' },
-            ]}
-          />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <FormSelect
+              value={pendingStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              options={[
+                { value: '', label: `All statuses (${Number(summary.totalCount)})` },
+                { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
+                { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
+                { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
+              ]}
+              wrapperClassName="w-full sm:w-56"
+            />
+            {/* View mode toggle — Batches (grouped) vs Orders (flat) */}
+            <div className="inline-flex rounded-lg border border-app-border overflow-hidden text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => {
+                  const params = new URLSearchParams(location.search);
+                  params.delete('view');
+                  params.set('page', '1');
+                  setSearchParams(params);
+                }}
+                className={`px-3 py-1.5 transition-colors ${
+                  viewMode === 'batches'
+                    ? 'bg-brand-600 text-white'
+                    : 'text-app-fg-muted hover:bg-app-hover'
+                }`}
+              >
+                Batches
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const params = new URLSearchParams(location.search);
+                  params.set('view', 'orders');
+                  params.set('page', '1');
+                  setSearchParams(params);
+                }}
+                className={`px-3 py-1.5 transition-colors ${
+                  viewMode === 'orders'
+                    ? 'bg-brand-600 text-white'
+                    : 'text-app-fg-muted hover:bg-app-hover'
+                }`}
+              >
+                Orders
+              </button>
+            </div>
+          </div>
 
+          {viewMode === 'orders' ? (
+            <CompactTable<RemittanceOrderRow>
+              columns={[
+                {
+                  key: 'orderNumber',
+                  header: 'Order',
+                  render: (r) => (
+                    <span className="text-xs font-mono text-app-fg-muted">
+                      {r.orderNumber ?? `${r.id.slice(0, 10)}…`}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'customerName',
+                  header: 'Customer',
+                  render: (r) => (
+                    <span className="text-sm text-app-fg truncate max-w-[10rem] block">{r.customerName}</span>
+                  ),
+                },
+                {
+                  key: 'locationName',
+                  header: 'Location',
+                  render: (r) => (
+                    <span className="text-sm text-app-fg-muted truncate max-w-[12rem] block">
+                      {r.locationName
+                        ? r.providerName
+                          ? `${r.locationName} — ${r.providerName}`
+                          : r.locationName
+                        : '—'}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'totalAmount',
+                  header: 'Net Amount',
+                  headerClassName: 'text-right',
+                  className: 'text-right',
+                  render: (r) => {
+                    const net = Number(r.totalAmount || 0) - Number(r.deliveryFee || 0);
+                    return <NairaPrice amount={net} className="text-sm font-medium tabular-nums" />;
+                  },
+                },
+                {
+                  key: 'deliveredAt',
+                  header: 'Delivered',
+                  render: (r) => (
+                    <span className="text-sm text-app-fg-muted">{formatDeliveredAt(r.deliveredAt)}</span>
+                  ),
+                },
+                {
+                  key: 'remittanceStatus',
+                  header: 'Status',
+                  render: (r) => {
+                    const label = r.remittanceStatus === 'SENT' ? 'Pending' : r.remittanceStatus === 'RECEIVED' ? 'Received' : r.remittanceStatus === 'DISPUTED' ? 'Disputed' : r.remittanceStatus;
+                    return <StatusBadge status={r.remittanceStatus} label={label} />;
+                  },
+                },
+                {
+                  key: 'sentAt',
+                  header: 'Sent',
+                  render: (r) => (
+                    <span className="text-sm text-app-fg-muted">
+                      {new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  ),
+                },
+              ]}
+              rows={remittanceOrders}
+              rowKey={(r) => r.id}
+              loading={isLoaderRefetchBusy}
+              loadingVariant="overlay"
+              emptyTitle="No remitted orders found"
+              emptyDescription={hasFilters ? 'Try adjusting your filters' : 'Orders will appear here once remittances are created'}
+              pagination={{
+                page,
+                totalPages: remittanceOrdersPagination?.totalPages ?? 1,
+                pageParam: 'page',
+                pageSize,
+                pageSizeOptions,
+                showWhenSinglePage: true,
+                wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+                controlsClassName: 'sm:justify-end',
+                summary: (
+                  <span className="text-app-fg-muted">
+                    {(remittanceOrdersPagination?.total ?? 0) === 0
+                      ? '0 orders'
+                      : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, remittanceOrdersPagination?.total ?? 0)} of ${remittanceOrdersPagination?.total ?? 0} orders`}
+                  </span>
+                ),
+              }}
+              renderMobileCard={(r) => {
+                const statusLabel = r.remittanceStatus === 'SENT' ? 'Pending' : r.remittanceStatus === 'RECEIVED' ? 'Received' : r.remittanceStatus === 'DISPUTED' ? 'Disputed' : r.remittanceStatus;
+                const net = Number(r.totalAmount || 0) - Number(r.deliveryFee || 0);
+                return (
+                  <div className="space-y-1.5">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-app-fg truncate">{r.customerName}</p>
+                        <p className="text-xs text-app-fg-muted truncate">
+                          {r.orderNumber ?? `${r.id.slice(0, 10)}…`} ·{' '}
+                          {r.locationName
+                            ? r.providerName
+                              ? `${r.locationName} — ${r.providerName}`
+                              : r.locationName
+                            : '—'}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <NairaPrice amount={net} className="text-sm font-semibold text-app-fg tabular-nums" />
+                        <p className="text-mini text-app-fg-muted">
+                          {new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+                    <StatusBadge status={r.remittanceStatus} label={statusLabel} />
+                  </div>
+                );
+              }}
+            />
+          ) : (
           <CompactTable<DeliveryRemittanceListItem>
             columns={remittanceColumns}
             rows={remittances}
@@ -1121,6 +1297,7 @@ export function DeliveryRemittancesPage({
               );
             }}
           />
+          )}
         </>
       )}
 
