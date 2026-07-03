@@ -104,6 +104,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     logisticsLocationId?: string;
     statuses?: readonly string[];
     isFollowUp?: boolean;
+    excludeGraduated?: boolean;
   } = {};
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
@@ -114,6 +115,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Match orders.list default: exclude non-graduated follow-ups so stat strip
   // counts agree with the paginated list totals.
   countsInput.isFollowUp = false;
+  // Logistics must see graduated follow-up + cart orders — they are real
+  // deliveries that flow through remittance.
+  countsInput.excludeGraduated = false;
 
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));

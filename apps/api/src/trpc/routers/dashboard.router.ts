@@ -82,7 +82,7 @@ async function _ceoOverviewFetch(params: {
       : Promise.resolve(undefined),
     // CS funnel: servicing branch scope, includes offline orders, excludes
     // graduated follow-up and cart orders (they have their own funnels).
-    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true).catch(logErr('csStatusCounts')),
+    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true, true).catch(logErr('csStatusCounts')),
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
     financeService!.getInvoiceSummary(effectiveBranchIds).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
@@ -238,11 +238,10 @@ async function _ceoOverviewFetch(params: {
     followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     cartAbandonmentCount: await getCartService().countAllCarts({ branchId, effectiveBranchIds, startDate, endDate }).catch(() => 0),
-    // Total Orders — form-submitted orders only; graduated follow-up/cart
-    // orders are excluded so they don't inflate the main funnel (they have
-    // their own strips). Remittance/finance/logistics still see graduated
-    // rows — this only affects the dashboard stat strip.
-    totalOrdersCounts: await ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true).catch(() => ({})),
+    // Total Orders — bird's-eye view: includes graduated follow-up + cart
+    // orders so the number matches logistics/remittance. Marketing and CS
+    // funnels exclude graduated (they have their own strips).
+    totalOrdersCounts: await ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
   };
 }
 

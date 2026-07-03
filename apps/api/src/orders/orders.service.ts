@@ -5701,10 +5701,13 @@ export class OrdersService {
     isFollowUp?: boolean,
     /** When true, exclude offline-created orders from counts. Marketing surfaces pass true. */
     excludeOffline?: boolean,
-    /** When true, strictly exclude graduated follow-up orders AND graduated cart
-     *  orders. CS surfaces pass true so closers don't get credit for follow-up
-     *  and cart recovery deliveries (CEO 2026-06-30). */
+    /** When true, exclude graduated follow-up orders (is_follow_up=true).
+     *  Cart-graduated orders (order_source='online') are real MB sales and
+     *  remain unless excludeCartGraduated is also true. */
     excludeGraduated?: boolean,
+    /** When true, also exclude cart-graduated orders (order_source='online').
+     *  CS funnel passes true (cart orders have their own strip). */
+    excludeCartGraduated?: boolean,
   ) {
     // Status counts always include every status (including DELETED) so the
     // stat strip can show the Deleted count. CANCELLED is merged into DELETED
@@ -5713,14 +5716,13 @@ export class OrdersService {
     const conditions: Parameters<typeof and>[0][] = [];
 
     if (excludeGraduated) {
-      // Strict exclusion: no follow-up orders, no cart-graduated orders.
-      // These have their own funnels (Follow-Up Orders, Cart Orders).
-      // Cart-graduated orders have order_source='online' (set by graduateToOrders).
-      // Regular form orders have order_source='edge-form' or NULL — many also have
-      // cart_id set (customer started typing → cart saved → then submitted), so
-      // filtering by cart_id IS NULL would exclude 60% of real orders.
+      // Exclude graduated follow-up orders (is_follow_up=true).
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
+      if (excludeCartGraduated) {
+        // Also exclude cart-graduated orders (order_source='online').
+        // CS funnel passes this — cart orders have their own strip.
+        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
+      }
     } else if (isFollowUp === true) {
       conditions.push(eq(schema.orders.isFollowUp, true));
     } else if (isFollowUp === false) {

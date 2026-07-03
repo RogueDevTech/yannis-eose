@@ -1024,6 +1024,10 @@ export const ordersRouter = router({
           endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
           /** When true, return counts for follow-up orders only. When false/omitted, exclude them. */
           isFollowUp: z.boolean().optional(),
+          /** When true, exclude graduated follow-up + cart orders from counts.
+           *  Defaults to true for funnel pages; logistics passes false so
+           *  graduated deliveries remain visible for remittance. */
+          excludeGraduated: z.boolean().optional(),
         })
         .optional(),
     )
@@ -1051,9 +1055,13 @@ export const ordersRouter = router({
 
       const isFollowUp = input?.isFollowUp;
 
-      // Exclude graduated follow-up + cart orders from funnel counts — they
-      // have their own pipelines and must not inflate the main order funnel.
-      const excludeGraduated = !isFollowUp;
+      // Exclude graduated follow-up orders from funnel counts — they belong
+      // in the Follow-Up strip only. Logistics passes excludeGraduated=false
+      // so graduated deliveries stay visible for remittance.
+      const excludeGraduated = input?.excludeGraduated ?? !isFollowUp;
+      // CS funnel (servicing scope) also excludes cart-graduated orders —
+      // they have their own Cart Orders strip. Marketing keeps them (MB credit).
+      const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -1070,6 +1078,7 @@ export const ordersRouter = router({
           isFollowUp,
           undefined,
           excludeGraduated,
+          excludeCartGraduated,
         );
       }
 
@@ -1100,6 +1109,7 @@ export const ordersRouter = router({
           isFollowUp,
           undefined,
           excludeGraduated,
+          excludeCartGraduated,
         ),
       );
     }),
@@ -1423,7 +1433,8 @@ export const ordersRouter = router({
           ctx.effectiveBranchIds,
           false, // exclude follow-up orders — matches orders.list default
           undefined,
-          true, // exclude graduated follow-up + cart orders from all funnel counts
+          true, // exclude graduated follow-up orders from funnel counts
+          bundleBranchScope === 'servicing', // CS also excludes cart-graduated (own strip)
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
