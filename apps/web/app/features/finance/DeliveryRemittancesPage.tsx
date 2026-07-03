@@ -775,15 +775,15 @@ export function DeliveryRemittancesPage({
           items={[
             {
               label: <span className="flex items-center">Delivered Orders ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
-              value: <NairaPrice amount={Number(summary.deliveredNetAmount ?? summary.deliveredAmount ?? 0)} />,
+              value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
               valueClassName: 'text-app-fg tabular-nums',
-              title: 'Net value (minus delivery fees) of all delivered + remitted orders — should equal Awaiting + Received + Pending + Disputed',
+              title: 'Gross value of all delivered + remitted orders (total customer payments)',
             },
             {
               label: <span className="flex items-center">Awaiting Remittance ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
-              value: <NairaPrice amount={summary.awaitingAmount} />,
+              value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
               valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
-              title: 'Net value (minus delivery fees) of delivered orders not yet on any remittance batch',
+              title: 'Gross value of delivered orders not yet on any remittance batch',
               onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
               active: viewTab === 'eligible' && !pendingStatus,
             },
@@ -865,11 +865,11 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
           title="Delivered Orders"
-          description="Net value of all delivered + remitted orders. This should equal Awaiting + Received + Pending + Disputed."
+          description="Gross value of all orders with status DELIVERED or REMITTED. This is the total amount customers paid before any deductions."
           lines={[
-            { label: 'Gross order value', amount: Number(summary.deliveredAmount ?? 0), type: 'value', count: Number(summary.deliveredCount ?? 0) },
-            { label: 'Delivery fees', amount: Number(summary.deliveredAmount ?? 0) - Number(summary.deliveredNetAmount ?? summary.deliveredAmount ?? 0), type: 'deduction' },
-            { label: 'Net delivered', amount: Number(summary.deliveredNetAmount ?? summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
+            { label: 'Awaiting remittance (gross)', amount: Number(summary.awaitingGrossAmount ?? summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
+            { label: 'On remittance batches (gross)', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0) },
+            { label: 'Total delivered (gross)', amount: Number(summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
           ]}
         />
         <FormulaBreakdownModal
@@ -888,11 +888,11 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'awaiting'}
           onClose={() => setInfoModal(null)}
           title="Awaiting Remittance"
-          description="Net value of delivered orders that have not been placed on any remittance batch yet. These orders are waiting for an accountant to create a remittance."
+          description="Gross value of delivered orders not yet placed on any remittance batch. These orders are waiting for an accountant to create a remittance."
           lines={[
             { label: 'Gross order value', amount: Number(summary.awaitingGrossAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
-            { label: 'Delivery fees', amount: Number(summary.awaitingDeliveryFees ?? 0), type: 'deduction', count: Number(summary.awaitingDeliveryFeeCount ?? 0) },
-            { label: 'Net remittable', amount: Number(summary.awaitingAmount ?? 0), type: 'result', count: Number(summary.awaitingCount ?? 0) },
+            { label: 'Delivery fees (deducted on batch)', amount: Number(summary.awaitingDeliveryFees ?? 0), type: 'deduction', count: Number(summary.awaitingDeliveryFeeCount ?? 0) },
+            { label: 'Net when batched', amount: Number(summary.awaitingAmount ?? 0), type: 'result', count: Number(summary.awaitingCount ?? 0) },
           ]}
         />
         <FormulaBreakdownModal
