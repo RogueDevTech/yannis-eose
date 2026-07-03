@@ -1719,15 +1719,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
-    // Date filter on batch sentAt — so stat strip counts match the date range
-    // the user selected. Without this, Pending/Received counts show all-time
-    // totals even when the user picks "Last month".
-    if (input.startDate) {
-      summaryConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
-    }
-    if (input.endDate) {
-      summaryConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
-    }
+    // Date filter added separately per query — baseSummaryQuery filters by
+    // orders.deliveredAt (matches Delivered/Awaiting), outcomeSummaryQuery
+    // filters by deliveryRemittances.sentAt (no orders join available).
     if (input.sentBy) {
       summaryConditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
     }
@@ -1773,8 +1767,8 @@ export class LogisticsService {
     // Outcome count/amount conditions — filter by orders.created_at to match
     // Delivered/Awaiting/batch stats.
     const outcomeCountConditions: SQL[] = [];
-    if (input.startDate) outcomeCountConditions.push(sql`o_date.created_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeCountConditions.push(sql`o_date.created_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.startDate) outcomeCountConditions.push(sql`o_date.delivered_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`o_date.delivered_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     if (groupId) {
       outcomeCountConditions.push(sql`dr.logistics_location_id IN (
         SELECT ll.id FROM logistics_locations ll
@@ -1892,10 +1886,11 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
-    // Batch stats filter orders by created_at to match Delivered/Awaiting counts.
+    // Batch stats filter orders by deliveredAt to match Delivered/Awaiting counts.
+    // Previously used createdAt which caused a mismatch with the Delivered stat.
     const orderDateConditions: SQL[] = [];
-    if (input.startDate) orderDateConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) orderDateConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    if (input.startDate) orderDateConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) orderDateConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     const baseSummaryWhere = summaryWhere
       ? (orderDateConditions.length > 0 ? and(summaryWhere, ...orderDateConditions) : summaryWhere)
       : (orderDateConditions.length > 0 ? and(...orderDateConditions) : undefined);

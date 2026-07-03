@@ -9,36 +9,28 @@ pnpm turbo dev
 
 docker restart yannis-eose-api-1
 
-   
-<!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"   
+<!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"
  -->
 
+docker exec yannis-eose-api-1 grep -c "Step A: starting INSERT" /app/dist/cart-orders/cart-orders.service.js 2>/dev/null || echo "not found"
 
-docker exec yannis-eose-api-1 grep -c "Step A: starting INSERT" /app/dist/cart-orders/cart-orders.service.js 2>/dev/null || echo "not found"  
+docker compose pull && docker compose up -d --force-recreate
 
-docker compose pull && docker compose up -d --force-recreate                     
+      cd /opt/yannis-eose && docker compose pull api && docker compose up -d api
 
-      cd /opt/yannis-eose && docker compose pull api && docker compose up -d api                     
+sudo docker logs yannis-eose-api-1 --since 30m 2>&1 | grep -i "migration\|cart\|error\|failed" | tail -20
 
-sudo docker logs yannis-eose-api-1 --since 30m 2>&1 | grep -i "migration\|cart\|error\|failed" | tail -20       
+sudo docker logs yannis-eose-api-1 --since 3m 2>&1 | grep -i "\[Cart\]"
 
-sudo docker logs yannis-eose-api-1 --since 3m 2>&1 | grep -i "\[Cart\]"   
+cd ~/yannis-eose && git pull origin main && sudo docker compose build api && sudo docker compose up -d api
 
+PGPASSWORD='586686586686' pg_dump -h 34.105.212.253 -U postgres -d postgres -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql
 
-
-
-
-  cd ~/yannis-eose && git pull origin main && sudo docker compose build api && sudo docker compose up -d api   
-
- PGPASSWORD='586686586686' pg_dump -h 34.105.212.253 -U postgres -d postgres -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql 
-
-sudo docker exec yannis-eose-api-1 grep -c "INSERT INTO cart_orders" /app/dist/main.js     
+sudo docker exec yannis-eose-api-1 grep -c "INSERT INTO cart_orders" /app/dist/main.js
 
 pg_dump "postgresql://postgres:586686586686@34.105.212.253:5432/postgres?sslmode=require" -t follow_up_orders -t follow_up_order_items -t follow_up_order_timeline_events --data-only --inserts -f /tmp/followup_recovery.sql
 
-
-grep -r "sql.raw" dist/apps/api/ 2>/dev/null || echo "Not found — build didn't include the fix"                                     
-                                  
+grep -r "sql.raw" dist/apps/api/ 2>/dev/null || echo "Not found — build didn't include the fix"
 
 DATABASE_URL=postgresql://yannis_app: @34.39.26.2:5432/yannis?sslmode=require
 
@@ -50,13 +42,13 @@ pnpm db:seed-permissions
 pnpm --filter @yannis/shared db:seed
 
 LOCAL REDIS
-brew services list           # see status
-brew services stop redis     # stop now (does not unregister)
-brew services restart redis  # restart
+brew services list # see status
+brew services stop redis # stop now (does not unregister)
+brew services restart redis # restart
 
 brew services stop redis
 brew services start redis
-brew services list | grep redis   # should now show "started"
+brew services list | grep redis # should now show "started"
 
 GCP TERRAFORM
 terraform plan project-26c432ec-b4f1-4e21-a6a
@@ -70,6 +62,7 @@ cd packages/shared && pnpm db:migrate    # Run database migrations
 cd packages/shared && pnpm db:seed       # Seed test data (optional)
 cd ../.. && pnpm turbo dev               # Start all apps
 ```
+
 migrate
 
 pnpm db:migrate:app
@@ -77,44 +70,48 @@ cd packages/shared && pnpm run db:migrate
 cd apps/api && npm run dev
 cd apps/web && npm run dev
 
-terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod                           
-                                 
+terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod
 
 sed -i '' 's/machine_type = "e2-standard-4"/machine_type = "e2-custom-2-4096"/' terraform.tfvars.prod
 
+# pg_dump --no-owner --no-acl "postgresql://postgres:586686@34.35.38.230:5432/postgres?sslmode=require" > yannis_full_dump.sql
 
-#  pg_dump --no-owner --no-acl "postgresql://postgres:586686@34.35.38.230:5432/postgres?sslmode=require" > yannis_full_dump.sql  
-
-#   /opt/homebrew/opt/postgresql@18/bin/pg_dump --no-owner --no-acl "postgresql://postgres:586686@34.35.38.230:5432/postgres?sslmode=require" > yannis_full_dump.sql
+# /opt/homebrew/opt/postgresql@18/bin/pg_dump --no-owner --no-acl "postgresql://postgres:586686@34.35.38.230:5432/postgres?sslmode=require" > yannis_full_dump.sql
 
 # Yannis-586686
-#  DB PROD
+
+# DB PROD
+
 # DATABASE_URL=postgresql://postgres:Yannis-eoseprod5866@34.51.148.220:5432/postgres?sslmode=require
 
 # NEW PROD DB
+
 # DATABASE_URL=postgresql://yannis_app:586686586686@34.39.26.212:5432/yannis?sslmode=require
 
 # export OLD_URL='postgresql://postgres:Yannis-eoseprod5866@34.51.148.220:5432/postgres'
+
 # export NEW_URL='postgresql://yannis_app:586686586686@34.39.26.212:5432/yannis'
 
 # pg_dump --format=custom --no-owner --no-privileges "$OLD_URL" \
-#   | pg_restore --no-owner --no-privileges --clean --if-exists --dbname="$NEW_URL"
 
-
+# | pg_restore --no-owner --no-privileges --clean --if-exists --dbname="$NEW_URL"
 
 # Unit tests — no DB needed, runs in ~2 seconds
-  pnpm turbo test --filter=@yannis/api --filter=@yannis/shared
-  pnpm turbo test --filter=@yannis/api
-  pnpm turbo test --filter=@yannis/shared
 
-  # Integration tests — needs test DB
-  pnpm turbo test:integration --filter=@yannis/api
+pnpm turbo test --filter=@yannis/api --filter=@yannis/shared
+pnpm turbo test --filter=@yannis/api
+pnpm turbo test --filter=@yannis/shared
 
-  # E2E tests — needs full app running
-  pnpm --filter @yannis/web exec playwright test
+# Integration tests — needs test DB
 
+pnpm turbo test:integration --filter=@yannis/api
+
+# E2E tests — needs full app running
+
+pnpm --filter @yannis/web exec playwright test
 
 **URLs:**
+
 - Web: http://localhost:4003
 - API: http://localhost:4444
 - Swagger: http://localhost:4444/api/docs
@@ -122,46 +119,46 @@ sed -i '' 's/machine_type = "e2-standard-4"/machine_type = "e2-custom-2-4096"/' 
 
 ### Test Accounts (after seeding)
 
-| Email | Role | Password |
-|-------|------|----------|
-| `admin@yannis.test` | SuperAdmin | `Test@12345` |
-| `cs.agent@yannis.test` | CS Closer | `Test@12345` |
-| `media.buyer@yannis.test` | Media Buyer | `Test@12345` |
-| `finance@yannis.test` | Finance Officer | `Test@12345` |
-| `hr@yannis.test` | HR Manager | `Test@12345` |
-| `hom@yannis.test` | Head of Marketing | `Test@12345` |
-| `rider@yannis.test` | 3PL Rider | `Test@12345` |
+| Email                     | Role              | Password     |
+| ------------------------- | ----------------- | ------------ |
+| `admin@yannis.test`       | SuperAdmin        | `Test@12345` |
+| `cs.agent@yannis.test`    | CS Closer         | `Test@12345` |
+| `media.buyer@yannis.test` | Media Buyer       | `Test@12345` |
+| `finance@yannis.test`     | Finance Officer   | `Test@12345` |
+| `hr@yannis.test`          | HR Manager        | `Test@12345` |
+| `hom@yannis.test`         | Head of Marketing | `Test@12345` |
+| `rider@yannis.test`       | 3PL Rider         | `Test@12345` |
 
 ## Core Modules
 
-| Module | Description | Status |
-|--------|-------------|--------|
-| Edge Sales & Intake | Order capture, dedup, circuit breaker, inventory cap | Done |
-| CS Command & Privacy | VOIP bridge, weighted dispatch, phone masking, callbacks | Done |
-| Inventory Management | FIFO batch costing, location tracking, virtual buffer, reconciliation | Done |
-| 3PL Logistics | Dual-entry transfers, rider delivery, returns, offline sync | Done |
-| Marketing Governance | Funding ledger, ad spend logging, CPA/ROAS metrics | Done |
-| Financial Core | True profit (6 cost layers), approvals, budgets, invoicing (PDF) | Done |
-| HR & Payroll | Commission engine (JSONB rules), settlement, clawback, add-ons | Done |
-| Temporal Audit Trail | PostgreSQL system-versioned tables, time-travel queries | Done |
+| Module               | Description                                                           | Status |
+| -------------------- | --------------------------------------------------------------------- | ------ |
+| Edge Sales & Intake  | Order capture, dedup, circuit breaker, inventory cap                  | Done   |
+| CS Command & Privacy | VOIP bridge, weighted dispatch, phone masking, callbacks              | Done   |
+| Inventory Management | FIFO batch costing, location tracking, virtual buffer, reconciliation | Done   |
+| 3PL Logistics        | Dual-entry transfers, rider delivery, returns, offline sync           | Done   |
+| Marketing Governance | Funding ledger, ad spend logging, CPA/ROAS metrics                    | Done   |
+| Financial Core       | True profit (6 cost layers), approvals, budgets, invoicing (PDF)      | Done   |
+| HR & Payroll         | Commission engine (JSONB rules), settlement, clawback, add-ons        | Done   |
+| Temporal Audit Trail | PostgreSQL system-versioned tables, time-travel queries               | Done   |
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Remix (React 19) + Tailwind CSS |
-| Backend | NestJS 11 + TypeScript 5.7 |
-| Type Contract | tRPC 11 (internal) + Swagger (external) |
-| Database | PostgreSQL 18 (temporal tables, RLS) |
-| ORM | Drizzle 0.38 |
-| Cache/Sessions | Redis (ioredis) |
-| Real-time | Socket.io 4.8 |
-| Edge | Cloudflare Workers |
-| VOIP | Twilio Voice API + WebRTC |
-| PWA | Service Workers + Web Push |
-| File Storage | Provider-selectable object storage (GCS / S3) |
-| Testing | Playwright (7 E2E specs) |
-| CI/CD | GitHub Actions |
+| Layer          | Technology                                    |
+| -------------- | --------------------------------------------- |
+| Frontend       | Remix (React 19) + Tailwind CSS               |
+| Backend        | NestJS 11 + TypeScript 5.7                    |
+| Type Contract  | tRPC 11 (internal) + Swagger (external)       |
+| Database       | PostgreSQL 18 (temporal tables, RLS)          |
+| ORM            | Drizzle 0.38                                  |
+| Cache/Sessions | Redis (ioredis)                               |
+| Real-time      | Socket.io 4.8                                 |
+| Edge           | Cloudflare Workers                            |
+| VOIP           | Twilio Voice API + WebRTC                     |
+| PWA            | Service Workers + Web Push                    |
+| File Storage   | Provider-selectable object storage (GCS / S3) |
+| Testing        | Playwright (7 E2E specs)                      |
+| CI/CD          | GitHub Actions                                |
 
 ## Documentation
 
@@ -229,9 +226,7 @@ binding = "CAMPAIGN_CACHE"
 id = "7a4c4ff13803430fa1173674e88ff5b0"
 preview_id = "36f748275dec4c669b6fe26dca9cf8db"
 
-
 EDGE_API_KEY = "fa281444318a48163471c0469b8f23fa1a4ab5e2923bc492ea469ff50449c116"
-
 
 site key=0x4AAAAAACwS5uc-71js3fAy
 secret key=0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw
@@ -242,93 +237,93 @@ EDGE_API_KEY = "fa281444318a48163471c0469b8f23fa1a4ab5e2923bc492ea469ff50449c116
 TURNSTILE_SECRET_KEY = "0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw"
 
 [
-  {
-    "id": "7a4c4ff13803430fa1173674e88ff5b0",
-    "title": "CAMPAIGN_CACHE",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "36f748275dec4c669b6fe26dca9cf8db",
-    "title": "CAMPAIGN_CACHE_preview",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "d727ced193824b3db128d422163239eb",
-    "title": "yannis-edge-worker-CAMPAIGN_CACHE",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "fddd3a355ff8438db230a5932bd1f31b",
-    "title": "yannis-edge-worker-CAMPAIGN_CACHE_preview",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "dd6aa2365f7a44c5b0d3b4825bdb8749",
-    "title": "yannis-edge-worker-DEDUP_CACHE",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "e73dc2a62c124f05b1029332b7596ac0",
-    "title": "yannis-edge-worker-DEDUP_CACHE_preview",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "7ef0945b3f044e0280db399fdcc2cdb7",
-    "title": "yannis-edge-worker-INVENTORY_CACHE",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "4a79f1f5fe2541369c5d6c95a581f591",
-    "title": "yannis-edge-worker-INVENTORY_CACHE_preview",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "b68391c82d004c40a9f3dfd61fd49866",
-    "title": "yannis-edge-worker-RATE_LIMIT_CACHE",
-    "supports_url_encoding": true
-  },
-  {
-    "id": "47b3b79e86e0452eb202d54d883f41aa",
-    "title": "yannis-edge-worker-RATE_LIMIT_CACHE_preview",
-    "supports_url_encoding": true
-  }
+{
+"id": "7a4c4ff13803430fa1173674e88ff5b0",
+"title": "CAMPAIGN_CACHE",
+"supports_url_encoding": true
+},
+{
+"id": "36f748275dec4c669b6fe26dca9cf8db",
+"title": "CAMPAIGN_CACHE_preview",
+"supports_url_encoding": true
+},
+{
+"id": "d727ced193824b3db128d422163239eb",
+"title": "yannis-edge-worker-CAMPAIGN_CACHE",
+"supports_url_encoding": true
+},
+{
+"id": "fddd3a355ff8438db230a5932bd1f31b",
+"title": "yannis-edge-worker-CAMPAIGN_CACHE_preview",
+"supports_url_encoding": true
+},
+{
+"id": "dd6aa2365f7a44c5b0d3b4825bdb8749",
+"title": "yannis-edge-worker-DEDUP_CACHE",
+"supports_url_encoding": true
+},
+{
+"id": "e73dc2a62c124f05b1029332b7596ac0",
+"title": "yannis-edge-worker-DEDUP_CACHE_preview",
+"supports_url_encoding": true
+},
+{
+"id": "7ef0945b3f044e0280db399fdcc2cdb7",
+"title": "yannis-edge-worker-INVENTORY_CACHE",
+"supports_url_encoding": true
+},
+{
+"id": "4a79f1f5fe2541369c5d6c95a581f591",
+"title": "yannis-edge-worker-INVENTORY_CACHE_preview",
+"supports_url_encoding": true
+},
+{
+"id": "b68391c82d004c40a9f3dfd61fd49866",
+"title": "yannis-edge-worker-RATE_LIMIT_CACHE",
+"supports_url_encoding": true
+},
+{
+"id": "47b3b79e86e0452eb202d54d883f41aa",
+"title": "yannis-edge-worker-RATE_LIMIT_CACHE_preview",
+"supports_url_encoding": true
+}
 ]
-
-
 
 [
-  {
-    "name": "QSTASH_URL",
-    "type": "secret_text"
-  }
+{
+"name": "QSTASH_URL",
+"type": "secret_text"
+}
 ]
 
-
-
 # Fetch the password (it prints to your terminal)
+
 PASS=$(gcloud secrets versions access latest \
-  --secret=prod-yannis-eose-pg-app-password \
-  --project=project-26c432ec-b4f1-4e21-a6a)
+ --secret=prod-yannis-eose-pg-app-password \
+ --project=project-26c432ec-b4f1-4e21-a6a)
 
 # Build the URL — replace <PUBLIC_IP> with the value from
+
 # `terraform output cloud_sql_public_ip`
+
 NEW_URL="postgres://yannis_app:${PASS}@<PUBLIC_IP>:5432/yannis?sslmode=require"
 
 # Echo it so you can copy if needed (don't paste into chat — has the password)
+
 echo "$NEW_URL"
 
-
-
-
-
-
 # GCP_WORKLOAD_IDENTITY_PROVIDER=projects/297686176779/locations/global/workloadIdentityPools/github-actions/providers/github
+
 # GCP_SERVICE_ACCOUNT_EMAIL=github-deploy-dev@project-26c432ec-b4f1-4e21-a6a.iam.gserviceaccount.com
 
 # GCP_PROJECT_ID=project-26c432ec-b4f1-4e21-a6a
-# GCP_VM_NAME=dev-yannis-eose-vm
-# GCP_REGION=europe-west2
-# GCP_ZONE=europe-west2-a
-# GCP_ARTIFACT_REPOSITORY_ID=dev-yannis-eose
-# GCP_RUNTIME_ENV_SECRET_NAME=dev-yannis-runtime-env
 
+# GCP_VM_NAME=dev-yannis-eose-vm
+
+# GCP_REGION=europe-west2
+
+# GCP_ZONE=europe-west2-a
+
+# GCP_ARTIFACT_REPOSITORY_ID=dev-yannis-eose
+
+# GCP_RUNTIME_ENV_SECRET_NAME=dev-yannis-runtime-env

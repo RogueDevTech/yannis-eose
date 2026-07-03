@@ -18,6 +18,7 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { getManageableRolesForViewer } from './payroll-batch.service';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules, resolveClawbackPerReturnAmount } from './commission-rules-math';
@@ -482,13 +483,15 @@ export class HrService {
     };
   }
 
-  async getPayoutSummary(effectiveBranchIds?: string[] | null) {
+  async getPayoutSummary(effectiveBranchIds?: string[] | null, dateRange?: { startDate?: string; endDate?: string }) {
     const conditions: Parameters<typeof and>[0][] = [];
     if (effectiveBranchIds?.length) {
       conditions.push(
         sql`${schema.payoutRecords.staffId} IN (SELECT user_id FROM user_branches WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)}))`,
       );
     }
+    if (dateRange?.startDate) conditions.push(gte(schema.payoutRecords.createdAt, nigeriaDayStart(dateRange.startDate)));
+    if (dateRange?.endDate) conditions.push(lte(schema.payoutRecords.createdAt, nigeriaDayEnd(dateRange.endDate)));
     const results = await this.db
       .select({
         status: schema.payoutRecords.status,

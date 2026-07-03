@@ -137,6 +137,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     users: Array<{ id: string; name: string; email: string; role: string }>;
     balancesList: Array<{ userId: string; name: string; role: string; totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> | null;
     fundingBalance: { totalReceived: string; totalDistributed: string; totalSpend: string; balance: string } | null;
+    allTimeBalance?: { totalReceived: string; totalDistributed: string; totalSpend: string; balance: string };
     branches: Array<{ id: string; name: string }>;
     fundingRequestRecipients: Array<{
       id: string;
@@ -310,7 +311,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const showFundingBalance = user.role === 'MEDIA_BUYER' || user.role === 'HEAD_OF_MARKETING';
   const directionSummary = parseFundingDirectionSummary(directionSummaryRes);
-  const fundingBalance = showFundingBalance ? bundle?.fundingBalance ?? undefined : undefined;
+  const fundingBalance = showFundingBalance
+    ? bundle?.fundingBalance
+      ? {
+          ...bundle.fundingBalance,
+          // When date-filtered, use the all-time balance for "Current Balance"
+          // so it reflects the true running balance, not just the period's net.
+          ...(bundle.allTimeBalance ? { balance: bundle.allTimeBalance.balance } : {}),
+        }
+      : undefined
+    : undefined;
   const usersList = bundle?.users ?? [];
   const balancesList = isFundingAdmin ? bundle?.balancesList ?? undefined : undefined;
   const fundingRequestRecipients = canRequestFunding

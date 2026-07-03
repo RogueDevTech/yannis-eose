@@ -84,9 +84,9 @@ async function _ceoOverviewFetch(params: {
     // graduated follow-up and cart orders (they have their own funnels).
     ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true, true).catch(logErr('csStatusCounts')),
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
-    financeService!.getInvoiceSummary(effectiveBranchIds).catch(logErr('invoiceSummary')),
+    financeService!.getInvoiceSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
-    hrService!.getPayoutSummary(effectiveBranchIds).catch(logErr('payoutSummary')),
+    hrService!.getPayoutSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('payoutSummary')),
     ordersService!.getCSCloserWorkloads(branchId, effectiveBranchIds).catch(logErr('csWorkloads')),
     ordersService!.getRevenueByPeriod(branchId, effectiveBranchIds).catch(logErr('revenueByPeriod')),
     ordersService!.getDeliveriesByProduct(branchId, effectiveBranchIds).catch(logErr('deliveriesByProduct')),
@@ -464,8 +464,8 @@ export const dashboardRouter = router({
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true).catch(() => ({})),
       ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
-      getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, undefined, undefined, ctx.effectiveBranchIds).catch(() => ({})),
-      getCartOrdersService().getStatusCounts(ctx.currentBranchId, undefined, undefined, undefined, ctx.effectiveBranchIds).catch(() => ({})),
+      getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
+      getCartOrdersService().getStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
     ]);
 
     const today = (todayCounts ?? {}) as Record<string, number>;

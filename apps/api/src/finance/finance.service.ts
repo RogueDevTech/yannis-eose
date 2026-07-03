@@ -306,19 +306,24 @@ export class FinanceService {
     };
   }
 
-  async getInvoiceSummary(effectiveBranchIds?: string[] | null) {
+  async getInvoiceSummary(effectiveBranchIds?: string[] | null, dateRange?: { startDate?: string; endDate?: string }) {
+    const conditions: SQL[] = [];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
-    const query = bCond
-      ? this.db
-          .select({ status: schema.invoices.status, count: count(), total: sum(schema.invoices.totalAmount) })
-          .from(schema.invoices)
-          .leftJoin(schema.orders, eq(schema.invoices.orderId, schema.orders.id))
-          .where(bCond)
-          .groupBy(schema.invoices.status)
-      : this.db
-          .select({ status: schema.invoices.status, count: count(), total: sum(schema.invoices.totalAmount) })
-          .from(schema.invoices)
-          .groupBy(schema.invoices.status);
+    if (bCond) conditions.push(bCond);
+    if (dateRange?.startDate) conditions.push(gte(schema.invoices.createdAt, nigeriaDayStart(dateRange.startDate)));
+    if (dateRange?.endDate) conditions.push(lte(schema.invoices.createdAt, nigeriaDayEnd(dateRange.endDate)));
+
+    const needsOrderJoin = !!bCond;
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const baseQuery = this.db
+      .select({ status: schema.invoices.status, count: count(), total: sum(schema.invoices.totalAmount) })
+      .from(schema.invoices);
+
+    const query = needsOrderJoin
+      ? baseQuery.leftJoin(schema.orders, eq(schema.invoices.orderId, schema.orders.id)).where(whereClause).groupBy(schema.invoices.status)
+      : baseQuery.where(whereClause).groupBy(schema.invoices.status);
+
     const statusCounts = await query;
 
     const summary: Record<string, { count: number; total: string }> = {};
