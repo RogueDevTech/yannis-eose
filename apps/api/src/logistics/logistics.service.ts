@@ -1699,12 +1699,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
-    if (input.startDate) {
-      summaryConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
-    }
-    if (input.endDate) {
-      summaryConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
-    }
+    // No date filter on summaryConditions — it's shared between baseSummaryQuery
+    // (joins orders) and outcomeSummaryQuery (no orders join). Date filtering
+    // for batch stats uses orders.created_at via orderDateConditions below.
     if (input.sentBy) {
       summaryConditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
     }
@@ -1741,9 +1738,11 @@ export class LogisticsService {
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     // Scoped by date, location, group, and sentBy — must mirror summaryConditions
     // so the counts reconcile with the amounts.
+    // Outcome count/amount conditions — filter by orders.created_at to match
+    // Delivered/Awaiting/batch stats.
     const outcomeCountConditions: SQL[] = [];
-    if (input.startDate) outcomeCountConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeCountConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.startDate) outcomeCountConditions.push(sql`o_date.created_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`o_date.created_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     if (groupId) {
       outcomeCountConditions.push(sql`dr.logistics_location_id IN (
         SELECT ll.id FROM logistics_locations ll
@@ -1765,8 +1764,8 @@ export class LogisticsService {
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeCountWhere})::text`,
-        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeCountWhere})::text`,
+        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id JOIN orders o_date ON o_date.id = dro_inner.order_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeCountWhere})::text`,
+        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id JOIN orders o_date ON o_date.id = dro_inner.order_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeCountWhere})::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
@@ -1861,8 +1860,16 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
+    // Batch stats filter orders by created_at to match Delivered/Awaiting counts.
+    const orderDateConditions: SQL[] = [];
+    if (input.startDate) orderDateConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) orderDateConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    const baseSummaryWhere = summaryWhere
+      ? (orderDateConditions.length > 0 ? and(summaryWhere, ...orderDateConditions) : summaryWhere)
+      : (orderDateConditions.length > 0 ? and(...orderDateConditions) : undefined);
+
     const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, deliveredRows] = await Promise.all([
-      summaryWhere ? baseSummaryQuery.where(summaryWhere) : baseSummaryQuery,
+      baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
       summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
       awaitingSummaryQuery,
       deliveredCountQuery,
