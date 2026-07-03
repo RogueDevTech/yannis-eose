@@ -142,6 +142,14 @@ export function FundingLedgerPage({
         header: 'From / To',
         render: (e) => {
           if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
+          if (e.counterpartyName && (e.entryType === 'transfer_in' || e.entryType === 'transfer_out')) {
+            const prefix = e.entryType === 'transfer_in' ? 'From' : 'To';
+            return (
+              <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={`${prefix}: ${e.counterpartyName}`}>
+                <span className="text-app-fg-muted">{prefix}:</span> {e.counterpartyName}
+              </span>
+            );
+          }
           if (e.counterpartyName) {
             return <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={e.counterpartyName}>{e.counterpartyName}</span>;
           }

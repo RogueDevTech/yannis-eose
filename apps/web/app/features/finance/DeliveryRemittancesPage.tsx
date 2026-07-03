@@ -1009,7 +1009,7 @@ export function DeliveryRemittancesPage({
                     value={pendingStatus}
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={[
-                      { value: '', label: `All (${remittedOrderCount} orders)` },
+                      { value: '', label: viewMode === 'orders' ? `All (${remittedOrderCount} orders)` : `All (${Number(summary.totalCount)} batches)` },
                       { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
                       { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
                       { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
@@ -1082,7 +1082,7 @@ export function DeliveryRemittancesPage({
                     value={pendingStatus}
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={[
-                      { value: '', label: `All (${remittedOrderCount} orders)` },
+                      { value: '', label: viewMode === 'orders' ? `All (${remittedOrderCount} orders)` : `All (${Number(summary.totalCount)} batches)` },
                       { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
                       { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
                       { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
@@ -1181,9 +1181,14 @@ export function DeliveryRemittancesPage({
                   align: 'right',
                   tight: true,
                   render: (r) => (
-                    <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}`}>
-                      View
-                    </CompactTableActionButton>
+                    <div className="flex items-center gap-1">
+                      <CompactTableActionButton to={`/admin/orders/${r.id}`}>
+                        Order
+                      </CompactTableActionButton>
+                      <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}`}>
+                        Batch
+                      </CompactTableActionButton>
+                    </div>
                   ),
                 },
               ]}

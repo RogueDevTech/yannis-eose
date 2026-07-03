@@ -977,10 +977,11 @@ export class MarketingService {
         marketingSupervisorToMb,
       });
 
-      if (
-        receiverRole === 'MEDIA_BUYER' &&
-        (senderRole === 'HEAD_OF_MARKETING' || marketingSupervisorToMb)
-      ) {
+      // Balance check: sender must have sufficient funds for ANY outbound transfer.
+      // Admin-class roles (SUPER_ADMIN, ADMIN, FINANCE_OFFICER) are exempt — they
+      // disburse from company funds, not a personal marketing balance.
+      const isAdminClass = senderRole === 'SUPER_ADMIN' || senderRole === 'ADMIN' || senderRole === 'FINANCE_OFFICER';
+      if (!isAdminClass) {
         const disbursable = await this.computeMarketingDisbursableInTx(
           tx,
           senderId,
@@ -2464,7 +2465,9 @@ export class MarketingService {
         this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: true });
       }
 
-      if (senderRole === 'HEAD_OF_MARKETING' && receiverRole === 'MEDIA_BUYER') {
+      // Balance check: approver must have sufficient funds. Admin-class roles exempt.
+      const isApproverAdminClass = senderRole === 'SUPER_ADMIN' || senderRole === 'ADMIN' || senderRole === 'FINANCE_OFFICER';
+      if (!isApproverAdminClass) {
         const disbursable = await this.computeMarketingDisbursableInTx(
           tx,
           approverId,

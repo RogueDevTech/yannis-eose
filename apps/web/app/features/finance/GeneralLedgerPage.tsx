@@ -415,20 +415,20 @@ export function GeneralLedgerPage({
         />
       )}
 
-      {totalPages > 1 && (
-        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-sm text-app-fg-muted">
-            Showing {entries.length} of {total} transactions
-          </p>
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            pageParam="page"
-            pageSize={limit}
-            pageSizeParam="perPage"
-          />
-        </div>
-      )}
+      <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <p className="text-sm text-app-fg-muted">
+          {total > 0
+            ? `Showing ${Math.min((page - 1) * limit + 1, total)}–${Math.min(page * limit, total)} of ${total} transactions`
+            : '0 transactions'}
+        </p>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageParam="page"
+          pageSize={limit}
+          pageSizeParam="perPage"
+        />
+      </div>
 
       {/* Export modal */}
       <LocalExportModal

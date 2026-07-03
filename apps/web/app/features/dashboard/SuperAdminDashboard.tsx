@@ -270,8 +270,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               description="All orders across all pipelines. Includes form orders, graduated follow-up, and graduated cart orders."
               lines={[
                 { label: 'Form orders (orders table)', value: tTotal - fuDelivered - cartDelivered },
-                { label: 'Follow-up graduated (delivered)', value: fuDelivered, muted: true },
-                { label: 'Cart graduated (delivered)', value: cartDelivered, muted: true },
+                { label: 'Follow-up orders delivered', value: fuDelivered, muted: true },
+                { label: 'Cart orders delivered', value: cartDelivered, muted: true },
                 { label: 'Total', value: tTotal, bold: true },
               ]}
             />
@@ -282,11 +282,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               description="All delivered + remitted orders across all pipelines."
               lines={[
                 { label: 'Form orders delivered', value: tDelivered - fuDelivered - cartDelivered },
-                { label: 'Follow-up graduated (delivered)', value: fuDelivered, muted: true },
-                { label: 'Cart graduated (delivered)', value: cartDelivered, muted: true },
+                { label: 'Follow-up orders delivered', value: fuDelivered, muted: true },
+                { label: 'Cart orders delivered', value: cartDelivered, muted: true },
                 { label: 'Total Delivered', value: tDelivered, bold: true },
-                { label: 'Follow-up pipeline (own strip)', value: fuTotal, muted: true },
-                { label: 'Cart pipeline (own strip)', value: cartTotal, muted: true },
               ]}
             />
           </div>
@@ -394,7 +392,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 description="Form orders + cart-graduated orders. Excludes offline and follow-up graduated orders."
                 lines={[
                   { label: 'Form orders (edge-form)', value: ordersTotal - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
-                  { label: 'Cart graduated (delivered)', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
+                  { label: 'Cart orders delivered', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
                   { label: 'Marketing Total', value: ordersTotal, bold: true },
                 ]}
               />
@@ -405,7 +403,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 description="Form orders delivered + cart-graduated orders delivered. Cart orders are real MB-attributable sales."
                 lines={[
                   { label: 'Form orders delivered', value: delivered - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
-                  { label: 'Cart graduated (delivered)', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
+                  { label: 'Cart orders delivered', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
                   { label: 'Marketing Delivered', value: delivered, bold: true },
                 ]}
               />
@@ -519,11 +517,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         open={breakdownModal === 'csDelivered'}
                         onClose={() => setBreakdownModal(null)}
                         title="CS Delivered — Breakdown"
-                        description="Form + offline orders delivered. Follow-up and cart deliveries are in their own strips below."
+                        description="Orders delivered or remitted from the CS pipeline."
                         lines={[
-                          { label: 'Form + offline delivered', value: csDelivered },
-                          { label: 'Follow-up delivered (own strip)', value: fuDel, muted: true },
-                          { label: 'Cart delivered (own strip)', value: caDel, muted: true },
+                          { label: 'Delivered', value: csSc['DELIVERED'] ?? 0 },
+                          { label: 'Remitted', value: csSc['REMITTED'] ?? 0, muted: true },
                           { label: 'CS Delivered', value: csDelivered, bold: true },
                         ]}
                       />

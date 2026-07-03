@@ -1525,10 +1525,12 @@ export class FinanceService {
     if (dEnd) disburseConds.push(lte(schema.marketingFunding.sentAt, dEnd));
 
     // ── 5) Ad Spend ──
+    // Filter by createdAt (when the expense was recorded in the system), not
+    // spendDate (user-supplied, can be set to future dates).
     const adSpendConds: SQL[] = [eq(schema.adSpendLogs.status, 'APPROVED')];
     if (userId) adSpendConds.push(eq(schema.adSpendLogs.mediaBuyerId, userId));
-    if (dStart) adSpendConds.push(gte(schema.adSpendLogs.spendDate, dStart));
-    if (dEnd) adSpendConds.push(lte(schema.adSpendLogs.spendDate, dEnd));
+    if (dStart) adSpendConds.push(gte(schema.adSpendLogs.createdAt, dStart));
+    if (dEnd) adSpendConds.push(lte(schema.adSpendLogs.createdAt, dEnd));
 
     // ── 6) Payroll — PAID batches ──
     const payrollConds: SQL[] = [eq(schema.payrollBatches.status, 'PAID'), isNotNull(schema.payrollBatches.financeProcessedAt)];
@@ -1616,6 +1618,7 @@ export class FinanceService {
                 amount: schema.marketingFunding.amount,
                 sentAt: schema.marketingFunding.sentAt,
                 status: schema.marketingFunding.status,
+                senderName: senderAlias.name,
                 receiverName: receiverAlias.name,
               })
               .from(schema.marketingFunding)
@@ -1630,6 +1633,7 @@ export class FinanceService {
                 id: schema.adSpendLogs.id,
                 spendAmount: schema.adSpendLogs.spendAmount,
                 spendDate: schema.adSpendLogs.spendDate,
+                createdAt: schema.adSpendLogs.createdAt,
                 status: schema.adSpendLogs.status,
                 platform: schema.adSpendLogs.platform,
                 description: schema.adSpendLogs.description,
@@ -1734,8 +1738,10 @@ export class FinanceService {
       });
     }
 
-    for (const r of disburseRows as Array<{ id: string; amount: string | null; sentAt: Date; status: string; receiverName: string | null }>) {
+    for (const r of disburseRows as Array<{ id: string; amount: string | null; sentAt: Date; status: string; senderName: string | null; receiverName: string | null }>) {
       const amt = Number(r.amount ?? 0);
+      const from = r.senderName ?? 'Unknown';
+      const to = r.receiverName ?? 'Unknown';
       entries.push({
         id: r.id,
         entryType: 'disbursement',
@@ -1743,19 +1749,19 @@ export class FinanceService {
         amount: amt,
         balanceEffect: -amt,
         status: r.status,
-        description: `Disbursement to ${r.receiverName ?? 'Unknown'}`,
+        description: `${from} → ${to}`,
         counterpartyName: r.receiverName ?? null,
-        userName: null,
+        userName: r.senderName ?? null,
       });
     }
 
-    for (const r of adSpendRows as Array<{ id: string; spendAmount: string | null; spendDate: Date; status: string; platform: string; description: string | null; productName: string | null; mbName: string | null }>) {
+    for (const r of adSpendRows as Array<{ id: string; spendAmount: string | null; spendDate: Date; createdAt: Date; status: string; platform: string; description: string | null; productName: string | null; mbName: string | null }>) {
       const amt = Number(r.spendAmount ?? 0);
       const label = [r.platform, r.productName, r.description].filter(Boolean).join(' — ');
       entries.push({
         id: r.id,
         entryType: 'ad_spend',
-        eventDate: r.spendDate,
+        eventDate: r.createdAt,
         amount: amt,
         balanceEffect: -amt,
         status: r.status ?? 'APPROVED',
