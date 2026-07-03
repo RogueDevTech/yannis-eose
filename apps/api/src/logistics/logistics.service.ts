@@ -1776,6 +1776,7 @@ export class LogisticsService {
 
     const awaitingConditions: SQL[] = [
       eq(schema.orders.status, 'DELIVERED'),
+      isNull(schema.orders.deletedAt),
       notExists(
         this.db
           .select({ one: sql`1` })
@@ -1799,11 +1800,14 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
+    // Date filter by created_at to match dashboard/marketing/sales funnel
+    // counts — ensures "Delivered Orders" on remittance tallies with the
+    // same period on the CEO dashboard and Marketing Orders page.
     if (input.startDate) {
-      awaitingConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
+      awaitingConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      awaitingConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+      awaitingConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
@@ -1827,6 +1831,7 @@ export class LogisticsService {
     // and must count toward the total.
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      isNull(schema.orders.deletedAt),
     ];
     if (groupId) {
       // Include orders with NULL logisticsLocationId (not yet assigned to a 3PL)
@@ -1843,8 +1848,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+    // Date filter by created_at — matches dashboard/marketing/sales funnels.
+    if (input.startDate) deliveredConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) deliveredConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
