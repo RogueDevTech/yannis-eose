@@ -3490,9 +3490,11 @@ export class OrdersService {
        *  `'marketing'`. */
       branchScope?: 'servicing' | 'marketing';
       effectiveBranchIds?: string[] | null;
-      /** When true, strictly exclude graduated follow-up and cart orders.
-       *  CS surfaces pass true so closers only see orders they worked. */
+      /** When true, exclude graduated follow-up orders (is_follow_up=true). */
       excludeGraduated?: boolean;
+      /** When true, also exclude cart-graduated orders (order_source='online').
+       *  CS surfaces pass true (cart orders have their own strip). */
+      excludeCartGraduated?: boolean;
     },
   ) {
     // Skip the exclusion gate when explicitly querying DELETED orders —
@@ -3506,12 +3508,13 @@ export class OrdersService {
 
     // Follow-up / cart-graduated isolation.
     if (listOpts?.excludeGraduated) {
-      // Strict exclusion: no follow-up orders, no cart-graduated orders.
-      // CS surfaces use this so closers don't get credit for follow-up
-      // and cart recovery deliveries (CEO 2026-06-30).
-      // Cart-graduated orders have order_source='online' (set by graduateToOrders).
+      // Exclude graduated follow-up orders (is_follow_up=true).
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
+      if (listOpts.excludeCartGraduated) {
+        // Also exclude cart-graduated orders (order_source='online').
+        // CS funnel passes this — cart orders have their own strip.
+        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
+      }
     } else if (input.isFollowUp) {
       // Show ONLY follow-ups (follow-up batch detail page).
       conditions.push(eq(schema.orders.isFollowUp, true));

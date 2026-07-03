@@ -734,11 +734,17 @@ export const ordersRouter = router({
       // CS (servicing-scoped) and marketing (marketing-scoped) pages correctly.
       if (input.branchScope) baseOpts.branchScope = input.branchScope;
       baseOpts.effectiveBranchIds = ctx.effectiveBranchIds;
-      // CS-scoped lists exclude graduated follow-up and cart orders — they have
-      // their own funnels. Marketing lists keep them (graduated = delivered = counts).
+      // Exclude graduated follow-up orders from list views — they belong in
+      // the Follow-Up strip only. CS also excludes cart-graduated (own strip);
+      // Marketing keeps cart-graduated (MB credit). Logistics passes
+      // excludeGraduated=false so graduated deliveries stay visible.
       const effectiveBranchScope = baseOpts.branchScope ?? 'servicing';
-      if (effectiveBranchScope === 'servicing') {
+      const callerExcludeGraduated = input.excludeGraduated;
+      if (callerExcludeGraduated !== false) {
         (baseOpts as Record<string, unknown>).excludeGraduated = true;
+        if (effectiveBranchScope === 'servicing') {
+          (baseOpts as Record<string, unknown>).excludeCartGraduated = true;
+        }
       }
       const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
       const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);

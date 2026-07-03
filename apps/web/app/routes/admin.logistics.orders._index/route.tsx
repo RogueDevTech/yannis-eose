@@ -97,6 +97,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
+    // Logistics must see graduated follow-up + cart orders for remittance.
+    excludeGraduated: false as const,
   };
   const countsInput: {
     startDate?: string;

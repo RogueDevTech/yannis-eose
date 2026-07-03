@@ -364,6 +364,9 @@ export const listOrdersSchema = z
     branchScope: z.enum(['servicing', 'marketing']).optional(),
     /** When true, exclude follow-up orders from results. Default true — normal pages never see follow-ups. */
     excludeFollowUp: z.boolean().optional(),
+    /** When false, include graduated follow-up + cart orders in results.
+     *  Logistics passes false so graduated deliveries stay visible. */
+    excludeGraduated: z.boolean().optional(),
     /** When true, only return follow-up orders. Used by the "Follow Up" pseudo-status filter. */
     isFollowUp: z.boolean().optional(),
     /** Filter by frozen status: 'frozen' = frozenForFollowUp true, 'active' = false, omit = all. */
