@@ -849,7 +849,14 @@ export function MarketingAdSpendPage({
           return (
             <span className="inline-flex items-center gap-2">
               {checkbox}
-              {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              <span>
+                {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                {s.createdAt && (
+                  <span className="ml-1 text-app-fg-muted/60">
+                    {new Date(s.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                  </span>
+                )}
+              </span>
             </span>
           );
         },
@@ -1656,7 +1663,12 @@ export function MarketingAdSpendPage({
                       : getUserName(s.mediaBuyerId, users)}
                   </span>
                   <span className="whitespace-nowrap">
-                    {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                    {s.createdAt && (
+                      <span className="ml-1 text-app-fg-muted/60">
+                        {new Date(s.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </span>
+                    )}
                   </span>
                 </div>
               </button>

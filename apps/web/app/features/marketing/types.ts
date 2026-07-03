@@ -133,6 +133,7 @@ export interface AdSpendRecord {
   category?: ExpenseCategory;
   description?: string | null;
   spendDate: string;
+  createdAt?: string;
   status: string;
   approvedAt: string | null;
   approvedBy: string | null;
