@@ -1488,7 +1488,7 @@ function CSDashboardPageLoaded({
       ),
       valueClassName: 'text-brand-600 dark:text-brand-400',
     },
-    { label: 'Deleted', value: deletedCount, valueClassName: deletedCount > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg' },
+    { label: 'Deleted', value: deletedCount, valueClassName: deletedCount > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg', to: deletedCount > 0 ? '/admin/sales/orders?status=DELETED' : undefined },
     ...(cartStats
       ? ([
           {
