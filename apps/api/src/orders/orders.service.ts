@@ -8443,10 +8443,10 @@ export class OrdersService {
       )
       .limit(1);
 
-    if (matchingItems.length === 0) return null;
+    const firstMatch = matchingItems[0];
+    if (!firstMatch) return null;
 
-    const matchId = matchingItems[0].orderId;
-    const winner = candidates.find((c) => c.id === matchId);
+    const winner = candidates.find((c) => c.id === firstMatch.orderId);
     if (!winner) return null;
 
     return {
@@ -8454,7 +8454,7 @@ export class OrdersService {
       orderNumber: winner.orderNumber,
       status: winner.status,
       deliveredAt: winner.deliveredAt,
-      productName: matchingItems[0].productName,
+      productName: firstMatch.productName,
     };
   }
 

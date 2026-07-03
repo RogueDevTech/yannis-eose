@@ -760,14 +760,15 @@ export class CartOrdersService {
             ),
           )
           .limit(1);
-        if (existing.length > 0) {
+        const dupeMatch = existing[0];
+        if (dupeMatch) {
           this.logger.warn(
-            `Cart order ${cartOrderId} skipped graduation: duplicate delivery found (order ${existing[0].id}) for same phone+product`,
+            `Cart order ${cartOrderId} skipped graduation: duplicate delivery found (order ${dupeMatch.id}) for same phone+product`,
           );
           // Mark cart order as CONVERTED without creating a duplicate order
           await this.db
             .update(schema.cartOrders)
-            .set({ status: 'CONVERTED', notes: `Skipped graduation — duplicate delivery exists (${existing[0].id})` })
+            .set({ status: 'CONVERTED' })
             .where(eq(schema.cartOrders.id, cartOrderId));
           return;
         }
