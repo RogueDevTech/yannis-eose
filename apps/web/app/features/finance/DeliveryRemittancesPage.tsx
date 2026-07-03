@@ -47,6 +47,7 @@ export interface DeliveryRemittanceListItem {
   outcomeAmount?: string;
   outcomeOrderCount?: number;
   outcomeReason?: string | null;
+  receivedAt?: string | null;
 }
 
 export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
@@ -72,6 +73,9 @@ export interface DeliveryRemittanceSummary {
   /** Delivered orders not yet on a cash remittance batch (same scope as Awaiting tab, ignores batch date filter). */
   awaitingAmount: string;
   awaitingCount: string;
+  awaitingGrossAmount?: string;
+  awaitingDeliveryFees?: string;
+  awaitingDeliveryFeeCount?: string;
   totalRemitted: string;
   pendingAmount: string;
   receivedAmount: string;
@@ -378,6 +382,22 @@ export function DeliveryRemittancesPage({
               year: 'numeric',
             })}
           </span>
+        ),
+      },
+      {
+        key: 'receivedAt',
+        header: 'Received at',
+        nowrap: true,
+        render: (r) => r.receivedAt ? (
+          <span className="text-sm text-app-fg-muted">
+            {new Date(r.receivedAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        ) : (
+          <span className="text-sm text-app-fg-muted">—</span>
         ),
       },
       {
@@ -703,6 +723,7 @@ export function DeliveryRemittancesPage({
             STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
             (r.outcomeStatus ?? r.status),
           sentAt: new Date(r.sentAt).toLocaleString(),
+          receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
         }))}
         columns={[
           { key: 'id', label: 'ID' },
@@ -712,8 +733,9 @@ export function DeliveryRemittancesPage({
           { key: 'batchTotal', label: 'Batch total (₦)' },
           { key: 'status', label: 'Status' },
           { key: 'sentAt', label: 'Sent at' },
+          { key: 'receivedAt', label: 'Received at' },
         ]}
-        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt']}
+        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt', 'receivedAt']}
       />
 
       {(() => {
@@ -840,9 +862,11 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'awaiting'}
           onClose={() => setInfoModal(null)}
           title="Awaiting Remittance"
-          description="Net value of delivered orders that have not been placed on any remittance batch yet. Delivery fees are already deducted. These orders are waiting for an accountant to create a remittance."
+          description="Net value of delivered orders that have not been placed on any remittance batch yet. These orders are waiting for an accountant to create a remittance."
           lines={[
-            { label: 'Delivered orders not on any batch (net)', amount: Number(summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
+            { label: 'Gross order value', amount: Number(summary.awaitingGrossAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
+            { label: 'Delivery fees', amount: Number(summary.awaitingDeliveryFees ?? 0), type: 'deduction', count: Number(summary.awaitingDeliveryFeeCount ?? 0) },
+            { label: 'Net remittable', amount: Number(summary.awaitingAmount ?? 0), type: 'result', count: Number(summary.awaitingCount ?? 0) },
           ]}
         />
         <FormulaBreakdownModal
@@ -1078,10 +1102,9 @@ export function DeliveryRemittancesPage({
                         className="text-sm font-semibold text-app-fg tabular-nums"
                       />
                       <p className="text-mini text-app-fg-muted">
-                        {new Date(r.sentAt).toLocaleDateString('en-NG', {
-                          month: 'short',
-                          day: 'numeric',
-                        })}
+                        {r.receivedAt
+                          ? new Date(r.receivedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })
+                          : new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </p>
                     </div>
                   </div>
