@@ -1,5 +1,5 @@
 import { uuid, pgTable, text, numeric, jsonb, timestamp, index, integer } from 'drizzle-orm/pg-core';
-import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum, expenseCategoryEnum } from './enums';
+import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, mbFundTransferStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum, expenseCategoryEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -229,3 +229,28 @@ export const crossFunnelAttempts = pgTable(
     originalOrderIdx: index('cfa_original_order_idx').on(table.originalOrderId),
   }),
 );
+
+// ── MB Fund Transfers — peer-to-peer funding within a branch ────────────
+export const mbFundTransfers = pgTable('mb_fund_transfers', {
+  id: uuidv7Pk(),
+  senderMbId: uuid('sender_mb_id').notNull().references(() => users.id),
+  receiverMbId: uuid('receiver_mb_id').notNull().references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  reason: text('reason'),
+  status: mbFundTransferStatusEnum('status').default('PENDING').notNull(),
+  branchId: uuid('branch_id').references(() => branches.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectedBy: uuid('rejected_by').references(() => users.id),
+  rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+  rejectionReason: text('rejection_reason'),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  /** The marketing_funding ledger row created on acceptance. */
+  ledgerEntryId: uuid('ledger_entry_id').references(() => marketingFunding.id),
+  ...temporalColumns,
+  ...timestampColumns,
+}, (table) => ({
+  senderStatusIdx: index('mb_ft_sender_status_idx').on(table.senderMbId, table.status),
+  receiverStatusIdx: index('mb_ft_receiver_status_idx').on(table.receiverMbId, table.status),
+  branchStatusIdx: index('mb_ft_branch_status_idx').on(table.branchId, table.status),
+}));

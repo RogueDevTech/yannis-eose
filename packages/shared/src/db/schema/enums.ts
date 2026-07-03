@@ -104,6 +104,13 @@ export const fundingRequestStatusEnum = pgEnum('funding_request_status', [
   'REJECTED',
 ]);
 
+export const mbFundTransferStatusEnum = pgEnum('mb_fund_transfer_status', [
+  'PENDING',   // MB created, awaiting HoM/Supervisor approval
+  'APPROVED',  // HoM/Supervisor approved, awaiting recipient acceptance
+  'REJECTED',  // HoM/Supervisor rejected (with reason)
+  'ACCEPTED',  // Recipient confirmed receipt, balances updated
+]);
+
 export const invoiceStatusEnum = pgEnum('invoice_status', [
   'DRAFT',
   'SENT',

@@ -1719,9 +1719,15 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
-    // No date filter on summaryConditions — it's shared between baseSummaryQuery
-    // (joins orders) and outcomeSummaryQuery (no orders join). Date filtering
-    // for batch stats uses orders.created_at via orderDateConditions below.
+    // Date filter on batch sentAt — so stat strip counts match the date range
+    // the user selected. Without this, Pending/Received counts show all-time
+    // totals even when the user picks "Last month".
+    if (input.startDate) {
+      summaryConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
+    }
+    if (input.endDate) {
+      summaryConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
+    }
     if (input.sentBy) {
       summaryConditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
     }
