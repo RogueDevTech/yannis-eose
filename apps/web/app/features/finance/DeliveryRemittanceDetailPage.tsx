@@ -100,9 +100,20 @@ export function DeliveryRemittanceDetailPage({
         key: 'customer',
         header: 'Customer',
         render: (o) => (
-          <span className="text-sm font-medium text-app-fg truncate max-w-[14rem]" title={o.customerName}>
-            {o.customerName}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-app-fg truncate max-w-[12rem]" title={o.customerName}>
+              {o.customerName}
+            </span>
+            {o.isDuplicate && (
+              <a
+                href={`/admin/finance/delivery-remittances/duplicates/${o.duplicateOfId ?? o.id}`}
+                className="shrink-0 rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300 hover:bg-warning-200 dark:hover:bg-warning-800/40"
+                title="Compare duplicate orders"
+              >
+                Duplicate
+              </a>
+            )}
+          </div>
         ),
       },
       {
@@ -194,10 +205,10 @@ export function DeliveryRemittanceDetailPage({
             ariaLabel={`Actions for ${o.customerName}`}
             sheetTitle={o.customerName}
             actions={[
-              { key: 'view', kind: 'link', label: 'View order', to: `/admin/orders/${o.id}` },
+              { key: 'view', kind: 'link', label: 'Order', to: `/admin/orders/${o.id}` },
               ...(o.invoice
                 ? [
-                    { key: 'invoice', kind: 'button' as const, label: 'View invoice', onClick: () => setInvoicePreview(o.invoice) },
+                    { key: 'invoice', kind: 'button' as const, label: 'Invoice', onClick: () => setInvoicePreview(o.invoice) },
                     { key: 'pdf', kind: 'button' as const, label: 'Download PDF', onClick: () => { if (o.invoice) void generateInvoicePdf(o.invoice); } },
                   ]
                 : []),

@@ -89,7 +89,8 @@ const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
 
 function adSpendRowCanEdit(s: AdSpendRecord): boolean {
   const st = s.status ?? 'PENDING';
-  return st === 'PENDING' || st === 'REJECTED';
+  // MBs can edit approved entries — backend reverts status to PENDING for re-approval
+  return st === 'PENDING' || st === 'REJECTED' || st === 'APPROVED';
 }
 
 function InlineLoadingText({ label = 'Loading…' }: { label?: string }) {
