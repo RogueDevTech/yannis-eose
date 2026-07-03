@@ -293,6 +293,13 @@ export const logisticsRouter = router({
       return getLogisticsService().listDeliveryRemittanceOrders(input, ctx.user, ctx.activeGroupId);
     }),
 
+  /** Duplicate order comparison: original + all duplicates with invoices and remittance info. */
+  getDuplicateGroup: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getLogisticsService().getDuplicateGroup(input.orderId);
+    }),
+
   /**
    * Single-request bundle for the Cash Remittances page. Replaces 4 parallel
    * HTTP round-trips (listDeliveryRemittances + locationOptions + users.list +

@@ -14,6 +14,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  not,
   notExists,
   or,
   sql,
@@ -1714,7 +1715,8 @@ export class LogisticsService {
         totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
         pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
-        // Order count (not batch count) so the stat strip is consistent with Delivered/Awaiting
+        // Order counts (not batch counts) so the stat strip is consistent with Delivered/Awaiting
+        batchedOrderCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittanceOrders.orderId})::text`,
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
         // Deduction breakdown — so the CEO sees where the money goes
         grossOrderValue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
@@ -1885,6 +1887,7 @@ export class LogisticsService {
       receivedAmount: outcomeSummary?.receivedAmount ?? '0',
       disputedAmount: outcomeSummary?.disputedAmount ?? '0',
       totalCount: baseSummary?.totalCount ?? '0',
+      batchedOrderCount: baseSummary?.batchedOrderCount ?? '0',
       pendingCount: baseSummary?.pendingCount ?? '0',
       receivedCount: outcomeSummary?.receivedCount ?? '0',
       disputedCount: outcomeSummary?.disputedCount ?? '0',
@@ -1910,7 +1913,7 @@ export class LogisticsService {
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
-      totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
+      totalCount: '0', batchedOrderCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', awaitingGrossAmount: '0', awaitingDeliveryFees: '0', awaitingDeliveryFeeCount: '0',
       deliveredCount: '0', deliveredAmount: '0', deliveredNetAmount: '0',
       grossOrderValue: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
@@ -2027,6 +2030,8 @@ export class LogisticsService {
         sentAt: schema.deliveryRemittances.sentAt,
         locationName: loc.name,
         providerName: prov.name,
+        isDuplicate: schema.orders.isDuplicate,
+        duplicateOfId: schema.orders.duplicateOfId,
       })
       .from(schema.deliveryRemittanceOrders)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -2068,6 +2073,8 @@ export class LogisticsService {
         sentAt: r.sentAt.toISOString(),
         locationName: r.locationName ?? null,
         providerName: r.providerName ?? null,
+        isDuplicate: r.isDuplicate ?? null,
+        duplicateOfId: r.duplicateOfId ?? null,
       })),
       pagination: {
         page: input.page,
@@ -2075,6 +2082,189 @@ export class LogisticsService {
         total,
         totalPages: Math.ceil(total / input.limit),
       },
+    };
+  }
+
+  /**
+   * Fetch the original order and all its duplicates (same phone + same product)
+   * for a side-by-side comparison view. Returns the original first, then duplicates
+   * sorted by delivered_at.
+   */
+  async getDuplicateGroup(orderId: string) {
+    // Find the order — either the original or one of its duplicates
+    const [order] = await this.db
+      .select({
+        id: schema.orders.id,
+        customerPhoneHash: schema.orders.customerPhoneHash,
+        duplicateOfId: schema.orders.duplicateOfId,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    // Resolve the original order ID
+    const originalId = order.duplicateOfId ?? order.id;
+
+    // Get the original order's products
+    const originalItems = await this.db
+      .select({ productId: schema.orderItems.productId })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, originalId));
+
+    const productIds = originalItems.map((i) => i.productId).filter(Boolean) as string[];
+    if (productIds.length === 0) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order has no products' });
+    }
+
+    // Get the original order's phone hash
+    const [originalOrder] = await this.db
+      .select({ customerPhoneHash: schema.orders.customerPhoneHash })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, originalId))
+      .limit(1);
+
+    if (!originalOrder) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Original order not found' });
+    }
+
+    const csAlias = alias(schema.users, 'closer');
+    const mbAlias = alias(schema.users, 'mb');
+    const locAlias = alias(schema.logisticsLocations, 'dup_loc');
+    const provAlias = alias(schema.logisticsProviders, 'dup_prov');
+
+    // Fetch all orders with same phone + overlapping product (the whole group)
+    const groupOrders = await this.db
+      .select({
+        id: schema.orders.id,
+        orderNumber: schema.orders.orderNumber,
+        customerName: schema.orders.customerName,
+        customerPhone: schema.orders.customerPhone,
+        totalAmount: schema.orders.totalAmount,
+        deliveryFee: schema.orders.deliveryFee,
+        status: schema.orders.status,
+        orderSource: schema.orders.orderSource,
+        isFollowUp: schema.orders.isFollowUp,
+        createdAt: schema.orders.createdAt,
+        confirmedAt: schema.orders.confirmedAt,
+        deliveredAt: schema.orders.deliveredAt,
+        isDuplicate: schema.orders.isDuplicate,
+        duplicateOfId: schema.orders.duplicateOfId,
+        closerName: csAlias.name,
+        mediaBuyerName: mbAlias.name,
+        locationName: locAlias.name,
+        providerName: provAlias.name,
+      })
+      .from(schema.orders)
+      .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+      .leftJoin(csAlias, eq(csAlias.id, schema.orders.assignedCsId))
+      .leftJoin(mbAlias, eq(mbAlias.id, schema.orders.mediaBuyerId))
+      .leftJoin(locAlias, eq(locAlias.id, schema.orders.logisticsLocationId))
+      .leftJoin(provAlias, eq(provAlias.id, locAlias.providerId))
+      .where(
+        and(
+          eq(schema.orders.customerPhoneHash, originalOrder.customerPhoneHash),
+          inArray(schema.orderItems.productId, productIds),
+          not(inArray(schema.orders.status, ['CANCELLED', 'DELETED'])),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .orderBy(asc(schema.orders.createdAt));
+
+    // Deduplicate (an order with multiple matching products would appear multiple times)
+    const seen = new Set<string>();
+    const dedupedOrders = groupOrders.filter((o) => {
+      if (seen.has(o.id)) return false;
+      seen.add(o.id);
+      return true;
+    });
+
+    // Fetch invoices for all orders in the group
+    const orderIds = dedupedOrders.map((o) => o.id);
+    const invoices = orderIds.length > 0
+      ? await this.db
+          .select({
+            orderId: schema.invoices.orderId,
+            id: schema.invoices.id,
+            referenceNumber: schema.invoices.referenceNumber,
+            totalAmount: schema.invoices.totalAmount,
+            status: schema.invoices.status,
+            createdAt: schema.invoices.createdAt,
+          })
+          .from(schema.invoices)
+          .where(inArray(schema.invoices.orderId, orderIds))
+      : [];
+    const invoiceByOrderId = new Map(invoices.map((inv) => [inv.orderId, inv]));
+
+    // Fetch remittance info for all orders
+    const remittances = orderIds.length > 0
+      ? await this.db
+          .select({
+            orderId: schema.deliveryRemittanceOrders.orderId,
+            remittanceId: schema.deliveryRemittances.id,
+            remittanceStatus: schema.deliveryRemittances.status,
+            sentAt: schema.deliveryRemittances.sentAt,
+            receivedAt: schema.deliveryRemittances.receivedAt,
+          })
+          .from(schema.deliveryRemittanceOrders)
+          .innerJoin(
+            schema.deliveryRemittances,
+            eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
+          )
+          .where(inArray(schema.deliveryRemittanceOrders.orderId, orderIds))
+      : [];
+    const remittanceByOrderId = new Map(remittances.map((r) => [r.orderId, r]));
+
+    // Fetch product names
+    const products = productIds.length > 0
+      ? await this.db
+          .select({ id: schema.products.id, name: schema.products.name })
+          .from(schema.products)
+          .where(inArray(schema.products.id, productIds))
+      : [];
+
+    return {
+      originalOrderId: originalId,
+      products: products.map((p) => ({ id: p.id, name: p.name })),
+      orders: dedupedOrders.map((o) => {
+        const inv = invoiceByOrderId.get(o.id);
+        const rem = remittanceByOrderId.get(o.id);
+        return {
+          id: o.id,
+          orderNumber: o.orderNumber,
+          customerName: o.customerName,
+          totalAmount: o.totalAmount ? String(o.totalAmount) : '0',
+          deliveryFee: o.deliveryFee ? String(o.deliveryFee) : null,
+          status: o.status,
+          orderSource: o.orderSource,
+          isFollowUp: o.isFollowUp,
+          isOriginal: o.id === originalId,
+          isDuplicate: o.isDuplicate,
+          createdAt: o.createdAt.toISOString(),
+          confirmedAt: o.confirmedAt?.toISOString() ?? null,
+          deliveredAt: o.deliveredAt?.toISOString() ?? null,
+          closerName: o.closerName ?? null,
+          mediaBuyerName: o.mediaBuyerName ?? null,
+          locationName: o.locationName ?? null,
+          providerName: o.providerName ?? null,
+          invoice: inv ? {
+            id: inv.id,
+            referenceNumber: inv.referenceNumber,
+            totalAmount: inv.totalAmount ? String(inv.totalAmount) : '0',
+            status: inv.status,
+            createdAt: inv.createdAt.toISOString(),
+          } : null,
+          remittance: rem ? {
+            id: rem.remittanceId,
+            status: rem.remittanceStatus,
+            sentAt: rem.sentAt.toISOString(),
+            receivedAt: rem.receivedAt?.toISOString() ?? null,
+          } : null,
+        };
+      }),
     };
   }
 
@@ -2454,6 +2644,8 @@ export class LogisticsService {
           invoiceStatus: schema.invoices.status,
           invoiceDueDate: schema.invoices.dueDate,
           invoiceCreatedAt: schema.invoices.createdAt,
+          isDuplicate: schema.orders.isDuplicate,
+          duplicateOfId: schema.orders.duplicateOfId,
         })
         .from(schema.orders)
         .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
@@ -2482,6 +2674,8 @@ export class LogisticsService {
         logisticsLocationId: o.logisticsLocationId ?? null,
         logisticsLocationName: o.logisticsLocationName ?? null,
         logisticsLocationProviderName: o.logisticsLocationProviderName ?? null,
+        isDuplicate: o.isDuplicate ?? null,
+        duplicateOfId: o.duplicateOfId ?? null,
         invoice:
           o.invoiceId != null && o.invoiceReferenceNumber != null && o.invoiceCreatedAt
             ? {
