@@ -1886,11 +1886,10 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
-    // Batch stats filter orders by deliveredAt to match Delivered/Awaiting counts.
-    // Previously used createdAt which caused a mismatch with the Delivered stat.
+    // Batch stats filter orders by created_at — must match Delivered/Awaiting counts above.
     const orderDateConditions: SQL[] = [];
-    if (input.startDate) orderDateConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) orderDateConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+    if (input.startDate) orderDateConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) orderDateConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     const baseSummaryWhere = summaryWhere
       ? (orderDateConditions.length > 0 ? and(summaryWhere, ...orderDateConditions) : summaryWhere)
       : (orderDateConditions.length > 0 ? and(...orderDateConditions) : undefined);
