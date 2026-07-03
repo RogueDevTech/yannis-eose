@@ -339,6 +339,13 @@ export type {
   CustomFormField,
   FormConfig,
   FormFieldType,
+  createMbFundTransferSchema,
+  approveMbFundTransferSchema,
+  rejectMbFundTransferSchema,
+  acceptMbFundTransferSchema,
+  listMbFundTransfersSchema,
+  type CreateMbFundTransferInput,
+  type ListMbFundTransfersInput,
 } from './marketing';
 
 // Finance validators

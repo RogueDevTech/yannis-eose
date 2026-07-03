@@ -205,6 +205,7 @@ export function DeliveryRemittanceDetailPage({
             ariaLabel={`Actions for ${o.customerName}`}
             sheetTitle={o.customerName}
             actions={[
+              ...(o.isDuplicate ? [{ key: 'compare', kind: 'link' as const, label: 'Compare duplicates', to: `/admin/finance/delivery-remittances/duplicates/${o.duplicateOfId ?? o.id}` }] : []),
               { key: 'view', kind: 'link', label: 'Order', to: `/admin/orders/${o.id}` },
               ...(o.invoice
                 ? [

@@ -238,6 +238,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const cartDelivered = (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0);
         const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
 
+        const offlineCount = orderPipeline.offlineCount ?? 0;
         const tTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
         const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0);
         const tConfirmed = (tsc['CONFIRMED'] ?? 0) + (tsc['AGENT_ASSIGNED'] ?? 0) + (tsc['DISPATCHED'] ?? 0) + (tsc['IN_TRANSIT'] ?? 0);
@@ -267,9 +268,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'total'}
               onClose={() => setBreakdownModal(null)}
               title="Total Orders — Breakdown"
-              description="All orders across all pipelines. Includes form orders, graduated follow-up, and graduated cart orders."
+              description="All orders across all pipelines. Includes form orders, offline orders, graduated follow-up, and graduated cart orders."
               lines={[
-                { label: 'Form orders (orders table)', value: tTotal - fuDelivered - cartDelivered },
+                { label: 'Online form orders', value: tTotal - fuDelivered - cartDelivered - offlineCount },
+                { label: 'Offline orders', value: offlineCount },
                 { label: 'Follow-up orders delivered', value: fuDelivered, muted: true },
                 { label: 'Cart orders delivered', value: cartDelivered, muted: true },
                 { label: 'Total', value: tTotal, bold: true },

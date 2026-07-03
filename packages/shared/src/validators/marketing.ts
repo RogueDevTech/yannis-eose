@@ -748,3 +748,35 @@ export const fundingLedgerSchema = z.object({
   limit: z.number().int().min(1).max(200).default(50),
 });
 export type FundingLedgerInput = z.infer<typeof fundingLedgerSchema>;
+
+// ── MB Fund Transfers ───────────────────────────────────────────────────
+
+export const createMbFundTransferSchema = z.object({
+  receiverMbId: z.string().uuid(),
+  amount: z.number().positive(),
+  reason: z.string().max(500).optional(),
+});
+export type CreateMbFundTransferInput = z.infer<typeof createMbFundTransferSchema>;
+
+export const approveMbFundTransferSchema = z.object({
+  transferId: z.string().uuid(),
+});
+
+export const rejectMbFundTransferSchema = z.object({
+  transferId: z.string().uuid(),
+  rejectionReason: z.string().min(1).max(500),
+});
+
+export const acceptMbFundTransferSchema = z.object({
+  transferId: z.string().uuid(),
+});
+
+export const listMbFundTransfersSchema = z.object({
+  direction: z.enum(['sent', 'received', 'pending_approval', 'all']).default('all'),
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'ACCEPTED']).optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(20),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+export type ListMbFundTransfersInput = z.infer<typeof listMbFundTransfersSchema>;
