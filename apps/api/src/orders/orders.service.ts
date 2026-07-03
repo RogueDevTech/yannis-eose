@@ -5712,11 +5712,12 @@ export class OrdersService {
      *  CS funnel passes true (cart orders have their own strip). */
     excludeCartGraduated?: boolean,
   ) {
-    // Status counts always include every status (including DELETED) so the
-    // stat strip can show the Deleted count. CANCELLED is merged into DELETED
-    // post-query (CEO directive 2026-05-23). The frontend excludes DELETED
-    // from the "Total" by using `total` from listOrders (which filters them).
-    const conditions: Parameters<typeof and>[0][] = [];
+    // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
+    // count under DELETED/CANCELLED, never inflate other status buckets.
+    // Legacy CANCELLED is merged into DELETED post-query (CEO directive 2026-05-23).
+    const conditions: Parameters<typeof and>[0][] = [
+      sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
+    ];
 
     if (excludeGraduated) {
       // Exclude graduated follow-up orders (is_follow_up=true).

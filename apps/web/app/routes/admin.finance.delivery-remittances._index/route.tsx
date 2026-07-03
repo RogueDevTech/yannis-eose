@@ -96,6 +96,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const eligibleListInput = JSON.stringify(eligibleListBase);
 
+  // View mode: 'batches' (default) or 'orders' (flat list)
+  const viewMode = url.searchParams.get('view') === 'orders' ? 'orders' : 'batches';
+
   const remittancesShell = {
     filters: {
       status: statusFilter ?? '',
@@ -114,7 +117,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Single bundled call replaces 4 parallel HTTP round-trips. Eligible orders
   // are deferred — loaded on demand when the Create modal opens.
   const bundleInput = encodeURIComponent(JSON.stringify(listInput));
-  const [bundleRes, eligibleListRes] = await Promise.all([
+
+  // Orders view: flat list of individual orders across remittance batches
+  type RemittanceOrderRow = {
+    id: string; customerName: string; orderNumber: string | null;
+    totalAmount: string; deliveryFee: string | null;
+    deliveredAt: string | null; status: string;
+    remittanceId: string; remittanceStatus: string;
+    sentAt: string; locationName: string | null; providerName: string | null;
+  };
+  const ordersViewInput = encodeURIComponent(JSON.stringify(listInput));
+  const ordersViewPromise = viewMode === 'orders'
+    ? apiRequest<unknown>(
+        `/trpc/logistics.listDeliveryRemittanceOrders?input=${ordersViewInput}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve(null);
+
+  const [bundleRes, eligibleListRes, ordersViewRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/logistics.deliveryRemittancesPageBundle?input=${bundleInput}`,
       { method: 'GET', cookie },
@@ -124,6 +144,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         encodeURIComponent(eligibleListInput),
       { method: 'GET', cookie },
     ),
+    ordersViewPromise,
   ]);
 
   type SummaryData = {
@@ -192,6 +213,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const eligibleTotalPages =
     Math.ceil(eligibleTotal / eligiblePageSize) || 1;
 
+  // Parse orders view data
+  const ordersViewData = ordersViewRes && 'ok' in ordersViewRes && ordersViewRes.ok
+    ? ((ordersViewRes.data as { result?: { data?: { orders: RemittanceOrderRow[]; pagination: { total: number; totalPages: number } } } })?.result?.data ?? null)
+    : null;
+
   return {
     remittances,
     pagination: { total, totalPages, page, pageSize: remittancesPageSize, pageSizeOptions },
@@ -218,6 +244,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     summary,
     canCreateRemittance,
     canMarkReceived,
+    viewMode,
+    remittanceOrders: ordersViewData?.orders ?? [],
+    remittanceOrdersPagination: ordersViewData?.pagination ?? { total: 0, totalPages: 1 },
   };
   })();
 
@@ -331,6 +360,9 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
             summary={data.summary}
             canCreateRemittance={data.canCreateRemittance}
             canMarkReceived={data.canMarkReceived}
+            viewMode={data.viewMode as 'batches' | 'orders'}
+            remittanceOrders={data.remittanceOrders}
+            remittanceOrdersPagination={data.remittanceOrdersPagination}
           />
         )}
     </CachedAwait>

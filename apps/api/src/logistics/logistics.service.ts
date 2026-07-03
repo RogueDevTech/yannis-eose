@@ -1739,18 +1739,34 @@ export class LogisticsService {
 
     // Received/Disputed: count orders (not batches) by joining through
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
-    // Date-filtered by deliveryRemittances.sentAt to match the base summary scope.
-    const outcomeDateConditions: SQL[] = [];
-    if (input.startDate) outcomeDateConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeDateConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
-    const outcomeDateWhere = outcomeDateConditions.length > 0 ? sql` AND ${sql.join(outcomeDateConditions, sql` AND `)}` : sql``;
+    // Scoped by date, location, group, and sentBy — must mirror summaryConditions
+    // so the counts reconcile with the amounts.
+    const outcomeCountConditions: SQL[] = [];
+    if (input.startDate) outcomeCountConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (groupId) {
+      outcomeCountConditions.push(sql`dr.logistics_location_id IN (
+        SELECT ll.id FROM logistics_locations ll
+        JOIN logistics_providers lp ON lp.id = ll.provider_id
+        WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
+      )`);
+    }
+    if (isTplCaller && !canListGlobal) {
+      outcomeCountConditions.push(sql`dr.logistics_location_id = ${actor.logisticsLocationId!}`);
+    } else if (input.logisticsLocationId) {
+      outcomeCountConditions.push(sql`dr.logistics_location_id = ${input.logisticsLocationId}`);
+    }
+    if (input.sentBy) {
+      outcomeCountConditions.push(sql`dr.sent_by = ${input.sentBy}`);
+    }
+    const outcomeCountWhere = outcomeCountConditions.length > 0 ? sql` AND ${sql.join(outcomeCountConditions, sql` AND `)}` : sql``;
 
     const outcomeSummaryQuery = this.db
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeDateWhere})::text`,
-        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeDateWhere})::text`,
+        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeCountWhere})::text`,
+        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeCountWhere})::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
@@ -1796,14 +1812,33 @@ export class LogisticsService {
       .select({
         awaitingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
         awaitingCount: sql<string>`COUNT(*)::text`,
+        awaitingGrossAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        awaitingDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        awaitingDeliveryFeeCount: sql<string>`COUNT(CASE WHEN COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
       })
       .from(schema.orders)
       .where(and(...awaitingConditions));
 
-    // Count all delivered orders in the period (both awaiting and on remittance)
+    // Count all delivered orders in the period (both awaiting and on remittance).
+    // Must mirror the same location / group / branch scoping as awaitingConditions
+    // so the stat strip reconciles: delivered = awaiting + remitted.
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
+    if (groupId) {
+      deliveredConditions.push(
+        sql`${schema.orders.logisticsLocationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
+        )`,
+      );
+    }
+    if (isTplCaller && !canListGlobal) {
+      deliveredConditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
+    } else if (input.logisticsLocationId) {
+      deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
+    }
     if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
     if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
@@ -1837,6 +1872,9 @@ export class LogisticsService {
       disputedCount: outcomeSummary?.disputedCount ?? '0',
       awaitingAmount: awaitingSummary?.awaitingAmount ?? '0',
       awaitingCount: awaitingSummary?.awaitingCount ?? '0',
+      awaitingGrossAmount: awaitingSummary?.awaitingGrossAmount ?? '0',
+      awaitingDeliveryFees: awaitingSummary?.awaitingDeliveryFees ?? '0',
+      awaitingDeliveryFeeCount: awaitingSummary?.awaitingDeliveryFeeCount ?? '0',
       deliveredCount: deliveredSummary?.deliveredCount ?? '0',
       deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
       // Deduction breakdown for remitted orders
@@ -1854,7 +1892,8 @@ export class LogisticsService {
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
-      awaitingAmount: '0', awaitingCount: '0', deliveredCount: '0', deliveredAmount: '0',
+      awaitingAmount: '0', awaitingCount: '0', awaitingGrossAmount: '0', awaitingDeliveryFees: '0', awaitingDeliveryFeeCount: '0',
+      deliveredCount: '0', deliveredAmount: '0',
       grossOrderValue: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
       totalCommitmentFees: '0', commitmentFeeCount: '0',
       totalPosFees: '0', posFeeCount: '0',
@@ -1906,6 +1945,117 @@ export class LogisticsService {
         totalPages: Math.ceil(total / input.limit),
       },
       summary: summary ?? fallbackSummary,
+    };
+  }
+
+  /**
+   * Flat list of individual orders across remittance batches (unbatched view).
+   * Same filters as `listDeliveryRemittances` but returns one row per order instead of per batch.
+   */
+  async listDeliveryRemittanceOrders(
+    input: ListDeliveryRemittancesInput,
+    actor: SessionUser,
+    groupId?: string | null,
+  ) {
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+    const canListGlobal =
+      actor.role === 'SUPER_ADMIN' ||
+      hasFinanceAccess(actor) ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
+      this.actorHasAnyPermission(actor, 'finance.read');
+    if (!isTplCaller && !canListGlobal) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot list delivery remittances' });
+    }
+
+    const conditions: SQL[] = [];
+    if (isTplCaller && !canListGlobal) {
+      conditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId!));
+    } else if (input.logisticsLocationId) {
+      conditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
+    }
+    if (input.sentBy) conditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
+    if (input.status) conditions.push(eq(schema.deliveryRemittances.status, input.status));
+    if (input.startDate) conditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) conditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
+    if (groupId) {
+      conditions.push(
+        sql`${schema.deliveryRemittances.logisticsLocationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
+        )`,
+      );
+    }
+
+    const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
+    const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const baseQuery = this.db
+      .select({
+        id: schema.orders.id,
+        customerName: schema.orders.customerName,
+        orderNumber: schema.orders.orderNumber,
+        totalAmount: schema.orders.totalAmount,
+        deliveryFee: schema.orders.deliveryFee,
+        deliveredAt: schema.orders.deliveredAt,
+        status: schema.orders.status,
+        remittanceId: schema.deliveryRemittances.id,
+        remittanceStatus: schema.deliveryRemittances.status,
+        sentAt: schema.deliveryRemittances.sentAt,
+        locationName: loc.name,
+        providerName: prov.name,
+      })
+      .from(schema.deliveryRemittanceOrders)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+      .innerJoin(
+        schema.deliveryRemittances,
+        eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
+      )
+      .leftJoin(loc, eq(loc.id, schema.deliveryRemittances.logisticsLocationId))
+      .leftJoin(prov, eq(prov.id, loc.providerId));
+
+    const countQuery = this.db
+      .select({ count: count() })
+      .from(schema.deliveryRemittanceOrders)
+      .innerJoin(
+        schema.deliveryRemittances,
+        eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
+      );
+
+    const [rows, totalRows] = await Promise.all([
+      whereClause
+        ? baseQuery.where(whereClause).orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset)
+        : baseQuery.orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset),
+      whereClause ? countQuery.where(whereClause) : countQuery,
+    ]);
+
+    const total = totalRows[0]?.count ?? 0;
+
+    return {
+      orders: rows.map((r) => ({
+        id: r.id,
+        customerName: r.customerName,
+        orderNumber: r.orderNumber,
+        totalAmount: r.totalAmount ? String(r.totalAmount) : '0',
+        deliveryFee: r.deliveryFee ? String(r.deliveryFee) : null,
+        deliveredAt: r.deliveredAt?.toISOString() ?? null,
+        status: r.status,
+        remittanceId: r.remittanceId,
+        remittanceStatus: r.remittanceStatus,
+        sentAt: r.sentAt.toISOString(),
+        locationName: r.locationName ?? null,
+        providerName: r.providerName ?? null,
+      })),
+      pagination: {
+        page: input.page,
+        limit: input.limit,
+        total,
+        totalPages: Math.ceil(total / input.limit),
+      },
     };
   }
 

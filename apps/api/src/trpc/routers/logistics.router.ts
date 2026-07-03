@@ -286,6 +286,13 @@ export const logisticsRouter = router({
       return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
+  /** Flat list of individual orders across remittance batches (unbatched view). */
+  listDeliveryRemittanceOrders: authedProcedure
+    .input(listDeliveryRemittancesSchema)
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().listDeliveryRemittanceOrders(input, ctx.user, ctx.activeGroupId);
+    }),
+
   /**
    * Single-request bundle for the Cash Remittances page. Replaces 4 parallel
    * HTTP round-trips (listDeliveryRemittances + locationOptions + users.list +

@@ -820,16 +820,8 @@ export function DeliveryRemittancesLoadingShell({
               }
             />
           </div>
-          {/* Pills skeleton — keeps the layout aligned with the loaded state,
-              which renders <FilterPills /> for All/Pending/Received/Disputed. */}
-          <div className="flex gap-1.5">
-            {['All', 'Pending', 'Received', 'Disputed'].map((label) => (
-              <div
-                key={label}
-                className="h-7 w-20 rounded-full border border-app-border bg-app-hover/40 animate-pulse"
-              />
-            ))}
-          </div>
+          {/* Status dropdown skeleton */}
+          <div className="h-10 md:h-9 w-full sm:w-56 rounded-md border border-app-border bg-app-hover/40 animate-pulse" />
           <CompactTable<{ id: string }>
             caption="Cash remittance batches"
             columns={listShellColumns}

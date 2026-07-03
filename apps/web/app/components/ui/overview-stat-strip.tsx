@@ -299,7 +299,7 @@ export function OverviewStatStrip({
     <div className="md:hidden">
       <div
         className="gap-1.5 px-1.5 py-1.5"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(12rem, 100%), 1fr))' }}
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)' }}
       >
       {items.map((item, i) => {
         const stamp = changedAt.get(i);

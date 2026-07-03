@@ -34,7 +34,7 @@ export function FormulaBreakdownModal({
 }) {
   return (
     <Modal open={open} onClose={onClose} maxWidth="max-w-md">
-      <div className="space-y-5 p-1">
+      <div className="space-y-5 p-5">
         <div>
           <h2 className="text-base font-semibold text-app-fg">{title}</h2>
           <p className="text-sm text-app-fg-muted mt-1.5 leading-relaxed">{description}</p>
