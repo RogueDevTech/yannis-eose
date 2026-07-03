@@ -56,6 +56,7 @@ export interface FinanceOverviewPulse {
   receivedCount: number;
   deliveredCount: number;
   deliveredAmount: number;
+  deliveredNetAmount: number;
   grossOrderValue: number;
   totalDeliveryFees: number;
   deliveryFeeCount: number;

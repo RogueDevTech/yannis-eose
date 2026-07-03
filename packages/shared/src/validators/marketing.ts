@@ -149,12 +149,25 @@ const platformCustomLabelSchema = z
 
 const adUrlSchema = optionalAssetUrl;
 
+/** Date string that must not be in the future (Nigeria timezone, WAT = UTC+1). */
+const pastOrTodayDate = z.string().date().refine(
+  (v) => {
+    // Nigeria is UTC+1 — compute today's date in that timezone
+    const now = new Date();
+    const nigeriaOffset = 60; // minutes ahead of UTC
+    const nigeriaMs = now.getTime() + (now.getTimezoneOffset() + nigeriaOffset) * 60_000;
+    const nigeriaToday = new Date(nigeriaMs).toISOString().slice(0, 10);
+    return v <= nigeriaToday;
+  },
+  { message: 'Spend date cannot be in the future' },
+);
+
 const createAdSpendObjectSchema = z.object({
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
   screenshotUrl: optionalAssetUrl,
-  spendDate: z.string().date(),
+  spendDate: pastOrTodayDate,
   notes: z.string().max(500).optional(),
   platform: adPlatformSchema.default('FACEBOOK'),
   platformCustomLabel: platformCustomLabelSchema,
@@ -214,7 +227,7 @@ const adSpendBatchLineSchema = z.object({
 });
 
 const createAdSpendBatchObjectSchema = z.object({
-  spendDate: z.string().date(),
+  spendDate: pastOrTodayDate,
   /** One form (campaign) per batch — every line in `lines` belongs to it. */
   campaignId: z.string().uuid(),
   lines: z
@@ -327,7 +340,7 @@ export const updateAdSpendSchema = z.object({
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
   screenshotUrl: optionalAssetUrl,
   /** Optional for daily-flow updates (date is immutable on daily records). */
-  spendDate: z.string().date().optional(),
+  spendDate: pastOrTodayDate.optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
 });
@@ -360,7 +373,7 @@ export type CampaignOrderTotalForBatchInput = z.infer<typeof campaignOrderTotalF
 
 /** MB logs spend for a single day. Order count is system-derived. */
 export const logDailyAdSpendSchema = z.object({
-  spendDate: z.string().date(),
+  spendDate: pastOrTodayDate,
   spendAmount: z.coerce.number().min(0, 'Spend amount cannot be negative').multipleOf(0.01),
 });
 export type LogDailyAdSpendInput = z.infer<typeof logDailyAdSpendSchema>;

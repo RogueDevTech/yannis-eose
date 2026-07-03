@@ -1856,6 +1856,7 @@ export class LogisticsService {
       .select({
         deliveredCount: sql<string>`COUNT(*)::text`,
         deliveredAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        deliveredNetAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
       })
       .from(schema.orders)
       .where(and(...deliveredConditions));
@@ -1887,6 +1888,7 @@ export class LogisticsService {
       awaitingDeliveryFeeCount: awaitingSummary?.awaitingDeliveryFeeCount ?? '0',
       deliveredCount: deliveredSummary?.deliveredCount ?? '0',
       deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
+      deliveredNetAmount: deliveredSummary?.deliveredNetAmount ?? '0',
       // Deduction breakdown for remitted orders
       grossOrderValue: baseSummary?.grossOrderValue ?? '0',
       totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
@@ -1903,7 +1905,7 @@ export class LogisticsService {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', awaitingGrossAmount: '0', awaitingDeliveryFees: '0', awaitingDeliveryFeeCount: '0',
-      deliveredCount: '0', deliveredAmount: '0',
+      deliveredCount: '0', deliveredAmount: '0', deliveredNetAmount: '0',
       grossOrderValue: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
       totalCommitmentFees: '0', commitmentFeeCount: '0',
       totalPosFees: '0', posFeeCount: '0',

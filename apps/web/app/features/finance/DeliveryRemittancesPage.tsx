@@ -86,6 +86,7 @@ export interface DeliveryRemittanceSummary {
   disputedCount: string;
   deliveredCount?: string;
   deliveredAmount?: string;
+  deliveredNetAmount?: string;
   grossOrderValue?: string;
   totalDeliveryFees?: string;
   deliveryFeeCount?: string;
@@ -774,9 +775,9 @@ export function DeliveryRemittancesPage({
           items={[
             {
               label: <span className="flex items-center">Delivered Orders ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
-              value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
+              value: <NairaPrice amount={Number(summary.deliveredNetAmount ?? summary.deliveredAmount ?? 0)} />,
               valueClassName: 'text-app-fg tabular-nums',
-              title: 'Gross value of all delivered + remitted orders in this period',
+              title: 'Net value (minus delivery fees) of all delivered + remitted orders — should equal Awaiting + Received + Pending + Disputed',
             },
             {
               label: <span className="flex items-center">Awaiting Remittance ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
@@ -864,9 +865,11 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
           title="Delivered Orders"
-          description="Gross value of all orders with status DELIVERED or REMITTED in the selected period. This is the total amount customers paid — before any delivery fees or other deductions."
+          description="Net value of all delivered + remitted orders. This should equal Awaiting + Received + Pending + Disputed."
           lines={[
-            { label: 'All delivered + remitted orders', amount: Number(summary.deliveredAmount ?? 0), type: 'value', count: Number(summary.deliveredCount ?? 0) },
+            { label: 'Gross order value', amount: Number(summary.deliveredAmount ?? 0), type: 'value', count: Number(summary.deliveredCount ?? 0) },
+            { label: 'Delivery fees', amount: Number(summary.deliveredAmount ?? 0) - Number(summary.deliveredNetAmount ?? summary.deliveredAmount ?? 0), type: 'deduction' },
+            { label: 'Net delivered', amount: Number(summary.deliveredNetAmount ?? summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
           ]}
         />
         <FormulaBreakdownModal
