@@ -739,9 +739,10 @@ export class CartOrdersService {
       .from(schema.cartOrderItems)
       .where(eq(schema.cartOrderItems.cartOrderId, cartOrderId));
 
-    // Dedup guard: skip graduation if the same phone+product already has an
-    // active order in the last 60 days. Prevents duplicate deliveries when a
-    // cart order and a form/offline order both exist for the same customer.
+    // Dedup guard: skip graduation only if the same phone+product already has
+    // a DELIVERED or REMITTED order in the last 60 days. Only block when the
+    // product was genuinely delivered — don't block when the original form
+    // order is still in CS pipeline (that's a legitimate cart recovery delivery).
     if (co.customerPhoneHash && coItems.length > 0) {
       const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
       const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
@@ -753,9 +754,9 @@ export class CartOrdersService {
           .where(
             and(
               eq(schema.orders.customerPhoneHash, co.customerPhoneHash),
-              sql`${schema.orders.status} NOT IN ('CANCELLED', 'DELETED')`,
+              inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
               isNull(schema.orders.deletedAt),
-              gte(schema.orders.createdAt, sixtyDaysAgo),
+              gte(schema.orders.deliveredAt, sixtyDaysAgo),
               inArray(schema.orderItems.productId, productIds),
             ),
           )
@@ -765,7 +766,6 @@ export class CartOrdersService {
           this.logger.warn(
             `Cart order ${cartOrderId} skipped graduation: duplicate delivery found (order ${dupeMatch.id}) for same phone+product`,
           );
-          // Mark cart order as CONVERTED without creating a duplicate order
           await this.db
             .update(schema.cartOrders)
             .set({ status: 'CONVERTED' })
