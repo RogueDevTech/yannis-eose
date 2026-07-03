@@ -25,6 +25,8 @@ export interface EligibleOrder {
   logisticsLocationProviderName: string | null;
   /** Auto-generated invoice when present (CONFIRM side effect); null for legacy rows. */
   invoice: OrderInvoice | null;
+  isDuplicate?: string | null;
+  duplicateOfId?: string | null;
 }
 
 function lineAmount(o: EligibleOrder): number {

@@ -1650,6 +1650,25 @@ export class LogisticsService {
       return [{ count: s?.count ?? 0, amount: s?.amount ?? '0' }];
     });
 
+    // Count duplicate-flagged orders per batch for the batch list UI
+    const dupCountRows = remittanceIds.length > 0
+      ? await this.db
+          .select({
+            deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
+            dupCount: count(),
+          })
+          .from(schema.deliveryRemittanceOrders)
+          .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+          .where(
+            and(
+              inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds),
+              isNotNull(schema.orders.isDuplicate),
+            ),
+          )
+          .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
+      : [];
+    const dupCountMap = new Map(dupCountRows.map((r) => [r.deliveryRemittanceId, r.dupCount]));
+
     const sentByIds = [...new Set(records.map((r) => r.sentBy))];
     const senders =
       sentByIds.length > 0
@@ -1717,17 +1736,22 @@ export class LogisticsService {
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
         // Order counts (not batch counts) so the stat strip is consistent with Delivered/Awaiting
         batchedOrderCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittanceOrders.orderId})::text`,
+        receivedOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
-        // Deduction breakdown — so the CEO sees where the money goes
-        grossOrderValue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
-        totalDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
-        deliveryFeeCount: sql<string>`COUNT(CASE WHEN COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
-        totalCommitmentFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.commitmentFee}, 0)), 0)::text`,
-        commitmentFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
-        totalPosFees: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.posFee}, 0)), 0)::text`,
-        posFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
-        totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0)), 0)::text`,
-        failedDeliveryCount: sql<string>`COUNT(DISTINCT CASE WHEN COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
+        disputedOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
+        pendingGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        disputedGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        // Deduction breakdown — RECEIVED batches only (confirmed remittances)
+        grossOrderValue: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        grossOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
+        totalDeliveryFees: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN COALESCE(${schema.orders.deliveryFee}, 0) ELSE 0 END), 0)::text`,
+        deliveryFeeCount: sql<string>`COUNT(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
+        totalCommitmentFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.commitmentFee} ELSE 0 END), 0)::text`,
+        commitmentFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
+        totalPosFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.posFee} ELSE 0 END), 0)::text`,
+        posFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
+        totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.failedDeliveryCost} ELSE 0 END), 0)::text`,
+        failedDeliveryCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -1888,7 +1912,12 @@ export class LogisticsService {
       disputedAmount: outcomeSummary?.disputedAmount ?? '0',
       totalCount: baseSummary?.totalCount ?? '0',
       batchedOrderCount: baseSummary?.batchedOrderCount ?? '0',
+      receivedOrderCount: baseSummary?.receivedOrderCount ?? '0',
       pendingCount: baseSummary?.pendingCount ?? '0',
+      disputedOrderCount: baseSummary?.disputedOrderCount ?? '0',
+      pendingGrossAmount: baseSummary?.pendingGrossAmount ?? '0',
+      disputedGrossAmount: baseSummary?.disputedGrossAmount ?? '0',
+      // Outcome-based counts (legacy — may be 0 if no outcome records)
       receivedCount: outcomeSummary?.receivedCount ?? '0',
       disputedCount: outcomeSummary?.disputedCount ?? '0',
       awaitingAmount: awaitingSummary?.awaitingAmount ?? '0',
@@ -1901,6 +1930,7 @@ export class LogisticsService {
       deliveredNetAmount: deliveredSummary?.deliveredNetAmount ?? '0',
       // Deduction breakdown for remitted orders
       grossOrderValue: baseSummary?.grossOrderValue ?? '0',
+      grossOrderCount: baseSummary?.grossOrderCount ?? '0',
       totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
       deliveryFeeCount: baseSummary?.deliveryFeeCount ?? '0',
       totalCommitmentFees: baseSummary?.totalCommitmentFees ?? '0',
@@ -1913,10 +1943,10 @@ export class LogisticsService {
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
-      totalCount: '0', batchedOrderCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
+      totalCount: '0', batchedOrderCount: '0', receivedOrderCount: '0', pendingCount: '0', disputedOrderCount: '0', pendingGrossAmount: '0', disputedGrossAmount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', awaitingGrossAmount: '0', awaitingDeliveryFees: '0', awaitingDeliveryFeeCount: '0',
       deliveredCount: '0', deliveredAmount: '0', deliveredNetAmount: '0',
-      grossOrderValue: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
+      grossOrderValue: '0', grossOrderCount: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
       totalCommitmentFees: '0', commitmentFeeCount: '0',
       totalPosFees: '0', posFeeCount: '0',
       totalFailedDeliveryCosts: '0', failedDeliveryCount: '0',
@@ -1933,6 +1963,7 @@ export class LogisticsService {
             locationProviderName: locationProviderMap.get(r.logisticsLocationId) ?? null,
             sentByName: sentByNameMap.get(r.sentBy) ?? null,
             orderCount,
+            duplicateOrderCount: dupCountMap.get(r.id) ?? 0,
             outcomeAmount: orderAmount,
             outcomeOrderCount: orderCount,
             outcomeReason: r.disputeReason,
@@ -2136,7 +2167,10 @@ export class LogisticsService {
     const locAlias = alias(schema.logisticsLocations, 'dup_loc');
     const provAlias = alias(schema.logisticsProviders, 'dup_prov');
 
-    // Fetch all orders with same phone + overlapping product (the whole group)
+    // Fetch all orders in the duplicate group:
+    // 1. The original order itself
+    // 2. Any order with duplicate_of_id pointing to the original
+    // 3. Any order with same phone + overlapping product (catches unflagged duplicates)
     const groupOrders = await this.db
       .select({
         id: schema.orders.id,
@@ -2159,17 +2193,26 @@ export class LogisticsService {
         providerName: provAlias.name,
       })
       .from(schema.orders)
-      .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+      .leftJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
       .leftJoin(csAlias, eq(csAlias.id, schema.orders.assignedCsId))
       .leftJoin(mbAlias, eq(mbAlias.id, schema.orders.mediaBuyerId))
       .leftJoin(locAlias, eq(locAlias.id, schema.orders.logisticsLocationId))
       .leftJoin(provAlias, eq(provAlias.id, locAlias.providerId))
       .where(
         and(
-          eq(schema.orders.customerPhoneHash, originalOrder.customerPhoneHash),
-          inArray(schema.orderItems.productId, productIds),
           not(inArray(schema.orders.status, ['CANCELLED', 'DELETED'])),
           isNull(schema.orders.deletedAt),
+          or(
+            // The original order
+            eq(schema.orders.id, originalId),
+            // Orders flagged as duplicates of the original
+            eq(schema.orders.duplicateOfId, originalId),
+            // Unflagged duplicates: same phone + overlapping product
+            and(
+              eq(schema.orders.customerPhoneHash, originalOrder.customerPhoneHash),
+              productIds.length > 0 ? inArray(schema.orderItems.productId, productIds) : sql`FALSE`,
+            ),
+          ),
         ),
       )
       .orderBy(asc(schema.orders.createdAt));
@@ -2839,6 +2882,8 @@ export class LogisticsService {
           invoiceStatus: schema.invoices.status,
           invoiceDueDate: schema.invoices.dueDate,
           invoiceCreatedAt: schema.invoices.createdAt,
+          isDuplicate: schema.orders.isDuplicate,
+          duplicateOfId: schema.orders.duplicateOfId,
         })
         .from(schema.orders)
         .leftJoin(schema.invoices, eq(schema.invoices.orderId, schema.orders.id))
@@ -2850,6 +2895,8 @@ export class LogisticsService {
         deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         status: o.status,
+        isDuplicate: o.isDuplicate ?? null,
+        duplicateOfId: o.duplicateOfId ?? null,
         invoice:
           o.invoiceId != null && o.invoiceReferenceNumber != null && o.invoiceCreatedAt
             ? {

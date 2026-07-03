@@ -125,6 +125,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     deliveredAt: string | null; status: string;
     remittanceId: string; remittanceStatus: string;
     sentAt: string; locationName: string | null; providerName: string | null;
+    isDuplicate: string | null; duplicateOfId: string | null;
   };
   const ordersViewInput = encodeURIComponent(JSON.stringify(listInput));
   const ordersViewPromise = viewMode === 'orders'

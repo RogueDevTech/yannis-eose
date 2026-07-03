@@ -27,6 +27,7 @@ import { RemittanceInfoIcon, FormulaBreakdownModal } from './remittance-info-mod
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { SearchInput } from '~/components/ui/search-input';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { useNavigate } from '@remix-run/react';
 import type { EligibleOrder } from './CashRemittanceCreateModal';
 
@@ -48,6 +49,7 @@ export interface DeliveryRemittanceListItem {
   outcomeOrderCount?: number;
   outcomeReason?: string | null;
   receivedAt?: string | null;
+  duplicateOrderCount?: number;
 }
 
 export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
@@ -66,6 +68,8 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
     deliveredAt: string | null;
     status: string;
     invoice: OrderInvoice | null;
+    isDuplicate?: string | null;
+    duplicateOfId?: string | null;
   }>;
 }
 
@@ -81,6 +85,7 @@ export interface DeliveryRemittanceSummary {
   receivedAmount: string;
   disputedAmount: string;
   totalCount: string;
+  batchedOrderCount?: string;
   pendingCount: string;
   receivedCount: string;
   disputedCount: string;
@@ -144,6 +149,8 @@ export interface RemittanceOrderRow {
   sentAt: string;
   locationName: string | null;
   providerName: string | null;
+  isDuplicate: string | null;
+  duplicateOfId: string | null;
 }
 
 function formatDeliveredAt(iso: string | null): string {
@@ -318,7 +325,10 @@ export function DeliveryRemittancesPage({
     });
   };
 
-  const remittedOrderCount = Number(summary.pendingCount ?? 0) + Number(summary.receivedCount ?? 0) + Number(summary.disputedCount ?? 0);
+  const s = summary as Record<string, unknown>;
+  const receivedOrderCount = Number(s.receivedOrderCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
+  const disputedOrderCount = Number(s.disputedOrderCount ?? summary.disputedCount ?? 0);
+  const remittedOrderCount = Number(summary.batchedOrderCount ?? 0) || (receivedOrderCount + Number(summary.pendingCount ?? 0) + disputedOrderCount);
   const hasFilters = !!filters.location || !!filters.sentBy;
   const hasEligibleFilters = !!filters.location || !!filters.eligibleQ;
 
@@ -369,7 +379,16 @@ export function DeliveryRemittancesPage({
         key: 'orderCount',
         header: 'Orders',
         align: 'right',
-        render: (r) => <span className="tabular-nums">{r.orderCount}</span>,
+        render: (r) => (
+          <div className="flex items-center justify-end gap-1.5">
+            <span className="tabular-nums">{r.orderCount}</span>
+            {(r.duplicateOrderCount ?? 0) > 0 && (
+              <span className="shrink-0 rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300" title={`${r.duplicateOrderCount} duplicate order${r.duplicateOrderCount === 1 ? '' : 's'} in this batch`}>
+                {r.duplicateOrderCount} dup
+              </span>
+            )}
+          </div>
+        ),
       },
       {
         key: 'amount',
@@ -484,9 +503,16 @@ export function DeliveryRemittancesPage({
         key: 'billTo',
         header: 'Bill to',
         render: (o) => (
-          <span className="text-sm text-app-fg truncate max-w-[12rem] inline-block align-bottom">
-            {o.invoice?.recipientInfo?.name ?? o.customerName}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm text-app-fg truncate max-w-[10rem] inline-block align-bottom">
+              {o.invoice?.recipientInfo?.name ?? o.customerName}
+            </span>
+            {o.isDuplicate && (
+              <span className="shrink-0 rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300" title="This order has a similar order for the same customer and product">
+                Duplicate
+              </span>
+            )}
+          </div>
         ),
       },
       {
@@ -519,50 +545,41 @@ export function DeliveryRemittancesPage({
         key: 'invoiceActions',
         header: '',
         align: 'right',
+        tight: true,
         nowrap: true,
         render: (o) => (
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <TableActionButton
-              variant="neutral"
-              onClick={() => navigateTo(`/admin/orders/${o.id}`)}
-              title="View order"
-            >
-              Order
-            </TableActionButton>
-            {o.invoice ? (
-              <>
-                <TableActionButton
-                  variant="primary"
-                  title="View invoice"
-                  onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
-                >
-                  Invoice
-                </TableActionButton>
-                <TableActionButton
-                  variant="neutral"
-                  title="Download"
-                  onClick={() => {
-                    if (o.invoice) void generateInvoicePdf(o.invoice);
-                  }}
-                >
-                  Download
-                </TableActionButton>
-              </>
-            ) : (
-              <generateInvoiceFetcher.Form method="post">
-                <input type="hidden" name="intent" value="generateInvoice" />
-                <input type="hidden" name="orderId" value={o.id} />
-                <TableActionButton
-                  variant="primary"
-                  type="submit"
-                  disabled={isGeneratingInvoice && generatingOrderId === o.id}
-                  onClick={() => setGeneratingOrderId(o.id)}
-                >
-                  {isGeneratingInvoice && generatingOrderId === o.id ? 'Generating…' : 'Generate Invoice'}
-                </TableActionButton>
-              </generateInvoiceFetcher.Form>
-            )}
-          </div>
+          <TableRowActionsSheet
+            ariaLabel={`Actions for ${o.customerName}`}
+            sheetTitle={o.customerName}
+            actions={[
+              ...(o.isDuplicate ? [{
+                key: 'compare',
+                kind: 'link' as const,
+                label: 'Compare',
+                to: `/admin/finance/delivery-remittances/duplicates/${(o as EligibleOrder & { duplicateOfId?: string | null }).duplicateOfId ?? o.id}`,
+              }] : []),
+              {
+                key: 'order',
+                kind: 'link' as const,
+                label: 'Order',
+                to: `/admin/orders/${o.id}`,
+              },
+              ...(o.invoice ? [
+                {
+                  key: 'invoice',
+                  kind: 'button' as const,
+                  label: 'Invoice',
+                  onClick: () => o.invoice && setEligibleInvoicePreview(o.invoice),
+                },
+                {
+                  key: 'download',
+                  kind: 'button' as const,
+                  label: 'Download invoice',
+                  onClick: () => { if (o.invoice) void generateInvoicePdf(o.invoice); },
+                },
+              ] : []),
+            ]}
+          />
         ),
       },
     ],
@@ -770,10 +787,13 @@ export function DeliveryRemittancesPage({
         const netRemittable = grossVal - deliveryFees - commitmentFees - posFees - failedDelivery;
         return (
         <>
-        {/* Main stats — Delivered = Awaiting + Remitted */}
+        {/* Main stats — Delivered = Awaiting + Remitted + Pending + Disputed */}
         {(() => {
-          const remittedCount = Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0);
-          const remittedAmount = Number(summary.grossOrderValue ?? 0);
+          const pendingGross = Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0);
+          const disputedGross = Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0);
+          // grossOrderValue is now RECEIVED-only, so it IS the remitted gross
+          const remittedGross = Number(summary.grossOrderValue ?? 0);
+          const remittedCount = Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? summary.receivedCount ?? 0);
           return (
             <OverviewStatStrip
               mobileGrid
@@ -782,7 +802,7 @@ export function DeliveryRemittancesPage({
                   label: <span className="flex items-center">Delivered ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
                   value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
                   valueClassName: 'text-app-fg tabular-nums',
-                  title: 'Total value of all delivered orders = Awaiting + Remitted',
+                  title: 'Total value = Awaiting + Remitted + Pending + Disputed',
                 },
                 {
                   label: <span className="flex items-center">Awaiting ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
@@ -794,25 +814,41 @@ export function DeliveryRemittancesPage({
                 },
                 {
                   label: <span className="flex items-center">Remitted ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
-                  value: <NairaPrice amount={remittedAmount} />,
+                  value: <NairaPrice amount={remittedGross} />,
                   valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
-                  title: 'Orders placed on remittance batches (received + pending + disputed)',
-                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
-                  active: viewTab === 'remittances' && !pendingStatus,
+                  title: 'Cash collected and confirmed by Finance',
+                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('page', '1'); return n; }, { replace: true }); },
+                  active: viewTab === 'remittances' && pendingStatus === 'RECEIVED',
                 },
+                {
+                  label: <span className="flex items-center">Pending ({Number(summary.pendingCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('pending')} /></span>,
+                  value: <NairaPrice amount={pendingGross} />,
+                  valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
+                  title: 'Sent but not yet confirmed by Finance',
+                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'SENT'); n.set('page', '1'); return n; }, { replace: true }); },
+                  active: viewTab === 'remittances' && pendingStatus === 'SENT',
+                },
+                ...(Number(summary.disputedCount ?? 0) > 0 ? [{
+                  label: <span className="flex items-center">Disputed ({Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('disputed')} /></span>,
+                  value: <NairaPrice amount={disputedGross} />,
+                  valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' as const,
+                  title: 'Needs resolution',
+                  onClick: () => { primeSamePathRefetch(); setSearchParams((p: URLSearchParams) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'DISPUTED'); n.set('page', '1'); return n; }, { replace: true }); },
+                  active: viewTab === 'remittances' && pendingStatus === 'DISPUTED',
+                }] : []),
               ]}
             />
           );
         })()}
 
-        {/* Deductions — only show when there are batched orders */}
+        {/* Deductions — received batches only */}
         {grossVal > 0 && (
           <OverviewStatStrip
             mobileGrid
             tileClassName="!py-2"
             items={[
               {
-                label: <span className="flex items-center">Gross Order Value ({Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
+                label: <span className="flex items-center">Gross Order Value ({Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? summary.receivedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
                 value: <NairaPrice amount={summary.grossOrderValue ?? '0'} />,
                 valueClassName: 'text-app-fg tabular-nums',
               },
@@ -850,10 +886,12 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
           title="Delivered"
-          description="Total value of all delivered orders. Equals Awaiting + Remitted."
+          description="Total gross value of all delivered orders. Equals Awaiting + Remitted + Pending + Disputed."
           lines={[
             { label: 'Awaiting', amount: Number(summary.awaitingGrossAmount ?? summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
-            { label: 'Remitted', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0) },
+            { label: 'Remitted (received)', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? 0) },
+            { label: 'Pending (sent)', amount: Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
+            ...(Number(summary.disputedCount ?? 0) > 0 ? [{ label: 'Disputed', amount: Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0), type: 'value' as const, count: Number(summary.disputedCount ?? 0) }] : []),
             { label: 'Delivered', amount: Number(summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
           ]}
         />
@@ -861,12 +899,10 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
           title="Remitted"
-          description="Orders placed on remittance batches. Gross value before deductions."
+          description="Orders on batches confirmed as received by Finance. Gross value before deductions."
           lines={[
-            { label: 'Received by Finance', amount: Number(summary.receivedAmount ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) },
-            { label: 'Pending (sent, not confirmed)', amount: Number(summary.pendingAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
-            { label: 'Disputed', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
-            { label: 'Gross total on batches', amount: Number(summary.grossOrderValue ?? 0), type: 'result', count: Number(summary.receivedCount ?? 0) + Number(summary.pendingCount ?? 0) + Number(summary.disputedCount ?? 0) },
+            { label: 'Gross order value', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? 0) },
+            { label: 'After deductions (Expected Net)', amount: netRemittable, type: 'result' },
           ]}
         />
         <FormulaBreakdownModal
@@ -902,12 +938,11 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
-          description="Total order value of all orders on a remittance batch (any status). Before deductions. Only batched orders — orders awaiting a batch are not counted."
+          description="Gross value of orders on received remittance batches. Before deductions."
           lines={[
-            { label: 'Received batches', amount: Number(summary.receivedAmount ?? 0), type: 'value', count: Number(summary.receivedCount ?? 0) },
-            { label: 'Pending batches', amount: Number(summary.pendingAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
-            { label: 'Disputed batches', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
-            { label: 'Gross Order Value', amount: grossVal, type: 'result' },
+            { label: 'Orders on received batches', amount: grossVal, type: 'value', count: Number(s.grossOrderCount ?? 0) },
+            { label: 'Delivery fees', amount: deliveryFees, type: 'deduction', count: Number(summary.deliveryFeeCount ?? 0) },
+            { label: 'Expected Net', amount: netRemittable, type: 'result' },
           ]}
         />
         <FormulaBreakdownModal
@@ -943,7 +978,7 @@ export function DeliveryRemittancesPage({
                 </span>
               ) : null,
           },
-          { value: 'remittances', label: `Remitted (${Number(summary.pendingCount ?? 0) + Number(summary.receivedCount ?? 0) + Number(summary.disputedCount ?? 0)} orders)` },
+          { value: 'remittances', label: viewMode === 'orders' ? `Remitted (${remittedOrderCount} orders)` : `Remitted (${Number(summary.totalCount)} batches)` },
         ]}
       />
 
@@ -998,9 +1033,10 @@ export function DeliveryRemittancesPage({
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={[
                       { value: '', label: viewMode === 'orders' ? `All (${remittedOrderCount} orders)` : `All (${Number(summary.totalCount)} batches)` },
+
                       { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
-                      { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
-                      { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
+                      { value: 'RECEIVED', label: `Received (${receivedOrderCount})` },
+                      { value: 'DISPUTED', label: `Disputed (${disputedOrderCount})` },
                     ]}
                     wrapperClassName="w-full sm:w-52"
                   />
@@ -1071,9 +1107,10 @@ export function DeliveryRemittancesPage({
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={[
                       { value: '', label: viewMode === 'orders' ? `All (${remittedOrderCount} orders)` : `All (${Number(summary.totalCount)} batches)` },
+
                       { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
-                      { value: 'RECEIVED', label: `Received (${Number(summary.receivedCount)})` },
-                      { value: 'DISPUTED', label: `Disputed (${Number(summary.disputedCount)})` },
+                      { value: 'RECEIVED', label: `Received (${receivedOrderCount})` },
+                      { value: 'DISPUTED', label: `Disputed (${disputedOrderCount})` },
                     ]}
                     wrapperClassName="w-full"
                   />
@@ -1113,7 +1150,14 @@ export function DeliveryRemittancesPage({
                   key: 'customerName',
                   header: 'Customer',
                   render: (r) => (
-                    <span className="text-sm text-app-fg truncate max-w-[10rem] block">{r.customerName}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm text-app-fg truncate max-w-[10rem] inline-block align-bottom">{r.customerName}</span>
+                      {r.isDuplicate && (
+                        <span className="shrink-0 rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300" title="This order has a similar order for the same customer and product">
+                          Duplicate
+                        </span>
+                      )}
+                    </div>
                   ),
                 },
                 {
@@ -1170,6 +1214,11 @@ export function DeliveryRemittancesPage({
                   tight: true,
                   render: (r) => (
                     <div className="flex items-center gap-1">
+                      {r.isDuplicate && (
+                        <CompactTableActionButton to={`/admin/finance/delivery-remittances/duplicates/${r.duplicateOfId ?? r.id}`}>
+                          Compare
+                        </CompactTableActionButton>
+                      )}
                       <CompactTableActionButton to={`/admin/orders/${r.id}`}>
                         Order
                       </CompactTableActionButton>
@@ -1182,6 +1231,7 @@ export function DeliveryRemittancesPage({
               ]}
               rows={remittanceOrders}
               rowKey={(r) => r.id}
+              rowClassName={(r) => r.isDuplicate ? 'bg-warning-50/50 dark:bg-warning-950/20' : ''}
               loading={isLoaderRefetchBusy}
               loadingVariant="overlay"
               emptyTitle="No remitted orders found"
@@ -1212,6 +1262,11 @@ export function DeliveryRemittancesPage({
                     prefetch="intent"
                     className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
                   >
+                    {r.isDuplicate && (
+                      <span className="mb-1 inline-block rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300">
+                        Duplicate order
+                      </span>
+                    )}
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-app-fg truncate">{r.customerName}</p>
@@ -1418,6 +1473,7 @@ export function DeliveryRemittancesPage({
             columns={eligibleColumns}
             rows={eligibleOrders}
             rowKey={(o) => o.id}
+            rowClassName={(o) => o.isDuplicate ? 'bg-warning-50/50 dark:bg-warning-950/20' : ''}
             loading={isLoaderRefetchBusy}
             loadingVariant="overlay"
             selection={{
@@ -1498,7 +1554,7 @@ export function DeliveryRemittancesPage({
                   <TableActionButton
                     variant="neutral"
                     onClick={() => navigateTo(`/admin/orders/${o.id}`)}
-                    title="View order"
+                    title="Order"
                   >
                     Order
                   </TableActionButton>
@@ -1506,7 +1562,7 @@ export function DeliveryRemittancesPage({
                     <>
                       <TableActionButton
                         variant="primary"
-                        title="View invoice"
+                        title="Invoice"
                         onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
                       >
                         Invoice
