@@ -88,7 +88,10 @@
 
   html {
     @apply antialiased;
-    font-size: 14px;
+    /* Default to xlarge (17.5px) — matches the boot script's default.
+       The boot script overrides this from localStorage if the user picked a different scale.
+       Previously 14px (base), causing a flash from small→large on every page load. */
+    font-size: 17.5px;
   }
 
   body {
