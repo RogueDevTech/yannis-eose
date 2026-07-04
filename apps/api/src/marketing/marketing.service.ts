@@ -1569,6 +1569,59 @@ export class MarketingService {
   }
 
   /**
+   * Org-wide direction summary for admin-class users. Shows all COMPLETED transfers as
+   * "received" and all outbound (SENT+COMPLETED+DISPUTED) as "distributed" across all users.
+   */
+  async fundingByDirectionSummaryOrgWide(
+    input: { startDate?: string; endDate?: string },
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const dateConditions: SQL[] = [];
+    if (input.startDate) dateConditions.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) dateConditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
+
+    const branchFilter: SQL[] = [];
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      branchFilter.push(
+        sql`${schema.marketingFunding.receiverId} IN (
+          SELECT DISTINCT user_id FROM user_branches
+          WHERE branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
+        )`,
+      );
+    }
+
+    const [received, distributed, pendingRow, disputedRow] = await Promise.all([
+      this.db
+        .select({ total: sum(schema.marketingFunding.amount), c: count() })
+        .from(schema.marketingFunding)
+        .where(and(eq(schema.marketingFunding.status, 'COMPLETED'), ...dateConditions, ...branchFilter)),
+      this.db
+        .select({ total: sum(schema.marketingFunding.amount), c: count() })
+        .from(schema.marketingFunding)
+        .where(and(inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']), ...dateConditions, ...branchFilter)),
+      this.db
+        .select({ c: count(), total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(and(eq(schema.marketingFunding.status, 'SENT'), ...dateConditions, ...branchFilter)),
+      this.db
+        .select({ c: count() })
+        .from(schema.marketingFunding)
+        .where(and(eq(schema.marketingFunding.status, 'DISPUTED'), ...dateConditions, ...branchFilter)),
+    ]);
+
+    return {
+      totalReceived: received[0]?.total ?? '0',
+      receivedCount: Number(received[0]?.c ?? 0),
+      totalDistributed: distributed[0]?.total ?? '0',
+      distributedCount: Number(distributed[0]?.c ?? 0),
+      pendingMarkReceived: Number(pendingRow[0]?.c ?? 0),
+      pendingMarkReceivedAmount: pendingRow[0]?.total ?? '0',
+      disputedAsReceiver: Number(disputedRow[0]?.c ?? 0),
+      disputedAsSender: 0,
+    };
+  }
+
+  /**
    * Funding balance for one user: COMPLETED received − COMPLETED distributed − non-REJECTED ad spend.
    * Expenses deduct immediately on creation (PENDING + APPROVED both count); only REJECTED
    * entries are excluded — effectively "returned" to the balance.

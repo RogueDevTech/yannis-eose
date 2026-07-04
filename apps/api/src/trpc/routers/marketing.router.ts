@@ -1862,7 +1862,10 @@ export const marketingRouter = router({
         distributingTransfers,
         distributingRequests,
       ] = await Promise.all([
-        getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange, ctx.effectiveBranchIds),
+        // Admin-class users see org-wide totals; HoM/MB/supervisor see personal direction stats
+        isFundingAdmin && isAdminLevel(ctx.user)
+          ? getMarketingService().fundingByDirectionSummaryOrgWide(dateRange, ctx.effectiveBranchIds)
+          : getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange, ctx.effectiveBranchIds),
         isFundingAdmin
           ? (async () => {
               // Supervisors see only their team members as funding recipients
