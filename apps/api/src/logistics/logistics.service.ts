@@ -1500,7 +1500,7 @@ export class LogisticsService {
         }
         // Deduct remittance-level costs from the completed total
         completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost;
-        await tx
+        const remittedRows = await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })
           .where(
@@ -1508,7 +1508,23 @@ export class LogisticsService {
               inArray(schema.orders.id, input.orderIds),
               eq(schema.orders.status, 'DELIVERED'),
             ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+
+        // Write timeline events for each order that transitioned to REMITTED
+        if (remittedRows.length > 0) {
+          await tx.insert(schema.orderTimelineEvents).values(
+            remittedRows.map((r) => ({
+              orderId: r.id,
+              eventType: 'ORDER_REMITTED' as const,
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: `Cash remittance received — order marked as remitted.`,
+              metadata: { deliveryRemittanceId: row.id },
+              branchId: r.branchId ?? null,
+            })),
           );
+        }
 
         await tx.insert(schema.deliveryRemittanceOutcomes).values({
           deliveryRemittanceId: row.id,
@@ -2385,7 +2401,7 @@ export class LogisticsService {
       ).map((r) => r.orderId);
 
       if (linkedOrderIds.length > 0) {
-        await tx
+        const remittedRows = await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })
           .where(
@@ -2393,7 +2409,23 @@ export class LogisticsService {
               inArray(schema.orders.id, linkedOrderIds),
               eq(schema.orders.status, 'DELIVERED'),
             ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+
+        // Write timeline events for each order that transitioned to REMITTED
+        if (remittedRows.length > 0) {
+          await tx.insert(schema.orderTimelineEvents).values(
+            remittedRows.map((r) => ({
+              orderId: r.id,
+              eventType: 'ORDER_REMITTED' as const,
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: `Cash remittance received — order marked as remitted.`,
+              metadata: { deliveryRemittanceId: input.deliveryRemittanceId },
+              branchId: r.branchId ?? null,
+            })),
           );
+        }
       }
 
       return found;
