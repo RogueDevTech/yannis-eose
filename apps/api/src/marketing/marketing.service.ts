@@ -176,7 +176,7 @@ export class MarketingService {
       if (isOrgWide) return;
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'No active branch — switch to a branch before initiating a funding transfer',
+        message: 'No active branch. Switch to a branch before initiating a funding transfer.',
       });
     }
 
@@ -3498,7 +3498,7 @@ export class MarketingService {
           userId: transfer.receiverMbId,
           type: 'mb_fund_transfer:approved' as const,
           title: 'Fund transfer received',
-          body: `${sender?.name ?? 'A media buyer'} sent you ₦${Number(transfer.amount).toLocaleString()} — tap to accept`,
+          body: `${sender?.name ?? 'A media buyer'} sent you ₦${Number(transfer.amount).toLocaleString()}. Tap to accept.`,
           data: { transferId },
         });
         this.notifications.enqueueCreate({
@@ -3888,7 +3888,7 @@ export class MarketingService {
       this.notifications.enqueueCreate({
         userId,
         type: 'marketing:ad_spend_submitted',
-        title: 'Ad spend edited — re-approval needed',
+        title: 'Ad spend edited: re-approval needed',
         body: `${actor.name ?? 'A media buyer'} updated approved spend for ${formatted}. Review under Ads Expense.`,
         data: { mediaBuyerId: actor.id },
       });

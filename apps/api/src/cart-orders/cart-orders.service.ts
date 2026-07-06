@@ -562,7 +562,7 @@ export class CartOrdersService {
       // Build a descriptive timeline message instead of the generic "Status changed to X."
       let description: string | undefined;
       if (isRetrack) {
-        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? ` — ${note}` : ''}`;
+        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? `. ${note}` : ''}`;
       } else if (note) {
         description = note;
       }
@@ -1119,7 +1119,7 @@ export class CartOrdersService {
         eventType: 'QUANTITY_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
-        description: `Adjusted order items — new total ₦${totalAmount.toLocaleString('en-NG')}.`,
+        description: `Adjusted order items. New total ₦${totalAmount.toLocaleString('en-NG')}.`,
         metadata: { items, totalAmount },
         branchId: order.servicingBranchId,
       });
@@ -1239,6 +1239,19 @@ export class CartOrdersService {
         AND ca.status IN ('PENDING', 'ABANDONED')
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+        -- Dedup: skip if an edge-form order already exists for the same
+        -- customer + product. Prevents the same lead being worked in both
+        -- the orders and cart_orders pipelines simultaneously.
+        AND NOT EXISTS (
+          SELECT 1
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.id
+          WHERE o.customer_phone_hash = ca.customer_phone_hash
+            AND oi.product_id = ca.product_id
+            AND (o.order_source IS NULL OR o.order_source = 'edge-form')
+            AND o.deleted_at IS NULL
+            AND o.status != 'DELETED'
+        )
       RETURNING id, source_cart_id
     `);
 

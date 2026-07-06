@@ -360,7 +360,7 @@ export function DeliveryRemittancesPage({
           <span className="text-sm text-app-fg">
             {r.locationName
               ? r.locationProviderName
-                ? `${r.locationName} — ${r.locationProviderName}`
+                ? `${r.locationName}: ${r.locationProviderName}`
                 : r.locationName
               : '—'}
           </span>
@@ -533,7 +533,7 @@ export function DeliveryRemittancesPage({
         render: (o) =>
           o.logisticsLocationName
             ? o.logisticsLocationProviderName
-              ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+              ? `${o.logisticsLocationName}: ${o.logisticsLocationProviderName}`
               : o.logisticsLocationName
             : '—',
       },
@@ -931,7 +931,7 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'disputed'}
           onClose={() => setInfoModal(null)}
           title="Disputed"
-          description="Net value of orders on remittance batches that have been flagged as disputed — the amount was not received as expected."
+          description="Net value of orders on remittance batches that have been flagged as disputed. The amount was not received as expected."
           lines={[
             { label: 'Orders on DISPUTED batches', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
           ]}
@@ -1169,7 +1169,7 @@ export function DeliveryRemittancesPage({
                     <span className="text-sm text-app-fg-muted truncate max-w-[12rem] block">
                       {r.locationName
                         ? r.providerName
-                          ? `${r.locationName} — ${r.providerName}`
+                          ? `${r.locationName}: ${r.providerName}`
                           : r.locationName
                         : '—'}
                     </span>
@@ -1276,7 +1276,7 @@ export function DeliveryRemittancesPage({
                           {r.orderNumber ?? `${r.id.slice(0, 10)}…`} ·{' '}
                           {r.locationName
                             ? r.providerName
-                              ? `${r.locationName} — ${r.providerName}`
+                              ? `${r.locationName}: ${r.providerName}`
                               : r.locationName
                             : '—'}
                         </p>
@@ -1333,7 +1333,7 @@ export function DeliveryRemittancesPage({
                       <p className="text-sm font-medium text-app-fg truncate">
                         {r.locationName
                           ? r.locationProviderName
-                            ? `${r.locationName} — ${r.locationProviderName}`
+                            ? `${r.locationName}: ${r.locationProviderName}`
                             : r.locationName
                           : '—'}
                       </p>
@@ -1546,7 +1546,7 @@ export function DeliveryRemittancesPage({
                   <span className="truncate">
                     {o.logisticsLocationName
                       ? o.logisticsLocationProviderName
-                        ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+                        ? `${o.logisticsLocationName}: ${o.logisticsLocationProviderName}`
                         : o.logisticsLocationName
                       : '—'}
                   </span>
