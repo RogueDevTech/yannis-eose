@@ -4806,6 +4806,7 @@ export class OrdersService {
       RETURNED: 'ORDER_RETURNED',
       RESTOCKED: 'ORDER_RESTOCKED',
       WRITTEN_OFF: 'ORDER_WRITTEN_OFF',
+      REMITTED: 'ORDER_REMITTED',
     };
     // Detect retrack (backward transition) by lifecycle position
     const LIFECYCLE_POSITION: Record<string, number> = {

@@ -395,6 +395,7 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'ORDER_DUPLICATE_FLAGGED',
   'ORDER_UNFROZEN',
   'ORDER_FROZEN',
+  'ORDER_REMITTED',
 ]);
 
 /** Staff onboarding workflow — non-blocking record-keeping flow. */
