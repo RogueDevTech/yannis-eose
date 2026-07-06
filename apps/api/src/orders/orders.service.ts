@@ -391,6 +391,95 @@ export class OrdersService {
     return row?.id ?? null;
   }
 
+  /**
+   * Check if a counterpart order (follow-up or original) is already DELIVERED/REMITTED.
+   * Returns the counterpart info for the UI warning banner, or null if no duplicate.
+   */
+  private async findDuplicateDeliveryCounterpart(
+    orderId: string,
+    order: typeof schema.orders.$inferSelect,
+  ): Promise<{ counterpartOrderNo: number; counterpartId: string; counterpartStatus: string; isFollowUp: boolean } | null> {
+    // Case 1: Check follow_up_orders table for a delivered follow-up
+    const [fuDelivered] = await this.db
+      .select({
+        id: schema.followUpOrders.id,
+        orderNumber: schema.followUpOrders.orderNumber,
+        status: schema.followUpOrders.status,
+      })
+      .from(schema.followUpOrders)
+      .where(
+        and(
+          eq(schema.followUpOrders.sourceOrderId, orderId),
+          inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.followUpOrders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (fuDelivered) {
+      return {
+        counterpartOrderNo: fuDelivered.orderNumber,
+        counterpartId: fuDelivered.id,
+        counterpartStatus: fuDelivered.status,
+        isFollowUp: true,
+      };
+    }
+
+    // Case 2: Check graduated follow-ups in orders table
+    const [graduatedFu] = await this.db
+      .select({
+        id: schema.orders.id,
+        orderNumber: schema.orders.orderNumber,
+        status: schema.orders.status,
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.followUpSourceOrderId, orderId),
+          eq(schema.orders.isFollowUp, true),
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (graduatedFu) {
+      return {
+        counterpartOrderNo: graduatedFu.orderNumber!,
+        counterpartId: graduatedFu.id,
+        counterpartStatus: graduatedFu.status,
+        isFollowUp: true,
+      };
+    }
+
+    // Case 3: This is a follow-up — check if original is already delivered
+    if (order.isFollowUp && order.followUpSourceOrderId) {
+      const [origDelivered] = await this.db
+        .select({
+          id: schema.orders.id,
+          orderNumber: schema.orders.orderNumber,
+          status: schema.orders.status,
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.id, order.followUpSourceOrderId),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (origDelivered) {
+        return {
+          counterpartOrderNo: origDelivered.orderNumber!,
+          counterpartId: origDelivered.id,
+          counterpartStatus: origDelivered.status,
+          isFollowUp: false,
+        };
+      }
+    }
+
+    return null;
+  }
+
   private async proposedLineItemPricingDiffersFromDatabase(
     orderId: string,
     items: RequestOrderLinePriceChangeInput['items'],
@@ -3089,7 +3178,7 @@ export class OrdersService {
     //   3) pending permission_request to archive (soft-delete) the order.
     // Previously these ran sequentially (3 RTTs); fanning out collapses them
     // to a single wall-clock round-trip on the cache-miss detail load.
-    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId, pendingRetrackRequestId] =
+    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId, pendingRetrackRequestId, duplicateDeliveryWarning] =
       await Promise.all([
         this.db
           .select({
@@ -3107,6 +3196,7 @@ export class OrdersService {
         this.findPendingOrderDeletionRequestId(orderId),
         this.findPendingDeliveredOrderDeletionRequestId(orderId),
         this.findPendingOrderRetrackRequestId(orderId),
+        this.findDuplicateDeliveryCounterpart(orderId, order),
       ]);
 
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
@@ -3139,6 +3229,7 @@ export class OrdersService {
       pendingOrderDeletionRequestId,
       pendingDeliveredOrderDeletionRequestId,
       pendingRetrackRequestId,
+      duplicateDeliveryWarning,
     };
   }
 

@@ -2136,6 +2136,37 @@ export function OrderDetailPage({
         </div>
       )}
 
+      {order.duplicateDeliveryWarning && (
+        <div className="rounded-lg border border-danger-300 dark:border-danger-700/60 bg-danger-50 dark:bg-danger-900/20 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg
+              className="h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div className="flex-1 min-w-0 text-sm text-danger-900 dark:text-danger-100">
+              <p className="font-semibold">Duplicate delivery detected</p>
+              <p className="mt-0.5 text-danger-800 dark:text-danger-200/90">
+                {order.duplicateDeliveryWarning.isFollowUp
+                  ? `A follow-up order (YNS-${order.duplicateDeliveryWarning.counterpartOrderNo}) has already been delivered for this customer. This order should not be delivered again.`
+                  : `The original order (YNS-${order.duplicateDeliveryWarning.counterpartOrderNo}) has already been delivered for this customer. This follow-up should not be delivered again.`
+                }
+              </p>
+              <Link
+                to={`/admin/orders/${order.duplicateDeliveryWarning.counterpartId}`}
+                className="inline-block mt-1.5 text-sm font-medium text-danger-700 dark:text-danger-300 underline underline-offset-2 hover:text-danger-900 dark:hover:text-danger-100"
+              >
+                View YNS-{order.duplicateDeliveryWarning.counterpartOrderNo}
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left column — `contents` collapses this wrapper on mobile so the

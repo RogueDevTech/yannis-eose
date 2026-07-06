@@ -165,6 +165,14 @@ export interface OrderDetail {
   pendingDeliveredOrderDeletionRequestId?: string | null;
   /** PENDING permission_request id for ORDER_STATUS_RETRACK, if any */
   pendingRetrackRequestId?: string | null;
+  /** Warning: counterpart order (follow-up or original) already delivered */
+  duplicateDeliveryWarning?: {
+    counterpartOrderNo: number;
+    counterpartId: string;
+    counterpartStatus: string;
+    /** True = the counterpart is a follow-up; false = the counterpart is the original */
+    isFollowUp: boolean;
+  } | null;
 }
 
 /**
