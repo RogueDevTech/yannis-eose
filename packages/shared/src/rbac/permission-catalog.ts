@@ -196,6 +196,8 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'permission_requests.order_deletion.approve', resource: 'permission_requests.order_deletion', action: 'approve', description: 'Approve / reject pending ORDER_DELETION requests (per-order branch / assignee context still applies)' },
   { code: 'orders.deletion.request', resource: 'orders.deletion', action: 'request', description: 'Request deletion of a DELIVERED/REMITTED order (Finance-initiated). Requires dual approval from HoCS + HoL before execution.' },
   { code: 'permission_requests.delivered_order_deletion.approve', resource: 'permission_requests.delivered_order_deletion', action: 'approve', description: 'Approve / reject DELIVERED_ORDER_DELETION requests (dual-approval: both CS and Logistics heads must sign off)' },
+  { code: 'orders.retrack.request', resource: 'orders.retrack', action: 'request', description: 'Request a status retrack on a DELIVERED/REMITTED order (Finance-initiated). Requires dual approval from HoCS + HoL.' },
+  { code: 'permission_requests.order_retrack.approve', resource: 'permission_requests.order_retrack', action: 'approve', description: 'Approve / reject ORDER_STATUS_RETRACK requests (dual-approval: both CS and Logistics heads must sign off)' },
 
   // Per-domain export gates. CEO directive: download/CSV/XLSX is permission-first
   // so admins can deputize export rights to specific users (senior CS, MB, etc.)
@@ -360,6 +362,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
     'permission_requests.delivered_order_deletion.approve',
+    'permission_requests.order_retrack.approve',
     'orders.export',
     'branches.teams.cs',
     'orders.routing',
@@ -393,6 +396,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'finance.cashRemittance.create',
     'finance.cashRemittance.markReceived',
     'orders.deletion.request',
+    'orders.retrack.request',
     'finance.export',
     'orders.export',
     'audit.export',
@@ -435,6 +439,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
     'permission_requests.delivered_order_deletion.approve',
+    'permission_requests.order_retrack.approve',
     'transfers.read',
     'finance.read',
     'orders.export',
