@@ -146,7 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         campaignId: (o.campaignId as string) ?? null,
         campaignName: (o.campaignName as string) ?? null,
         cartId: (o.sourceCartId as string) ?? null,
-        isDuplicate: null,
+        isDuplicate: (o.isDuplicate as string) ?? null,
         lastCsComment: null,
       }));
 
