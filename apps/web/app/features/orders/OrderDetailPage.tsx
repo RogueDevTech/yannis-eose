@@ -1868,6 +1868,27 @@ export function OrderDetailPage({
           </div>
         </div>
       ) : null}
+      {order.isDuplicate === 'CART_EDGE_FORM_DUPE' && (
+        <div className="rounded-lg border border-app-border bg-app-hover px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="text-sm text-app-fg">
+              <p className="font-semibold">Duplicate — cart order matched an existing edge-form order</p>
+              <p className="mt-0.5 text-app-fg-muted">
+                This order was automatically deleted because the same customer and product already exists
+                in the main orders pipeline. The original order is the source of truth.
+              </p>
+            </div>
+            {order.duplicateOfId && (
+              <Link
+                to={`/admin/orders/${order.duplicateOfId}`}
+                className="btn-secondary btn-sm inline-flex shrink-0"
+              >
+                View original order →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
       {(order.isDuplicate === 'FLAGGED' || order.isDuplicate === 'POSSIBLY_DUPLICATE') && (
         <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
