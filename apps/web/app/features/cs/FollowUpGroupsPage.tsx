@@ -47,9 +47,9 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Follow Up — Groups"
+        title="Follow Up: Groups"
         mobileInlineActions
-        description="Manage follow-up groups — teams of closers that work reopened orders."
+        description="Manage follow-up groups. Teams of closers that work reopened orders."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"

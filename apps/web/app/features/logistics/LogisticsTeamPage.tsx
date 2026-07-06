@@ -1015,7 +1015,7 @@ export function LogisticsTeamPage({
         const activeProductName = activeProductId ? productOptions.find((pr) => pr.id === activeProductId)?.name : undefined;
         const reportFilters = { productName: activeProductName, startDate: dateFilters.startDate || undefined, endDate: dateFilters.endDate || undefined, periodAllTime: dateFilters.periodAllTime };
         const subtitleParts = [
-          `${p.providerName} — ${p.locationCount} location${p.locationCount === 1 ? '' : 's'}`,
+          `${p.providerName}: ${p.locationCount} location${p.locationCount === 1 ? '' : 's'}`,
           ...(activeProductName ? [`Product: ${activeProductName}`] : []),
           ...(dateFilters.periodAllTime ? ['All time'] : dateFilters.startDate && dateFilters.endDate ? [`${dateFilters.startDate} to ${dateFilters.endDate}`] : []),
         ];

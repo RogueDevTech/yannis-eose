@@ -533,8 +533,8 @@ export class PermissionRequestsService {
           actorId: approver.id,
           actorName: approver.name ?? null,
           description:
-            `${approver.name ?? 'Approver'} approved the line price change — ` +
-            `new total ₦${approvedTotal.toLocaleString('en-NG')}.`,
+            `${approver.name ?? 'Approver'} approved the line price change. ` +
+            `New total ₦${approvedTotal.toLocaleString('en-NG')}.`,
           metadata: {
             permissionRequestId: requestId,
             approvedItems: items,
@@ -678,7 +678,7 @@ export class PermissionRequestsService {
         this.notificationsService.enqueueCreate({
           userId: req.requesterId,
           type: 'approval:permission_request',
-          title: 'Deletion request — partial approval',
+          title: 'Deletion request: partial approval',
           body: `${sideLabel} has approved the deletion of order ${orderLabel}. Awaiting the other department's approval.`,
           data: { requestId, action: 'PARTIAL_APPROVAL' },
         });
@@ -813,7 +813,7 @@ export class PermissionRequestsService {
         this.notificationsService.enqueueCreate({
           userId: req.requesterId,
           type: 'approval:permission_request',
-          title: 'Retrack request — partial approval',
+          title: 'Retrack request: partial approval',
           body: `${sideLabel} has approved the retrack of order ${orderLabel}. Awaiting the other department's approval.`,
           data: { requestId, action: 'PARTIAL_APPROVAL' },
         });

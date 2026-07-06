@@ -161,7 +161,7 @@ export function DuplicateComparisonPage({ data }: { data: DuplicateGroupData }) 
             <span className="font-medium text-app-fg">{original.customerName}</span>
             {original.closerName && <span className="text-app-fg-muted">Closer: <span className="text-app-fg">{original.closerName}</span></span>}
             {original.mediaBuyerName && <span className="text-app-fg-muted">MB: <span className="text-app-fg">{original.mediaBuyerName}</span></span>}
-            {original.locationName && <span className="text-app-fg-muted">{original.locationName}{original.providerName ? ` — ${original.providerName}` : ''}</span>}
+            {original.locationName && <span className="text-app-fg-muted">{original.locationName}{original.providerName ? `: ${original.providerName}` : ''}</span>}
           </div>
         </div>
       )}

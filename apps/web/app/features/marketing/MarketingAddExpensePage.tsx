@@ -14,7 +14,7 @@ export function MarketingAddExpensePage({
     <div className="space-y-6">
       <PageHeader
         title="Log expenses"
-        description="Daily ad spend per form — screenshot required."
+        description="Daily ad spend per form. Screenshot required."
         actions={
           <Link
             to="/admin/marketing/expenses"

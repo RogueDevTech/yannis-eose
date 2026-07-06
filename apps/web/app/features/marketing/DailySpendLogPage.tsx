@@ -225,8 +225,8 @@ export function DailySpendLogPage() {
                   : 'bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300'
               }`}>
                 {isLocked
-                  ? "Approved — submitting sends for re-approval."
-                  : `Existing ${existing.status.toLowerCase()} record — submitting will update.`}
+                  ? "Approved. Submitting sends for re-approval."
+                  : `Existing ${existing.status.toLowerCase()} record. Submitting will update.`}
               </p>
             )}
 

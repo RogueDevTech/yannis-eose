@@ -529,7 +529,7 @@ export function FundingLedgerPage({
         open={showExport}
         onClose={() => setShowExport(false)}
         title="Export Funding Ledger"
-        description={`${selectedUserName ?? 'All members'} — ${filters.periodAllTime ? 'All time' : `${filters.startDate} to ${filters.endDate}`}`}
+        description={`${selectedUserName ?? 'All members'}: ${filters.periodAllTime ? 'All time' : `${filters.startDate} to ${filters.endDate}`}`}
         rows={entries.map((e) => ({
           txnId: `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`,
           date: new Date(e.eventDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }),

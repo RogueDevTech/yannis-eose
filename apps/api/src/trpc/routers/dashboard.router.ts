@@ -83,7 +83,7 @@ async function _ceoOverviewFetch(params: {
     // CS funnel: servicing branch scope, includes offline orders, excludes
     // graduated follow-up and cart orders (they have their own funnels).
     ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true, true).catch(logErr('csStatusCounts')),
-    ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
+    ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
     financeService!.getInvoiceSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('payoutSummary')),
@@ -204,6 +204,7 @@ async function _ceoOverviewFetch(params: {
       returned: returnedOrders,
       statusCounts,
       offlineCount: supplementaryCounts.offlineCount,
+      offlineDeliveredCount: supplementaryCounts.offlineDeliveredCount,
       // CS funnel: includes offline orders, scoped by servicing branch
       csStatusCounts: (csStatusCountsResult ?? {}) as Record<string, number>,
     },
@@ -462,7 +463,7 @@ export const dashboardRouter = router({
     const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
       // CS funnel — excludes graduated follow-up + cart orders
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true).catch(() => ({})),
-      ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, duplicateCount: 0 })),
+      ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
       getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
       getCartOrdersService().getStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),

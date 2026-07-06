@@ -101,7 +101,7 @@ export function OfferImagesEditor({
     <div className="w-full min-w-0 space-y-2">
       <FormField
         label="Offer images"
-        hint={`Optional — up to ${MAX_PRODUCT_OFFER_IMAGES} image(s) for this tier (forms, catalog).`}
+        hint={`Optional. Up to ${MAX_PRODUCT_OFFER_IMAGES} image(s) for this tier (forms, catalog).`}
       >
         {imageUrls.length > 0 && (
           <ul className="flex flex-wrap gap-2 mb-2">

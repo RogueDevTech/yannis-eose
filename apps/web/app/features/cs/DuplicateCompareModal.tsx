@@ -242,7 +242,7 @@ export function DuplicateCompareModal({
           variant="primary"
           onClick={() => pair && onMerge(pair)}
           disabled={!pair || !original || actionsBusy}
-          title={!original ? 'Original order missing — cannot merge' : undefined}
+          title={!original ? 'Original order missing. Cannot merge.' : undefined}
         >
           Merge into existing
         </Button>

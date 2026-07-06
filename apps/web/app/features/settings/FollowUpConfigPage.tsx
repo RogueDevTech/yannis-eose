@@ -438,14 +438,14 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-app-fg">
                     {syncProgress.status === 'complete'
-                      ? `Sync complete — ${syncProgress.totalPulledSoFar} orders pulled`
+                      ? `Sync complete: ${syncProgress.totalPulledSoFar} orders pulled`
                       : syncProgress.status === 'error'
-                        ? `Sync error — ${syncProgress.totalPulledSoFar} orders pulled before failure`
+                        ? `Sync error: ${syncProgress.totalPulledSoFar} orders pulled before failure`
                         : `Syncing... Rule ${syncProgress.currentRuleIndex} of ${syncProgress.totalRules}`}
                   </p>
                   <p className="text-xs text-app-fg-muted mt-0.5 truncate">
                     {syncProgress.status === 'running'
-                      ? `${syncProgress.currentRuleName} — ${syncProgress.totalPulledSoFar} orders pulled so far`
+                      ? `${syncProgress.currentRuleName}: ${syncProgress.totalPulledSoFar} orders pulled so far`
                       : syncProgress.status === 'error'
                         ? syncProgress.errorMessage ?? 'Unknown error'
                         : `${syncProgress.ruleResults.length} rules processed`}
@@ -764,7 +764,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                 Are you sure you want to delete <strong className="text-app-fg">{deleteRuleTarget.name}</strong>?
               </p>
               <p className="text-xs text-app-fg-muted mt-2">
-                Previously pulled orders will not be affected — they stay in their current state.
+                Previously pulled orders will not be affected. They stay in their current state.
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -805,7 +805,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             )}
             <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
             <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
-            <ViewRow label="Freeze Original" value={viewRule.freezeOriginal !== false ? 'Yes — original locked' : 'No — both compete'} />
+            <ViewRow label="Freeze Original" value={viewRule.freezeOriginal !== false ? 'Yes, original locked' : 'No, both compete'} />
             <ViewRow label="Priority" value={String(viewRule.priority)} />
           </div>
 
@@ -969,7 +969,7 @@ function GroupsAndBranchesTab({
   const toggleFetcher = useFetcher<{ success?: boolean; error?: string; redistributed?: number }>();
   useFetcherToast(toggleFetcher.data, {
     successMessage: toggleFetcher.data?.redistributed
-      ? `Updated — ${toggleFetcher.data.redistributed} orders redistributed`
+      ? `Updated: ${toggleFetcher.data.redistributed} orders redistributed`
       : 'Updated',
   });
   const [toggleTarget, setToggleTarget] = useState<{ id: string; name: string; kind: string; isExcluded: boolean } | null>(null);

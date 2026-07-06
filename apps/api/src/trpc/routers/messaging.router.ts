@@ -337,7 +337,7 @@ export const messagingRouter = router({
       if (!order.customerPhone) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'This order has no phone number on record — messaging is unavailable.',
+          message: 'This order has no phone number on record. Messaging is unavailable.',
         });
       }
 

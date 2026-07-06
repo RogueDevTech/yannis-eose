@@ -451,7 +451,7 @@ export function FormsPage({
             </p>
           ) : uiFormsScope === 'mine' ? (
             <p className="text-sm text-info-800 dark:text-info-200">
-              No forms in this view. You&apos;re viewing <strong>My forms</strong> — switch to the <strong>All forms</strong> tab above to see forms created by other users.
+              No forms in this view. You&apos;re viewing <strong>My forms</strong>. Switch to the <strong>All forms</strong> tab above to see forms created by other users.
             </p>
           ) : (
             <p className="text-sm text-info-800 dark:text-info-200">

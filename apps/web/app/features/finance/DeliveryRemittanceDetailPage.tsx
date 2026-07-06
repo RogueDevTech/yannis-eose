@@ -90,7 +90,7 @@ export function DeliveryRemittanceDetailPage({
   const locationLine =
     detail.locationName != null
       ? detail.locationProviderName != null
-        ? `${detail.locationName} — ${detail.locationProviderName}`
+        ? `${detail.locationName}: ${detail.locationProviderName}`
         : detail.locationName
       : 'Unknown location';
 

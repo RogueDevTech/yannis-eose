@@ -218,8 +218,8 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           <span className="text-sm text-app-fg-muted">
             {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
             {plan.effectiveTo
-              ? ` — ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
-              : ' — Ongoing'}
+              ? `: ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
+              : ': Ongoing'}
           </span>
         ),
       },
@@ -767,7 +767,7 @@ function PlanForm({
 
       <Collapsible
         trigger={
-          <span className="text-sm font-medium text-app-fg">Advanced — tiered rates &amp; caps</span>
+          <span className="text-sm font-medium text-app-fg">Advanced: tiered rates &amp; caps</span>
         }
         defaultOpen={Boolean(rules['orderRateTiers'] || rules['deliveryRateBonusMultiplier'] || rules['minPerformanceBonus'] || rules['maxPerformanceBonus'])}
         divided
@@ -778,7 +778,7 @@ function PlanForm({
             Tier rows apply a different ₦ rate to each marginal delivered unit that falls inside the range. Leave “To order” blank for open-ended slabs.
           </p>
           {tierRows.length === 0 ? (
-            <p className="text-xs text-app-fg-muted">No tiers — flat per-order pricing applies.</p>
+            <p className="text-xs text-app-fg-muted">No tiers. Flat per-order pricing applies.</p>
           ) : (
             tierRows.map((row, idx) => (
               <div key={`tier-${idx}`} className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-end">
@@ -899,7 +899,7 @@ function PlanForm({
             <p className="input bg-app-hover/40 cursor-not-allowed">
               {new Date(plan!.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
-            <p className="text-xs text-app-fg-muted mt-0.5">Locked — create a new plan to change start date.</p>
+            <p className="text-xs text-app-fg-muted mt-0.5">Locked. Create a new plan to change start date.</p>
           </div>
           <div>
             <TextInput

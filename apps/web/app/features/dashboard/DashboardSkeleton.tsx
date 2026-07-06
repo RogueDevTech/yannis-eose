@@ -36,7 +36,7 @@ export function SuperAdminDashboardLoadingShell({
       <PageHeader
         title={`${dashboardGreeting()}, ${firstName}`}
         mobileInlineActions
-        description="Executive dashboard — key business metrics at a glance."
+        description="Executive dashboard. Key business metrics at a glance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"

@@ -293,7 +293,7 @@ function formatOffers(val: unknown): string {
     const price = (typeof priceVal === 'number' || (typeof priceVal === 'string' && !isNaN(Number(priceVal))))
       ? formatCurrency(priceVal)
       : String(priceVal ?? '—');
-    return `  • ${label} — ${qty} qty — ${price}`;
+    return `  • ${label}: ${qty} qty, ${price}`;
   }).join('\n');
 }
 
@@ -328,7 +328,7 @@ function formatValue(
     if (actor) {
       const role = ROLE_LABELS[actor.role] ?? actor.role;
       const base = `${actor.name} (${role})`;
-      return actor.isHistorical ? `${base} — now ${actor.nameNow}` : base;
+      return actor.isHistorical ? `${base}, now ${actor.nameNow}` : base;
     }
     return `${strVal.slice(0, 8)}...`;
   }
@@ -388,7 +388,7 @@ function UnknownActorModal({
           <p className="text-sm text-app-fg-muted">
             {changedBy === EDGE_FORM_ACTOR_ID ? (
               <>
-                <strong>Edge Form</strong> — This change was performed by the sales form hosted on the Cloudflare Edge.
+                <strong>Edge Form</strong>: This change was performed by the sales form hosted on the Cloudflare Edge.
                 Orders created via the Edge form are captured without a logged-in user; the audit trail uses this reserved
                 actor ID to distinguish them from other system actions (e.g. scheduled jobs, migrations).
               </>
@@ -554,7 +554,7 @@ function formatLeafValue(
     if (actor) {
       const role = ROLE_LABELS[actor.role] ?? actor.role;
       const label = `${actor.name} (${role})`;
-      if (actor.isHistorical) return `${label} — now ${actor.nameNow}`;
+      if (actor.isHistorical) return `${label}, now ${actor.nameNow}`;
       return label;
     }
     // Linkable ID keys — audit detail shows the truncated UUID that jumps straight to the record.
@@ -718,7 +718,7 @@ function OffersDisplay({ value }: { value: unknown }) {
         return (
           <div key={i} className="flex flex-wrap gap-x-2 gap-y-0.5 text-app-fg-muted">
             <span className="font-medium">{label}</span>
-            <span className="text-app-fg-muted">— {String(qty)} qty</span>
+            <span className="text-app-fg-muted">· {String(qty)} qty</span>
             <span className="text-success-600 dark:text-success-400 font-medium">{price}</span>
           </div>
         );
@@ -1142,7 +1142,7 @@ export function AuditPage({
       map.set(selected, {
         value: selected,
         label: `${selected.slice(0, 8)}…`,
-        description: 'Not in preload list — paste UUID or widen scope',
+        description: 'Not in preload list. Paste UUID or widen scope.',
       });
     }
 

@@ -1507,7 +1507,7 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS dispatch — which closer?</h3>
+                        <h3 className="text-lg font-semibold text-app-fg">CS dispatch: which closer?</h3>
                         <p className="text-sm text-app-fg-muted">
                           After routing picks a CS branch, dispatch picks which closer in that branch takes the order.
                         </p>
@@ -1773,8 +1773,8 @@ function VoipProviderPicker({
                 </div>
                 <p className="mt-0.5 text-xs text-app-fg-muted">
                   {p.supportsBrowserClient
-                    ? 'Browser SDK — agent talks via the dashboard.'
-                    : "Phone-to-phone — provider rings the agent's phone, then bridges to the customer."}
+                    ? 'Browser SDK. Agent talks via the dashboard.'
+                    : "Phone-to-phone. Provider rings the agent's phone, then bridges to the customer."}
                 </p>
                 {/* env-var hint removed — credential setup is documented in the runbook. */}
               </div>

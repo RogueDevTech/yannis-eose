@@ -240,7 +240,7 @@ function CreateDisbursementModal({
             searchPlaceholder="Search recipients..."
             options={recipients.map((u) => {
               const bal = recipientBalances.find((b) => b.userId === u.id);
-              const balanceLabel = bal != null ? ` — Balance: ${formatNaira(Number(bal.balance))}` : '';
+              const balanceLabel = bal != null ? `. Balance: ${formatNaira(Number(bal.balance))}` : '';
               return {
                 value: u.id,
                 label: `${u.name}${u.role ? ` (${formatRole(u.role)})` : ''}${balanceLabel}`,
@@ -1253,7 +1253,7 @@ export function DisbursementsPage({
                         <p className="text-xs text-app-fg-muted">
                           {new Date(r.createdAt).toLocaleString('en-NG', DATE_TIME_FMT)}
                           {r.resolvedAt
-                            ? ` — Resolved ${new Date(r.resolvedAt).toLocaleString('en-NG', DATE_TIME_FMT)}`
+                            ? `. Resolved ${new Date(r.resolvedAt).toLocaleString('en-NG', DATE_TIME_FMT)}`
                             : null}
                         </p>
                         {r.status === 'PENDING' ? (

@@ -181,7 +181,7 @@ export function ReceiveShipmentForm({
             }))}
           />
         </FormField>
-        <FormField label="Label" hint="Optional — e.g. Lagos container, May 12">
+        <FormField label="Label" hint="Optional: e.g. Lagos container, May 12">
           <TextInput value={label} onChange={(e) => setLabel(e.target.value)} maxLength={160} disabled={disabled} />
         </FormField>
         <FormField label="Supplier name">
@@ -193,7 +193,7 @@ export function ReceiveShipmentForm({
         <FormField label="Expected arrival">
           <TextInput type="date" value={expectedArrivalDate} onChange={(e) => setExpectedArrivalDate(e.target.value)} disabled={disabled} />
         </FormField>
-        <FormField label="Total landing cost (₦)" hint="Freight + duty + clearing — allocated across lines on verify">
+        <FormField label="Total landing cost (₦)" hint="Freight + duty + clearing. Allocated across lines on verify.">
           <AmountInput value={totalLandingCost} onChange={setTotalLandingCost} disabled={disabled} />
         </FormField>
       </div>

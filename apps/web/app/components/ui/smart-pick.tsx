@@ -106,7 +106,7 @@ export function SmartPick({
               } ${variant}`}
               title={
                 isShortfall
-                  ? `Only ${total} ${itemNoun} available — will pick all ${total}`
+                  ? `Only ${total} ${itemNoun} available. Will pick all ${total}.`
                   : `Pick first ${n} ${itemNoun}`
               }
             >
@@ -158,7 +158,7 @@ export function SmartPick({
             placeholder="Custom"
             disabled={total === 0}
             aria-label={`Custom pick count (max ${total})`}
-            title={customShortfall ? `Only ${total} ${itemNoun} available — picking all ${total}` : undefined}
+            title={customShortfall ? `Only ${total} ${itemNoun} available. Picking all ${total}.` : undefined}
             controlSize="sm"
             wrapperClassName={compactMobile ? 'w-14 shrink-0 md:w-24' : 'w-24 shrink-0'}
             className={`rounded-lg ${

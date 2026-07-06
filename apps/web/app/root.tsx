@@ -566,7 +566,7 @@ export function ErrorBoundary() {
         ? !isOnline
           ? "Your device lost connection. We'll retry as soon as you're back online."
           : exhaustedAutoRetries
-            ? `${networkCopy.description} Auto-retry stopped — tap Try Again when you're ready.`
+            ? `${networkCopy.description} Auto-retry stopped. Tap Try Again when you're ready.`
             : networkCopy.description
         : 'An unexpected error occurred. Please try refreshing the page.';
 

@@ -1434,7 +1434,7 @@ export function MarketingAdSpendPage({
                 onUpload={(url) => setAdSpendScreenshotUrl(url)}
                 onUploadStateChange={setAdSpendFileUploadState}
               />
-              <p className="text-xs text-app-fg-muted mt-1">Mandatory — no screenshot, no log entry accepted</p>
+              <p className="text-xs text-app-fg-muted mt-1">Mandatory. No screenshot, no log entry accepted.</p>
             </div>
           </div>
 
