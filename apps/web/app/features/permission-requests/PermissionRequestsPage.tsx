@@ -216,9 +216,6 @@ export function PermissionRequestsPage({
             <span className="font-medium text-app-fg line-clamp-1" title={req.requesterName}>
               {req.requesterName}
             </span>
-            <span className="block text-xs text-app-fg-muted line-clamp-1" title={req.requesterEmail}>
-              {req.requesterEmail}
-            </span>
           </div>
         ),
       },
@@ -410,10 +407,7 @@ export function PermissionRequestsPage({
                 {
                   label: 'Requester',
                   value: (
-                    <span>
-                      <span className="font-medium">{viewing.requesterName}</span>
-                      <span className="block text-xs text-app-fg-muted">{viewing.requesterEmail}</span>
-                    </span>
+                    <span className="font-medium">{viewing.requesterName}</span>
                   ),
                   fullWidth: true,
                 },
