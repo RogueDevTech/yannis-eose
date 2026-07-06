@@ -884,6 +884,76 @@ export class OrdersService {
   }
 
   /**
+   * Block delivery if the counterpart (follow-up or original) is already DELIVERED/REMITTED.
+   * Prevents double-counted deliveries in Cash Remittances.
+   */
+  private async blockDuplicateDelivery(
+    orderId: string,
+    order: typeof schema.orders.$inferSelect,
+  ): Promise<void> {
+    // Case 1: This is an original order — check if any follow-up already delivered.
+    // Check follow_up_orders table (not yet graduated)
+    const [fuDelivered] = await this.db
+      .select({ id: schema.followUpOrders.id, orderNumber: schema.followUpOrders.orderNumber })
+      .from(schema.followUpOrders)
+      .where(
+        and(
+          eq(schema.followUpOrders.sourceOrderId, orderId),
+          inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.followUpOrders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (fuDelivered) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot mark as delivered — follow-up order FU-${fuDelivered.orderNumber} has already been delivered for this customer.`,
+      });
+    }
+
+    // Check graduated follow-ups in orders table
+    const [graduatedFu] = await this.db
+      .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.followUpSourceOrderId, orderId),
+          eq(schema.orders.isFollowUp, true),
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (graduatedFu) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot mark as delivered — follow-up order YNS-${graduatedFu.orderNumber} has already been delivered for this customer.`,
+      });
+    }
+
+    // Case 2: This is a graduated follow-up — check if the original already delivered.
+    if (order.isFollowUp && order.followUpSourceOrderId) {
+      const [origDelivered] = await this.db
+        .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.id, order.followUpSourceOrderId),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (origDelivered) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot mark as delivered — original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+        });
+      }
+    }
+  }
+
+  /**
    * Soft-delete: transitions order to DELETED status and sets `deleted_at`.
    * DELETED orders are excluded from ALL metrics/counts but the row stays in
    * the DB for audit trail. Admin/SuperAdmin can restore to UNPROCESSED.
@@ -4556,6 +4626,10 @@ export class OrdersService {
       }
       // Delivery note is optional (CEO directive 2026-04-24 reversed the prior mandatory rule).
       // The note + screenshot fields are still persisted when provided.
+
+      // Guard: block delivery if a follow-up (or original) order already delivered.
+      // Prevents double-counted deliveries in Cash Remittances.
+      await this.blockDuplicateDelivery(input.orderId, order);
     }
 
     // Block ALL forward transitions while a line-item change approval is
@@ -6049,7 +6123,7 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
-  ): Promise<{ offlineCount: number; duplicateCount: number }> {
+  ): Promise<{ offlineCount: number; offlineDeliveredCount: number; duplicateCount: number }> {
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.isFollowUp, false),
     ];
@@ -6075,7 +6149,7 @@ export class OrdersService {
     if (endDate) deliveredFollowUpOfflineConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const deliveredFollowUpOfflineWhere = and(...deliveredFollowUpOfflineConditions);
 
-    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows] = await Promise.all([
+    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows, offlineDeliveredRows] = await Promise.all([
       this.db
         .select({ count: count() })
         .from(schema.orders)
@@ -6088,12 +6162,18 @@ export class OrdersService {
         .select({ count: count() })
         .from(schema.orders)
         .where(and(whereClause, sql`${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != ''`)),
+      // Offline orders that reached DELIVERED or REMITTED (for CS Delivered breakdown)
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(and(whereClause, eq(schema.orders.orderSource, 'offline'), inArray(schema.orders.status, ['DELIVERED', 'REMITTED']))),
     ]);
 
     return {
       // Merge delivered follow-up offline orders into the offline count so they
       // surface in the "Offline orders" stat strip tile (CEO 2026-06-09).
       offlineCount: (offlineRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
+      offlineDeliveredCount: (offlineDeliveredRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
       duplicateCount: duplicateRows[0]?.count ?? 0,
     };
   }

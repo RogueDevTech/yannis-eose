@@ -1555,6 +1555,28 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (newStatus === 'DISPATCHED') timestampUpdates.dispatchedAt = new Date();
     if (newStatus === 'DELIVERED') timestampUpdates.deliveredAt = new Date();
 
+    // Guard: block delivery if the original order is already DELIVERED/REMITTED.
+    // Prevents double-counted deliveries in Cash Remittances.
+    if (newStatus === 'DELIVERED' && order.sourceOrderId) {
+      const [origDelivered] = await this.db
+        .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.id, order.sourceOrderId),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (origDelivered) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot mark as delivered — original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+        });
+      }
+    }
+
     // Persist logistics fields from metadata (mirrors regular order transitions)
     const logisticsUpdates: Record<string, unknown> = {};
     if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
