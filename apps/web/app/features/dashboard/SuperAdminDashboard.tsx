@@ -156,6 +156,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     total: data?.orderPipeline?.total ?? 0,
     statusCounts: data?.orderPipeline?.statusCounts ?? {},
     offlineCount: data?.orderPipeline?.offlineCount ?? 0,
+    offlineDeliveredCount: (data?.orderPipeline as Record<string, number> | undefined)?.offlineDeliveredCount ?? 0,
     csStatusCounts: (data?.orderPipeline as Record<string, unknown> | undefined)?.csStatusCounts as Record<string, number> ?? {},
     totalOrdersCounts: (data as unknown as Record<string, unknown> | undefined)?.totalOrdersCounts as Record<string, number> ?? {},
   };
@@ -167,7 +168,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
         mobileInlineActions
-        description="Executive dashboard — key business metrics at a glance."
+        description="Executive dashboard. Key business metrics at a glance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
@@ -267,7 +268,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             <FunnelBreakdownModal
               open={breakdownModal === 'total'}
               onClose={() => setBreakdownModal(null)}
-              title="Total Orders — Breakdown"
+              title="Total Orders: Breakdown"
               description="All orders across all pipelines. Includes form orders, offline orders, graduated follow-up, and graduated cart orders."
               lines={[
                 { label: 'Online form orders', value: tTotal - fuDelivered - cartDelivered - offlineCount },
@@ -280,7 +281,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             <FunnelBreakdownModal
               open={breakdownModal === 'totalDelivered'}
               onClose={() => setBreakdownModal(null)}
-              title="Total Delivered — Breakdown"
+              title="Total Delivered: Breakdown"
               description="All delivered + remitted orders across all pipelines."
               lines={[
                 { label: 'Form orders delivered', value: tDelivered - fuDelivered - cartDelivered },
@@ -390,7 +391,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               <FunnelBreakdownModal
                 open={breakdownModal === 'mktTotal'}
                 onClose={() => setBreakdownModal(null)}
-                title="Marketing Total — Breakdown"
+                title="Marketing Total: Breakdown"
                 description="Form orders + cart-graduated orders. Excludes offline and follow-up graduated orders."
                 lines={[
                   { label: 'Form orders (edge-form)', value: ordersTotal - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
@@ -401,7 +402,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               <FunnelBreakdownModal
                 open={breakdownModal === 'mktDelivered'}
                 onClose={() => setBreakdownModal(null)}
-                title="Marketing Delivered — Breakdown"
+                title="Marketing Delivered: Breakdown"
                 description="Form orders delivered + cart-graduated orders delivered. Cart orders are real MB-attributable sales."
                 lines={[
                   { label: 'Form orders delivered', value: delivered - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
@@ -501,7 +502,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   <FunnelBreakdownModal
                     open={breakdownModal === 'csTotal'}
                     onClose={() => setBreakdownModal(null)}
-                    title="CS Total — Breakdown"
+                    title="CS Total: Breakdown"
                     description="Form orders + offline orders. Excludes graduated follow-up and cart orders (they have their own strips)."
                     lines={[
                       { label: 'Form orders', value: csTotal - offlineCount },
@@ -510,19 +511,17 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     ]}
                   />
                   {(() => {
-                    const fuC = data?.followUpCounts ?? {};
-                    const caC = data?.cartOrdersCounts ?? {};
-                    const fuDel = (fuC['DELIVERED'] ?? 0) + (fuC['REMITTED'] ?? 0);
-                    const caDel = (caC['DELIVERED'] ?? 0) + (caC['REMITTED'] ?? 0);
+                    const offDel = orderPipeline.offlineDeliveredCount ?? 0;
+                    const mktDel = csDelivered - offDel;
                     return (
                       <FunnelBreakdownModal
                         open={breakdownModal === 'csDelivered'}
                         onClose={() => setBreakdownModal(null)}
-                        title="CS Delivered — Breakdown"
-                        description="Orders delivered or remitted from the CS pipeline."
+                        title="CS Delivered: Breakdown"
+                        description="Marketing orders delivered + offline orders delivered from the CS pipeline."
                         lines={[
-                          { label: 'Delivered', value: csSc['DELIVERED'] ?? 0 },
-                          { label: 'Remitted', value: csSc['REMITTED'] ?? 0, muted: true },
+                          { label: 'Marketing orders delivered', value: mktDel },
+                          { label: 'Offline orders delivered', value: offDel, muted: true },
                           { label: 'CS Delivered', value: csDelivered, bold: true },
                         ]}
                       />

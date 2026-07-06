@@ -266,7 +266,7 @@ function appendWarehouseTransferGeoLinks(
   } else {
     pieces.push({ kind: 'text', text: 'unknown destination' });
   }
-  if (tailQty) pieces.push({ kind: 'text', text: ` — ${tailQty}` });
+  if (tailQty) pieces.push({ kind: 'text', text: `: ${tailQty}` });
   pieces.push({ kind: 'text', text: '.' });
   pieces.push({ kind: 'text', text: ' ' });
   pieces.push({
@@ -580,7 +580,7 @@ export function getAuditSummaryParts(
     }
     const verb = entry.action === 'INSERT' ? 'created' : 'updated';
     const mid = statusLabel ? ` (${statusLabel})` : '';
-    const qtyPart = qtyStr ? ` — ${qtyStr} units` : '';
+    const qtyPart = qtyStr ? `: ${qtyStr} units` : '';
     const routeSeg = routePhrase ? ` · ${routePhrase}` : '';
     return { prefix: `${actor} ${verb} a warehouse transfer${mid}${qtyPart}${routeSeg}.`, entityLabel: null, suffix: '' };
   }
@@ -651,7 +651,7 @@ export function getAuditSummaryParts(
     const staffId = pickDataField(data, 'staff_id', 'staffId', 'user_id', 'userId');
     const staff = lookupName(staffId, actorNames, asOf);
     const staffLine = staff ? ` for ${staff}` : '';
-    const tail = `${staffLine}${amount}${statusLabel ? ` — ${statusLabel}.` : '.'}`;
+    const tail = `${staffLine}${amount}${statusLabel ? `. ${statusLabel}.` : '.'}`;
     const verb = entry.action === 'INSERT' ? 'created' : entry.action === 'DELETE' ? 'removed' : 'updated';
     return { prefix: `${actor} ${verb} a payout record`, entityLabel: null, suffix: tail };
   }

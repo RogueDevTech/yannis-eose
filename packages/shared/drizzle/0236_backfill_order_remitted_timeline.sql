@@ -13,7 +13,7 @@ SELECT
   'ORDER_REMITTED',
   dr.received_by,
   u.name,
-  'Cash remittance received — order marked as remitted. (backfilled)',
+  'Cash remittance received. Order marked as remitted. (backfilled)',
   jsonb_build_object('deliveryRemittanceId', dr.id, 'backfilled', true),
   o.branch_id
 FROM delivery_remittance_orders dro

@@ -472,7 +472,7 @@ export function ProductsListPage({
           </p>
           <Textarea
             label="Reason"
-            hint="Minimum 10 characters — visible to approvers."
+            hint="Minimum 10 characters. Visible to approvers."
             value={archiveReason}
             onChange={(e) => setArchiveReason(e.target.value)}
             rows={3}

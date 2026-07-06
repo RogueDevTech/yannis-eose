@@ -604,7 +604,7 @@ export function StaffOnboardingPage({
 
       {isMirroring ? (
         <div className="rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-900 dark:border-success-700 dark:bg-success-900/20 dark:text-success-100">
-          <p className="font-semibold">Read-only — Mirror Mode</p>
+          <p className="font-semibold">Read-only. Mirror Mode</p>
           <p className="mt-1">
             You're viewing this onboarding as {subject.name}. Form fields, file uploads,
             save and submit are disabled. Exit Mirror Mode from the header to make changes
@@ -709,7 +709,7 @@ export function StaffOnboardingPage({
                   options={STATE_OPTIONS}
                 />
               </FormField>
-              <FormField label="Additional phone numbers" hint="Optional — separate with commas">
+              <FormField label="Additional phone numbers" hint="Optional. Separate with commas.">
                 <TextInput
                   name="additionalPhoneNumbers"
                   defaultValue={record.additionalPhoneNumbers ?? ''}
@@ -800,7 +800,7 @@ export function StaffOnboardingPage({
                   inputMode="numeric"
                 />
               </FormField>
-              <FormField label="Rent receipt" hint="Optional — PDF or image, ≤10MB">
+              <FormField label="Rent receipt" hint="Optional. PDF or image, ≤10MB.">
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
@@ -816,7 +816,7 @@ export function StaffOnboardingPage({
           <Card>
             <CardHeader
               title="Academic & employment background"
-              description="Attach one combined PDF per row — certificates, transcripts, CV, prior employment letters."
+              description="Attach one combined PDF per row: certificates, transcripts, CV, prior employment letters."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Academic records" hint="PDF or image, ≤10MB">
@@ -845,7 +845,7 @@ export function StaffOnboardingPage({
           <Card>
             <CardHeader
               title="Other supporting documents"
-              description="Optional — anything outside the standard checklist HR should keep on file."
+              description="Optional. Anything outside the standard checklist HR should keep on file."
             />
             <CardBody className="space-y-3">
               {supportingDocs.length === 0 ? (
@@ -910,7 +910,7 @@ export function StaffOnboardingPage({
               description="Where Finance sends your payroll. Required before review."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Bank" hint="Pick from the list — bank code fills in automatically">
+              <FormField label="Bank" hint="Pick from the list. Bank code fills in automatically.">
                 <SearchableSelect
                   id="onboarding-bank-name"
                   value={bankName}
@@ -1027,7 +1027,7 @@ export function StaffOnboardingPage({
               rows={4}
               value={requestChangesReason}
               onChange={(e) => setRequestChangesReason(e.target.value)}
-              placeholder="e.g. Re-upload the proof of address — the current file is unreadable."
+              placeholder="e.g. Re-upload the proof of address. The current file is unreadable."
               maxLength={1000}
               autoFocus
             />

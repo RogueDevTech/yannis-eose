@@ -793,7 +793,7 @@ export function FollowUpPage({
                         selectedIds.size > orders.length ? ` ${(selectedIds.size - orders.length).toLocaleString()} are not visible on this page.` : ''
                       }${selectAllMatchingCapped ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} of ${viewTotal.toLocaleString()} matching.` : ''}`
                     : `Selects every order matching the current filter.${
-                        viewTotal > ORDERS_DEEP_SELECT_MAX ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} — narrow the filter to process more.` : ''
+                        viewTotal > ORDERS_DEEP_SELECT_MAX ? ` Capped at ${ORDERS_DEEP_SELECT_MAX}. Narrow the filter to process more.` : ''
                       }`}
                 >
                   <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -845,7 +845,7 @@ export function FollowUpPage({
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" size="sm" onClick={() => {
                 const today = new Date().toLocaleDateString('en-NG', { month: 'short', day: 'numeric' });
-                setBatchName(`Follow Up — ${today}`);
+                setBatchName(`Follow Up: ${today}`);
                 setReopenModalOpen(true);
               }}>
                 Reopen for follow-up
@@ -1136,7 +1136,7 @@ export function FollowUpPage({
                 onChange={() => setAssignmentMode('EQUAL')}
                 className="accent-brand-500"
               />
-              <span className="text-sm text-app-fg">Split equally — auto-assign orders to group members</span>
+              <span className="text-sm text-app-fg">Split equally. Auto-assign orders to group members</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -1147,7 +1147,7 @@ export function FollowUpPage({
                 onChange={() => setAssignmentMode('MANUAL')}
                 className="accent-brand-500"
               />
-              <span className="text-sm text-app-fg">Manual — assign individually from the batch detail</span>
+              <span className="text-sm text-app-fg">Manual. Assign individually from the batch detail</span>
             </label>
           </fieldset>
         )}

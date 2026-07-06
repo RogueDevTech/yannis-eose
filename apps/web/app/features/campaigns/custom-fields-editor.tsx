@@ -326,12 +326,12 @@ function FieldEditorModal({
         onChange={(e) => update('helpText', e.target.value)}
         rows={2}
         maxLength={240}
-        placeholder="Shown below the field — explain what to enter."
+        placeholder="Shown below the field. Explain what to enter."
       />
 
       <label className="flex items-center gap-2 cursor-pointer">
         <Checkbox checked={!!draft.required} onChange={(e) => update('required', e.target.checked)} />
-        <span className="text-sm text-app-fg">Required — customer must fill this in</span>
+        <span className="text-sm text-app-fg">Required. Customer must fill this in.</span>
       </label>
 
       <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">

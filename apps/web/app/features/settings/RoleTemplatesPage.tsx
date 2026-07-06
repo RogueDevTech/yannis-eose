@@ -460,7 +460,7 @@ export function RoleTemplatesPage({
         contentClassName="flex max-h-[90vh] flex-col gap-4 bg-app-elevated p-6"
       >
         <h3 className="text-lg font-semibold text-app-fg">
-          {active ? `Edit permissions — ${active.name}` : 'Edit permissions'}
+          {active ? `Edit permissions: ${active.name}` : 'Edit permissions'}
         </h3>
         <ModalFetcherInlineError message={roleTplSurface.errorMatchingIntent('setTemplatePermissions')} />
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
@@ -566,7 +566,7 @@ export function RoleTemplatesPage({
       >
         <div className="space-y-1">
           <h3 className="text-lg font-semibold text-app-fg">
-            {active ? `Permissions — ${active.name}` : 'Permissions'}
+            {active ? `Permissions: ${active.name}` : 'Permissions'}
           </h3>
           {active ? (
             <p className="font-mono text-xs text-app-fg-muted break-all">{active.key}</p>

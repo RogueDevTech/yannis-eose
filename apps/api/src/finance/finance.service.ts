@@ -1706,7 +1706,7 @@ export class FinanceService {
         amount: amt,
         balanceEffect: amt,
         status: r.status,
-        description: `Order YNS-${String(r.orderNumber).padStart(5, '0')} — ${r.customerName}`,
+        description: `Order YNS-${String(r.orderNumber).padStart(5, '0')}: ${r.customerName}`,
         counterpartyName: null,
         userName: null,
       });
@@ -1737,7 +1737,7 @@ export class FinanceService {
         amount: amt,
         balanceEffect: -amt,
         status: r.status,
-        description: `Remittance fees — ${r.locationName ?? 'Unknown location'}`,
+        description: `Remittance fees: ${r.locationName ?? 'Unknown location'}`,
         counterpartyName: null,
         userName: null,
       });
@@ -1762,7 +1762,7 @@ export class FinanceService {
 
     for (const r of adSpendRows as Array<{ id: string; spendAmount: string | null; spendDate: Date; createdAt: Date; status: string; platform: string; description: string | null; productName: string | null; mbName: string | null }>) {
       const amt = Number(r.spendAmount ?? 0);
-      const label = [r.platform, r.productName, r.description].filter(Boolean).join(' — ');
+      const label = [r.platform, r.productName, r.description].filter(Boolean).join(': ');
       entries.push({
         id: r.id,
         entryType: 'ad_spend',
@@ -1785,7 +1785,7 @@ export class FinanceService {
         amount: amt,
         balanceEffect: -amt,
         status: r.status,
-        description: `Payroll — ${r.staffName ?? 'Staff'}`,
+        description: `Payroll: ${r.staffName ?? 'Staff'}`,
         counterpartyName: r.staffName ?? null,
         userName: r.staffName ?? null,
       });

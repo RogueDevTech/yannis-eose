@@ -238,7 +238,7 @@ export function PermissionsPreview({
                 {orphanRevokesOnly.map(({ code }) => (
                   <span
                     key={code}
-                    title={`${code} — explicitly revoked`}
+                    title={`${code}: explicitly revoked`}
                     className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-base font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/20"
                   >
                     {formatPermissionCode(code)}
@@ -316,7 +316,7 @@ export function PermissionsPreview({
                   return (
                     <span
                       key={perm.code}
-                      title={`${perm.code}${perm.description ? ` — ${perm.description}` : ''}`}
+                      title={`${perm.code}${perm.description ? `: ${perm.description}` : ''}`}
                       className={
                         state === 'explicitGrant'
                           ? 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-mini font-medium bg-brand-50 text-brand-700 ring-1 ring-brand-500/30 dark:bg-brand-900/30 dark:text-brand-200'
@@ -333,7 +333,7 @@ export function PermissionsPreview({
                 {revokedRows.map(({ perm }) => (
                   <span
                     key={perm.code}
-                    title={`${perm.code} — explicitly revoked from this user`}
+                    title={`${perm.code}: explicitly revoked from this user`}
                     className="inline-flex items-center rounded px-1.5 py-0.5 text-mini font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/30"
                   >
                     {stripGroupPrefix(perm.code)}

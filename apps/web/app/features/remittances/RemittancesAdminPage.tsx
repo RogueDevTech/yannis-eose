@@ -969,7 +969,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
                 <TextInput
                   label="Shrinkage reason (if short)"
                   type="text"
-                  placeholder="Optional — required if count is below sent qty"
+                  placeholder="Optional. Required if count is below sent qty."
                   value={shrinkageReason[pendingAction.row.id] ?? ''}
                   onChange={(e) => {
                     setActionModalFieldError(null);
@@ -1245,7 +1245,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
                           <TextInput
                             label={hasShrinkage ? 'Shrinkage reason (required)' : 'Shrinkage reason'}
                             type="text"
-                            placeholder={hasShrinkage ? 'Required — why is it short?' : 'Optional'}
+                            placeholder={hasShrinkage ? 'Required. Why is it short?' : 'Optional'}
                             value={shrinkageReason[r.id] ?? ''}
                             onChange={(e) => {
                               setBulkFieldError(null);

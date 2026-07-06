@@ -1874,7 +1874,7 @@ export class UsersService {
         if (!allowedByTeamLead.has(key) && input[key] !== undefined) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: `Team leads cannot change "${String(key)}" — contact an administrator.`,
+            message: `Team leads cannot change "${String(key)}". Contact an administrator.`,
           });
         }
       }
