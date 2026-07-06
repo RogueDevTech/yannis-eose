@@ -119,7 +119,7 @@ function generateStockReport(
   lines.push(`Actual Available:    ${row.available.toLocaleString()} units`);
 
   if (isConsistent) {
-    lines.push(`Status:              ✓ CONSISTENT — all stock is accounted for.`);
+    lines.push(`Status:              ✓ CONSISTENT. All stock is accounted for.`);
   } else {
     lines.push(`Discrepancy:         ${diff > 0 ? '+' : ''}${diff.toLocaleString()} units`);
     lines.push(`Status:              ✗ INCONSISTENT`);
@@ -144,7 +144,7 @@ function generateStockReport(
   lines.push(`Pending:    ${row.qtyPending.toLocaleString()} units (${formatNaira(row.amountPending)})`);
 
   if (row.qtyAwaitingRemittance > 0) {
-    lines.push(`Awaiting:   ${row.qtyAwaitingRemittance.toLocaleString()} units (${formatNaira(row.amountAwaitingRemittance)}) — delivered, no remittance batch yet`);
+    lines.push(`Awaiting:   ${row.qtyAwaitingRemittance.toLocaleString()} units (${formatNaira(row.amountAwaitingRemittance)}). Delivered, no remittance batch yet.`);
   }
 
   lines.push('');
@@ -724,7 +724,7 @@ export function LogisticsProviderDetailPage({
 
                 <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Reserved</span> <span className={`font-semibold ${l.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.reserved.toLocaleString()}</span></span>
                 <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Remitted</span> <span className={`font-semibold ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{l.qtyRemitted.toLocaleString()}</span> <span className={l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>({formatNaira(l.amountRemitted)})</span>{l.qtyPending > 0 && <><span className="text-app-fg-muted text-[0.6em] mx-1">●</span><span className="font-semibold text-warning-600 dark:text-warning-400">{l.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(l.amountPending)}) pending</span></>}</span>
-                {l.qtyAwaitingRemittance > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.qtyAwaitingRemittance.toLocaleString()} delivered — no remittance yet ({formatNaira(l.amountAwaitingRemittance)})</span></span>}
+                {l.qtyAwaitingRemittance > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatNaira(l.amountAwaitingRemittance)})</span></span>}
               </div>
               <button
                 type="button"
@@ -761,7 +761,7 @@ export function LogisticsProviderDetailPage({
                   {p.dispatched > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Dispatched</span> <span className="font-semibold text-warning-600 dark:text-warning-400">{p.dispatched.toLocaleString()}</span></span>}
                   <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Reserved</span> <span className={`font-semibold ${p.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.reserved.toLocaleString()}</span></span>
                   <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Remitted</span> <span className={`font-semibold ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{p.qtyRemitted.toLocaleString()}</span> <span className={p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>({formatNaira(p.amountRemitted)})</span>{p.qtyPending > 0 && <><span className="text-app-fg-muted text-[0.6em] mx-1">●</span><span className="font-semibold text-warning-600 dark:text-warning-400">{p.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(p.amountPending)}) pending</span></>}</span>
-                  {p.qtyAwaitingRemittance > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.qtyAwaitingRemittance.toLocaleString()} delivered — no remittance yet ({formatNaira(p.amountAwaitingRemittance)})</span></span>}
+                  {p.qtyAwaitingRemittance > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatNaira(p.amountAwaitingRemittance)})</span></span>}
                 </div>
                 <button
                   type="button"
@@ -912,7 +912,7 @@ export function LogisticsProviderDetailPage({
           <div className="px-5 py-4 border-b border-app-border flex items-start justify-between gap-3 shrink-0">
             <div>
               <h2 className="text-lg font-semibold text-app-fg">Stock Reconciliation Report</h2>
-              <p className="text-xs text-app-fg-muted mt-0.5">{provider.name} — {reportModal.name}</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">{provider.name}: {reportModal.name}</p>
             </div>
             <button type="button" onClick={() => { setReportModal(null); setReportView('summary'); }} className="text-app-fg-muted hover:text-app-fg mt-0.5"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg></button>
           </div>
@@ -952,7 +952,7 @@ export function LogisticsProviderDetailPage({
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
                     <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={r.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>{r.qtyRemitted.toLocaleString()} units ({formatNaira(r.amountRemitted)})</span></td></tr>
                     <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={r.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{r.qtyPending.toLocaleString()} units ({formatNaira(r.amountPending)})</span></td></tr>
-                    {r.qtyAwaitingRemittance > 0 && <tr className="bg-danger-50 dark:bg-danger-900/10"><td className="px-4 py-2.5 text-danger-700 dark:text-danger-400 font-medium">Awaiting</td><td className="px-4 py-2.5 text-right font-semibold text-danger-700 dark:text-danger-400 tabular-nums">{r.qtyAwaitingRemittance.toLocaleString()} delivered — no remittance yet ({formatNaira(r.amountAwaitingRemittance)})</td></tr>}
+                    {r.qtyAwaitingRemittance > 0 && <tr className="bg-danger-50 dark:bg-danger-900/10"><td className="px-4 py-2.5 text-danger-700 dark:text-danger-400 font-medium">Awaiting</td><td className="px-4 py-2.5 text-right font-semibold text-danger-700 dark:text-danger-400 tabular-nums">{r.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatNaira(r.amountAwaitingRemittance)})</td></tr>}
                   </tbody></table></div>
                 </div>
               </div>

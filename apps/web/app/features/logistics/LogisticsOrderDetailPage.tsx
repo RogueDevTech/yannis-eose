@@ -917,7 +917,7 @@ export function LogisticsOrderDetailPage({
               {order.paymentMethod && (
                 <InfoRow icon={<BanknotesIcon />} label="Payment" value={
                   order.paymentMethod === 'PAY_ONLINE'
-                    ? `Online${order.paymentStatus ? ` — ${order.paymentStatus}` : ''}`
+                    ? `Online${order.paymentStatus ? `: ${order.paymentStatus}` : ''}`
                     : 'Pay on Delivery'
                 } valueClass={
                   order.paymentMethod === 'PAY_ON_DELIVERY'
@@ -991,7 +991,7 @@ export function LogisticsOrderDetailPage({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-app-fg">Assign for delivery</h3>
-                  <p className="text-mini text-app-fg-muted">Pick a 3PL hub — order becomes agent assigned for dispatch</p>
+                  <p className="text-mini text-app-fg-muted">Pick a 3PL hub. Order becomes agent assigned for dispatch</p>
                 </div>
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
@@ -1314,7 +1314,7 @@ export function LogisticsOrderDetailPage({
                       name="reason"
                       required
                       minLength={10}
-                      placeholder="Describe return reason — minimum 10 characters"
+                      placeholder="Describe return reason. Minimum 10 characters."
                       disabled={isSubmitting}
                     />
                     <div className="flex justify-end">
@@ -1339,7 +1339,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Restock</h3>
-                      <p className="text-mini text-app-fg-muted">Item sellable — return to local stock</p>
+                      <p className="text-mini text-app-fg-muted">Item sellable. Return to local stock.</p>
                     </div>
                   </div>
                   <fetcher.Form method="post">
@@ -1361,7 +1361,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Write Off</h3>
-                      <p className="text-mini text-app-fg-muted">Item damaged — log as operational loss</p>
+                      <p className="text-mini text-app-fg-muted">Item damaged. Log as operational loss.</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">

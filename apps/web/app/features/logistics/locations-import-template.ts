@@ -61,7 +61,7 @@ export function downloadLocationsImportTemplate(providers: ProviderInfo[]): void
     ['', ''],
     [
       'Valid providers (name)',
-      providers.length > 0 ? 'Provider id (UUID — pasting also works)' : 'No providers configured yet',
+      providers.length > 0 ? 'Provider id (UUID, pasting also works)' : 'No providers configured yet',
     ],
     ...providers.map((p) => [p.name, p.id]),
   ];

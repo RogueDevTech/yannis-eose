@@ -1091,7 +1091,7 @@ export function UserCreatePage({
               <div className="sm:col-span-2">
                 <InlineNotification
                   variant="info"
-                  message={`${conflictScopeLabel} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Yannis allows multiple holders — continue if intended.`}
+                  message={`${conflictScopeLabel} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Yannis allows multiple holders. Continue if intended.`}
                 />
               </div>
             )}

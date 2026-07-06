@@ -269,11 +269,11 @@ export function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityI
             </div>
 
             <p className="text-xs text-center text-app-fg-muted">
-              {stage === 'browsing' && 'Customer is actively browsing — they may convert soon.'}
+              {stage === 'browsing' && 'Customer is actively browsing. They may convert soon.'}
               {stage === 'abandoned' && 'Customer left without placing an order.'}
-              {stage === 'order_placed' && 'Order created — waiting for CS assignment.'}
+              {stage === 'order_placed' && 'Order created. Waiting for CS assignment.'}
               {stage === 'with_cs' && 'A closer is engaged with this customer.'}
-              {stage === 'confirmed' && 'Order confirmed — awaiting logistics allocation.'}
+              {stage === 'confirmed' && 'Order confirmed. Awaiting logistics allocation.'}
               {stage === 'in_delivery' && 'Out for delivery.'}
               {stage === 'delivered' && 'Successfully delivered.'}
               {stage === 'returned' && 'Order was returned.'}

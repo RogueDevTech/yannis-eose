@@ -429,7 +429,7 @@ function CSDashboard({
           <p className="text-sm text-app-fg-muted mb-4">
             {role === 'HEAD_OF_CS'
               ? 'Manage agent assignments and monitor queue health.'
-              : "Monitor your team's pipeline — metrics above aggregate across every closer you supervise on this branch."}
+              : "Monitor your team's pipeline. Metrics above aggregate across every closer you supervise on this branch."}
           </p>
           <div className="flex gap-2 flex-wrap">
             <Link to="/admin/sales/queue" prefetch="intent" className="btn-primary btn-sm">Sales Dashboard</Link>

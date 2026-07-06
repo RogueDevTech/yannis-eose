@@ -1269,7 +1269,7 @@ export class InventoryService {
         if (!dest || destAvailable < receivedQty) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: `Cannot cancel — destination only has ${Math.max(0, destAvailable)} unit(s) free, but ${receivedQty} were sent there. Use a Stock Adjustment instead.`,
+            message: `Cannot cancel. Destination only has ${Math.max(0, destAvailable)} unit(s) free, but ${receivedQty} were sent there. Use a Stock Adjustment instead.`,
           });
         }
       }
@@ -3577,7 +3577,7 @@ export class InventoryService {
         if (totalFree < qty) {
           throw new TRPCError({
             code: 'CONFLICT',
-            message: 'Stock changed while allocating — not enough free units left at this location.',
+            message: 'Stock changed while allocating. Not enough free units left at this location.',
           });
         }
 
@@ -3599,7 +3599,7 @@ export class InventoryService {
         if (remaining > 0) {
           throw new TRPCError({
             code: 'CONFLICT',
-            message: 'Stock changed while allocating — not enough free units left at this location.',
+            message: 'Stock changed while allocating. Not enough free units left at this location.',
           });
         }
 
@@ -3823,7 +3823,7 @@ export class InventoryService {
           quantity: reverseQty,
           toLocationId: locationId,
           referenceId: orderId,
-          reason: `Stock reversal — delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
+          reason: `Stock reversal: delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
           actorId: actor.id,
         });
 

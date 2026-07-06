@@ -624,7 +624,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         onClose={() => setConfirmClose(false)}
         error={fetcherSurface.errorMatchingIntent('closeShipment')}
         title="Close this shipment?"
-        description="Locks the shipment from any further edits — final audit point."
+        description="Locks the shipment from any further edits. Final audit point."
         confirmLabel="Close shipment"
         variant="warning"
         loading={isPending('closeShipment')}

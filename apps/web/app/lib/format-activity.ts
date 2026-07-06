@@ -125,11 +125,11 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     if (status === 'CS_ENGAGED') return `Started CS call on order${customer}`;
     if (status === 'CONFIRMED') return `Confirmed order${customer}`;
     if (status === 'CANCELLED') {
-      const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
+      const reason = data.cancel_reason ? `: ${data.cancel_reason}` : '';
       return `Cancelled order${customer}${reason}`;
     }
     if (status === 'DELETED') {
-      const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
+      const reason = data.cancel_reason ? `: ${data.cancel_reason}` : '';
       return `Deleted order${customer}${reason}`;
     }
     if (status === 'AGENT_ASSIGNED') return `Order${customer} assigned for delivery (logistics company)`;
@@ -148,7 +148,7 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
   if (table === 'order_items') {
     const qty = data.quantity ?? '';
     const price = data.unit_price ? formatCurrency(data.unit_price) : '';
-    if (qty && price) return `Updated order item — ${qty} units at ${price}`;
+    if (qty && price) return `Updated order item: ${qty} units at ${price}`;
     return `Updated order item`;
   }
 
@@ -168,7 +168,7 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
   if (table === 'stock_batches') {
     const units = data.total_units ?? '';
     const cost = data.factory_cost ? ` at ${formatCurrency(data.factory_cost)}/unit` : '';
-    if (units) return `Updated stock batch${label} — ${units} units${cost}`;
+    if (units) return `Updated stock batch${label}: ${units} units${cost}`;
     return `Updated stock batch${label}`;
   }
 
@@ -178,16 +178,16 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     const qty = data.sent_quantity ? `${data.sent_quantity} units` : '';
     if (status === 'RECEIVED') {
       const received = data.received_quantity ?? data.sent_quantity ?? '';
-      return `Received transfer — ${received} units`;
+      return `Received transfer: ${received} units`;
     }
-    if (status === 'DISPUTED') return `Disputed transfer — ${qty}`;
-    if (statusLabel) return `Updated stock transfer to ${statusLabel} — ${qty}`;
-    return `Updated stock transfer — ${qty}`;
+    if (status === 'DISPUTED') return `Disputed transfer: ${qty}`;
+    if (statusLabel) return `Updated stock transfer to ${statusLabel}: ${qty}`;
+    return `Updated stock transfer: ${qty}`;
   }
 
   if (table === 'inventory_levels') {
     const qty = data.available_units ?? data.quantity ?? '';
-    return `Updated inventory level${qty ? ` — ${qty} units` : ''}`;
+    return `Updated inventory level${qty ? `: ${qty} units` : ''}`;
   }
 
   if (table === 'logistics_providers') {
@@ -201,17 +201,17 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     const status = data.invoice_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` for ${formatCurrency(data.amount)}` : '';
-    if (statusLabel) return `Updated invoice${label}${amount} — ${statusLabel}`;
+    if (statusLabel) return `Updated invoice${label}${amount}. ${statusLabel}`;
     return `Updated invoice${label}${amount}`;
   }
 
   if (table === 'marketing_funding') {
     const status = data.funding_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
+    const amount = data.amount ? `: ${formatCurrency(data.amount)}` : '';
     if (status === 'COMPLETED') return `Confirmed funding received${amount}`;
     if (status === 'DISPUTED') return `Disputed funding${amount}`;
-    if (statusLabel) return `Updated marketing funding${amount} — ${statusLabel}`;
+    if (statusLabel) return `Updated marketing funding${amount}. ${statusLabel}`;
     return `Updated marketing funding${amount}`;
   }
 
@@ -224,8 +224,8 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
   if (table === 'payout_records') {
     const status = data.payout_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.net_amount ? ` — ${formatCurrency(data.net_amount)}` : '';
-    if (statusLabel) return `Updated payout${amount} — ${statusLabel}`;
+    const amount = data.net_amount ? `: ${formatCurrency(data.net_amount)}` : '';
+    if (statusLabel) return `Updated payout${amount}. ${statusLabel}`;
     return `Updated payout record${amount}`;
   }
 

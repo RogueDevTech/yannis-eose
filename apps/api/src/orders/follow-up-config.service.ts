@@ -1315,7 +1315,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         eventType: 'QUANTITY_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
-        description: `Adjusted order items — new total ₦${totalAmount.toLocaleString('en-NG')}.`,
+        description: `Adjusted order items. New total ₦${totalAmount.toLocaleString('en-NG')}.`,
         metadata: { items, totalAmount },
         branchId: order.servicingBranchId,
       });
@@ -1572,7 +1572,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (origDelivered) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Cannot mark as delivered — original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+          message: `Cannot mark as delivered. Original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
         });
       }
     }
@@ -1624,7 +1624,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // Build a descriptive timeline message
       let description: string | undefined;
       if (isRetrack) {
-        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? ` — ${note}` : ''}`;
+        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? `. ${note}` : ''}`;
       } else if (note) {
         description = note;
       }
@@ -2247,8 +2247,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
       // Timeline event — only mention follow-up if a copy actually exists
       const defaultMsg = hasFollowUp
-        ? 'Order unfrozen — CS can resume. Follow-up copy continues independently.'
-        : 'Order unfrozen — CS can resume.';
+        ? 'Order unfrozen. CS can resume. Follow-up copy continues independently.'
+        : 'Order unfrozen. CS can resume.';
       await tx.insert(schema.orderTimelineEvents).values({
         orderId,
         eventType: 'ORDER_UNFROZEN',
@@ -2374,8 +2374,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           eligibleIds.map((orderId) => {
             const hasFollowUp = hasFollowUpSet.has(orderId);
             const defaultMsg = hasFollowUp
-              ? 'Order unfrozen — CS can resume. Follow-up copy continues independently.'
-              : 'Order unfrozen — CS can resume.';
+              ? 'Order unfrozen. CS can resume. Follow-up copy continues independently.'
+              : 'Order unfrozen. CS can resume.';
             return {
               orderId,
               eventType: 'ORDER_UNFROZEN' as const,

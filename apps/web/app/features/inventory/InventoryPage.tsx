@@ -117,7 +117,7 @@ function LowStockAlertStrip({ items }: { items: LowStockAlertItem[] }) {
               className="shrink-0 w-36 rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 shadow-sm"
             >
               {isEmpty ? (
-                <div title={`${item.locationName} — no stock received yet`}>
+                <div title={`${item.locationName}: no stock received yet`}>
                   {cardContent}
                 </div>
               ) : (
@@ -125,7 +125,7 @@ function LowStockAlertStrip({ items }: { items: LowStockAlertItem[] }) {
                   to={`/admin/inventory/${item.levelId}`}
                   prefetch="intent"
                   className="block hover:opacity-90 transition-opacity"
-                  title={`${item.productName} — ${item.locationName}`}
+                  title={`${item.productName}: ${item.locationName}`}
                 >
                   {cardContent}
                 </Link>
@@ -1017,7 +1017,7 @@ export function InventoryPage(props: InventoryStreamData) {
               onChange={(e) => setAdjustQty(e.target.value)}
               hint={
                 adjustDirection === 'decrease'
-                  ? `Reconciles on-hand stock downward (max ${editingLevel.stockCount}). Creates an ADJUSTMENT movement — not a FIFO batch.`
+                  ? `Reconciles on-hand stock downward (max ${editingLevel.stockCount}). Creates an ADJUSTMENT movement. Not a FIFO batch.`
                   : 'Reconciles on-hand stock upward (count fix only). New supplier stock must use Receive Shipment → verify.'
               }
             />
@@ -1880,12 +1880,12 @@ function ReturnsTab({
               disabled={fetcher.state === 'submitting'}
               loading={fetcher.state === 'submitting'}
               loadingText="Restocking..."
-              title="Mark as sellable — add to local 3PL stock"
+              title="Mark as sellable. Add to local 3PL stock."
             >
               Sellable
             </Button>
           </fetcher.Form>
-          <TableActionButton variant="danger" onClick={() => setWriteOffOrderId(order.id)} title="Mark as damaged — write off as operational loss">
+          <TableActionButton variant="danger" onClick={() => setWriteOffOrderId(order.id)} title="Mark as damaged. Write off as operational loss.">
             Damaged
           </TableActionButton>
         </CompactTableActions>
@@ -1917,7 +1917,7 @@ function ReturnsTab({
       {writeOffOrderId && (
         <Modal open onClose={() => setWriteOffOrderId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
             <ModalFetcherInlineError message={returnsSurface.errorMatchingIntent('writeOff')} />
-            <h3 className="text-lg font-semibold text-app-fg">Write Off — Damaged Item</h3>
+            <h3 className="text-lg font-semibold text-app-fg">Write Off: Damaged Item</h3>
             <p className="text-sm text-app-fg-muted">This will permanently mark the item as damaged and log it as an Operational Loss.</p>
             <fetcher.Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="writeOff" />

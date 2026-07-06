@@ -1040,7 +1040,7 @@ function LogisticsOrdersPageImpl({
             <div className="space-y-2">
               <TextInput
                 type="number"
-                label="Cost of delivery (₦) — optional"
+                label="Cost of delivery (₦), optional"
                 min={0}
                 step="0.01"
                 value={deliverConfirmDeliveryCost}
@@ -1051,7 +1051,7 @@ function LogisticsOrdersPageImpl({
               />
               <TextInput
                 type="number"
-                label="Discount at delivery (₦) — optional"
+                label="Discount at delivery (₦), optional"
                 min={0}
                 step="0.01"
                 value={deliverConfirmDiscount}
@@ -1351,7 +1351,7 @@ function EditDeliveryDateModal({
           />
           <TextInput
             type="number"
-            label="Cost of delivery (₦) — optional"
+            label="Cost of delivery (₦), optional"
             min={0}
             step="0.01"
             value={deliveryCost}
@@ -1361,7 +1361,7 @@ function EditDeliveryDateModal({
           />
           <TextInput
             type="number"
-            label="Discount at delivery (₦) — optional"
+            label="Discount at delivery (₦), optional"
             min={0}
             step="0.01"
             value={discount}

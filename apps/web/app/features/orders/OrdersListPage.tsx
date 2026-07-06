@@ -815,7 +815,7 @@ function OrdersListPageImpl({
       }`
     : `Selects every order matching the current filter.${
         total > ORDERS_DEEP_SELECT_MAX
-          ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} — to process more, narrow the filter or run the action again.`
+          ? ` Capped at ${ORDERS_DEEP_SELECT_MAX}. To process more, narrow the filter or run the action again.`
           : ''
       }`;
 

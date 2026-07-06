@@ -98,7 +98,7 @@ export class AfricasTalkingProvider implements VoipProvider {
       return {
         success: false,
         providerError:
-          "Agent phone number is not set. Africa's Talking calls the agent's phone first — add a phone number in your profile.",
+          "Agent phone number is not set. Africa's Talking calls the agent's phone first. Add a phone number in your profile.",
       };
     }
 

@@ -420,7 +420,7 @@ export function CashRemittanceCreateModal({
                   </>
                 ) : (
                   <>
-                    Batch will be created as <span className="font-semibold">Pending</span> — Finance reviews and marks
+                    Batch will be created as <span className="font-semibold">Pending</span>. Finance reviews and marks
                     Received later. Toggle on only if cash is already in hand.
                   </>
                 )}

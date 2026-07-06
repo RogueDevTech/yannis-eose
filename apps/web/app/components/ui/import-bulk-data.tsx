@@ -726,7 +726,7 @@ export function ImportBulkData<
                 ? `${completedCount} imported${failedCount > 0 ? `, ${failedCount} failed` : ''}.`
                 : isImporting
                   ? `Importing… ${completedCount} done.`
-                  : `Invalid rows are skipped — fix or drop them.`}
+                  : `Invalid rows are skipped. Fix or drop them.`}
             </p>
             <div className="flex items-center gap-2 max-sm:w-full">
               <Button
@@ -1040,7 +1040,7 @@ function RowImportStatusIcon({ status }: { status: RowStatus | undefined }) {
     );
   }
   if (status.state === 'created') {
-    const tip = status.meta ? `Created — ${status.meta}` : 'Created';
+    const tip = status.meta ? `Created: ${status.meta}` : 'Created';
     return (
       <span
         className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-success-100 text-success-700 dark:bg-success-900/40 dark:text-success-300"

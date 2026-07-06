@@ -65,7 +65,7 @@ export class BranchTeamsService {
     if (!row) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'User is not a member of this branch — add them to the branch before adding to a team.',
+        message: 'User is not a member of this branch. Add them to the branch before adding to a team.',
       });
     }
   }

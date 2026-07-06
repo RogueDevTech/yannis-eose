@@ -966,7 +966,7 @@ export class ShipmentsService {
           quantity: line.receivedQuantity,
           toLocationId: existing.destinationLocationId,
           referenceId: line.id,
-          reason: `Shipment receipt — ${line.receivedQuantity} units${
+          reason: `Shipment receipt: ${line.receivedQuantity} units${
             line.varianceReason ? ` (variance: ${line.varianceReason})` : ''
           }`,
           actorId: actor.id,
@@ -1061,7 +1061,7 @@ export class ShipmentsService {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message:
-            'Cannot cancel a verified or closed shipment — its receipts are already in inventory.',
+            'Cannot cancel a verified or closed shipment. Its receipts are already in inventory.',
         });
       }
       if (existing.status === 'CANCELLED') {

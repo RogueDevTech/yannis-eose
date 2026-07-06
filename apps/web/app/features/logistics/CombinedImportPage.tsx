@@ -249,7 +249,7 @@ export function CombinedImportPage({ providers }: CombinedImportPageProps) {
   return (
     <ImportBulkData<ParsedRow, ResolvedRow>
       title="Import providers & locations"
-      description="Upload one spreadsheet to create providers and their locations in a single step. Existing providers are matched by name — no duplicates."
+      description="Upload one spreadsheet to create providers and their locations in a single step. Existing providers are matched by name. No duplicates."
       backHref="/admin/logistics/partners"
       backLabel="← Back to partners"
       resourceLabel="row"

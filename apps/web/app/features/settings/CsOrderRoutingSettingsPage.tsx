@@ -444,7 +444,7 @@ export function CsOrderRoutingSettingsPage({
                         }}
                         aria-label={
                           isAlreadyAssigned
-                            ? `${p.name} is already assigned — remove the existing route to re-assign`
+                            ? `${p.name} is already assigned. Remove the existing route to re-assign`
                             : `Select ${p.name}`
                         }
                         title={

@@ -307,7 +307,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     getValue: (o) => o.paymentMethod,
     format: (_, o) =>
       o.paymentMethod === 'PAY_ONLINE'
-        ? `Pay online${o.paymentStatus ? ` — ${o.paymentStatus}` : ''}${o.paymentReference ? ` (ref: ${o.paymentReference})` : ''}`
+        ? `Pay online${o.paymentStatus ? `: ${o.paymentStatus}` : ''}${o.paymentReference ? ` (ref: ${o.paymentReference})` : ''}`
         : 'Pay on delivery',
     ddClassName: (_, o) => {
       if (o.paymentMethod === 'PAY_ON_DELIVERY') return 'font-medium text-success-600 dark:text-success-400';
@@ -704,7 +704,7 @@ function VoipCallPanel({
           not the browser. Always shown so first-time users immediately know what to expect. */}
       <div className="mb-3 rounded-md bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-800/50 px-3 py-2 text-xs text-info-700 dark:text-info-300">
         <p>
-          <strong>Click Call</strong> — {voipProviderDisplayName} will ring your phone first, then
+          <strong>Click Call</strong>. {voipProviderDisplayName} will ring your phone first, then
           bridge you to the customer. Make sure your phone number is set in your profile and
           keep it nearby.
         </p>
@@ -4206,7 +4206,7 @@ export function OrderDetailPage({
                           setPhoneUnmasked(true);
                           setTimeout(() => setCopyFeedback(false), 2000);
                         },
-                        () => toast.error('Copy failed', 'Could not copy the number — try again.'),
+                        () => toast.error('Copy failed', 'Could not copy the number. Try again.'),
                       );
                       ensureBranchForAction({
                         actionLabel: 'recording customer call',
@@ -4509,7 +4509,7 @@ export function OrderDetailPage({
                             }`}
                           >
                             <p className="text-sm font-semibold text-app-fg">Custom</p>
-                            <p className="text-xs text-app-fg-muted mt-1">Set your own quantity & price — requires approval</p>
+                            <p className="text-xs text-app-fg-muted mt-1">Set your own quantity & price. Requires approval.</p>
                           </button>
                         </div>
                       </div>
