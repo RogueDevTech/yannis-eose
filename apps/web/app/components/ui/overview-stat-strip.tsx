@@ -305,7 +305,7 @@ export function OverviewStatStrip({
         const stamp = changedAt.get(i);
         const inner = (
           <>
-            <p className="truncate text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
+            <p className="truncate text-micro font-medium text-app-fg-muted uppercase tracking-wider flex items-center justify-center gap-1">{item.label}</p>
             {loading ? (
               valueSkeleton
             ) : item.plainValue ? (
@@ -350,7 +350,7 @@ export function OverviewStatStrip({
           const stamp = changedAt.get(i);
           const inner = (
             <div>
-              <p className={`truncate ${labelClass}`}>{item.label}</p>
+              <p className={`truncate ${labelClass} flex items-center justify-center gap-1`}>{item.label}</p>
               {loading ? (
                 valueSkeleton
               ) : item.plainValue ? (

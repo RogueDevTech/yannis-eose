@@ -432,10 +432,12 @@ export function DeliveryRemittancesPage({
         nowrap: true,
         render: (r) => r.receivedAt ? (
           <span className="text-sm text-app-fg-muted">
-            {new Date(r.receivedAt).toLocaleDateString('en-NG', {
+            {new Date(r.receivedAt).toLocaleString('en-NG', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
             })}
           </span>
         ) : (

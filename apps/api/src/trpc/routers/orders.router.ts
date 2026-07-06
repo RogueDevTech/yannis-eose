@@ -9,6 +9,7 @@ import {
   requestOrderLinePriceChangeSchema,
   requestOrderDeletionSchema,
   requestDeliveredOrderDeletionSchema,
+  requestOrderRetrackSchema,
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
@@ -900,6 +901,18 @@ export const ordersRouter = router({
     .input(requestDeliveredOrderDeletionSchema)
     .mutation(async ({ input, ctx }) => {
       const res = await getOrdersService().requestDeliveredOrderDeletion(input, ctx.user);
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
+    }),
+
+  /**
+   * Finance-initiated retrack request for DELIVERED/REMITTED orders.
+   * Requires dual approval (HoCS + HoL) before the retrack executes.
+   */
+  requestOrderRetrack: authedProcedure
+    .input(requestOrderRetrackSchema)
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().requestOrderRetrack(input, ctx.user);
       await invalidateOrderDetailCache(input.orderId);
       return res;
     }),

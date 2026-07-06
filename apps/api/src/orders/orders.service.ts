@@ -376,6 +376,21 @@ export class OrdersService {
     return row?.id ?? null;
   }
 
+  async findPendingOrderRetrackRequestId(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_STATUS_RETRACK'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
   private async proposedLineItemPricingDiffersFromDatabase(
     orderId: string,
     items: RequestOrderLinePriceChangeInput['items'],
@@ -468,6 +483,7 @@ export class OrdersService {
   private async notifyOrderDeletionApprovers(params: {
     requestId: string;
     orderId: string;
+    superAdminOnly?: boolean;
     branchId: string | null;
     servicingBranchId: string | null;
     requesterName: string | null;
@@ -482,17 +498,92 @@ export class OrdersService {
       permissionRequestKind: 'order_deletion',
     };
 
+    const recipientIds = new Set<string>();
+
+    if (params.superAdminOnly) {
+      // Finance-initiated: only SuperAdmin/Admin approves
+      const admins = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN'])));
+      for (const r of admins) {
+        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+      }
+    } else {
+      // Admin-initiated: dual approval (HoCS + HoL + Admins)
+      const branchIdSet = new Set<string>();
+      if (params.branchId) branchIdSet.add(params.branchId);
+      if (params.servicingBranchId) branchIdSet.add(params.servicingBranchId);
+      const branchIds = [...branchIdSet];
+
+      const [admins, heads, hoLogisticsDeletion] = await Promise.all([
+        this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+        branchIds.length > 0
+          ? this.db
+              .select({ id: schema.users.id })
+              .from(schema.users)
+              .where(
+                and(
+                  eq(schema.users.status, 'ACTIVE'),
+                  inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
+                  inArray(schema.users.primaryBranchId, branchIds),
+                ),
+              )
+          : Promise.resolve([] as Array<{ id: string }>),
+        this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS'))),
+      ]);
+      for (const r of [...admins, ...heads, ...hoLogisticsDeletion]) {
+        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+      }
+    }
+
+    for (const userId of recipientIds) {
+      this.notifications.enqueueCreate({
+        userId,
+        type: 'approval:permission_request',
+        title,
+        body,
+        data,
+      });
+    }
+  }
+
+  /** Notify HoCS + HoL about a pending retrack request (fire-and-forget). */
+  private async notifyRetrackApprovers(params: {
+    requestId: string;
+    orderId: string;
+    orderNo: number | null;
+    currentStatus: string;
+    targetStatus: string;
+    branchId: string | null;
+    servicingBranchId: string | null;
+    requesterName: string | null;
+    excludeUserId: string;
+  }): Promise<void> {
+    const orderLabel = params.orderNo != null
+      ? `YNS-${params.orderNo}`
+      : params.orderId.slice(0, 8).toUpperCase();
+    const title = 'Order retrack — approval needed';
+    const body = `${params.requesterName ?? 'A teammate'} requested to retrack order ${orderLabel} from ${params.currentStatus} to ${params.targetStatus}. Review under Permission Requests.`;
+    const data: Record<string, string> = {
+      requestId: params.requestId,
+      orderId: params.orderId,
+      permissionRequestKind: 'order_retrack',
+    };
+
     const branchIdSet = new Set<string>();
     if (params.branchId) branchIdSet.add(params.branchId);
     if (params.servicingBranchId) branchIdSet.add(params.servicingBranchId);
     const branchIds = [...branchIdSet];
 
     const recipientIds = new Set<string>();
-    const [admins, heads, hoLogisticsDeletion] = await Promise.all([
-      this.db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+    const [heads, hoLogistics] = await Promise.all([
       branchIds.length > 0
         ? this.db
             .select({ id: schema.users.id })
@@ -510,7 +601,7 @@ export class OrdersService {
         .from(schema.users)
         .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS'))),
     ]);
-    for (const r of [...admins, ...heads, ...hoLogisticsDeletion]) {
+    for (const r of [...heads, ...hoLogistics]) {
       if (r.id !== params.excludeUserId) recipientIds.add(r.id);
     }
 
@@ -941,10 +1032,15 @@ export class OrdersService {
       });
     }
 
+    // Finance-access users (not admin-level) → SuperAdmin-only approval.
+    // Admin-level requesters → dual approval (HoCS + HoL) as before.
+    const isSuperAdminOnly = !isAdminLevel(actor);
+
     const payload = {
       orderId: input.orderId,
       orderNo: order.orderNumber ?? null,
       orderStatus: order.status,
+      ...(isSuperAdminOnly ? { superAdminOnly: true } : {}),
     };
 
     const [req] = await withActor(this.db, actor, async (tx) =>
@@ -969,7 +1065,156 @@ export class OrdersService {
 
     void this.notifyOrderDeletionApprovers({
       requestId: req.id,
+      superAdminOnly: isSuperAdminOnly,
       orderId: input.orderId,
+      branchId: order.branchId ?? null,
+      servicingBranchId: order.servicingBranchId ?? null,
+      requesterName: actor.name ?? null,
+      excludeUserId: actor.id,
+    });
+
+    return { success: true as const, requestId: req.id };
+  }
+
+  /**
+   * Finance-access users request a status retrack on a DELIVERED/REMITTED order.
+   * Creates a permission_request of type ORDER_STATUS_RETRACK; requires dual
+   * approval from HoCS + HoL before the actual retrack executes.
+   */
+  async requestOrderRetrack(
+    input: { orderId: string; targetStatus: string; reason: string },
+    actor: SessionUser,
+  ): Promise<{ success: true; requestId: string }> {
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    // Retrack via this finance flow is scoped to DELIVERED orders. The approval
+    // executor reverses the FIFO delivery deduction on the way out of DELIVERED,
+    // so inventory reconciles cleanly. REMITTED is deliberately excluded: a
+    // remitted order belongs to a settled multi-order delivery-remittance batch,
+    // and there is no un-remit primitive to void that cash record — retracking it
+    // here would leave the remittance outcome overstated (breaks Financial Truth).
+    // The accountant must unwind the remittance first, which cascades the order
+    // back to DELIVERED; it can then be retracked.
+    if (order.status === 'REMITTED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'This order is remitted. Reverse the cash remittance first (which returns it to Delivered), then retrack.',
+      });
+    }
+    if (order.status !== 'DELIVERED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only delivered orders can be retrack-requested via this flow.',
+      });
+    }
+
+    // Permission gate: finance access or orders.retrack.request
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    if (
+      !hasFinanceAccess(actor) &&
+      !perms.includes(canonicalPermissionCode('orders.retrack.request'))
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to request an order status retrack.',
+      });
+    }
+
+    // Validate target status is a valid backward step
+    const RETRACK_LIFECYCLE: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const currentPos = RETRACK_LIFECYCLE[order.status] ?? -1;
+    const targetPos = RETRACK_LIFECYCLE[input.targetStatus] ?? -1;
+    if (targetPos < 0 || targetPos >= currentPos) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot retrack from ${order.status} to ${input.targetStatus}.`,
+      });
+    }
+    // Finance retrack requests only allow rolling back to CONFIRMED or later
+    if (targetPos < 3) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Finance retrack requests can only roll back to Confirmed or later.',
+      });
+    }
+    // The target must be a single valid backward hop in the state machine —
+    // otherwise the request is approvable but throws at execution time (e.g.
+    // REMITTED only retracks to DELIVERED, never straight to CONFIRMED). Reject
+    // unexecutable requests up front so dual-approval never dead-ends.
+    if (!isTransitionAllowed(order.status as OrderStatus, input.targetStatus as OrderStatus)) {
+      const allowed = getAllowedNextStatuses(order.status as OrderStatus)
+        .filter((s) => (RETRACK_LIFECYCLE[s] ?? 99) < currentPos);
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: allowed.length
+          ? `Cannot retrack ${order.status} directly to ${input.targetStatus}. Allowed: ${allowed.join(', ')}.`
+          : `Cannot retrack an order in ${order.status}.`,
+      });
+    }
+
+    // Check for existing pending request
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_STATUS_RETRACK'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
+        ),
+      )
+      .limit(1);
+    if (duplicate) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'A retrack request is already pending for this order.',
+      });
+    }
+
+    const payload = {
+      orderId: input.orderId,
+      orderNo: order.orderNumber ?? null,
+      currentStatus: order.status,
+      targetStatus: input.targetStatus,
+    };
+
+    const [req] = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.permissionRequests)
+        .values({
+          type: 'ORDER_STATUS_RETRACK',
+          status: 'PENDING',
+          requesterId: actor.id,
+          reason: input.reason,
+          payload: payload as unknown as Record<string, unknown>,
+        })
+        .returning({ id: schema.permissionRequests.id }),
+    );
+
+    if (!req?.id) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to create retrack request',
+      });
+    }
+
+    void this.notifyRetrackApprovers({
+      requestId: req.id,
+      orderId: input.orderId,
+      orderNo: order.orderNumber ?? null,
+      currentStatus: order.status,
+      targetStatus: input.targetStatus,
       branchId: order.branchId ?? null,
       servicingBranchId: order.servicingBranchId ?? null,
       requesterName: actor.name ?? null,
@@ -2774,7 +3019,7 @@ export class OrdersService {
     //   3) pending permission_request to archive (soft-delete) the order.
     // Previously these ran sequentially (3 RTTs); fanning out collapses them
     // to a single wall-clock round-trip on the cache-miss detail load.
-    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId] =
+    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId, pendingRetrackRequestId] =
       await Promise.all([
         this.db
           .select({
@@ -2791,6 +3036,7 @@ export class OrdersService {
         this.findPendingOrderLinePriceRequest(orderId),
         this.findPendingOrderDeletionRequestId(orderId),
         this.findPendingDeliveredOrderDeletionRequestId(orderId),
+        this.findPendingOrderRetrackRequestId(orderId),
       ]);
 
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
@@ -2822,6 +3068,7 @@ export class OrdersService {
       } : null,
       pendingOrderDeletionRequestId,
       pendingDeliveredOrderDeletionRequestId,
+      pendingRetrackRequestId,
     };
   }
 
@@ -7526,6 +7773,30 @@ export class OrdersService {
       .select()
       .from(schema.orderItems)
       .where(eq(schema.orderItems.orderId, updatedOrder.id));
+
+    // ── Retrack reconciliation ──────────────────────────────────────────────
+    // A backward transition out of DELIVERED must UNDO the delivery-time
+    // inventory deduction — otherwise the units stay depleted while the CONFIRMED
+    // case below layers a fresh RESERVATION on top (double-counted stock loss).
+    // The delivery reversal restores the on-hand count; the normal side-effect
+    // switch then re-establishes the reservation/allocation for the target state.
+    //
+    // REMITTED can only retrack one step to DELIVERED (state machine), which is a
+    // pure status flip — no cash-remittance reversal is performed here yet, so we
+    // intentionally do NOT reconcile financials on that hop. Guard against any
+    // future REMITTED→(below DELIVERED) path landing here silently.
+    const LIFECYCLE_POS: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const prevPos = LIFECYCLE_POS[previousOrder.status] ?? -1;
+    const nextPos = LIFECYCLE_POS[newStatus] ?? -1;
+    const isRetrackSideEffect = prevPos > nextPos && newStatus !== 'UNPROCESSED';
+
+    if (isRetrackSideEffect && previousOrder.status === 'DELIVERED') {
+      // Reverse the FIFO delivery deduction before the switch re-reserves stock.
+      await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+    }
 
     switch (newStatus) {
       case 'CONFIRMED': {

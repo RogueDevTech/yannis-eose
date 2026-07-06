@@ -2549,11 +2549,16 @@ function UnifiedDistributingTable({
         key: 'date',
         header: 'Date',
         nowrap: true,
-        render: (entry) => (
-          <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
-          </span>
-        ),
+        render: (entry) => {
+          const d = new Date(entry.createdAt);
+          return (
+            <span className="text-app-fg-muted text-sm">
+              {d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+              {' '}
+              <span className="text-app-fg-muted/60">{d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+            </span>
+          );
+        },
       },
       {
         key: 'actions',
@@ -2680,6 +2685,8 @@ function UnifiedDistributingTable({
             })()}
             <div className="text-xs text-app-fg-muted">
               {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {' '}
+              <span className="opacity-60">{new Date(entry.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
             </div>
           </button>
         </>
@@ -2962,11 +2969,16 @@ function UnifiedReceivedTable({
         key: 'date',
         header: 'Date',
         nowrap: true,
-        render: (entry) => (
-          <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
-          </span>
-        ),
+        render: (entry) => {
+          const d = new Date(entry.createdAt);
+          return (
+            <span className="text-app-fg-muted text-sm">
+              {d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+              {' '}
+              <span className="text-app-fg-muted/60">{d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+            </span>
+          );
+        },
       },
       {
         key: 'actions',
@@ -3079,6 +3091,8 @@ function UnifiedReceivedTable({
             </div>
             <div className="text-xs text-app-fg-muted">
               {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {' '}
+              <span className="opacity-60">{new Date(entry.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
             </div>
           </button>
         </>

@@ -163,6 +163,8 @@ export interface OrderDetail {
   pendingOrderDeletionRequestId?: string | null;
   /** PENDING permission_request id for DELIVERED_ORDER_DELETION, if any */
   pendingDeliveredOrderDeletionRequestId?: string | null;
+  /** PENDING permission_request id for ORDER_STATUS_RETRACK, if any */
+  pendingRetrackRequestId?: string | null;
 }
 
 /**
