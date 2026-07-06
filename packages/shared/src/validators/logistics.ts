@@ -189,6 +189,7 @@ export const listDeliveryRemittancesSchema = z.object({
   status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });

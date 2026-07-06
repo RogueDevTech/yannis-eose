@@ -117,6 +117,8 @@ export interface DeliveryRemittancesPageProps {
     periodAllTime: boolean;
     /** Server-side search for the Awaiting remittance tab (`q` query param). */
     eligibleQ: string;
+    /** Server-side search for the Remitted tab (`rq` query param). */
+    remittanceSearch: string;
   };
   userMap: Record<string, string>;
   /** Phase 18 — accountants (Finance / admin / Finance hat) for the Sent by select. */
@@ -227,10 +229,14 @@ export function DeliveryRemittancesPage({
     () => new Map(),
   );
   const [eligibleSearchDraft, setEligibleSearchDraft] = useState(filters.eligibleQ);
+  const [remittanceSearchDraft, setRemittanceSearchDraft] = useState(filters.remittanceSearch);
   const [infoModal, setInfoModal] = useState<string | null>(null);
   useEffect(() => {
     setEligibleSearchDraft(filters.eligibleQ);
   }, [filters.eligibleQ]);
+  useEffect(() => {
+    setRemittanceSearchDraft(filters.remittanceSearch);
+  }, [filters.remittanceSearch]);
 
   /**
    * Default: Awaiting remittance; `?tab=remittances` is the batch list.
@@ -300,6 +306,18 @@ export function DeliveryRemittancesPage({
     });
   };
 
+  const handleRemittanceSearchChange = (value: string) => {
+    const trimmed = value.trim();
+    primeSamePathRefetch();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (!trimmed) next.delete('rq');
+      else next.set('rq', trimmed);
+      return next;
+    });
+  };
+
   const handleSentByChange = (userId: string) => {
     primeSamePathRefetch();
     setSearchParams((p) => {
@@ -342,8 +360,9 @@ export function DeliveryRemittancesPage({
     let n = 0;
     if (filters.location) n += 1;
     if (filters.sentBy) n += 1;
+    if (filters.remittanceSearch) n += 1;
     return n;
-  }, [filters.location, filters.sentBy]);
+  }, [filters.location, filters.sentBy, filters.remittanceSearch]);
 
   const remittanceColumns: CompactTableColumn<DeliveryRemittanceListItem>[] = useMemo(
     () => [
@@ -987,6 +1006,24 @@ export function DeliveryRemittancesPage({
       {viewTab === 'remittances' && (
         <>
           <div className="list-panel">
+            <form
+              className="px-4 pt-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleRemittanceSearchChange(remittanceSearchDraft);
+              }}
+            >
+              <SearchInput
+                value={remittanceSearchDraft}
+                onChange={(v) => {
+                  setRemittanceSearchDraft(v);
+                  if (v.trim() === '') handleRemittanceSearchChange('');
+                }}
+                withSubmitButton
+                placeholder="Search customer, order number, or location"
+                controlSize="md"
+              />
+            </form>
             <ToolbarFiltersCollapsible
               className="!border-0"
               hideMobileSheet

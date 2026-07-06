@@ -78,6 +78,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
+  const remittanceSearch = url.searchParams.get('rq')?.trim() ?? undefined;
+  if (remittanceSearch) listInput.search = remittanceSearch;
 
   const eligiblePageParam = parseInt(url.searchParams.get('eligiblePage') ?? '1', 10);
   const eligiblePage =
@@ -108,6 +110,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endDate: endDate ?? '',
       periodAllTime,
       eligibleQ: eligibleQ ?? '',
+      remittanceSearch: remittanceSearch ?? '',
     },
     canCreateRemittance,
     canMarkReceived,

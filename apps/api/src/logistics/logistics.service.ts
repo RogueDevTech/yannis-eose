@@ -1605,6 +1605,26 @@ export class LogisticsService {
       );
     }
 
+    // Text search — reaches into linked orders and location name via EXISTS subquery
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        sql`(
+          EXISTS (
+            SELECT 1 FROM delivery_remittance_orders dro
+            JOIN orders o ON o.id = dro.order_id
+            WHERE dro.delivery_remittance_id = ${schema.deliveryRemittances.id}
+              AND (o.customer_name ILIKE ${term} OR CAST(o.order_number AS text) ILIKE ${term})
+          )
+          OR EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.deliveryRemittances.logisticsLocationId}
+              AND ll.name ILIKE ${term}
+          )
+        )`,
+      );
+    }
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -2058,6 +2078,17 @@ export class LogisticsService {
       );
     }
 
+    // Text search — customer name, order number, or location name
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        sql`(
+          ${schema.orders.customerName} ILIKE ${term}
+          OR CAST(${schema.orders.orderNumber} AS text) ILIKE ${term}
+        )`,
+      );
+    }
+
     const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
     const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2089,9 +2120,10 @@ export class LogisticsService {
       .leftJoin(loc, eq(loc.id, schema.deliveryRemittances.logisticsLocationId))
       .leftJoin(prov, eq(prov.id, loc.providerId));
 
-    const countQuery = this.db
+    const countBase = this.db
       .select({ count: count() })
       .from(schema.deliveryRemittanceOrders)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
       .innerJoin(
         schema.deliveryRemittances,
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
@@ -2101,7 +2133,7 @@ export class LogisticsService {
       whereClause
         ? baseQuery.where(whereClause).orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset)
         : baseQuery.orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset),
-      whereClause ? countQuery.where(whereClause) : countQuery,
+      whereClause ? countBase.where(whereClause) : countBase,
     ]);
 
     const total = totalRows[0]?.count ?? 0;
