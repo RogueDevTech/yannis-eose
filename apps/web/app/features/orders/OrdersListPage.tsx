@@ -1306,8 +1306,13 @@ function OrdersListPageImpl({
               Cart
             </span>
           ) : (
-            <span className={frozen ? 'opacity-60' : ''}>
+            <span className={`inline-flex items-center gap-1.5 ${frozen ? 'opacity-60' : ''}`}>
               <OrderStatusBadge status={order.status} />
+              {order.isDuplicate === 'CART_EDGE_FORM_DUPE' && (
+                <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700/50 dark:text-slate-300">
+                  Duplicate
+                </span>
+              )}
             </span>
           );
         },
@@ -1429,8 +1434,13 @@ function OrdersListPageImpl({
                 Cart
               </span>
             ) : (
-              <span className={mobileFrozen ? 'opacity-60' : ''}>
+              <span className={`inline-flex items-center gap-1.5 ${mobileFrozen ? 'opacity-60' : ''}`}>
                 <OrderStatusBadge status={order.status} />
+                {order.isDuplicate === 'CART_EDGE_FORM_DUPE' && (
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700/50 dark:text-slate-300">
+                    Duplicate
+                  </span>
+                )}
               </span>
             )}
             <span className="whitespace-nowrap text-xs text-app-fg-muted">
