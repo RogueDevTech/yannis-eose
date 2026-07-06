@@ -18,6 +18,7 @@ export {
   requestOrderLinePriceChangeSchema,
   requestOrderDeletionSchema,
   requestDeliveredOrderDeletionSchema,
+  requestOrderRetrackSchema,
   softDeleteOrderSchema,
   assignOrderSchema,
   bulkReassignSchema,

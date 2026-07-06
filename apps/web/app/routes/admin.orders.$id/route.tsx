@@ -738,7 +738,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  if (intent && !canManageOrderDetail(user)) {
+  // Finance-initiated intents self-authorize below via their own finance-access
+  // checks (a Finance Officer fails canManageOrderDetail by design, yet is
+  // explicitly allowed to request a delivered-order deletion or a status retrack).
+  const FINANCE_SELF_AUTHORIZED_INTENTS = new Set([
+    'requestDeliveredOrderDeletion',
+    'requestOrderRetrack',
+  ]);
+  if (intent && !FINANCE_SELF_AUTHORIZED_INTENTS.has(intent) && !canManageOrderDetail(user)) {
     return json(
       { error: 'This order is view-only for your permissions' },
       { status: 403 },
@@ -1340,8 +1347,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
       'FINANCE_OFFICER',
       'SUPER_ADMIN',
       'ADMIN',
+      'SUPPORT',
     ];
-    if (!allowedRoles.includes(user.role)) {
+    const hasFinance = allowedRoles.includes(user.role) ||
+      (user.permissions ?? []).some((p: string) => p === 'finance.costView' || p === 'finance.costs.view');
+    if (!hasFinance) {
       return json({ error: 'Only Finance or Admin can request delivered order deletion' }, { status: 403 });
     }
     const reason = formData.get('reason')?.toString()?.trim() ?? '';
@@ -1358,6 +1368,34 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true, intent: 'requestDeliveredOrderDeletion' });
+  }
+
+  if (intent === 'requestOrderRetrack') {
+    // Gate: finance access (backend does the full check, this is a first filter)
+    const financeRoles = ['FINANCE_OFFICER', 'SUPER_ADMIN', 'ADMIN', 'SUPPORT'];
+    const hasFinanceForRetrack = financeRoles.includes(user.role) ||
+      (user.permissions ?? []).some((p: string) => p === 'finance.costView' || p === 'finance.costs.view');
+    if (!hasFinanceForRetrack) {
+      return json({ error: 'Only Finance-access users can request order retrack' }, { status: 403 });
+    }
+    const targetStatus = formData.get('targetStatus')?.toString()?.trim() ?? '';
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    if (!targetStatus) {
+      return json({ error: 'Target status is required' }, { status: 400 });
+    }
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.requestOrderRetrack', {
+      method: 'POST',
+      cookie,
+      body: { orderId, targetStatus, reason },
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to submit retrack request');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, intent: 'requestOrderRetrack' });
   }
 
   if (intent === 'softDeleteOrder') {

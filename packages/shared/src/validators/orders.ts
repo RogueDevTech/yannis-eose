@@ -269,6 +269,14 @@ export const requestDeliveredOrderDeletionSchema = z.object({
 
 export type RequestDeliveredOrderDeletionInput = z.infer<typeof requestDeliveredOrderDeletionSchema>;
 
+export const requestOrderRetrackSchema = z.object({
+  orderId: z.string().uuid(),
+  targetStatus: z.string().min(1),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+});
+
+export type RequestOrderRetrackInput = z.infer<typeof requestOrderRetrackSchema>;
+
 /**
  * Assign order to Sales closer — manual assignment or bulk reassign.
  */
