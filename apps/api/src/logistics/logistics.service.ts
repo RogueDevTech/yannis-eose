@@ -2248,8 +2248,9 @@ export class LogisticsService {
       orderNumber: schema.orders.orderNumber,
     } as const;
     const sortCol = input.sortBy ? sortColumnMap[input.sortBy as keyof typeof sortColumnMap] ?? schema.deliveryRemittances.sentAt : schema.deliveryRemittances.sentAt;
-    const sortFn = input.sortDir === 'asc' ? asc : desc;
-    const orderClauses = [sortFn(sortCol), desc(schema.orders.deliveredAt)];
+    // NULLS LAST so NULL delivery fees / amounts don't rank above real values
+    const sortDirection = input.sortDir === 'asc' ? 'ASC' : 'DESC';
+    const orderClauses = [sql`${sortCol} ${sql.raw(sortDirection)} NULLS LAST`, desc(schema.orders.deliveredAt)];
 
     const [rows, totalRows] = await Promise.all([
       whereClause
