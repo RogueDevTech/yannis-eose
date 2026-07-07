@@ -22,6 +22,8 @@ export interface SelectOption {
   value: string;
   label: string;
   disabled?: boolean;
+  /** Optional colored dot rendered before the label (e.g. 'bg-blue-500'). */
+  dot?: string;
 }
 
 export interface SelectGroup {
@@ -418,8 +420,9 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
             aria-controls={inputId ? `${inputId}-listbox` : undefined}
           >
             <span
-              className={[inlineChevron ? 'min-w-0 truncate' : 'block min-w-0 truncate', selected ? 'text-app-fg' : 'text-app-fg-muted'].join(' ')}
+              className={[inlineChevron ? 'min-w-0 truncate flex items-center gap-1.5' : 'block min-w-0 truncate flex items-center gap-1.5', selected ? 'text-app-fg' : 'text-app-fg-muted'].join(' ')}
             >
+              {selected?.dot && <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${selected.dot}`} />}
               {selected?.label ?? placeholder ?? ''}
             </span>
             {inlineChevron && (
@@ -484,7 +487,10 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
                                   onMouseEnter={() => !option.disabled && setActiveIndex(currentOptionIndex)}
                                   onClick={() => selectAt(currentOptionIndex)}
                                 >
-                                  <span className="block truncate text-sm text-app-fg">{option.label}</span>
+                                  <span className="flex items-center gap-1.5 truncate text-sm text-app-fg">
+                                    {option.dot && <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${option.dot}`} />}
+                                    {option.label}
+                                  </span>
                                 </button>
                               );
                             })}

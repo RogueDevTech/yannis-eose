@@ -934,12 +934,6 @@ export function DeliveryRemittancesPage({
               mobileGrid
               items={[
                 {
-                  label: <span className="flex items-center">Delivered ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
-                  value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
-                  valueClassName: 'text-app-fg tabular-nums',
-                  title: 'Total value = Awaiting + Remitted + Pending + Disputed',
-                },
-                {
                   label: <span className="flex items-center">Awaiting ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
                   value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
                   valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
@@ -963,14 +957,14 @@ export function DeliveryRemittancesPage({
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'SENT'); n.set('page', '1'); return n; }, { replace: true }); },
                   active: viewTab === 'remittances' && pendingStatus === 'SENT',
                 },
-                ...(Number(summary.disputedCount ?? 0) > 0 ? [{
+                {
                   label: <span className="flex items-center">Disputed ({Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('disputed')} /></span>,
                   value: <NairaPrice amount={disputedGross} />,
                   valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' as const,
                   title: 'Needs resolution',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p: URLSearchParams) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'DISPUTED'); n.set('page', '1'); return n; }, { replace: true }); },
                   active: viewTab === 'remittances' && pendingStatus === 'DISPUTED',
-                }] : []),
+                },
               ]}
             />
           );
@@ -1219,54 +1213,59 @@ export function DeliveryRemittancesPage({
                     wrapperClassName="w-full sm:w-32"
                   />
                   {viewMode === 'orders' && (
-                    <>
-                      <FormSelect
-                        value={new URLSearchParams(location.search).get('category') ?? ''}
-                        onChange={(e) => {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            if (e.target.value) next.set('category', e.target.value);
-                            else next.delete('category');
-                            next.set('page', '1');
-                            return next;
-                          });
-                        }}
-                        options={[
-                          { value: '', label: 'All categories' },
-                          { value: 'marketing', label: 'Marketing orders' },
-                          { value: 'cart', label: 'Cart orders' },
-                          { value: 'follow-up', label: 'Follow-up orders' },
-                          { value: 'offline', label: 'Offline orders' },
-                        ]}
-                        wrapperClassName="w-full sm:w-44"
-                      />
-                      <SortMenu
-                        value={{
-                          sortBy: new URLSearchParams(location.search).get('sortBy') ?? 'sentAt',
-                          sortDir: (new URLSearchParams(location.search).get('sortDir') as 'asc' | 'desc') ?? 'desc',
-                        }}
-                        onChange={(next) => {
-                          setSearchParams((p) => {
-                            const params = new URLSearchParams(p);
-                            if (next.sortBy !== 'sentAt') params.set('sortBy', next.sortBy);
-                            else params.delete('sortBy');
-                            if (next.sortDir !== 'desc') params.set('sortDir', next.sortDir);
-                            else params.delete('sortDir');
-                            params.set('page', '1');
-                            return params;
-                          });
-                        }}
-                        options={[
+                    <FormSelect
+                      value={new URLSearchParams(location.search).get('category') ?? ''}
+                      onChange={(e) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          if (e.target.value) next.set('category', e.target.value);
+                          else next.delete('category');
+                          next.set('page', '1');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: '', label: 'All categories' },
+                        { value: 'marketing', label: 'Marketing orders', dot: 'bg-blue-500' },
+                        { value: 'cart', label: 'Cart orders', dot: 'bg-purple-500' },
+                        { value: 'follow-up', label: 'Follow-up orders', dot: 'bg-amber-500' },
+                        { value: 'offline', label: 'Offline orders', dot: 'bg-gray-400' },
+                      ]}
+                      wrapperClassName="w-full sm:w-44"
+                    />
+                  )}
+                  <SortMenu
+                    value={{
+                      sortBy: new URLSearchParams(location.search).get('sortBy') ?? 'sentAt',
+                      sortDir: (new URLSearchParams(location.search).get('sortDir') as 'asc' | 'desc') ?? 'desc',
+                    }}
+                    onChange={(next) => {
+                      setSearchParams((p) => {
+                        const params = new URLSearchParams(p);
+                        if (next.sortBy !== 'sentAt') params.set('sortBy', next.sortBy);
+                        else params.delete('sortBy');
+                        if (next.sortDir !== 'desc') params.set('sortDir', next.sortDir);
+                        else params.delete('sortDir');
+                        params.set('page', '1');
+                        return params;
+                      });
+                    }}
+                    options={viewMode === 'orders'
+                      ? [
                           { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
                           { value: 'deliveredAt', label: 'Delivered date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
                           { value: 'totalAmount', label: 'Amount', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
                           { value: 'deliveryFee', label: 'Delivery fee', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
                           { value: 'orderNumber', label: 'Order #', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
-                        ]}
-                        defaultValue={{ sortBy: 'sentAt', sortDir: 'desc' }}
-                      />
-                    </>
-                  )}
+                        ]
+                      : [
+                          { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+                          { value: 'orderCount', label: 'Order count', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
+                          { value: 'batchTotal', label: 'Batch total', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+                        ]
+                    }
+                    defaultValue={{ sortBy: 'sentAt', sortDir: 'desc' }}
+                  />
                 </>
               }
               sheetFilterBody={
