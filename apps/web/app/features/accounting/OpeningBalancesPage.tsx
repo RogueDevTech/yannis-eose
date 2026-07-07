@@ -77,7 +77,7 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
             type="date"
             value={postingDate}
             onChange={(e) => setPostingDate(e.target.value)}
-            className="h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg"
+            className="h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
           />
         </div>
         <div className="flex-1 min-w-[200px]">
@@ -108,7 +108,7 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
                     min="0"
                     value={amounts[a.id]?.debit ?? ''}
                     onChange={(e) => setAmt(a.id, 'debit', e.target.value)}
-                    className="h-8 w-32 rounded border border-app-border bg-app-bg px-2 text-right tabular-nums"
+                    className="h-8 w-32 rounded border border-app-border bg-app-canvas px-2 text-right tabular-nums"
                   />
                 </td>
                 <td className="px-3 py-1.5 text-right">
@@ -118,7 +118,7 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
                     min="0"
                     value={amounts[a.id]?.credit ?? ''}
                     onChange={(e) => setAmt(a.id, 'credit', e.target.value)}
-                    className="h-8 w-32 rounded border border-app-border bg-app-bg px-2 text-right tabular-nums"
+                    className="h-8 w-32 rounded border border-app-border bg-app-canvas px-2 text-right tabular-nums"
                   />
                 </td>
               </tr>

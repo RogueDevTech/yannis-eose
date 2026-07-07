@@ -91,7 +91,7 @@ export function TrialBalancePage({ accounts, totals, filters }: TrialBalancePage
           type="date"
           value={filters.asOfDate}
           onChange={(e) => onAsOfChange(e.target.value)}
-          className="h-10 md:h-9 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg"
+          className="h-10 md:h-9 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
         />
       </div>
 

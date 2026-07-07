@@ -82,7 +82,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
               type="date"
               value={postingDate}
               onChange={(e) => setPostingDate(e.target.value)}
-              className="w-full h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg"
+              className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
             />
           </div>
           <div>
@@ -91,7 +91,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="e.g. Agent remittance — batch AP-2026-06-00001"
-              className="w-full h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg"
+              className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
             />
           </div>
         </div>
@@ -120,7 +120,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
                 value={line.debit}
                 onChange={(e) => setLine(line.key, { debit: e.target.value, credit: '' })}
                 placeholder="0.00"
-                className="h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-right tabular-nums"
+                className="h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-right tabular-nums"
               />
               <input
                 type="number"
@@ -130,7 +130,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
                 value={line.credit}
                 onChange={(e) => setLine(line.key, { credit: e.target.value, debit: '' })}
                 placeholder="0.00"
-                className="h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-right tabular-nums"
+                className="h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-right tabular-nums"
               />
               <button
                 type="button"

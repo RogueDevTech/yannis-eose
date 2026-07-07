@@ -127,7 +127,7 @@ export function JournalEntriesPage({ records, pagination, canWrite }: JournalEnt
               <input type="hidden" name="journalEntryId" value={reverseTarget.id} />
               <div>
                 <label className="mb-1 block text-sm font-medium text-app-fg">Reason (optional)</label>
-                <input name="reason" className="w-full h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm" />
+                <input name="reason" className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setReverseTarget(null)}>

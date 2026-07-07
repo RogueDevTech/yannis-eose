@@ -150,11 +150,11 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
               <input type="hidden" name="intent" value="createAccount" />
               <div>
                 <label className="mb-1 block text-sm font-medium text-app-fg">Code</label>
-                <input name="code" required className="w-full h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm" />
+                <input name="code" required className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm" />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-app-fg">Name</label>
-                <input name="name" required className="w-full h-10 rounded-lg border border-app-border bg-app-bg px-3 text-sm" />
+                <input name="name" required className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm" />
               </div>
               <FormSelect name="rootType" label="Root type" options={ROOT_TYPES} required />
               <FormSelect
