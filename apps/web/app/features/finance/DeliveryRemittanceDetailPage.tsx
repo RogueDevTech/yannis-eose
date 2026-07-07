@@ -255,9 +255,9 @@ export function DeliveryRemittanceDetailPage({
         />
       )}
 
-      <div className="rounded-xl border border-app-border bg-app-elevated p-4 md:p-5 shadow-sm space-y-4">
+      <div className="rounded-xl border border-app-border bg-app-elevated p-3 md:p-4 shadow-sm space-y-3">
         {/* Desktop: single flex-wrap row. Mobile: stacked grid for readability. */}
-        <div className="hidden md:flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+        <div className="hidden md:flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
           <StatusBadge status={detail.status} label={STATUS_LABEL[detail.status] ?? detail.status} />
           <span className="text-app-fg-muted">
             Sent {new Date(detail.sentAt).toLocaleString('en-NG')} · by {recordedByLabel}
@@ -281,7 +281,7 @@ export function DeliveryRemittanceDetailPage({
             <>
               <span className="h-3 w-px bg-app-border" aria-hidden />
               <span className="text-app-fg-muted">
-                <span className="font-medium text-app-fg-muted/80">Marked received</span>{' '}
+                <span className="font-medium text-app-fg-muted/80">Received</span>{' '}
                 <span className="text-app-fg">
                   {new Date(detail.receivedAt).toLocaleString('en-NG')}
                   {detail.receivedByName ? ` · ${detail.receivedByName}` : ''}
@@ -291,12 +291,12 @@ export function DeliveryRemittanceDetailPage({
           ) : null}
         </div>
         {/* Mobile: compact stacked layout */}
-        <div className="md:hidden space-y-2.5">
+        <div className="md:hidden space-y-2">
           <div className="flex items-center justify-between gap-2">
             <StatusBadge status={detail.status} label={STATUS_LABEL[detail.status] ?? detail.status} />
             <span className="text-xs text-app-fg-muted">{new Date(detail.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
           </div>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
             <div>
               <dt className="text-app-fg-muted/80 font-medium">Location</dt>
               <dd className="text-app-fg mt-0.5">{locationLine}</dd>
@@ -317,78 +317,58 @@ export function DeliveryRemittanceDetailPage({
           </dl>
         </div>
         {detail.notes?.trim() ? (
-          <div className="text-sm text-app-fg-muted">
-            <span className="font-medium text-app-fg-muted/80">Accountant notes:</span>{' '}
+          <p className="text-xs text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Notes:</span>{' '}
             <span className="text-app-fg">{detail.notes}</span>
+          </p>
+        ) : null}
+        <div className="pt-2 border-t border-app-border flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="text-lg font-bold text-brand-700 dark:text-brand-300 tabular-nums">
+            <NairaPrice amount={remittanceTotal} />
+          </span>
+          {(totalDeliveryFees > 0 || totalExtraCosts > 0) ? (
+            <span className="text-xs text-app-fg-muted tabular-nums">
+              <NairaPrice amount={totalOrderAmount} /> gross
+              {totalDeliveryFees > 0 && <> · -<NairaPrice amount={totalDeliveryFees} /> delivery</>}
+              {commitmentFee > 0 && <> · -<NairaPrice amount={commitmentFee} /> commitment</>}
+              {posFee > 0 && <> · -<NairaPrice amount={posFee} /> POS</>}
+              {failedDeliveryCost > 0 && <> · -<NairaPrice amount={failedDeliveryCost} /> failed</>}
+            </span>
+          ) : null}
+          <span className="text-xs text-brand-500 dark:text-brand-400">
+            {detail.orders.length} order(s)
+          </span>
+        </div>
+        {/* Receipts inline */}
+        {(detail.receiptUrls ?? []).length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-medium text-app-fg-muted/80">Receipts:</span>
+            {(detail.receiptUrls ?? []).map((url, i) => {
+              const label = (detail.receiptUrls ?? []).length > 1 ? `Receipt ${i + 1}` : 'Receipt';
+              return (
+                <button
+                  key={url}
+                  type="button"
+                  onClick={() => setReceiptPreview({ url, label })}
+                  className="text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         ) : null}
-        <div className="pt-1 border-t border-app-border space-y-2">
-          <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">
-            Remittance total
-          </p>
-          {(totalDeliveryFees > 0 || totalExtraCosts > 0) && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-app-fg-muted">Order total</span>
-                <span className="text-sm tabular-nums text-app-fg-muted">
-                  <NairaPrice amount={totalOrderAmount} />
-                </span>
-              </div>
-              {totalDeliveryFees > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-app-fg-muted">Delivery costs</span>
-                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                    -<NairaPrice amount={totalDeliveryFees} />
-                  </span>
-                </div>
-              )}
-              {commitmentFee > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-app-fg-muted">Commitment fee</span>
-                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                    -<NairaPrice amount={commitmentFee} />
-                  </span>
-                </div>
-              )}
-              {posFee > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-app-fg-muted">POS fee</span>
-                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                    -<NairaPrice amount={posFee} />
-                  </span>
-                </div>
-              )}
-              {failedDeliveryCost > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-app-fg-muted">Failed delivery</span>
-                  <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                    -<NairaPrice amount={failedDeliveryCost} />
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-          <p className="text-2xl font-bold text-brand-700 dark:text-brand-300">
-            <NairaPrice amount={remittanceTotal} />
-          </p>
-          <p className="text-xs text-brand-500 dark:text-brand-400">
-            {(totalDeliveryFees > 0 || totalExtraCosts > 0)
-              ? `Net from ${detail.orders.length} order(s) after deductions`
-              : `Sum of ${detail.orders.length} linked order(s)`}
-          </p>
-        </div>
         {detail.status === 'DISPUTED' && detail.disputeReason ? (
-          <div className="rounded-md border border-danger-200 dark:border-danger-800 bg-danger-50 dark:bg-danger-900/20 p-3 text-sm text-danger-700 dark:text-danger-300">
+          <div className="rounded-md border border-danger-200 dark:border-danger-800 bg-danger-50 dark:bg-danger-900/20 p-2.5 text-sm text-danger-700 dark:text-danger-300">
             {detail.disputeReason}
           </div>
         ) : null}
       </div>
 
       {hasApprovePermission && detail.status === 'SENT' ? (
-        <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-3">
-          <h2 className="text-sm font-semibold text-app-fg">Settlement</h2>
+        <div className="rounded-xl border border-app-border bg-app-elevated p-3 md:p-4 shadow-sm space-y-2">
           <p className="text-sm text-app-fg-muted">
-            Mark received when cash matches this batch, or dispute with a reason if it does not.
+            Mark received when cash matches, or dispute if it does not.
           </p>
           {disputeMode ? (
             <>
@@ -397,11 +377,11 @@ export function DeliveryRemittanceDetailPage({
                 required
                 value={disputeReason}
                 onChange={(e) => setDisputeReason(e.target.value)}
-                rows={3}
-                placeholder="Explain why this remittance is disputed (min 10 chars)..."
+                rows={2}
+                placeholder="Why is this disputed? (min 10 chars)"
                 error={
                   disputeReason.length > 0 && disputeReason.length < 10
-                    ? `At least 10 characters required (${disputeReason.length}/10)`
+                    ? `${disputeReason.length}/10 chars`
                     : undefined
                 }
               />
@@ -457,49 +437,6 @@ export function DeliveryRemittanceDetailPage({
           )}
         </div>
       ) : null}
-
-      <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-3">
-        <h2 className="text-base font-semibold text-app-fg">Receipts</h2>
-        {/* Receipts open on demand in a modal — embedding the image inline made
-            the page heavy on long batches with multiple attachments and pushed
-            the "Orders in this batch" table below the fold. */}
-        {(detail.receiptUrls ?? []).length > 0 ? (
-          <ul className="flex flex-col gap-1.5">
-            {(detail.receiptUrls ?? []).map((url, i) => {
-              const label =
-                (detail.receiptUrls ?? []).length > 1 ? `Receipt ${i + 1}` : 'Receipt';
-              return (
-                <li key={url}>
-                  <button
-                    type="button"
-                    onClick={() => setReceiptPreview({ url, label })}
-                    className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline"
-                  >
-                    {`View ${label.toLowerCase()}`}
-                    <svg
-                      className="w-3.5 h-3.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                      />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="text-sm text-app-fg-muted italic">No receipts attached</p>
-        )}
-      </div>
 
       <div className="space-y-2">
         <div className="px-1">

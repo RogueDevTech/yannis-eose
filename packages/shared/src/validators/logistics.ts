@@ -190,6 +190,11 @@ export const listDeliveryRemittancesSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   search: z.string().trim().max(200).optional(),
+  /** Filter by order category in the orders view. */
+  category: z.enum(['marketing', 'cart', 'follow-up', 'offline']).optional(),
+  /** Sort field for the orders view. */
+  sortBy: z.enum(['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber']).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });

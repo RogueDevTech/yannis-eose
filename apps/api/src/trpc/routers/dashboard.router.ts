@@ -462,7 +462,7 @@ export const dashboardRouter = router({
 
     const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
       // CS funnel — excludes graduated follow-up + cart orders
-      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true).catch(() => ({})),
+      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true, true).catch(() => ({})),
       ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
       financeService.countPendingApprovalRequests().catch(() => 0),
       getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
