@@ -422,6 +422,7 @@ export function LogisticsTeamPage({
   );
   const totalRemitted = providers.reduce((acc, p) => acc + (Number(p.remittedAmount) || 0), 0);
   const totalPending = providers.reduce((acc, p) => acc + (Number(p.pendingRemittanceAmount) || 0), 0);
+  const totalOwing = providers.reduce((acc, p) => acc + (Number(p.owingAmount) || 0), 0);
   const totalAvailableStock = providers.reduce((acc, p) => acc + p.availableStock, 0);
   const totalReservedStock = providers.reduce((acc, p) => acc + (p.reservedStock ?? 0), 0);
   const totalStockReceived = providers.reduce((acc, p) => acc + p.stockReceived, 0);
@@ -519,6 +520,23 @@ export function LogisticsTeamPage({
             />
           ) : (
             <span className="text-success-600 dark:text-success-400 font-medium tabular-nums"><NairaPrice amount={p.remittedAmount} /></span>
+          );
+        },
+      },
+      {
+        key: 'owingAmount',
+        header: 'Owing',
+        align: 'right',
+        nowrap: true,
+        render: (p) => {
+          const amount = Number(p.owingAmount) || 0;
+          const cnt = p.owingCount ?? 0;
+          if (amount <= 0) return <span className="text-app-fg-muted tabular-nums">₦0</span>;
+          return (
+            <DualValue
+              left={<span className="text-danger-600 dark:text-danger-400 font-medium"><NairaPrice amount={amount} /></span>}
+              right={<span className="text-app-fg-muted">{cnt} order{cnt !== 1 ? 's' : ''}</span>}
+            />
           );
         },
       },
@@ -745,6 +763,7 @@ export function LogisticsTeamPage({
           { label: 'Delivery rate', value: totalAssigned > 0 ? `${Math.round(overallDeliveryRate)}%` : '0%', valueClassName: deliveryRateColorClass(overallDeliveryRate) },
           { label: 'Remitted', value: formatNaira(totalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
           ...(totalPending > 0 ? [{ label: 'Pending', value: formatNaira(totalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
+          ...(totalOwing > 0 ? [{ label: 'Owing', value: formatNaira(totalOwing), valueClassName: 'text-danger-600 dark:text-danger-400' }] : []),
         ] : [
           { label: 'Locations', value: filteredLocations.length, valueClassName: 'text-app-fg' },
           { label: 'Total assigned', value: locTotalAssigned, valueClassName: 'text-app-fg' },

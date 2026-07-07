@@ -155,6 +155,8 @@ export interface RemittanceOrderRow {
   providerName: string | null;
   isDuplicate: string | null;
   duplicateOfId: string | null;
+  csName: string | null;
+  branchName: string | null;
   category: 'marketing' | 'cart' | 'follow-up' | 'offline';
 }
 
