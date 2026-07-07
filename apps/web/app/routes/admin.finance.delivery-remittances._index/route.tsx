@@ -78,6 +78,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
+  const remittanceSearch = url.searchParams.get('rq')?.trim() ?? undefined;
+  if (remittanceSearch) listInput.search = remittanceSearch;
+  const category = url.searchParams.get('category') ?? undefined;
+  if (category && ['marketing', 'cart', 'follow-up', 'offline'].includes(category)) {
+    listInput.category = category;
+  }
+  const sortBy = url.searchParams.get('sortBy') ?? undefined;
+  const sortDir = url.searchParams.get('sortDir') ?? undefined;
+  if (sortBy && ['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber'].includes(sortBy)) {
+    listInput.sortBy = sortBy;
+  }
+  if (sortDir && ['asc', 'desc'].includes(sortDir)) {
+    listInput.sortDir = sortDir;
+  }
 
   const eligiblePageParam = parseInt(url.searchParams.get('eligiblePage') ?? '1', 10);
   const eligiblePage =
@@ -91,8 +105,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   if (locationFilter) eligibleListBase.logisticsLocationId = locationFilter;
   if (eligibleQ) eligibleListBase.search = eligibleQ;
-  if (startDate && !periodAllTime) eligibleListBase.startDate = startDate;
-  if (endDate && !periodAllTime) eligibleListBase.endDate = endDate;
+  // Awaiting remittance shows ALL unremitted orders regardless of date —
+  // an old unremitted order is just as actionable as a recent one.
 
   const eligibleListInput = JSON.stringify(eligibleListBase);
 
@@ -108,6 +122,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endDate: endDate ?? '',
       periodAllTime,
       eligibleQ: eligibleQ ?? '',
+      remittanceSearch: remittanceSearch ?? '',
     },
     canCreateRemittance,
     canMarkReceived,
@@ -126,6 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     remittanceId: string; remittanceStatus: string;
     sentAt: string; locationName: string | null; providerName: string | null;
     isDuplicate: string | null; duplicateOfId: string | null;
+    category: 'marketing' | 'cart' | 'follow-up' | 'offline';
   };
   const ordersViewInput = encodeURIComponent(JSON.stringify(listInput));
   const ordersViewPromise = viewMode === 'orders'
@@ -231,6 +247,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endDate: endDate ?? '',
       periodAllTime,
       eligibleQ: eligibleQ ?? '',
+      remittanceSearch: remittanceSearch ?? '',
     },
     userMap,
     sentByOptions,

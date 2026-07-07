@@ -316,6 +316,7 @@ export const logisticsRouter = router({
         sentBy: z.string().uuid().optional(),
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
+        search: z.string().trim().max(200).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {

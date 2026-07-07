@@ -491,7 +491,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         to: salesLink({ status: 'DELETED' }),
                       },
                       {
-                        label: 'Offline',
+                        label: <span className="flex items-center">Offline<FunnelInfoIcon onClick={() => setBreakdownModal('offline')} /></span>,
                         value: offlineCount,
                         valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
                         title: 'Orders created manually via offline order',
@@ -514,6 +514,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     const offDel = orderPipeline.offlineDeliveredCount ?? 0;
                     const mktDel = csDelivered - offDel;
                     return (
+                      <>
                       <FunnelBreakdownModal
                         open={breakdownModal === 'csDelivered'}
                         onClose={() => setBreakdownModal(null)}
@@ -525,6 +526,17 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                           { label: 'CS Delivered', value: csDelivered, bold: true },
                         ]}
                       />
+                      <FunnelBreakdownModal
+                        open={breakdownModal === 'offline'}
+                        onClose={() => setBreakdownModal(null)}
+                        title="Offline Orders: Breakdown"
+                        description="Offline orders created vs delivered in this period."
+                        lines={[
+                          { label: 'Offline created', value: offlineCount },
+                          { label: 'Offline delivered', value: offDel },
+                        ]}
+                      />
+                      </>
                     );
                   })()}
                 </div>

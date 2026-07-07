@@ -126,16 +126,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const remSummary = bundle?.remittanceSummary;
     let pulse: FinanceOverviewPulse = {
       ...emptyPulse,
-      awaitingCash: Number(remSummary?.awaitingAmount ?? 0),
+      awaitingCash: Number(remSummary?.awaitingGrossAmount ?? remSummary?.awaitingAmount ?? 0),
       awaitingOrderCount: Number(remSummary?.awaitingCount ?? 0),
-      pendingRemittanceAmount: Number(remSummary?.pendingAmount ?? 0),
+      pendingRemittanceAmount: Number(remSummary?.pendingGrossAmount ?? remSummary?.pendingAmount ?? 0),
       pendingRemittanceBatchCount: Number(remSummary?.pendingCount ?? 0),
       disputedRemittanceBatchCount: Number(remSummary?.disputedCount ?? 0),
-      disputedRemittanceAmount: Number(remSummary?.disputedAmount ?? 0),
+      disputedRemittanceAmount: Number(remSummary?.disputedGrossAmount ?? remSummary?.disputedAmount ?? 0),
       totalRemitted: Number(remSummary?.totalRemitted ?? 0),
       totalRemittedCount: Number(remSummary?.totalCount ?? 0),
-      receivedAmount: Number(remSummary?.receivedAmount ?? 0),
-      receivedCount: Number(remSummary?.receivedCount ?? 0),
+      // Use baseSummary fields (createdAt-scoped) so counts/amounts match the Cash Remittances page.
+      receivedAmount: Number(remSummary?.grossOrderValue ?? remSummary?.receivedAmount ?? 0),
+      receivedCount: Number(remSummary?.grossOrderCount ?? remSummary?.receivedOrderCount ?? remSummary?.receivedCount ?? 0),
       deliveredCount: Number(remSummary?.deliveredCount ?? 0),
       deliveredAmount: Number(remSummary?.deliveredAmount ?? 0),
       deliveredNetAmount: Number(remSummary?.deliveredNetAmount ?? 0),

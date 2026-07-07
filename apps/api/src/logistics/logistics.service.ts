@@ -1605,6 +1605,26 @@ export class LogisticsService {
       );
     }
 
+    // Text search — reaches into linked orders and location name via EXISTS subquery
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        sql`(
+          EXISTS (
+            SELECT 1 FROM delivery_remittance_orders dro
+            JOIN orders o ON o.id = dro.order_id
+            WHERE dro.delivery_remittance_id = ${schema.deliveryRemittances.id}
+              AND (o.customer_name ILIKE ${term} OR CAST(o.order_number AS text) ILIKE ${term})
+          )
+          OR EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.deliveryRemittances.logisticsLocationId}
+              AND ll.name ILIKE ${term}
+          )
+        )`,
+      );
+    }
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -1652,6 +1672,7 @@ export class LogisticsService {
             deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
             count: count(),
             amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+            deliveryFeeTotal: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
           })
           .from(schema.deliveryRemittanceOrders)
           .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -1659,11 +1680,11 @@ export class LogisticsService {
           .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
       : [];
     const orderSummaryMap = new Map(
-      orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount }]),
+      orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount, deliveryFeeTotal: r.deliveryFeeTotal }]),
     );
     const orderSummaries = records.map((r) => {
       const s = orderSummaryMap.get(r.id);
-      return [{ count: s?.count ?? 0, amount: s?.amount ?? '0' }];
+      return [{ count: s?.count ?? 0, amount: s?.amount ?? '0', deliveryFeeTotal: s?.deliveryFeeTotal ?? '0' }];
     });
 
     // Count duplicate-flagged orders per batch for the batch list UI
@@ -1780,11 +1801,10 @@ export class LogisticsService {
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     // Scoped by date, location, group, and sentBy — must mirror summaryConditions
     // so the counts reconcile with the amounts.
-    // Outcome count/amount conditions — filter by orders.created_at to match
-    // Delivered/Awaiting/batch stats.
+    // Outcome count/amount conditions — filter by sentAt to match batch stats.
     const outcomeCountConditions: SQL[] = [];
-    if (input.startDate) outcomeCountConditions.push(sql`o_date.delivered_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeCountConditions.push(sql`o_date.delivered_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.startDate) outcomeCountConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     if (groupId) {
       outcomeCountConditions.push(sql`dr.logistics_location_id IN (
         SELECT ll.id FROM logistics_locations ll
@@ -1902,13 +1922,13 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
-    // Batch stats filter orders by created_at — must match Delivered/Awaiting counts above.
-    const orderDateConditions: SQL[] = [];
-    if (input.startDate) orderDateConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) orderDateConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    // Batch stats filter by sentAt — matches the Remitted tab's date filter.
+    const batchDateConditions: SQL[] = [];
+    if (input.startDate) batchDateConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) batchDateConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
     const baseSummaryWhere = summaryWhere
-      ? (orderDateConditions.length > 0 ? and(summaryWhere, ...orderDateConditions) : summaryWhere)
-      : (orderDateConditions.length > 0 ? and(...orderDateConditions) : undefined);
+      ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
+      : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
 
     const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, deliveredRows] = await Promise.all([
       baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
@@ -1973,6 +1993,7 @@ export class LogisticsService {
         .flatMap((r, i) => {
           const orderCount = orderSummaries[i]?.[0]?.count ?? 0;
           const orderAmount = orderSummaries[i]?.[0]?.amount ?? '0';
+          const orderDeliveryFeeTotal = orderSummaries[i]?.[0]?.deliveryFeeTotal ?? '0';
           const base = {
             ...r,
             locationName: locationMap.get(r.logisticsLocationId) ?? null,
@@ -1981,6 +2002,7 @@ export class LogisticsService {
             orderCount,
             duplicateOrderCount: dupCountMap.get(r.id) ?? 0,
             outcomeAmount: orderAmount,
+            deliveryFeeTotal: orderDeliveryFeeTotal,
             outcomeOrderCount: orderCount,
             outcomeReason: r.disputeReason,
           };
@@ -2058,6 +2080,37 @@ export class LogisticsService {
       );
     }
 
+    // Text search — customer name, order number, or location name
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        sql`(
+          ${schema.orders.customerName} ILIKE ${term}
+          OR CAST(${schema.orders.orderNumber} AS text) ILIKE ${term}
+        )`,
+      );
+    }
+
+    if (input.category) {
+      switch (input.category) {
+        case 'marketing':
+          conditions.push(
+            sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
+            eq(schema.orders.isFollowUp, false),
+          );
+          break;
+        case 'cart':
+          conditions.push(eq(schema.orders.orderSource, 'online'));
+          break;
+        case 'follow-up':
+          conditions.push(eq(schema.orders.isFollowUp, true));
+          break;
+        case 'offline':
+          conditions.push(eq(schema.orders.orderSource, 'offline'));
+          break;
+      }
+    }
+
     const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
     const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2079,6 +2132,8 @@ export class LogisticsService {
         providerName: prov.name,
         isDuplicate: schema.orders.isDuplicate,
         duplicateOfId: schema.orders.duplicateOfId,
+        orderSource: schema.orders.orderSource,
+        isFollowUp: schema.orders.isFollowUp,
       })
       .from(schema.deliveryRemittanceOrders)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -2089,19 +2144,31 @@ export class LogisticsService {
       .leftJoin(loc, eq(loc.id, schema.deliveryRemittances.logisticsLocationId))
       .leftJoin(prov, eq(prov.id, loc.providerId));
 
-    const countQuery = this.db
+    const countBase = this.db
       .select({ count: count() })
       .from(schema.deliveryRemittanceOrders)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
       .innerJoin(
         schema.deliveryRemittances,
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
       );
 
+    const sortColumnMap = {
+      sentAt: schema.deliveryRemittances.sentAt,
+      deliveredAt: schema.orders.deliveredAt,
+      totalAmount: schema.orders.totalAmount,
+      deliveryFee: schema.orders.deliveryFee,
+      orderNumber: schema.orders.orderNumber,
+    } as const;
+    const sortCol = input.sortBy ? sortColumnMap[input.sortBy] : schema.deliveryRemittances.sentAt;
+    const sortFn = input.sortDir === 'asc' ? asc : desc;
+    const orderClauses = [sortFn(sortCol), desc(schema.orders.deliveredAt)];
+
     const [rows, totalRows] = await Promise.all([
       whereClause
-        ? baseQuery.where(whereClause).orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset)
-        : baseQuery.orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset),
-      whereClause ? countQuery.where(whereClause) : countQuery,
+        ? baseQuery.where(whereClause).orderBy(...orderClauses).limit(input.limit).offset(offset)
+        : baseQuery.orderBy(...orderClauses).limit(input.limit).offset(offset),
+      whereClause ? countBase.where(whereClause) : countBase,
     ]);
 
     const total = totalRows[0]?.count ?? 0;
@@ -2122,6 +2189,10 @@ export class LogisticsService {
         providerName: r.providerName ?? null,
         isDuplicate: r.isDuplicate ?? null,
         duplicateOfId: r.duplicateOfId ?? null,
+        category: r.isFollowUp ? 'follow-up' as const
+          : r.orderSource === 'online' ? 'cart' as const
+          : r.orderSource === 'offline' ? 'offline' as const
+          : 'marketing' as const,
       })),
       pagination: {
         page: input.page,

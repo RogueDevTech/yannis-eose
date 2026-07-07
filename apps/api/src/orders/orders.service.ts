@@ -6148,9 +6148,10 @@ export class OrdersService {
       // Exclude graduated follow-up orders (is_follow_up=true).
       conditions.push(eq(schema.orders.isFollowUp, false));
       if (excludeCartGraduated) {
-        // Also exclude cart-graduated orders (order_source='online').
-        // CS funnel passes this — cart orders have their own strip.
-        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
+        // Exclude cart-graduated orders — CS funnel; cart orders have their own strip.
+        // Primary: order_source='online' (stamped since cart graduation was added).
+        // Fallback: catch any legacy un-stamped graduations via cartId + DELIVERED.
+        conditions.push(sql`NOT (${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`);
       }
     } else if (isFollowUp === true) {
       conditions.push(eq(schema.orders.isFollowUp, true));
