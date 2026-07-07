@@ -16,6 +16,11 @@ type Props = {
   columns: LocalExportColumn[];
   defaultColumns: string[];
   filenamePrefix: string;
+  /** When provided, fetches all rows on export instead of using the `rows` prop.
+   *  Use when `rows` is paginated and the export should include everything. */
+  fetchAllRows?: () => Promise<Array<Record<string, unknown>>>;
+  /** Total row count for display when fetchAllRows is provided. */
+  totalRows?: number;
 };
 
 function escapeCsvField(value: unknown): string {
@@ -80,14 +85,16 @@ async function downloadXlsx(filename: string, csv: string) {
   );
 }
 
-export function LocalExportModal({ open, onClose, title, description, rows, columns, defaultColumns, filenamePrefix }: Props) {
+export function LocalExportModal({ open, onClose, title, description, rows, columns, defaultColumns, filenamePrefix, fetchAllRows, totalRows }: Props) {
   const [format, setFormat] = useState<'csv' | 'pdf' | 'xlsx'>('csv');
   const [selectedColumns, setSelectedColumns] = useState<string[]>(defaultColumns);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setFormat('csv');
     setSelectedColumns(defaultColumns);
+    setExporting(false);
   }, [open, defaultColumns]);
 
   const selectedColumnDefs = useMemo(
@@ -95,11 +102,14 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
     [columns, selectedColumns],
   );
 
-  const canGenerate = selectedColumnDefs.length > 0;
+  const canGenerate = selectedColumnDefs.length > 0 && !exporting;
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
-    const csv = buildCsv(rows, selectedColumnDefs);
+    setExporting(true);
+    try {
+    const exportRows = fetchAllRows ? await fetchAllRows() : rows;
+    const csv = buildCsv(exportRows, selectedColumnDefs);
     const date = new Date().toISOString().split('T')[0] ?? 'export';
     const filename = `${filenamePrefix}-${date}.csv`;
     if (format === 'csv') {
@@ -114,6 +124,9 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
     }
     await downloadXlsx(filename, csv);
     onClose();
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -159,19 +172,26 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          disabled={!canGenerate}
-          onClick={handleGenerate}
-          className="bg-gradient-to-r from-brand-600 to-brand-500 border border-brand-700/30 shadow-md shadow-brand-900/20 hover:from-brand-500 hover:to-brand-400"
-        >
-          Generate report
-        </Button>
+      <div className="flex items-center justify-between gap-2">
+        {totalRows != null && totalRows > rows.length ? (
+          <span className="text-xs text-app-fg-muted">{totalRows.toLocaleString()} rows total</span>
+        ) : (
+          <span className="text-xs text-app-fg-muted">{rows.length.toLocaleString()} rows</span>
+        )}
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={!canGenerate}
+            onClick={handleGenerate}
+            className="bg-gradient-to-r from-brand-600 to-brand-500 border border-brand-700/30 shadow-md shadow-brand-900/20 hover:from-brand-500 hover:to-brand-400"
+          >
+            {exporting ? 'Generating…' : 'Generate report'}
+          </Button>
+        </div>
       </div>
     </Modal>
   );

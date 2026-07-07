@@ -182,6 +182,18 @@ export const createDeliveryRemittanceSchema = z.object({
 });
 export type CreateDeliveryRemittanceInput = z.infer<typeof createDeliveryRemittanceSchema>;
 
+export const updateDeliveryRemittanceSchema = z.object({
+  id: z.string().uuid(),
+  receiptUrls: z.array(z.string().url()).max(20).optional(),
+  notes: z.string().trim().max(1000).optional().nullable(),
+  commitmentFee: z.string().optional(),
+  posFee: z.string().optional(),
+  failedDeliveryCost: z.string().optional(),
+  /** Per-order delivery fees. Keys are order IDs, values are numeric fee amounts. */
+  deliveryFees: z.record(z.string().uuid(), z.string()).optional(),
+});
+export type UpdateDeliveryRemittanceInput = z.infer<typeof updateDeliveryRemittanceSchema>;
+
 export const listDeliveryRemittancesSchema = z.object({
   logisticsLocationId: z.string().uuid().optional(),
   /** Filter by who recorded the remittance (Phase 18 — Sent by filter on the Finance page). */
