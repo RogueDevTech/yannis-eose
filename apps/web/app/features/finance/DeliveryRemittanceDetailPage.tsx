@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher, useLocation } from '@remix-run/react';
+import { Link, useFetcher, useLocation, useSearchParams } from '@remix-run/react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import { ReceiptPreviewModal } from '~/components/ui/receipt-preview-modal';
@@ -23,6 +23,7 @@ import {
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import type { DeliveryRemittanceDetail } from './DeliveryRemittancesPage';
+import { CashRemittanceEditModal } from './CashRemittanceEditModal';
 
 interface DeliveryRemittanceDetailPageProps {
   detail: DeliveryRemittanceDetail;
@@ -44,12 +45,26 @@ export function DeliveryRemittanceDetailPage({
   userMap,
 }: DeliveryRemittanceDetailPageProps) {
   const location = useLocation();
+  const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [disputeMode, setDisputeMode] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
   const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<{ url: string; label: string } | null>(null);
+  const [showEditModal, setShowEditModal] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('edit') === 'true';
+  });
+
+  const closeEditModal = () => {
+    closeEditModal();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.delete('edit');
+      return next;
+    }, { replace: true });
+  };
 
   const listBackHref =
     typeof location.state === 'object' &&
@@ -240,8 +255,34 @@ export function DeliveryRemittanceDetailPage({
             sheetTitle="Actions"
             triggerAriaLabel="Cash remittance toolbar"
             saveFilterKey
-            desktop={<PageRefreshButton />}
-            sheet={<PageRefreshButton />}
+            desktop={
+              <>
+                <PageRefreshButton />
+                {hasApprovePermission && (
+                  <Button variant="secondary" size="sm" onClick={() => setShowEditModal(true)}>
+                    Edit
+                  </Button>
+                )}
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <PageRefreshButton />
+                {hasApprovePermission && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowEditModal(true);
+                    }}
+                  >
+                    Edit batch
+                  </Button>
+                )}
+              </>
+            )}
           />
         }
       />
@@ -505,6 +546,20 @@ export function DeliveryRemittanceDetailPage({
         title={receiptPreview ? `Remittance ${receiptPreview.label.toLowerCase()}` : 'Receipt'}
         imageAlt={receiptPreview?.label ?? 'Receipt'}
       />
+
+      {hasApprovePermission && (
+        <CashRemittanceEditModal
+          open={showEditModal}
+          onClose={() => closeEditModal()}
+          detail={detail}
+          onSuccess={() => {
+            // Remove ?edit from URL and reload to pick up fresh data
+            const url = new URL(window.location.href);
+            url.searchParams.delete('edit');
+            window.location.replace(url.toString());
+          }}
+        />
+      )}
     </div>
   );
 }

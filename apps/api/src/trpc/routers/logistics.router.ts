@@ -9,6 +9,7 @@ import {
   listRemittancesSchema,
   markRemittanceReceivedSchema,
   createDeliveryRemittanceSchema,
+  updateDeliveryRemittanceSchema,
   listDeliveryRemittancesSchema,
   listDeliveryRemittanceEligibleOrdersSchema,
   markDeliveryRemittanceReceivedSchema,
@@ -278,6 +279,12 @@ export const logisticsRouter = router({
     .input(createDeliveryRemittanceSchema)
     .mutation(async ({ input, ctx }) => {
       return getLogisticsService().createDeliveryRemittance(input, ctx.user);
+    }),
+
+  updateDeliveryRemittance: authedProcedure
+    .input(updateDeliveryRemittanceSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getLogisticsService().updateDeliveryRemittance(input, ctx.user);
     }),
 
   listDeliveryRemittances: authedProcedure
