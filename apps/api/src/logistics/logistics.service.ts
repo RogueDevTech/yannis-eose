@@ -2194,6 +2194,8 @@ export class LogisticsService {
 
     const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
     const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
+    const csUser = alias(schema.users, 'rem_ord_cs');
+    const csBranch = alias(schema.branches, 'rem_ord_branch');
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -2215,6 +2217,8 @@ export class LogisticsService {
         duplicateOfId: schema.orders.duplicateOfId,
         orderSource: schema.orders.orderSource,
         isFollowUp: schema.orders.isFollowUp,
+        csName: csUser.name,
+        branchName: csBranch.name,
       })
       .from(schema.deliveryRemittanceOrders)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -2223,7 +2227,9 @@ export class LogisticsService {
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
       )
       .leftJoin(loc, eq(loc.id, schema.deliveryRemittances.logisticsLocationId))
-      .leftJoin(prov, eq(prov.id, loc.providerId));
+      .leftJoin(prov, eq(prov.id, loc.providerId))
+      .leftJoin(csUser, eq(csUser.id, schema.orders.assignedCsId))
+      .leftJoin(csBranch, eq(csBranch.id, schema.orders.servicingBranchId));
 
     const countBase = this.db
       .select({ count: count() })
@@ -2270,6 +2276,8 @@ export class LogisticsService {
         providerName: r.providerName ?? null,
         isDuplicate: r.isDuplicate ?? null,
         duplicateOfId: r.duplicateOfId ?? null,
+        csName: r.csName ?? null,
+        branchName: r.branchName ?? null,
         category: r.isFollowUp ? 'follow-up' as const
           : r.orderSource === 'online' ? 'cart' as const
           : r.orderSource === 'offline' ? 'offline' as const
@@ -3662,6 +3670,35 @@ export class LogisticsService {
       }
     }
 
+    // 4c: owing — DELIVERED orders NOT on any remittance batch
+    const owingConditions: SQL[] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      sql`${schema.orders.id} NOT IN (SELECT dro.order_id FROM delivery_remittance_orders dro)`,
+    ];
+    if (effectiveStart) owingConditions.push(sql`${schema.orders.deliveredAt} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) owingConditions.push(sql`${schema.orders.deliveredAt} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    if (effectiveBranchIds?.length) {
+      owingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+    }
+
+    const owingRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        owingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        owingCount: count(),
+      })
+      .from(schema.orders)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.orders.logisticsLocationId),
+      )
+      .where(and(...owingConditions))
+      .groupBy(schema.logisticsLocations.providerId);
+
+    const owingByProvider = new Map(
+      owingRows.map((r) => [r.providerId, { amount: r.owingAmount, count: r.owingCount }]),
+    );
+
     // ── Pass 5: units (bottles) delivered per provider ─────────────────────
     // SUM(order_items.quantity) for DELIVERED + REMITTED orders, same period
     // and branch scope as Pass 2. Gives the CEO a "bottles sold" metric.
@@ -3842,6 +3879,8 @@ export class LogisticsService {
         remittedAmount: remit?.received ?? '0',
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
+        owingAmount: owingByProvider.get(p.id)?.amount ?? '0',
+        owingCount: owingByProvider.get(p.id)?.count ?? 0,
         unitsDelivered: unitsByProvider.get(p.id) ?? 0,
         availableStock: stockByProvider.get(p.id)?.available ?? 0,
         reservedStock: stockByProvider.get(p.id)?.reserved ?? 0,
