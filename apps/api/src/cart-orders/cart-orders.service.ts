@@ -739,13 +739,13 @@ export class CartOrdersService {
       .from(schema.cartOrderItems)
       .where(eq(schema.cartOrderItems.cartOrderId, cartOrderId));
 
-    // Dedup guard: skip graduation only if the same phone+product already has
-    // a DELIVERED or REMITTED order in the last 60 days. Only block when the
-    // product was genuinely delivered — don't block when the original form
-    // order is still in CS pipeline (that's a legitimate cart recovery delivery).
+    // Dedup guard: skip graduation only if the same phone+product+amount already has
+    // a DELIVERED or REMITTED order within 14 days. Different amounts or 14+ day
+    // gaps are legitimate separate purchases — don't block.
     if (co.customerPhoneHash && coItems.length > 0) {
-      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
       const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
+      const itemPrices = coItems.map((i) => String(i.unitPrice)).filter(Boolean);
       if (productIds.length > 0) {
         const existing = await this.db
           .select({ id: schema.orders.id })
@@ -756,15 +756,19 @@ export class CartOrdersService {
               eq(schema.orders.customerPhoneHash, co.customerPhoneHash),
               inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
               isNull(schema.orders.deletedAt),
-              gte(schema.orders.deliveredAt, sixtyDaysAgo),
+              gte(schema.orders.deliveredAt, fourteenDaysAgo),
               inArray(schema.orderItems.productId, productIds),
+              // Must match price — different amount = different purchase
+              ...(itemPrices.length > 0
+                ? [sql`${schema.orderItems.unitPrice}::text IN (${sql.join(itemPrices.map(p => sql`${p}`), sql`, `)})`]
+                : []),
             ),
           )
           .limit(1);
         const dupeMatch = existing[0];
         if (dupeMatch) {
           this.logger.warn(
-            `Cart order ${cartOrderId} skipped graduation: duplicate delivery found (order ${dupeMatch.id}) for same phone+product`,
+            `Cart order ${cartOrderId} skipped graduation: duplicate delivery found (order ${dupeMatch.id}) for same phone+product+amount`,
           );
           await this.db
             .update(schema.cartOrders)
@@ -1240,17 +1244,25 @@ export class CartOrdersService {
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
         -- Dedup: skip if an edge-form order already exists for the same
-        -- customer + product. Prevents the same lead being worked in both
-        -- the orders and cart_orders pipelines simultaneously.
+        -- customer + product + same total amount within 14 days.
+        -- Different amounts or 14+ day gaps are likely legitimate separate purchases.
         AND NOT EXISTS (
           SELECT 1
           FROM orders o
           JOIN order_items oi ON oi.order_id = o.id
           WHERE o.customer_phone_hash = ca.customer_phone_hash
             AND oi.product_id = ca.product_id
+            AND oi.unit_price = COALESCE(
+              (SELECT (ofr->>'price')::numeric
+               FROM jsonb_array_elements(p.offers) AS ofr
+               WHERE ofr->>'label' = ca.offer_label
+               LIMIT 1),
+              COALESCE(p.base_sale_price, 0)
+            )
             AND (o.order_source IS NULL OR o.order_source = 'edge-form')
             AND o.deleted_at IS NULL
             AND o.status != 'DELETED'
+            AND o.created_at >= (ca.created_at - INTERVAL '14 days')
         )
       RETURNING id, source_cart_id
     `);
