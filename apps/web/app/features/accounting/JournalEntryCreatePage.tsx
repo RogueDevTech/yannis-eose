@@ -3,6 +3,9 @@ import { useFetcher, useNavigate } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { TextInput } from '~/components/ui/text-input';
+import { DateInput } from '~/components/ui/date-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -14,13 +17,13 @@ export interface JournalEntryCreatePageProps {
 interface LineDraft {
   key: string;
   accountId: string;
-  debit: string;
-  credit: string;
+  debit: number | null;
+  credit: number | null;
 }
 
-const toMinor = (v: string) => Math.round((parseFloat(v) || 0) * 100);
+const toMinor = (v: number | null) => Math.round((v ?? 0) * 100);
 let lineSeq = 0;
-const newLine = (): LineDraft => ({ key: `l${lineSeq++}`, accountId: '', debit: '', credit: '' });
+const newLine = (): LineDraft => ({ key: `l${lineSeq++}`, accountId: '', debit: null, credit: null });
 
 export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps) {
   const navigate = useNavigate();
@@ -34,10 +37,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
   const [lines, setLines] = useState<LineDraft[]>([newLine(), newLine()]);
 
   const accountOptions = useMemo(
-    () =>
-      accounts
-        .filter((a) => !a.isGroup)
-        .map((a) => ({ value: a.id, label: `${a.code} — ${a.name}` })),
+    () => accounts.filter((a) => !a.isGroup).map((a) => ({ value: a.id, label: a.name })),
     [accounts],
   );
 
@@ -60,8 +60,8 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
       description: description.trim(),
       lines: lines.map((l) => ({
         accountId: l.accountId,
-        debit: parseFloat(l.debit) || 0,
-        credit: parseFloat(l.credit) || 0,
+        debit: l.debit ?? 0,
+        credit: l.credit ?? 0,
       })),
     };
     fetcher.submit(
@@ -76,24 +76,17 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
 
       <div className="space-y-4 max-w-3xl">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-app-fg">Posting date</label>
-            <input
-              type="date"
-              value={postingDate}
-              onChange={(e) => setPostingDate(e.target.value)}
-              className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-app-fg">Description</label>
-            <input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Agent remittance — batch AP-2026-06-00001"
-              className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
-            />
-          </div>
+          <DateInput
+            label="Posting date"
+            value={postingDate}
+            onChange={(e) => setPostingDate(e.target.value)}
+          />
+          <TextInput
+            label="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Agent remittance batch AP-2026-06-00001"
+          />
         </div>
 
         {/* Lines editor */}
@@ -112,25 +105,27 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
                 options={accountOptions}
                 placeholder="Select account"
               />
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
+              <NumberInput
                 value={line.debit}
-                onChange={(e) => setLine(line.key, { debit: e.target.value, credit: '' })}
+                onValueChange={(v) => setLine(line.key, { debit: v, credit: null })}
+                onValueCleared={() => setLine(line.key, { debit: null })}
+                coerce="decimal"
+                commitOnChange
+                allowEmpty
+                min={0}
                 placeholder="0.00"
-                className="h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-right tabular-nums"
+                className="text-right tabular-nums"
               />
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
+              <NumberInput
                 value={line.credit}
-                onChange={(e) => setLine(line.key, { credit: e.target.value, debit: '' })}
+                onValueChange={(v) => setLine(line.key, { credit: v, debit: null })}
+                onValueCleared={() => setLine(line.key, { credit: null })}
+                coerce="decimal"
+                commitOnChange
+                allowEmpty
+                min={0}
                 placeholder="0.00"
-                className="h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-right tabular-nums"
+                className="text-right tabular-nums"
               />
               <button
                 type="button"

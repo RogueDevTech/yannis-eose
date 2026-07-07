@@ -3,6 +3,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
+import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 
 export interface TrialBalanceRow {
@@ -86,12 +87,11 @@ export function TrialBalancePage({ accounts, totals, filters }: TrialBalancePage
         <label htmlFor="tb-asof" className="text-sm text-app-fg-muted">
           As of
         </label>
-        <input
+        <DateInput
           id="tb-asof"
-          type="date"
           value={filters.asOfDate}
           onChange={(e) => onAsOfChange(e.target.value)}
-          className="h-10 md:h-9 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
+          wrapperClassName="w-44"
         />
       </div>
 

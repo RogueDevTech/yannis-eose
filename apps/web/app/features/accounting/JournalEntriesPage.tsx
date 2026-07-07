@@ -8,6 +8,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useFetcherToast } from '~/components/ui/toast';
 
@@ -120,15 +121,12 @@ export function JournalEntriesPage({ records, pagination, canWrite }: JournalEnt
             <h2 className="text-lg font-semibold text-app-fg">Reverse JE #{reverseTarget.entryNumber}?</h2>
             <p className="text-sm text-app-fg-muted">
               This creates a new entry with debit and credit swapped, and marks the original cancelled.
-              The ledger is never edited — the reversal nets the original to zero.
+              The ledger is never edited; the reversal nets the original to zero.
             </p>
             <fetcher.Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="reverseEntry" />
               <input type="hidden" name="journalEntryId" value={reverseTarget.id} />
-              <div>
-                <label className="mb-1 block text-sm font-medium text-app-fg">Reason (optional)</label>
-                <input name="reason" className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm" />
-              </div>
+              <TextInput label="Reason (optional)" name="reason" />
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setReverseTarget(null)}>
                   Cancel

@@ -8,6 +8,8 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { SearchInput } from '~/components/ui/search-input';
+import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -44,6 +46,13 @@ const ACCOUNT_TYPES = [
   'CHARGEABLE', 'STOCK_RECEIVED_BUT_NOT_BILLED',
 ].map((v) => ({ value: v, label: v.replace(/_/g, ' ') }));
 
+/** Human label for a semantic account type tag, e.g. COST_OF_GOODS_SOLD -> Cost of goods sold. */
+function typeLabel(accountType: string | null): string {
+  if (!accountType) return '';
+  const words = accountType.replace(/_/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** Order accounts as a tree (parent immediately above its children) + depth. */
 function toTree(accounts: AccountRow[]): Array<AccountRow & { depth: number }> {
   const byParent = new Map<string | null, AccountRow[]>();
@@ -70,6 +79,7 @@ function toTree(accounts: AccountRow[]): Array<AccountRow & { depth: number }> {
 export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [parentId, setParentId] = useState('');
+  const [search, setSearch] = useState('');
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
 
   useFetcherToast(fetcher.data);
@@ -79,8 +89,18 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
   });
 
   const tree = useMemo(() => toTree(accounts), [accounts]);
+  // While searching, show a flat filtered list (indentation loses meaning when
+  // ancestors are filtered out).
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tree;
+    return tree
+      .filter((a) => `${a.code} ${a.name}`.toLowerCase().includes(q))
+      .map((a) => ({ ...a, depth: 0 }));
+  }, [tree, search]);
+
   const parentOptions = useMemo(
-    () => accounts.filter((a) => a.isGroup).map((a) => ({ value: a.id, label: `${a.code}` })),
+    () => accounts.filter((a) => a.isGroup).map((a) => ({ value: a.id, label: a.name })),
     [accounts],
   );
 
@@ -99,13 +119,18 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
         </span>
       ),
     },
-    { key: 'code', header: 'Code', render: (r) => <span className="font-mono text-xs text-app-fg-muted">{r.code}</span>, hideOnMobile: true },
-    { key: 'type', header: 'Type', render: (r) => <span className="text-xs text-app-fg-muted">{r.accountType?.replace(/_/g, ' ') ?? '—'}</span>, hideOnMobile: true },
+    {
+      key: 'type',
+      header: 'Type',
+      hideOnMobile: true,
+      render: (r) => <span className="text-xs text-app-fg-muted">{typeLabel(r.accountType)}</span>,
+    },
     {
       key: 'balance',
       header: 'Balance',
       align: 'right',
-      render: (r) => (r.isGroup ? <span className="text-app-fg-muted">—</span> : <NairaPrice amount={r.balance} zeroAsDash />),
+      render: (r) =>
+        r.isGroup || Number(r.balance) === 0 ? null : <NairaPrice amount={r.balance} />,
     },
   ];
 
@@ -133,13 +158,17 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
         ]}
       />
 
+      <SearchInput value={search} onChange={setSearch} placeholder="Search accounts" />
+
       {accounts.length === 0 ? (
         <EmptyState
           title="No accounts yet"
           description="The chart of accounts seeds automatically on server boot. Create one manually if needed."
         />
+      ) : rows.length === 0 ? (
+        <EmptyState title="No matches" description="No account matches that search." />
       ) : (
-        <CompactTable columns={columns} rows={tree} rowKey={(r) => r.id} />
+        <CompactTable columns={columns} rows={rows} rowKey={(r) => r.id} />
       )}
 
       {createOpen && (
@@ -148,19 +177,13 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
             <h2 className="text-lg font-semibold text-app-fg">New Account</h2>
             <fetcher.Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="createAccount" />
-              <div>
-                <label className="mb-1 block text-sm font-medium text-app-fg">Code</label>
-                <input name="code" required className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm" />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-app-fg">Name</label>
-                <input name="name" required className="w-full h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm" />
-              </div>
+              <TextInput label="Code" name="code" required />
+              <TextInput label="Name" name="name" required />
               <FormSelect name="rootType" label="Root type" options={ROOT_TYPES} required />
               <FormSelect
                 name="accountType"
                 label="Account type (optional)"
-                options={[{ value: '', label: '— none —' }, ...ACCOUNT_TYPES]}
+                options={[{ value: '', label: 'None' }, ...ACCOUNT_TYPES]}
               />
               <input type="hidden" name="parentAccountId" value={parentId} />
               <SearchableSelect

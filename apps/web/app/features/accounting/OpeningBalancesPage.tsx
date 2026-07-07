@@ -3,6 +3,8 @@ import { useFetcher, useNavigate } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { SearchInput } from '~/components/ui/search-input';
+import { DateInput } from '~/components/ui/date-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -11,7 +13,12 @@ export interface OpeningBalancesPageProps {
   accounts: Array<{ id: string; code: string; name: string; isGroup: boolean; rootType: string }>;
 }
 
-const toMinor = (v: string) => Math.round((parseFloat(v) || 0) * 100);
+interface AmountDraft {
+  debit: number | null;
+  credit: number | null;
+}
+
+const toMinor = (v: number | null) => Math.round((v ?? 0) * 100);
 
 export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
   const navigate = useNavigate();
@@ -22,7 +29,7 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
   const today = new Date().toISOString().slice(0, 10);
   const [postingDate, setPostingDate] = useState(today);
   const [search, setSearch] = useState('');
-  const [amounts, setAmounts] = useState<Record<string, { debit: string; credit: string }>>({});
+  const [amounts, setAmounts] = useState<Record<string, AmountDraft>>({});
 
   const postable = useMemo(
     () => accounts.filter((a) => !a.isGroup),
@@ -39,11 +46,11 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
   const residualMinor = totalDebitMinor - totalCreditMinor;
   const hasAny = totalDebitMinor > 0 || totalCreditMinor > 0;
 
-  const setAmt = (id: string, side: 'debit' | 'credit', value: string) => {
+  const setAmt = (id: string, side: 'debit' | 'credit', value: number | null) => {
     setAmounts((prev) => ({
       ...prev,
       // Entering one side clears the other (a line is one-sided).
-      [id]: side === 'debit' ? { debit: value, credit: '' } : { debit: '', credit: value },
+      [id]: side === 'debit' ? { debit: value, credit: null } : { debit: null, credit: value },
     }));
   };
 
@@ -51,8 +58,8 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
     const lines = Object.entries(amounts)
       .map(([accountId, a]) => ({
         accountId,
-        debit: parseFloat(a.debit) || 0,
-        credit: parseFloat(a.credit) || 0,
+        debit: a.debit ?? 0,
+        credit: a.credit ?? 0,
       }))
       .filter((l) => l.debit > 0 || l.credit > 0);
     if (lines.length === 0) return;
@@ -71,17 +78,14 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
       />
 
       <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-app-fg">Cutover date</label>
-          <input
-            type="date"
-            value={postingDate}
-            onChange={(e) => setPostingDate(e.target.value)}
-            className="h-10 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-app-fg"
-          />
-        </div>
+        <DateInput
+          label="Cutover date"
+          value={postingDate}
+          onChange={(e) => setPostingDate(e.target.value)}
+          wrapperClassName="w-44"
+        />
         <div className="flex-1 min-w-[200px]">
-          <SearchInput value={search} onChange={setSearch} placeholder="Filter accounts…" />
+          <SearchInput value={search} onChange={setSearch} placeholder="Filter accounts" />
         </div>
       </div>
 
@@ -97,28 +101,33 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
           <tbody>
             {filtered.map((a) => (
               <tr key={a.id} className="border-t border-app-border">
+                <td className="px-3 py-1.5 text-app-fg">{a.name}</td>
                 <td className="px-3 py-1.5">
-                  <span className="font-mono text-xs text-app-fg-muted mr-2">{a.code}</span>
-                  {a.name}
-                </td>
-                <td className="px-3 py-1.5 text-right">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={amounts[a.id]?.debit ?? ''}
-                    onChange={(e) => setAmt(a.id, 'debit', e.target.value)}
-                    className="h-8 w-32 rounded border border-app-border bg-app-canvas px-2 text-right tabular-nums"
+                  <NumberInput
+                    value={amounts[a.id]?.debit ?? null}
+                    onValueChange={(v) => setAmt(a.id, 'debit', v)}
+                    onValueCleared={() => setAmt(a.id, 'debit', null)}
+                    coerce="decimal"
+                    commitOnChange
+                    allowEmpty
+                    min={0}
+                    controlSize="sm"
+                    className="text-right tabular-nums"
+                    wrapperClassName="ml-auto w-32"
                   />
                 </td>
-                <td className="px-3 py-1.5 text-right">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={amounts[a.id]?.credit ?? ''}
-                    onChange={(e) => setAmt(a.id, 'credit', e.target.value)}
-                    className="h-8 w-32 rounded border border-app-border bg-app-canvas px-2 text-right tabular-nums"
+                <td className="px-3 py-1.5">
+                  <NumberInput
+                    value={amounts[a.id]?.credit ?? null}
+                    onValueChange={(v) => setAmt(a.id, 'credit', v)}
+                    onValueCleared={() => setAmt(a.id, 'credit', null)}
+                    coerce="decimal"
+                    commitOnChange
+                    allowEmpty
+                    min={0}
+                    controlSize="sm"
+                    className="text-right tabular-nums"
+                    wrapperClassName="ml-auto w-32"
                   />
                 </td>
               </tr>
@@ -134,8 +143,8 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
         </div>
         <span className="text-app-fg-muted">
           {residualMinor === 0
-            ? 'Balanced — no equity plug needed'
-            : `Residual ${(Math.abs(residualMinor) / 100).toLocaleString('en-US')} → Opening Balance Equity`}
+            ? 'Balanced. No equity plug needed.'
+            : `Residual of ${(Math.abs(residualMinor) / 100).toLocaleString('en-US')} posts to Opening Balance Equity`}
         </span>
       </div>
 

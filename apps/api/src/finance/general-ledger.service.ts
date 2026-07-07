@@ -759,7 +759,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       const groupId = offsets[0]![1].groupId;
       const postingDate = new Date().toISOString().slice(0, 10);
-      const remark = `Reversal — ${reason ?? 'order retracted/deleted'}`;
+      const remark = `Reversal: ${reason ?? 'order retracted/deleted'}`;
 
       // Build offsetting lines: negate each account's live net (debit-positive).
       const lines: PostVoucherLine[] = offsets.map(([accountId, v]) => {
@@ -855,7 +855,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         if (!equity) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: 'Opening Balance Equity account not found — seed the chart of accounts first.',
+            message: 'Opening Balance Equity account not found. Seed the chart of accounts first.',
           });
         }
         const residual = Math.abs(residualMinor) / 100;
@@ -939,7 +939,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         .values({
           groupId: original.groupId,
           postingDate,
-          description: `Reversal of JE #${original.entryNumber}${reason ? ` — ${reason}` : ''}`,
+          description: `Reversal of JE #${original.entryNumber}${reason ? `: ${reason}` : ''}`,
           totalDebit: original.totalCredit,
           totalCredit: original.totalDebit,
           status: 'POSTED',
