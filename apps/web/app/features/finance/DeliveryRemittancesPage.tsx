@@ -478,12 +478,20 @@ export function DeliveryRemittancesPage({
         align: 'right',
         tight: true,
         render: (r) => (
-          <CompactTableActionButton
-            to={`/admin/finance/delivery-remittances/${r.id}`}
-            state={remittanceDetailLinkState}
-          >
-            {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
-          </CompactTableActionButton>
+          <div className="flex items-center gap-1">
+            <CompactTableActionButton
+              to={`/admin/finance/delivery-remittances/${r.id}?edit=true`}
+              state={remittanceDetailLinkState}
+            >
+              Edit
+            </CompactTableActionButton>
+            <CompactTableActionButton
+              to={`/admin/finance/delivery-remittances/${r.id}`}
+              state={remittanceDetailLinkState}
+            >
+              {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
+            </CompactTableActionButton>
+          </div>
         ),
       },
     ],
@@ -779,34 +787,128 @@ export function DeliveryRemittancesPage({
       <LocalExportModal
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
-        title="Export Delivery Remittances"
-        description="Choose format and columns for delivery remittances export."
-        filenamePrefix="cash-remittances"
-        rows={remittances.map((r) => ({
-          id: r.id,
-          location: r.locationName ?? '',
-          sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
-          orderCount: r.orderCount,
-          batchTotal: Number(r.outcomeAmount ?? 0),
-          deliveryFee: Number((r as any).deliveryFeeTotal ?? 0),
-          status:
-            STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
-            (r.outcomeStatus ?? r.status),
-          sentAt: new Date(r.sentAt).toLocaleString(),
-          receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
-        }))}
-        columns={[
-          { key: 'id', label: 'ID' },
-          { key: 'location', label: 'Location' },
-          { key: 'sentBy', label: 'Sent by' },
-          { key: 'orderCount', label: 'Orders' },
-          { key: 'batchTotal', label: 'Batch total (₦)' },
-          { key: 'deliveryFee', label: 'Delivery fee (₦)' },
-          { key: 'status', label: 'Status' },
-          { key: 'sentAt', label: 'Sent at' },
-          { key: 'receivedAt', label: 'Received at' },
-        ]}
-        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt', 'receivedAt']}
+        title={viewMode === 'orders' ? 'Export Remittance Orders' : 'Export Delivery Remittances'}
+        description={viewMode === 'orders' ? 'Export individual orders with category breakdown.' : 'Choose format and columns for delivery remittances export.'}
+        filenamePrefix={viewMode === 'orders' ? 'remittance-orders' : 'cash-remittances'}
+        totalRows={viewMode === 'orders' ? (remittanceOrdersPagination?.total ?? 0) : pagination.total}
+        rows={viewMode === 'orders'
+          ? remittanceOrders.map((r) => ({
+              orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
+              category: r.category,
+              customerName: r.customerName,
+              totalAmount: Number(r.totalAmount || 0),
+              deliveryFee: Number(r.deliveryFee || 0),
+              netAmount: Number(r.totalAmount || 0) - Number(r.deliveryFee || 0),
+              location: r.locationName ?? '',
+              provider: r.providerName ?? '',
+              deliveredAt: r.deliveredAt ? new Date(r.deliveredAt).toLocaleString() : '',
+              sentAt: new Date(r.sentAt).toLocaleString(),
+              status: r.remittanceStatus,
+              isDuplicate: r.isDuplicate ? 'Yes' : 'No',
+            }))
+          : remittances.map((r) => ({
+              id: r.id,
+              location: r.locationName ?? '',
+              sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
+              orderCount: r.orderCount,
+              batchTotal: Number(r.outcomeAmount ?? 0),
+              deliveryFee: Number((r as any).deliveryFeeTotal ?? 0),
+              status:
+                STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
+                (r.outcomeStatus ?? r.status),
+              sentAt: new Date(r.sentAt).toLocaleString(),
+              receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
+            }))
+        }
+        fetchAllRows={(() => {
+          if (viewMode === 'orders') {
+            const ordersTotal = remittanceOrdersPagination?.total ?? 0;
+            if (ordersTotal <= remittanceOrders.length) return undefined;
+            return async () => {
+              const params: Record<string, unknown> = { page: 1, limit: 10000 };
+              if (filters.status) params.status = filters.status;
+              if (filters.location) params.logisticsLocationId = filters.location;
+              if (filters.sentBy) params.sentBy = filters.sentBy;
+              if (filters.startDate) params.startDate = filters.startDate;
+              if (filters.endDate) params.endDate = filters.endDate;
+              if (filters.remittanceSearch) params.search = filters.remittanceSearch;
+              const res = await fetch(`/trpc/logistics.listDeliveryRemittanceOrders?input=${encodeURIComponent(JSON.stringify(params))}`);
+              const json = await res.json();
+              const allOrders: RemittanceOrderRow[] = json?.result?.data?.orders ?? [];
+              return allOrders.map((r) => ({
+                orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
+                category: r.category,
+                customerName: r.customerName,
+                totalAmount: Number(r.totalAmount || 0),
+                deliveryFee: Number(r.deliveryFee || 0),
+                netAmount: Number(r.totalAmount || 0) - Number(r.deliveryFee || 0),
+                location: r.locationName ?? '',
+                provider: r.providerName ?? '',
+                deliveredAt: r.deliveredAt ? new Date(r.deliveredAt).toLocaleString() : '',
+                sentAt: new Date(r.sentAt).toLocaleString(),
+                status: r.remittanceStatus,
+                isDuplicate: r.isDuplicate ? 'Yes' : 'No',
+              }));
+            };
+          }
+          if (pagination.total <= remittances.length) return undefined;
+          return async () => {
+            const params: Record<string, unknown> = { page: 1, limit: 10000 };
+            if (filters.status) params.status = filters.status;
+            if (filters.location) params.logisticsLocationId = filters.location;
+            if (filters.sentBy) params.sentBy = filters.sentBy;
+            if (filters.startDate) params.startDate = filters.startDate;
+            if (filters.endDate) params.endDate = filters.endDate;
+            if (filters.remittanceSearch) params.search = filters.remittanceSearch;
+            const res = await fetch(`/trpc/logistics.deliveryRemittancesPageBundle?input=${encodeURIComponent(JSON.stringify(params))}`);
+            const json = await res.json();
+            const allRemittances: DeliveryRemittanceListItem[] = json?.result?.data?.remittances?.records ?? [];
+            return allRemittances.map((r) => ({
+              id: r.id,
+              location: r.locationName ?? '',
+              sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
+              orderCount: r.orderCount,
+              batchTotal: Number(r.outcomeAmount ?? 0),
+              deliveryFee: Number((r as any).deliveryFeeTotal ?? 0),
+              status:
+                STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
+                (r.outcomeStatus ?? r.status),
+              sentAt: new Date(r.sentAt).toLocaleString(),
+              receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
+            }));
+          };
+        })()}
+        columns={viewMode === 'orders'
+          ? [
+              { key: 'orderNumber', label: 'Order #' },
+              { key: 'category', label: 'Category' },
+              { key: 'customerName', label: 'Customer' },
+              { key: 'totalAmount', label: 'Gross (₦)' },
+              { key: 'deliveryFee', label: 'Delivery fee (₦)' },
+              { key: 'netAmount', label: 'Net (₦)' },
+              { key: 'location', label: 'Location' },
+              { key: 'provider', label: 'Provider' },
+              { key: 'deliveredAt', label: 'Delivered at' },
+              { key: 'sentAt', label: 'Sent at' },
+              { key: 'status', label: 'Status' },
+              { key: 'isDuplicate', label: 'Duplicate' },
+            ]
+          : [
+              { key: 'id', label: 'ID' },
+              { key: 'location', label: 'Location' },
+              { key: 'sentBy', label: 'Sent by' },
+              { key: 'orderCount', label: 'Orders' },
+              { key: 'batchTotal', label: 'Batch total (₦)' },
+              { key: 'deliveryFee', label: 'Delivery fee (₦)' },
+              { key: 'status', label: 'Status' },
+              { key: 'sentAt', label: 'Sent at' },
+              { key: 'receivedAt', label: 'Received at' },
+            ]
+        }
+        defaultColumns={viewMode === 'orders'
+          ? ['orderNumber', 'category', 'customerName', 'totalAmount', 'deliveryFee', 'netAmount', 'location', 'deliveredAt', 'sentAt', 'status']
+          : ['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt', 'receivedAt']
+        }
       />
 
       {(() => {
@@ -1349,6 +1451,9 @@ export function DeliveryRemittancesPage({
                       )}
                       <CompactTableActionButton to={`/admin/orders/${r.id}`}>
                         Order
+                      </CompactTableActionButton>
+                      <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}?edit=true`}>
+                        Edit
                       </CompactTableActionButton>
                       <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}`}>
                         Batch
