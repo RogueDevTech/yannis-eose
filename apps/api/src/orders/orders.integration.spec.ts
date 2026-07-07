@@ -54,6 +54,12 @@ function createOrdersServiceForTest(dbRef: any, overrides?: { settingsService?: 
     new BranchTeamsService(dbRef as any, createFakeCacheService()),
     {} as any,
     stubCsOrderRouting as any,
+    // GeneralLedgerService — order-lifecycle GL posting is non-fatal and these
+    // tests don't assert on the ledger, so a no-op stub is sufficient.
+    {
+      postSalesInvoice: async () => ({ posted: false }),
+      reverseVoucher: async () => ({ reversed: false }),
+    } as any,
   );
 }
 
@@ -129,6 +135,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
+      { postSalesInvoice: async () => ({ posted: false }), reverseVoucher: async () => ({ reversed: false }) } as any,
     );
 
     const logisticsStatuses = ['CONFIRMED', 'AGENT_ASSIGNED', 'DELIVERED'] as const;
@@ -642,6 +649,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
+      { postSalesInvoice: async () => ({ posted: false }), reverseVoucher: async () => ({ reversed: false }) } as any,
     );
 
     const actor = {
@@ -687,6 +695,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
+      { postSalesInvoice: async () => ({ posted: false }), reverseVoucher: async () => ({ reversed: false }) } as any,
     );
     const actor = {
       id: supervisor.id,
@@ -719,6 +728,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
+      { postSalesInvoice: async () => ({ posted: false }), reverseVoucher: async () => ({ reversed: false }) } as any,
     );
 
     const listResult = await ordersService.list(
@@ -748,6 +758,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
+      { postSalesInvoice: async () => ({ posted: false }), reverseVoucher: async () => ({ reversed: false }) } as any,
     );
 
     const listA = await ordersService.list(
@@ -784,6 +795,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
+      { postSalesInvoice: async () => ({ posted: false }), reverseVoucher: async () => ({ reversed: false }) } as any,
     );
 
     const filtered = await ordersService.list(

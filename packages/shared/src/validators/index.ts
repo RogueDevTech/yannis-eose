@@ -374,6 +374,49 @@ export type {
   GeneralLedgerInput,
 } from './finance';
 
+// Double-entry general ledger validators (Phase 1)
+export {
+  glLineSchema,
+  createJournalEntrySchema,
+  listJournalEntriesSchema,
+  getJournalEntrySchema,
+  reverseJournalEntrySchema,
+  listAccountsSchema,
+  createAccountSchema,
+  listFiscalYearsSchema,
+  createFiscalYearSchema,
+  closeFiscalYearSchema,
+  trialBalanceSchema,
+  seedChartOfAccountsSchema,
+  profitAndLossSchema,
+  balanceSheetSchema,
+  cashFlowSchema,
+  agingSchema,
+  openingBalanceLineSchema,
+  postOpeningBalancesSchema,
+} from './general-ledger';
+
+export type {
+  GlLineInput,
+  CreateJournalEntryInput,
+  ListJournalEntriesInput,
+  GetJournalEntryInput,
+  ReverseJournalEntryInput,
+  ListAccountsInput,
+  CreateAccountInput,
+  ListFiscalYearsInput,
+  CreateFiscalYearInput,
+  CloseFiscalYearInput,
+  TrialBalanceInput,
+  SeedChartOfAccountsInput,
+  ProfitAndLossInput,
+  BalanceSheetInput,
+  CashFlowInput,
+  AgingInput,
+  OpeningBalanceLineInput,
+  PostOpeningBalancesInput,
+} from './general-ledger';
+
 // Notification validators
 export {
   listNotificationsSchema,

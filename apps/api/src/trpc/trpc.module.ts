@@ -34,6 +34,9 @@ import { setMarketingService } from './routers/marketing.router';
 import { FinanceModule } from '../finance/finance.module';
 import { FinanceService } from '../finance/finance.service';
 import { setFinanceService } from './routers/finance.router';
+import { LedgerModule } from '../finance/ledger.module';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { setGeneralLedgerService } from './routers/general-ledger.router';
 import { HrModule } from '../hr/hr.module';
 import { HrService } from '../hr/hr.service';
 import { PayrollBatchService } from '../hr/payroll-batch.service';
@@ -99,7 +102,7 @@ import { setUserFilterPreferencesService } from './routers/user-filter-preferenc
   imports: [
     DatabaseModule,
     OrdersModule, UsersModule, ProductsModule, InventoryModule,
-    LogisticsModule, MarketingModule, FinanceModule, HrModule,
+    LogisticsModule, MarketingModule, FinanceModule, LedgerModule, HrModule,
     NotificationsModule, AuditModule, VoipModule, SettingsModule, CartModule,
     PermissionsModule, PermissionRequestsModule,
     AuthModule,
@@ -127,6 +130,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly logisticsService: LogisticsService,
     private readonly marketingService: MarketingService,
     private readonly financeService: FinanceService,
+    private readonly generalLedgerService: GeneralLedgerService,
     private readonly hrService: HrService,
     private readonly payrollBatchService: PayrollBatchService,
     private readonly notificationsService: NotificationsService,
@@ -167,6 +171,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setLogisticsCacheService(this.cacheService);
     setMarketingService(this.marketingService);
     setFinanceService(this.financeService);
+    setGeneralLedgerService(this.generalLedgerService);
     setHrService(this.hrService);
     setPayrollBatchService(this.payrollBatchService);
     setNotificationsService(this.notificationsService);

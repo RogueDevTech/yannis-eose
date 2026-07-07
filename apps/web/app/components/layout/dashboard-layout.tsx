@@ -338,7 +338,10 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.disburse',
       },
       {
-        label: 'Ledger',
+        // Renamed from "Ledger" — this is a synthetic activity feed (revenue,
+        // remittances, ad spend, payroll), NOT the double-entry ledger. The
+        // real ledger lives under the "Accounting" group below.
+        label: 'Financial Activity',
         href: '/admin/finance/ledger',
         icon: SidebarIcons.remittances,
         permission: 'finance.read',
@@ -355,6 +358,59 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/finance/staff-accounts',
         icon: SidebarIcons.users,
         roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
+      },
+    ],
+  },
+  {
+    group: 'Accounting',
+    items: [
+      {
+        label: 'Chart of Accounts',
+        href: '/admin/finance/accounts',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Journal Entries',
+        href: '/admin/finance/journal-entries',
+        icon: SidebarIcons.remittances,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Trial Balance',
+        href: '/admin/finance/trial-balance',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Profit & Loss',
+        href: '/admin/finance/profit-loss',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Balance Sheet',
+        href: '/admin/finance/balance-sheet',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Cash Flow',
+        href: '/admin/finance/cash-flow',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Aging (AR/AP)',
+        href: '/admin/finance/aging',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Opening Balances',
+        href: '/admin/finance/opening-balances',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.write',
       },
     ],
   },
