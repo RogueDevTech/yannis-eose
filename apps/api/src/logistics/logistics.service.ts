@@ -2007,9 +2007,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Delivered count is all-time — must equal Awaiting + Remitted.
-    // Awaiting is all-time, Remitted filters by sentAt. Delivered stays
-    // unfiltered so the stat strip reconciles correctly.
+    // Date filter by createdAt — matches dashboard/marketing/sales funnels.
+    if (input.startDate) deliveredConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) deliveredConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
@@ -3938,6 +3938,7 @@ export class LogisticsService {
         delinquencyRate,
         statusBreakdown,
         remittedAmount: remit?.received ?? '0',
+        remittedOrderCount: Number(remit?.receivedOrderCount ?? '0'),
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
         owingAmount: owingByProvider.get(p.id)?.amount ?? '0',
