@@ -79,7 +79,7 @@ async function main() {
     campaignId = uuidv7();
     await sql`
       INSERT INTO campaigns (id, media_buyer_id, name, product_ids, status, branch_id, deployment_type)
-      VALUES (${campaignId}, ${mbs[0].id}, 'Seed Campaign', ${JSON.stringify(products.map((p: { id: string }) => p.id))}::jsonb, 'ACTIVE', ${BRANCH_ID}, 'HOSTED')
+      VALUES (${campaignId}, ${mbs[0]!.id}, 'Seed Campaign', ${JSON.stringify(products.map((p) => p.id as string))}::jsonb, 'ACTIVE', ${BRANCH_ID}, 'HOSTED')
     `;
   }
 
@@ -88,17 +88,17 @@ async function main() {
   let custIdx = 0;
 
   for (let mbIdx = 0; mbIdx < mbs.length; mbIdx++) {
-    const mb = mbs[mbIdx];
-    const pattern = MB_ORDER_PATTERNS[mbIdx % MB_ORDER_PATTERNS.length];
+    const mb = mbs[mbIdx]!;
+    const pattern = MB_ORDER_PATTERNS[mbIdx % MB_ORDER_PATTERNS.length]!;
     let orderOffset = 0;
 
     for (const [status, count] of pattern) {
       for (let j = 0; j < (count as number); j++) {
-        const customer = CUSTOMERS[custIdx % CUSTOMERS.length];
+        const customer = CUSTOMERS[custIdx % CUSTOMERS.length]!;
         const phone = `0801${String(7000 + custIdx).padStart(7, '0')}`;
-        const state = STATES[custIdx % STATES.length];
-        const address = ADDRESSES[custIdx % ADDRESSES.length];
-        const product = products[custIdx % products.length];
+        const state = STATES[custIdx % STATES.length]!;
+        const address = ADDRESSES[custIdx % ADDRESSES.length]!;
+        const product = products[custIdx % products.length]!;
         custIdx++;
 
         const orderId = uuidv7();

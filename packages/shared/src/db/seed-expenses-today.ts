@@ -90,7 +90,7 @@ async function seedExpensesToday() {
     const pids = Array.isArray(camp.product_ids) ? camp.product_ids : [];
     const productId = pids.find((pid: unknown) => productIdSet.has(pid as string)) as string | undefined ?? null;
     const amount = 5000 + Math.floor(Math.random() * 75000);
-    const platform = PLATFORMS[i % PLATFORMS.length];
+    const platform = PLATFORMS[i % PLATFORMS.length]!;
 
     await sql`
       INSERT INTO ad_spend_logs (
