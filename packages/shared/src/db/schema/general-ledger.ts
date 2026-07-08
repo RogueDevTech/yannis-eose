@@ -6,6 +6,7 @@ import {
   boolean,
   date,
   serial,
+  timestamp,
 } from 'drizzle-orm/pg-core';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { branchGroups } from './branch-groups';
@@ -90,6 +91,9 @@ export const journalEntries = pgTable('journal_entries', {
   // Self-ref: this JE reverses another JE (no .references() on self-ref).
   reversalOfId: uuid('reversal_of_id'),
   fiscalYearId: uuid('fiscal_year_id').references(() => fiscalYears.id),
+  // Phase 5: approval workflow columns.
+  approvedBy: uuid('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   // Retry-safety for Phase 2 auto-postings (invoice → GL). Nullable; the
   // manual UI create path omits it.
   idempotencyKey: text('idempotency_key'),

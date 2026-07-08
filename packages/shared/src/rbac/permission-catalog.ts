@@ -149,6 +149,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'finance.ledger.read', resource: 'finance.ledger', action: 'read', description: 'View chart of accounts, journal entries, and trial balance (double-entry ledger)' },
   { code: 'finance.ledger.write', resource: 'finance.ledger', action: 'write', description: 'Create accounts, post/reverse journal entries, manage fiscal years' },
   { code: 'finance.ledger.export', resource: 'finance.ledger', action: 'export', description: 'Export trial balance / general ledger as CSV or XLSX' },
+  { code: 'finance.audit.read', resource: 'finance.audit', action: 'read', description: 'Time-limited read-only access to all GL data (auditor role, Phase 5)' },
   { code: 'orders.createOffline', resource: 'orders', action: 'createOffline', description: 'Create an offline order (Sales manual entry)' },
   { code: 'orders.freeze', resource: 'orders', action: 'freeze', description: 'Freeze or unfreeze orders (blocks all status transitions / edits). CS group but SuperAdmin-only by default. CEO directive 2026-06-23.' },
   { code: 'messaging.templates.create', resource: 'messaging.templates', action: 'create', description: 'Create Sales message templates (SMS / WhatsApp / WhatsApp group)' },

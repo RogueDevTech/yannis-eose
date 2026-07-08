@@ -485,10 +485,11 @@ export const glVoucherTypeEnum = pgEnum('gl_voucher_type', [
   'EXPENSE',
 ]);
 
-/** Journal entry lifecycle. Post-only in Phase 1 (no DRAFT). */
+/** Journal entry lifecycle. DRAFT = pending approval (Phase 5). */
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
   'POSTED',
   'CANCELLED',
+  'DRAFT',
 ]);
 
 /** Fiscal year state. CLOSED = period locked (no postings). */

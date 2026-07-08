@@ -3,11 +3,13 @@ import {
   listJournalEntriesSchema,
   getJournalEntrySchema,
   reverseJournalEntrySchema,
+  approveJournalEntrySchema,
   listAccountsSchema,
   createAccountSchema,
   listFiscalYearsSchema,
   createFiscalYearSchema,
   closeFiscalYearSchema,
+  reopenFiscalYearSchema,
   trialBalanceSchema,
   seedChartOfAccountsSchema,
   profitAndLossSchema,
@@ -27,6 +29,7 @@ import {
   listExpensesSchema,
   getExpenseSchema,
 } from '@yannis/shared';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { GeneralLedgerService } from '../../finance/general-ledger.service';
 import { AssetRegisterService } from '../../finance/asset-register.service';
@@ -86,10 +89,29 @@ export const generalLedgerRouter = router({
   createJournalEntry: permissionProcedure('finance.ledger.write')
     .input(createJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
+      const groupId = resolveGroupId(input.groupId, ctx.activeGroupId);
+      const totalDebit = input.lines.reduce((s, l) => s + (l.debit ?? 0), 0);
+
+      // Threshold check: amounts above ₦500,000 force DRAFT unless the actor
+      // has SuperAdmin/SUPPORT role (they bypass permissionProcedure anyway).
+      const forceDraft =
+        !input.isDraft &&
+        totalDebit > GeneralLedgerService.APPROVAL_THRESHOLD &&
+        ctx.user.role !== 'SUPER_ADMIN' &&
+        ctx.user.role !== 'SUPPORT' &&
+        ctx.user.role !== 'ADMIN';
+
       return getGeneralLedgerService().createJournalEntry(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId },
         { id: ctx.user.id },
+        forceDraft,
       );
+    }),
+
+  approveJournalEntry: permissionProcedure('finance.ledger.write')
+    .input(approveJournalEntrySchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().approveJournalEntry(input, { id: ctx.user.id });
     }),
 
   reverseJournalEntry: permissionProcedure('finance.ledger.write')
@@ -98,7 +120,7 @@ export const generalLedgerRouter = router({
       return getGeneralLedgerService().reverseJournalEntry(input, { id: ctx.user.id });
     }),
 
-  listJournalEntries: permissionProcedure('finance.ledger.read')
+  listJournalEntries: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(listJournalEntriesSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listJournalEntries({
@@ -107,14 +129,14 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getJournalEntry: permissionProcedure('finance.ledger.read')
+  getJournalEntry: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(getJournalEntrySchema)
     .query(async ({ input }) => {
       return getGeneralLedgerService().getJournalEntry(input);
     }),
 
   // ─── Accounts (Chart of Accounts) ────────────────────────────────────────
-  listAccounts: permissionProcedure('finance.ledger.read')
+  listAccounts: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(listAccountsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listAccounts({
@@ -133,7 +155,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Fiscal Years ────────────────────────────────────────────────────────
-  listFiscalYears: permissionProcedure('finance.ledger.read')
+  listFiscalYears: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(listFiscalYearsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listFiscalYears({
@@ -157,8 +179,26 @@ export const generalLedgerRouter = router({
       return getGeneralLedgerService().closeFiscalYear(input, { id: ctx.user.id });
     }),
 
+  /** Reopen a closed fiscal year. SuperAdmin-only gate in the router. */
+  reopenFiscalYear: permissionProcedure('finance.ledger.write')
+    .input(reopenFiscalYearSchema)
+    .mutation(async ({ input, ctx }) => {
+      // Only SuperAdmin / SUPPORT / ADMIN can reopen a closed year.
+      if (
+        ctx.user.role !== 'SUPER_ADMIN' &&
+        ctx.user.role !== 'SUPPORT' &&
+        ctx.user.role !== 'ADMIN'
+      ) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only administrators can reopen a closed fiscal year.',
+        });
+      }
+      return getGeneralLedgerService().reopenFiscalYear(input, { id: ctx.user.id });
+    }),
+
   // ─── Trial Balance ─────────────────────────────────────────────────────────
-  trialBalance: permissionProcedure('finance.ledger.read')
+  trialBalance: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(trialBalanceSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().trialBalance({
@@ -168,7 +208,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Financial statements ────────────────────────────────────────────────
-  profitAndLoss: permissionProcedure('finance.ledger.read')
+  profitAndLoss: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(profitAndLossSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().profitAndLoss({
@@ -177,7 +217,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  balanceSheet: permissionProcedure('finance.ledger.read')
+  balanceSheet: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(balanceSheetSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().balanceSheet({
@@ -186,7 +226,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  cashFlow: permissionProcedure('finance.ledger.read')
+  cashFlow: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(cashFlowSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().cashFlow({
@@ -195,7 +235,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  aging: permissionProcedure('finance.ledger.read')
+  aging: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(agingSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().aging({
@@ -205,7 +245,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Financial KPIs (Phase 5A) ────────────────────────────────────────────
-  financialKPIs: permissionProcedure('finance.ledger.read')
+  financialKPIs: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(financialKPIsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().financialKPIs(
@@ -235,7 +275,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Asset Register (Phase 4A) ──────────────────────────────────────────
-  listAssets: permissionProcedure('finance.ledger.read')
+  listAssets: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(listAssetsSchema)
     .query(async ({ input, ctx }) => {
       return getAssetRegisterService().listAssets({
@@ -244,7 +284,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getAsset: permissionProcedure('finance.ledger.read')
+  getAsset: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(getAssetSchema)
     .query(async ({ input }) => {
       return getAssetRegisterService().getAsset(input);
@@ -297,7 +337,7 @@ export const generalLedgerRouter = router({
       return getExpenseSubmissionService().rejectExpense(input, { id: ctx.user.id });
     }),
 
-  listExpenses: permissionProcedure('finance.ledger.read')
+  listExpenses: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(listExpensesSchema)
     .query(async ({ input, ctx }) => {
       return getExpenseSubmissionService().listExpenses({
@@ -306,7 +346,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getExpense: permissionProcedure('finance.ledger.read')
+  getExpense: permissionProcedure('finance.ledger.read', 'finance.audit.read')
     .input(getExpenseSchema)
     .query(async ({ input }) => {
       return getExpenseSubmissionService().getExpense(input);

@@ -20,6 +20,8 @@ import {
   type ListFiscalYearsInput,
   type CreateFiscalYearInput,
   type CloseFiscalYearInput,
+  type ReopenFiscalYearInput,
+  type ApproveJournalEntryInput,
   type TrialBalanceInput,
   type ProfitAndLossInput,
   type BalanceSheetInput,
@@ -469,6 +471,18 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         { accountId: sale.id, debit: 0, credit: revenue },
       ];
 
+      // VAT output — 7.5% Nigerian VAT on top of revenue. Only posts if the
+      // VAT account exists in the CoA (graceful degradation for companies that
+      // haven't seeded it or are VAT-exempt).
+      const vatAccount = await this.resolveAccountByCode(tx, groupId, 'VAT');
+      if (vatAccount) {
+        const vatAmount = Math.round(revenue * 0.075 * 100) / 100; // 7.5%
+        if (vatAmount > 0) {
+          lines.push({ accountId: debtors.id, debit: vatAmount, credit: 0, partyType: 'CUSTOMER', remarks: customer });
+          lines.push({ accountId: vatAccount.id, debit: 0, credit: vatAmount, remarks: 'VAT output 7.5%' });
+        }
+      }
+
       // COGS pair — only when a FIFO cost is available.
       if (cogs > 0) {
         const cogsAcct = await this.resolveAccountByType(tx, groupId, 'COST_OF_GOODS_SOLD');
@@ -914,11 +928,52 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
   // ─── Journal Entries ───────────────────────────────────────────────────────
 
-  async createJournalEntry(input: CreateJournalEntryInput, actor: Actor) {
+  /** Approval threshold: JEs above this amount (₦500,000) require approval unless the actor has write permission. */
+  static readonly APPROVAL_THRESHOLD = 500_000;
+
+  async createJournalEntry(input: CreateJournalEntryInput, actor: Actor, forceDraft?: boolean) {
     return withActor(this.db, actor, async (tx) => {
       const totalDebit = input.lines.reduce((s, l) => s + (l.debit ?? 0), 0);
       const totalCredit = input.lines.reduce((s, l) => s + (l.credit ?? 0), 0);
+      const isDraft = input.isDraft || forceDraft || false;
 
+      if (isDraft) {
+        // DRAFT mode: save header + stash lines as JSON, but do NOT post GL entries.
+        const [header] = await tx
+          .insert(schema.journalEntries)
+          .values({
+            groupId: input.groupId ?? null,
+            postingDate: input.postingDate,
+            description: input.description,
+            totalDebit: sql`${totalDebit}::numeric`,
+            totalCredit: sql`${totalCredit}::numeric`,
+            status: 'DRAFT',
+          })
+          .returning();
+
+        // Store the draft lines in the idempotencyKey field as JSON (reusing
+        // nullable text column to avoid schema change — lines are small).
+        await tx
+          .update(schema.journalEntries)
+          .set({
+            idempotencyKey: JSON.stringify(
+              input.lines.map((l) => ({
+                accountId: l.accountId,
+                debit: l.debit ?? 0,
+                credit: l.credit ?? 0,
+                partyType: l.partyType ?? null,
+                partyId: l.partyId ?? null,
+                remarks: l.remarks ?? null,
+              })),
+            ),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.journalEntries.id, header!.id));
+
+        return { ...header!, fiscalYearId: null as string | null };
+      }
+
+      // POSTED mode: original flow.
       const [header] = await tx
         .insert(schema.journalEntries)
         .values({
@@ -952,6 +1007,72 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         .where(eq(schema.journalEntries.id, header!.id));
 
       return { ...header!, fiscalYearId };
+    });
+  }
+
+  /**
+   * Approve a DRAFT journal entry: validates it's in DRAFT status, hydrates
+   * the stashed lines from idempotencyKey, runs them through postVoucher, and
+   * flips status to POSTED. Sets approved_by/at for audit trail.
+   */
+  async approveJournalEntry(input: ApproveJournalEntryInput, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [header] = await tx
+        .select()
+        .from(schema.journalEntries)
+        .where(eq(schema.journalEntries.id, input.journalEntryId))
+        .limit(1);
+      if (!header) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
+      }
+      if (header.status !== 'DRAFT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot approve a journal entry with status "${header.status}". Only DRAFT entries can be approved.`,
+        });
+      }
+
+      // Hydrate stashed lines from idempotencyKey.
+      if (!header.idempotencyKey) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Draft journal entry has no stashed lines. Re-create it.',
+        });
+      }
+
+      let lines: PostVoucherLine[];
+      try {
+        lines = JSON.parse(header.idempotencyKey) as PostVoucherLine[];
+      } catch {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Draft journal entry has malformed stashed lines.',
+        });
+      }
+
+      const { fiscalYearId } = await this.postVoucher(tx, {
+        groupId: header.groupId,
+        postingDate: header.postingDate,
+        voucherType: 'JOURNAL_ENTRY',
+        voucherId: header.id,
+        lines,
+      });
+
+      const [updated] = await tx
+        .update(schema.journalEntries)
+        .set({
+          status: 'POSTED',
+          fiscalYearId,
+          approvedBy: actor.id,
+          approvedAt: new Date(),
+          // Clear the stashed lines now that they've been posted.
+          idempotencyKey: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.journalEntries.id, header.id))
+        .returning();
+
+      return { ...updated!, fiscalYearId };
     });
   }
 
@@ -1273,6 +1394,33 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
       }
       return row;
+    });
+  }
+
+  /**
+   * Reopen a closed fiscal year (SuperAdmin only — enforced in router).
+   * Allows postings to resume in the period.
+   */
+  async reopenFiscalYear(input: ReopenFiscalYearInput, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select({ status: schema.fiscalYears.status })
+        .from(schema.fiscalYears)
+        .where(eq(schema.fiscalYears.id, input.fiscalYearId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
+      }
+      if (existing.status === 'OPEN') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Fiscal year is already open.' });
+      }
+
+      const [row] = await tx
+        .update(schema.fiscalYears)
+        .set({ status: 'OPEN', updatedAt: new Date() })
+        .where(eq(schema.fiscalYears.id, input.fiscalYearId))
+        .returning();
+      return row!;
     });
   }
 
