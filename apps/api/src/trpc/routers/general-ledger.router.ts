@@ -28,6 +28,11 @@ import {
   rejectExpenseSchema,
   listExpensesSchema,
   getExpenseSchema,
+  budgetVsActualSchema,
+  recordWhtSchema,
+  listWhtSchema,
+  generateWhtCertificateSchema,
+  vatReturnSummarySchema,
 } from '@yannis/shared';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
@@ -350,5 +355,55 @@ export const generalLedgerRouter = router({
     .input(getExpenseSchema)
     .query(async ({ input }) => {
       return getExpenseSubmissionService().getExpense(input);
+    }),
+
+  // ─── Phase 6A: Budget vs Actual ─────────────────────────────────────────
+  budgetVsActual: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(budgetVsActualSchema)
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().budgetVsActual(
+        resolveGroupId(input.groupId, ctx.activeGroupId),
+        input.startDate ?? undefined,
+        input.endDate ?? undefined,
+      );
+    }),
+
+  // ─── Phase 6B: WHT Deductions ──────────────────────────────────────────
+  recordWht: permissionProcedure('finance.ledger.write')
+    .input(recordWhtSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().recordWhtDeduction(
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { id: ctx.user.id },
+      );
+    }),
+
+  listWht: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(listWhtSchema)
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().listWhtDeductions({
+        ...input,
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+      });
+    }),
+
+  generateWhtCertificate: permissionProcedure('finance.ledger.write')
+    .input(generateWhtCertificateSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().generateWhtCertificate(
+        input.deductionId,
+        { id: ctx.user.id },
+      );
+    }),
+
+  // ─── Phase 6C: VAT Return Summary ─────────────────────────────────────
+  vatReturnSummary: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(vatReturnSummarySchema)
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().vatReturnSummary(
+        resolveGroupId(input.groupId, ctx.activeGroupId),
+        input.startDate,
+        input.endDate,
+      );
     }),
 });

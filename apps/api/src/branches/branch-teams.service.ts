@@ -447,6 +447,23 @@ export class BranchTeamsService {
       if (isSupervisor) {
         await this.assertSingleSupervisor(teamId, [userId]);
       }
+      // Remove from sibling teams in the same department (move semantics —
+      // a user can only be on one team per department per branch).
+      const siblings = await this.db
+        .select({ id: schema.branchTeams.id })
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.branchDepartmentId, team.branchDepartmentId));
+      const otherTeamIds = siblings.map((s) => s.id).filter((id) => id !== teamId);
+      if (otherTeamIds.length > 0) {
+        await this.db
+          .delete(schema.branchTeamMembers)
+          .where(
+            and(
+              eq(schema.branchTeamMembers.userId, userId),
+              inArray(schema.branchTeamMembers.teamId, otherTeamIds),
+            ),
+          );
+      }
       await this.db
         .delete(schema.branchDepartmentMembers)
         .where(

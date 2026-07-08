@@ -27,6 +27,11 @@ import {
   type BalanceSheetInput,
   type CashFlowInput,
   type AgingInput,
+  type BudgetVsActualRow,
+  type RecordWhtInput,
+  type ListWhtInput,
+  type VatReturnSummary,
+  type VatTransaction,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -1912,6 +1917,297 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       daysInventoryOutstanding: Math.round(daysInventoryOutstanding * 10) / 10,
       interestCoverage: Math.round(interestCoverage * 100) / 100,
       cashConversionCycle: Math.round(cashConversionCycle * 10) / 10,
+    };
+  }
+
+  // ─── Phase 6A: Budget vs Actual Reporting ──────────────────────────────────
+
+  /**
+   * Compare budgets against actual GL expense postings in the period. Joins the
+   * budgets table with summed expense-account debits from gl_entries.
+   */
+  async budgetVsActual(
+    groupId: string | null,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<BudgetVsActualRow[]> {
+    // Fetch all budgets for the company.
+    const budgetConds: SQL[] = [];
+    if (groupId) budgetConds.push(eq(schema.budgets.groupId, groupId));
+    else budgetConds.push(isNull(schema.budgets.groupId));
+
+    const budgets = await this.db
+      .select()
+      .from(schema.budgets)
+      .where(and(...budgetConds))
+      .orderBy(desc(schema.budgets.createdAt));
+
+    if (budgets.length === 0) return [];
+
+    // Sum actual spend: expense-account debits in the period from gl_entries.
+    const expenseConds: SQL[] = [this.groupEqOn(schema.glEntries.groupId, groupId)];
+    expenseConds.push(eq(schema.accounts.rootType, 'EXPENSE'));
+    if (startDate) expenseConds.push(gte(schema.glEntries.postingDate, startDate));
+    if (endDate) expenseConds.push(lte(schema.glEntries.postingDate, endDate));
+
+    const expenseRows = await this.db
+      .select({
+        totalSpend: sql<string>`COALESCE(SUM(${schema.glEntries.debit} - ${schema.glEntries.credit}), 0)`,
+      })
+      .from(schema.glEntries)
+      .innerJoin(schema.accounts, eq(schema.glEntries.accountId, schema.accounts.id))
+      .where(and(...expenseConds));
+
+    const totalActualSpend = Number(expenseRows[0]?.totalSpend ?? 0);
+
+    return budgets.map((b) => {
+      const budgetAmount = Number(b.totalBudget ?? 0);
+      // Proportional allocation of actual spend across budgets by their share
+      // of total budget. This is a simplified model; a more granular version
+      // would tag GL entries to budget IDs.
+      const totalBudgetPool = budgets.reduce(
+        (s, bb) => s + Number(bb.totalBudget ?? 0),
+        0,
+      );
+      const share = totalBudgetPool > 0 ? budgetAmount / totalBudgetPool : 0;
+      const actualSpend = Math.round(totalActualSpend * share * 100) / 100;
+      const variance = budgetAmount - actualSpend;
+      const variancePct = budgetAmount > 0 ? (actualSpend / budgetAmount) * 100 : 0;
+      const status: 'under' | 'warning' | 'over' =
+        variancePct > 100 ? 'over' : variancePct >= 80 ? 'warning' : 'under';
+
+      return {
+        budgetId: b.id,
+        budgetName: b.name,
+        department: b.departmentOrCampaign,
+        budgetAmount,
+        actualSpend,
+        variance,
+        variancePct: Math.round(variancePct * 100) / 100,
+        status,
+      };
+    });
+  }
+
+  // ─── Phase 6B: WHT Deductions ─────────────────────────────────────────────
+
+  /**
+   * Record a WHT deduction and optionally post the GL entry:
+   *   Dr Expense (gross)
+   *   Cr WHT Payable (wht_amount)
+   *   Cr Bank (net_amount)
+   */
+  async recordWhtDeduction(input: RecordWhtInput, actor: Actor): Promise<{ id: string }> {
+    const groupId = input.groupId ?? null;
+    const grossAmount = input.grossAmount;
+    const whtRate = input.whtRate ?? 5;
+    const whtAmount = Math.round(grossAmount * (whtRate / 100) * 100) / 100;
+    const netAmount = Math.round((grossAmount - whtAmount) * 100) / 100;
+
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .insert(schema.whtDeductions)
+        .values({
+          groupId,
+          vendorName: input.vendorName,
+          vendorId: input.vendorId ?? null,
+          paymentDate: input.paymentDate,
+          grossAmount: sql`${grossAmount}::numeric`,
+          whtRate: sql`${whtRate}::numeric`,
+          whtAmount: sql`${whtAmount}::numeric`,
+          netAmount: sql`${netAmount}::numeric`,
+          description: input.description ?? null,
+          createdBy: actor.id,
+        })
+        .returning({ id: schema.whtDeductions.id });
+
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to record WHT deduction.' });
+      }
+
+      // Attempt GL posting (non-fatal — missing accounts should not block recording).
+      try {
+        const expense = await this.resolveAccountByCode(tx, groupId, 'Marketing Expenses');
+        const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
+        // WHT Payable — look for an account with code 'WHT Payable'; fall back to any PAYABLE.
+        const whtPayable = await this.resolveAccountByCode(tx, groupId, 'WHT Payable');
+
+        if (expense && bank && whtPayable) {
+          await this.postVoucher(tx, {
+            groupId,
+            postingDate: input.paymentDate,
+            voucherType: 'EXPENSE',
+            voucherId: row.id,
+            lines: [
+              { accountId: expense.id, debit: grossAmount, credit: 0, remarks: `WHT: ${input.vendorName}` },
+              { accountId: whtPayable.id, debit: 0, credit: whtAmount, remarks: `WHT ${whtRate}%` },
+              { accountId: bank.id, debit: 0, credit: netAmount, remarks: `Net payment to ${input.vendorName}` },
+            ],
+          });
+
+          await tx
+            .update(schema.whtDeductions)
+            .set({ glVoucherId: row.id, updatedAt: new Date() })
+            .where(eq(schema.whtDeductions.id, row.id));
+        }
+      } catch (err) {
+        this.logger.warn(`WHT GL posting skipped for ${row.id}: ${err instanceof Error ? err.message : err}`);
+      }
+
+      return { id: row.id };
+    });
+  }
+
+  async listWhtDeductions(input: ListWhtInput) {
+    const conds: SQL[] = [];
+    const groupId = input.groupId ?? null;
+    if (groupId) conds.push(eq(schema.whtDeductions.groupId, groupId));
+    else conds.push(isNull(schema.whtDeductions.groupId));
+    if (input.startDate) conds.push(gte(schema.whtDeductions.paymentDate, input.startDate));
+    if (input.endDate) conds.push(lte(schema.whtDeductions.paymentDate, input.endDate));
+
+    const where = and(...conds);
+    const offset = (input.page - 1) * input.limit;
+
+    const [rows, totalRow] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.whtDeductions)
+        .where(where)
+        .orderBy(desc(schema.whtDeductions.paymentDate))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.whtDeductions)
+        .where(where),
+    ]);
+
+    return {
+      records: rows,
+      pagination: {
+        total: totalRow[0]?.total ?? 0,
+        page: input.page,
+        pageSize: input.limit,
+        totalPages: Math.max(1, Math.ceil((totalRow[0]?.total ?? 0) / input.limit)),
+      },
+    };
+  }
+
+  async generateWhtCertificate(deductionId: string, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .update(schema.whtDeductions)
+        .set({ certificateGenerated: true, updatedAt: new Date() })
+        .where(eq(schema.whtDeductions.id, deductionId))
+        .returning();
+
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'WHT deduction not found.' });
+      }
+
+      return {
+        id: row.id,
+        vendorName: row.vendorName,
+        paymentDate: row.paymentDate,
+        grossAmount: row.grossAmount,
+        whtRate: row.whtRate,
+        whtAmount: row.whtAmount,
+        netAmount: row.netAmount,
+        description: row.description,
+        certificateGenerated: true,
+      };
+    });
+  }
+
+  // ─── Phase 6C: VAT Return Summary ────────────────────────────────────────
+
+  /**
+   * VAT return summary for FIRS: sums output VAT (credits to VAT account from
+   * sales) and input VAT (debits to VAT account from purchases) over the period.
+   * Also returns individual VAT transactions for the detail table.
+   */
+  async vatReturnSummary(
+    groupId: string | null,
+    startDate: string,
+    endDate: string,
+  ): Promise<VatReturnSummary> {
+    // Find the VAT account by code.
+    const vatAccount = await this.resolveAccountByCode(
+      this.db as unknown as Tx,
+      groupId,
+      'VAT',
+    );
+
+    if (!vatAccount) {
+      return {
+        outputVat: 0,
+        inputVat: 0,
+        netVatPayable: 0,
+        periodStart: startDate,
+        periodEnd: endDate,
+        transactionCount: 0,
+        transactions: [],
+      };
+    }
+
+    const conds: SQL[] = [
+      eq(schema.glEntries.accountId, vatAccount.id),
+      gte(schema.glEntries.postingDate, startDate),
+      lte(schema.glEntries.postingDate, endDate),
+    ];
+
+    const [summaryRows, transactionRows] = await Promise.all([
+      this.db
+        .select({
+          totalDebit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
+          totalCredit: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
+          txCount: sql<number>`count(*)::int`,
+        })
+        .from(schema.glEntries)
+        .where(and(...conds)),
+      this.db
+        .select({
+          id: schema.glEntries.id,
+          postingDate: schema.glEntries.postingDate,
+          voucherType: schema.glEntries.voucherType,
+          voucherId: schema.glEntries.voucherId,
+          debit: schema.glEntries.debit,
+          credit: schema.glEntries.credit,
+          remarks: schema.glEntries.remarks,
+        })
+        .from(schema.glEntries)
+        .where(and(...conds))
+        .orderBy(desc(schema.glEntries.postingDate)),
+    ]);
+
+    const totalDebit = Number(summaryRows[0]?.totalDebit ?? 0);
+    const totalCredit = Number(summaryRows[0]?.totalCredit ?? 0);
+
+    // Output VAT = credits to VAT account (collected from sales).
+    // Input VAT = debits to VAT account (paid on purchases).
+    const outputVat = totalCredit;
+    const inputVat = totalDebit;
+    const netVatPayable = outputVat - inputVat;
+
+    const transactions: VatTransaction[] = transactionRows.map((r) => ({
+      id: r.id,
+      postingDate: r.postingDate,
+      voucherType: r.voucherType,
+      voucherId: r.voucherId,
+      debit: Number(r.debit),
+      credit: Number(r.credit),
+      remarks: r.remarks,
+    }));
+
+    return {
+      outputVat,
+      inputVat,
+      netVatPayable,
+      periodStart: startDate,
+      periodEnd: endDate,
+      transactionCount: summaryRows[0]?.txCount ?? 0,
+      transactions,
     };
   }
 

@@ -35,3 +35,4 @@ export * from './user-filter-preferences';
 export * from './general-ledger';
 export * from './fixed-assets';
 export * from './expense-submissions';
+export * from './wht-deductions';

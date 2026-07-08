@@ -187,6 +187,14 @@ const SORT_MENU_OPTIONS = [
     descLabel: 'Highest first',
     defaultDir: 'desc' as const,
   },
+  {
+    value: 'owingAmount',
+    label: 'Owing',
+    description: 'Delivered orders not yet on a remittance batch.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
 ];
 
 /** Tailwind color class for each status segment of the stacked mix bar. */

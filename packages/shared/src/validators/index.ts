@@ -639,6 +639,26 @@ export type {
   GetExpenseInput,
 } from './expense-submissions';
 
+// WHT deductions / Budget vs Actual / VAT return validators (Phase 6)
+export {
+  recordWhtSchema,
+  listWhtSchema,
+  generateWhtCertificateSchema,
+  budgetVsActualSchema,
+  vatReturnSummarySchema,
+} from './wht-deductions';
+
+export type {
+  RecordWhtInput,
+  ListWhtInput,
+  GenerateWhtCertificateInput,
+  BudgetVsActualInput,
+  BudgetVsActualRow,
+  VatReturnSummaryInput,
+  VatReturnSummary,
+  VatTransaction,
+} from './wht-deductions';
+
 // User filter preferences validators
 export {
   pageKeySchema,

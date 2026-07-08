@@ -439,6 +439,24 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
       },
+      {
+        label: 'Budget Report',
+        href: '/admin/finance/budget-report',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'WHT Certificates',
+        href: '/admin/finance/wht-certificates',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Tax Returns',
+        href: '/admin/finance/tax-returns',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
     ],
   },
   {
