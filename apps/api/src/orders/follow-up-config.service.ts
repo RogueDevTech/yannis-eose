@@ -178,6 +178,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           sourceBranchId: input.sourceBranchId ?? null,
           targetBranchId: input.targetBranchId ?? null,
           targetGroupId: input.targetGroupId ?? null,
+          teamId: input.teamId ?? null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
           freezeOriginal: input.freezeOriginal ?? true,
@@ -206,6 +207,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (input.sourceBranchId !== undefined) set.sourceBranchId = input.sourceBranchId;
       if (input.targetBranchId !== undefined) set.targetBranchId = input.targetBranchId;
       if (input.targetGroupId !== undefined) set.targetGroupId = input.targetGroupId;
+      if (input.teamId !== undefined) set.teamId = input.teamId;
       if (input.priority !== undefined) set.priority = input.priority;
       if (input.enabled !== undefined) set.enabled = input.enabled;
       if (input.freezeOriginal !== undefined) set.freezeOriginal = input.freezeOriginal;

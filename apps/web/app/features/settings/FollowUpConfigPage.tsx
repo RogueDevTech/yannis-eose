@@ -228,7 +228,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
     setSourceBranchId(rule.sourceBranchId);
     setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
     setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
-    setTeamId((rule as Record<string, unknown>).teamId as string | null ?? null);
+    setTeamId((rule as unknown as Record<string, unknown>).teamId as string | null ?? null);
     setEnabled(rule.enabled); setFreezeOriginal(rule.freezeOriginal ?? true); setModalOpen(true);
   };
   const handleSave = () => {

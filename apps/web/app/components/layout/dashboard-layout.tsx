@@ -427,6 +427,12 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.write',
       },
+      {
+        label: 'Asset Register',
+        href: '/admin/finance/assets',
+        icon: SidebarIcons.inventory,
+        permission: 'finance.ledger.read',
+      },
     ],
   },
   {
