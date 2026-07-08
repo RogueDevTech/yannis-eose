@@ -397,6 +397,7 @@ export {
   agingSchema,
   openingBalanceLineSchema,
   postOpeningBalancesSchema,
+  financialKPIsSchema,
 } from './general-ledger';
 
 export type {
@@ -418,6 +419,8 @@ export type {
   AgingInput,
   OpeningBalanceLineInput,
   PostOpeningBalancesInput,
+  FinancialKPIsInput,
+  FinancialKPIs,
 } from './general-ledger';
 
 // Asset register validators (Phase 4A)

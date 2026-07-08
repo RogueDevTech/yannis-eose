@@ -15,6 +15,7 @@ import {
   cashFlowSchema,
   agingSchema,
   postOpeningBalancesSchema,
+  financialKPIsSchema,
   createAssetSchema,
   listAssetsSchema,
   getAssetSchema,
@@ -201,6 +202,16 @@ export const generalLedgerRouter = router({
         ...input,
         groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
       });
+    }),
+
+  // ─── Financial KPIs (Phase 5A) ────────────────────────────────────────────
+  financialKPIs: permissionProcedure('finance.ledger.read')
+    .input(financialKPIsSchema)
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().financialKPIs(
+        resolveGroupId(input.groupId, ctx.activeGroupId),
+        input.asOfDate ?? undefined,
+      );
     }),
 
   // ─── Cutover: opening balances ─────────────────────────────────────────────

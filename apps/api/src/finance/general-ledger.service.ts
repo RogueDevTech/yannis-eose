@@ -1599,6 +1599,174 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     return { kind: input.kind, asOfDate: asOf, parties, totals: grand };
   }
 
+  // ─── Financial KPIs (Phase 5A) ──────────────────────────────────────────────
+
+  /**
+   * Calculate 14 financial health KPIs from live GL data. Uses the trial balance
+   * to extract account-level balances by rootType and accountType, then derives
+   * ratios. All division is safe (returns 0 or Infinity on divide-by-zero).
+   */
+  async financialKPIs(
+    groupId: string | null,
+    asOfDate?: string,
+  ): Promise<{
+    currentRatio: number;
+    quickRatio: number;
+    cashRatio: number;
+    grossProfitMargin: number;
+    operatingProfitMargin: number;
+    netProfitMargin: number;
+    returnOnAssets: number;
+    returnOnEquity: number;
+    debtToEquity: number;
+    daysSalesOutstanding: number;
+    inventoryTurnover: number;
+    daysInventoryOutstanding: number;
+    interestCoverage: number;
+    cashConversionCycle: number;
+  }> {
+    // Fetch all account balances with their type metadata in one query.
+    const conds: SQL[] = [this.groupEqOn(schema.glEntries.groupId, groupId)];
+    if (asOfDate) conds.push(lte(schema.glEntries.postingDate, asOfDate));
+
+    const rows = await this.db
+      .select({
+        code: schema.accounts.code,
+        name: schema.accounts.name,
+        rootType: schema.accounts.rootType,
+        accountType: schema.accounts.accountType,
+        debit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
+        credit: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
+      })
+      .from(schema.glEntries)
+      .innerJoin(schema.accounts, eq(schema.glEntries.accountId, schema.accounts.id))
+      .where(and(...conds))
+      .groupBy(
+        schema.accounts.id,
+        schema.accounts.code,
+        schema.accounts.name,
+        schema.accounts.rootType,
+        schema.accounts.accountType,
+      )
+      .orderBy(schema.accounts.code);
+
+    // Compute net balance per account (debit-positive convention).
+    const accounts = rows.map((r) => ({
+      code: r.code,
+      name: r.name,
+      rootType: r.rootType,
+      accountType: r.accountType,
+      net: Number(r.debit) - Number(r.credit),
+    }));
+
+    // ── Aggregate by rootType / accountType ──
+
+    const sumByRoot = (rootType: string) =>
+      accounts.filter((a) => a.rootType === rootType).reduce((s, a) => s + a.net, 0);
+
+    const sumByAccountType = (accountType: string) =>
+      accounts.filter((a) => a.accountType === accountType).reduce((s, a) => s + a.net, 0);
+
+    // Assets are debit-positive. Current assets = all ASSET accounts (simplified;
+    // fixed assets are tagged FIXED_ASSET, the rest are current).
+    const totalAssets = sumByRoot('ASSET');
+    const fixedAssets = sumByAccountType('FIXED_ASSET');
+    const currentAssets = totalAssets - fixedAssets;
+
+    // Liabilities are credit-positive → negate net for natural sign.
+    const totalLiabilities = -sumByRoot('LIABILITY');
+    const currentLiabilities = totalLiabilities; // simplified: all liabilities are current
+
+    // Equity is credit-positive → negate.
+    const bookEquity = -sumByRoot('EQUITY');
+
+    // Revenue (INCOME is credit-positive → negate net).
+    const revenue = -sumByRoot('INCOME');
+
+    // Expenses are debit-positive.
+    const totalExpenses = sumByRoot('EXPENSE');
+
+    // Specific account types for KPI extraction.
+    const inventory = sumByAccountType('STOCK');
+    const cashAndBank = sumByAccountType('BANK') + sumByAccountType('CASH');
+    const accountsReceivable = sumByAccountType('RECEIVABLE');
+    const accountsPayable = -sumByAccountType('PAYABLE'); // credit-positive → negate
+    const cogs = sumByAccountType('COST_OF_GOODS_SOLD');
+
+    // Interest expense: look for expense accounts with 'Interest' in the code.
+    const interestExpense = accounts
+      .filter(
+        (a) =>
+          a.rootType === 'EXPENSE' &&
+          a.code.toLowerCase().includes('interest'),
+      )
+      .reduce((s, a) => s + a.net, 0);
+
+    // Retained earnings roll into equity for balance sheet purposes.
+    const retainedEarnings = revenue - totalExpenses;
+    const totalEquity = bookEquity + retainedEarnings;
+    const netProfit = revenue - totalExpenses; // PAT (no tax separation yet)
+    const grossProfit = revenue - cogs;
+    // EBIT = gross profit - operating expenses (everything except COGS and interest)
+    const operatingExpenses = totalExpenses - cogs - interestExpense;
+    const ebit = grossProfit - operatingExpenses;
+
+    // ── Safe division helper ──
+    const safeDiv = (num: number, den: number, fallback = 0): number => {
+      if (den === 0) return num === 0 ? fallback : num > 0 ? Infinity : -Infinity;
+      return num / den;
+    };
+
+    // ── KPIs ──
+
+    // Liquidity
+    const currentRatio = safeDiv(currentAssets, currentLiabilities);
+    const quickRatio = safeDiv(currentAssets - inventory, currentLiabilities);
+    const cashRatio = safeDiv(cashAndBank, currentLiabilities);
+
+    // Profitability (as %)
+    const grossProfitMargin = revenue === 0 ? 0 : (grossProfit / revenue) * 100;
+    const operatingProfitMargin = revenue === 0 ? 0 : (ebit / revenue) * 100;
+    const netProfitMargin = revenue === 0 ? 0 : (netProfit / revenue) * 100;
+
+    // Returns (as %)
+    const returnOnAssets = totalAssets === 0 ? 0 : (netProfit / totalAssets) * 100;
+    const returnOnEquity = totalEquity === 0 ? 0 : (netProfit / totalEquity) * 100;
+
+    // Leverage
+    const debtToEquity = safeDiv(totalLiabilities, totalEquity);
+
+    // Efficiency
+    const daysSalesOutstanding = revenue === 0 ? 0 : (accountsReceivable / revenue) * 365;
+    const inventoryTurnover = inventory === 0 ? 0 : safeDiv(cogs, inventory);
+    const daysInventoryOutstanding = cogs === 0 ? 0 : (inventory / cogs) * 365;
+
+    // Interest coverage
+    const interestCoverage =
+      interestExpense === 0 ? Infinity : safeDiv(ebit, interestExpense);
+
+    // Cash conversion cycle = DIO + DSO - AP days
+    const apDays = cogs === 0 ? 0 : (accountsPayable / cogs) * 365;
+    const cashConversionCycle = daysInventoryOutstanding + daysSalesOutstanding - apDays;
+
+    return {
+      currentRatio: Math.round(currentRatio * 100) / 100,
+      quickRatio: Math.round(quickRatio * 100) / 100,
+      cashRatio: Math.round(cashRatio * 100) / 100,
+      grossProfitMargin: Math.round(grossProfitMargin * 100) / 100,
+      operatingProfitMargin: Math.round(operatingProfitMargin * 100) / 100,
+      netProfitMargin: Math.round(netProfitMargin * 100) / 100,
+      returnOnAssets: Math.round(returnOnAssets * 100) / 100,
+      returnOnEquity: Math.round(returnOnEquity * 100) / 100,
+      debtToEquity: Math.round(debtToEquity * 100) / 100,
+      daysSalesOutstanding: Math.round(daysSalesOutstanding * 10) / 10,
+      inventoryTurnover: Math.round(inventoryTurnover * 100) / 100,
+      daysInventoryOutstanding: Math.round(daysInventoryOutstanding * 10) / 10,
+      interestCoverage: Math.round(interestCoverage * 100) / 100,
+      cashConversionCycle: Math.round(cashConversionCycle * 10) / 10,
+    };
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   /**

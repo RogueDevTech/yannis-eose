@@ -2,7 +2,7 @@ CREATE TYPE expense_submission_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED'
 
 CREATE TABLE IF NOT EXISTS expense_submissions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  group_id UUID REFERENCES companies(id),
+  group_id UUID,
   submitter_id UUID NOT NULL,
   vendor_name TEXT NOT NULL,
   description TEXT NOT NULL,

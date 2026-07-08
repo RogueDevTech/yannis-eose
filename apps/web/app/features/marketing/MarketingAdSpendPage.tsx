@@ -837,14 +837,15 @@ export function MarketingAdSpendPage({
         nowrap: true,
         render: (s) => {
           const isPending = (s.status ?? 'PENDING') === 'PENDING';
-          const checkbox = canApproveAdSpend && isPending ? (
+          const checkbox = canApproveAdSpend ? (
             <input
               type="checkbox"
-              checked={selectedIds.has(s.id)}
+              checked={isPending && selectedIds.has(s.id)}
               onChange={(e) => { e.stopPropagation(); toggleSelect(s.id, e.target.checked); }}
-              className="rounded border-app-border text-brand-600 focus:ring-brand-500 shrink-0"
-              aria-label="Select row"
+              className="rounded border-app-border text-brand-600 focus:ring-brand-500 shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label={isPending ? 'Select row' : 'Already processed'}
               onClick={(e) => e.stopPropagation()}
+              disabled={!isPending}
             />
           ) : null;
           return (

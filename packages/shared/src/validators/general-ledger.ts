@@ -177,6 +177,31 @@ export const agingSchema = z.object({
 });
 export type AgingInput = z.infer<typeof agingSchema>;
 
+// ─── Financial KPIs (Phase 5A) ─────────────────────────────────────────────────
+
+export const financialKPIsSchema = z.object({
+  groupId: z.string().uuid().nullish(),
+  asOfDate: z.string().date().optional(),
+});
+export type FinancialKPIsInput = z.infer<typeof financialKPIsSchema>;
+
+export interface FinancialKPIs {
+  currentRatio: number;
+  quickRatio: number;
+  cashRatio: number;
+  grossProfitMargin: number;
+  operatingProfitMargin: number;
+  netProfitMargin: number;
+  returnOnAssets: number;
+  returnOnEquity: number;
+  debtToEquity: number;
+  daysSalesOutstanding: number;
+  inventoryTurnover: number;
+  daysInventoryOutstanding: number;
+  interestCoverage: number;
+  cashConversionCycle: number;
+}
+
 // ─── Opening balances / cutover (Phase 6) ───────────────────────────────────────
 
 export const openingBalanceLineSchema = z
