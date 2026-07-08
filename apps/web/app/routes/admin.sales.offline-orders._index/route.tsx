@@ -699,6 +699,7 @@ export default function OfflineOrdersRoute() {
               : ['REMITTED', 'DELETED']
           }
           hideOfflineAndCartStats
+          canImportOrders={false}
         />
       )}
     </CachedAwait>

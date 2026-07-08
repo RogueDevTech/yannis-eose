@@ -1,4 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -25,6 +26,16 @@ import {
 } from '~/lib/hr-user-detail-overview-slices.server';
 
 export const meta: MetaFunction = () => [{ title: 'User Detail — Yannis EOSE' }];
+
+// Only revalidate after mutations on this route — tab navigation and sibling
+// route changes must NOT re-fire the heavy loader (20+ API calls).
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formMethod,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 // ─── Loader ─────────────────────────────────────────────
 
