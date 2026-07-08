@@ -699,7 +699,7 @@ function BatchDetailModal({
               label="HR notes (optional)"
               name="hrNotes"
               rows={3}
-              placeholder="Any context for Finance to know — leave blank if none."
+              placeholder="Any context for Finance to know. Leave blank if none."
             />
             <div className="flex gap-2">
               <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'}>Approve</Button>
@@ -725,7 +725,7 @@ function BatchDetailModal({
               rows={3}
               required
               minLength={10}
-              placeholder="Min 10 characters — what needs to change?"
+              placeholder="Min 10 characters. What needs to change?"
             />
             <div className="flex gap-2">
               <Button type="submit" variant="danger" size="sm" loading={fetcher.state === 'submitting'}>Reject</Button>

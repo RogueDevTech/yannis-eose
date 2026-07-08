@@ -176,7 +176,7 @@ export class MarketingService {
       if (isOrgWide) return;
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'No active branch — switch to a branch before initiating a funding transfer',
+        message: 'No active branch. Switch to a branch before initiating a funding transfer.',
       });
     }
 
@@ -3498,7 +3498,7 @@ export class MarketingService {
           userId: transfer.receiverMbId,
           type: 'mb_fund_transfer:approved' as const,
           title: 'Fund transfer received',
-          body: `${sender?.name ?? 'A media buyer'} sent you ₦${Number(transfer.amount).toLocaleString()} — tap to accept`,
+          body: `${sender?.name ?? 'A media buyer'} sent you ₦${Number(transfer.amount).toLocaleString()}. Tap to accept.`,
           data: { transferId },
         });
         this.notifications.enqueueCreate({
@@ -3888,7 +3888,7 @@ export class MarketingService {
       this.notifications.enqueueCreate({
         userId,
         type: 'marketing:ad_spend_submitted',
-        title: 'Ad spend edited — re-approval needed',
+        title: 'Ad spend edited: re-approval needed',
         body: `${actor.name ?? 'A media buyer'} updated approved spend for ${formatted}. Review under Ads Expense.`,
         data: { mediaBuyerId: actor.id },
       });
@@ -5026,14 +5026,20 @@ export class MarketingService {
 
     // CS/servicing scope includes ALL order sources (offline, edge-form, online).
     // Marketing scope excludes offline — MBs only care about edge-form/online orders.
-    const includeAllSources = orderBranchScope === 'servicing';
+    const isServicingScope = orderBranchScope === 'servicing';
     const orderConditions: Parameters<typeof and>[0][] = [
       // Exclude DELETED orders (editorial) from all marketing metrics.
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
-      // Exclude offline + graduated follow-up orders. Cart-graduated orders
+      // Marketing: exclude offline + graduated follow-up orders. Cart-graduated orders
       // (order_source='online') are real sales and stay in marketing metrics.
-      ...(includeAllSources ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      // CS/servicing: include all sources (offline etc.) but exclude graduated
+      // follow-up and cart-graduated orders — those have their own dashboard strips.
+      ...(isServicingScope ? [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`,
+      ] : []),
     ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
@@ -5049,7 +5055,11 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      ...(includeAllSources ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`,
+      ] : []),
     ];
     appendMetricsOrderScope(deliveredConditions);
     // Cohort semantics: count orders **created** in period that have since
@@ -5075,7 +5085,11 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
-      ...(includeAllSources ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`,
+      ] : []),
     ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));

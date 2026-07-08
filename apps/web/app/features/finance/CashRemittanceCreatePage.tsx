@@ -69,7 +69,7 @@ export function CashRemittanceCreatePage({
     const first = selectedOrders[0];
     if (!first) return null;
     return first.logisticsLocationProviderName
-      ? `${first.logisticsLocationName} — ${first.logisticsLocationProviderName}`
+      ? `${first.logisticsLocationName}: ${first.logisticsLocationProviderName}`
       : first.logisticsLocationName;
   }, [selectedOrders]);
 
@@ -378,7 +378,7 @@ export function CashRemittanceCreatePage({
                     </>
                   ) : (
                     <>
-                      Batch created as <span className="font-semibold">Pending</span> — Finance marks Received later.
+                      Batch created as <span className="font-semibold">Pending</span>. Finance marks Received later.
                     </>
                   )}
                 </p>

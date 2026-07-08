@@ -34,6 +34,7 @@ import type {
   ListRemittancesInput,
   MarkRemittanceReceivedInput,
   CreateDeliveryRemittanceInput,
+  UpdateDeliveryRemittanceInput,
   ListDeliveryRemittancesInput,
   ListDeliveryRemittanceEligibleOrdersInput,
   MarkDeliveryRemittanceReceivedInput,
@@ -1504,7 +1505,7 @@ export class LogisticsService {
         }
         // Deduct remittance-level costs from the completed total
         completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost;
-        await tx
+        const remittedRows = await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })
           .where(
@@ -1512,7 +1513,23 @@ export class LogisticsService {
               inArray(schema.orders.id, input.orderIds),
               eq(schema.orders.status, 'DELIVERED'),
             ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+
+        // Write timeline events for each order that transitioned to REMITTED
+        if (remittedRows.length > 0) {
+          await tx.insert(schema.orderTimelineEvents).values(
+            remittedRows.map((r) => ({
+              orderId: r.id,
+              eventType: 'ORDER_REMITTED' as const,
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: `Cash remittance received. Order marked as remitted.`,
+              metadata: { deliveryRemittanceId: row.id },
+              branchId: r.branchId ?? null,
+            })),
           );
+        }
 
         await tx.insert(schema.deliveryRemittanceOutcomes).values({
           deliveryRemittanceId: row.id,
@@ -1560,6 +1577,93 @@ export class LogisticsService {
   }
 
   /**
+   * Update a delivery remittance batch's editable fields (costs, notes, receipts,
+   * per-order delivery fees). Only allowed while the batch is still SENT (pending).
+   */
+  async updateDeliveryRemittance(input: UpdateDeliveryRemittanceInput, actor: SessionUser) {
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+    const isFinanceCaller =
+      actor.role === 'SUPER_ADMIN' ||
+      hasFinanceAccess(actor) ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
+    if (!isTplCaller && !isFinanceCaller) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only Finance (or a 3PL Manager with an assigned location) can edit a delivery remittance',
+      });
+    }
+
+    return withActorAndBranch(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.deliveryRemittances)
+        .where(eq(schema.deliveryRemittances.id, input.id));
+
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
+      }
+
+      const now = new Date();
+
+      // Build the update set for batch-level fields
+      const updateSet: Record<string, unknown> = { updatedAt: now };
+
+      if (input.receiptUrls !== undefined) {
+        updateSet.receiptUrls = input.receiptUrls;
+      }
+      if (input.notes !== undefined) {
+        updateSet.notes = input.notes;
+      }
+      if (input.commitmentFee !== undefined) {
+        const fee = parseFloat(input.commitmentFee) || 0;
+        updateSet.commitmentFee = sql`${fee.toFixed(2)}::numeric`;
+      }
+      if (input.posFee !== undefined) {
+        const fee = parseFloat(input.posFee) || 0;
+        updateSet.posFee = sql`${fee.toFixed(2)}::numeric`;
+      }
+      if (input.failedDeliveryCost !== undefined) {
+        const cost = parseFloat(input.failedDeliveryCost) || 0;
+        updateSet.failedDeliveryCost = sql`${cost.toFixed(2)}::numeric`;
+      }
+
+      const [updated] = await tx
+        .update(schema.deliveryRemittances)
+        .set(updateSet)
+        .where(eq(schema.deliveryRemittances.id, input.id))
+        .returning();
+
+      // Update per-order delivery fees when provided.
+      if (input.deliveryFees && Object.keys(input.deliveryFees).length > 0) {
+        // Verify all order IDs belong to this remittance
+        const junctionRows = await tx
+          .select({ orderId: schema.deliveryRemittanceOrders.orderId })
+          .from(schema.deliveryRemittanceOrders)
+          .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, input.id));
+        const validOrderIds = new Set(junctionRows.map((r) => r.orderId));
+
+        for (const [orderId, feeStr] of Object.entries(input.deliveryFees)) {
+          if (!validOrderIds.has(orderId)) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Order ${orderId} is not part of this remittance`,
+            });
+          }
+          const fee = parseFloat(feeStr);
+          if (!Number.isFinite(fee) || fee < 0) continue;
+          await tx
+            .update(schema.orders)
+            .set({ deliveryFee: sql`${fee.toFixed(2)}::numeric`, updatedAt: now })
+            .where(eq(schema.orders.id, orderId));
+        }
+      }
+
+      return updated;
+    });
+  }
+
+  /**
    * List delivery remittances. TPL_MANAGER sees own location's; Finance and HoL see all.
    */
   async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null) {
@@ -1602,6 +1706,26 @@ export class LogisticsService {
           SELECT ll.id FROM logistics_locations ll
           JOIN logistics_providers lp ON lp.id = ll.provider_id
           WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
+        )`,
+      );
+    }
+
+    // Text search — reaches into linked orders and location name via EXISTS subquery
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        sql`(
+          EXISTS (
+            SELECT 1 FROM delivery_remittance_orders dro
+            JOIN orders o ON o.id = dro.order_id
+            WHERE dro.delivery_remittance_id = ${schema.deliveryRemittances.id}
+              AND (o.customer_name ILIKE ${term} OR CAST(o.order_number AS text) ILIKE ${term})
+          )
+          OR EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.deliveryRemittances.logisticsLocationId}
+              AND ll.name ILIKE ${term}
+          )
         )`,
       );
     }
@@ -1653,6 +1777,7 @@ export class LogisticsService {
             deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
             count: count(),
             amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+            deliveryFeeTotal: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
           })
           .from(schema.deliveryRemittanceOrders)
           .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -1660,11 +1785,11 @@ export class LogisticsService {
           .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
       : [];
     const orderSummaryMap = new Map(
-      orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount }]),
+      orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount, deliveryFeeTotal: r.deliveryFeeTotal }]),
     );
     const orderSummaries = records.map((r) => {
       const s = orderSummaryMap.get(r.id);
-      return [{ count: s?.count ?? 0, amount: s?.amount ?? '0' }];
+      return [{ count: s?.count ?? 0, amount: s?.amount ?? '0', deliveryFeeTotal: s?.deliveryFeeTotal ?? '0' }];
     });
 
     // Count duplicate-flagged orders per batch for the batch list UI
@@ -1781,11 +1906,10 @@ export class LogisticsService {
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     // Scoped by date, location, group, and sentBy — must mirror summaryConditions
     // so the counts reconcile with the amounts.
-    // Outcome count/amount conditions — filter by orders.created_at to match
-    // Delivered/Awaiting/batch stats.
+    // Outcome count/amount conditions — filter by sentAt to match batch stats.
     const outcomeCountConditions: SQL[] = [];
-    if (input.startDate) outcomeCountConditions.push(sql`o_date.delivered_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeCountConditions.push(sql`o_date.delivered_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.startDate) outcomeCountConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     if (groupId) {
       outcomeCountConditions.push(sql`dr.logistics_location_id IN (
         SELECT ll.id FROM logistics_locations ll
@@ -1842,15 +1966,8 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Date filter by created_at to match dashboard/marketing/sales funnel
-    // counts — ensures "Delivered Orders" on remittance tallies with the
-    // same period on the CEO dashboard and Marketing Orders page.
-    if (input.startDate) {
-      awaitingConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    }
-    if (input.endDate) {
-      awaitingConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
-    }
+    // Awaiting remittance is always all-time — every unremitted delivered
+    // order is actionable regardless of when it was created/delivered.
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
@@ -1890,9 +2007,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Date filter by created_at — matches dashboard/marketing/sales funnels.
-    if (input.startDate) deliveredConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) deliveredConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    // Delivered count is all-time — must equal Awaiting + Remitted.
+    // Awaiting is all-time, Remitted filters by sentAt. Delivered stays
+    // unfiltered so the stat strip reconciles correctly.
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
@@ -1903,13 +2020,13 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
-    // Batch stats filter orders by created_at — must match Delivered/Awaiting counts above.
-    const orderDateConditions: SQL[] = [];
-    if (input.startDate) orderDateConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) orderDateConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    // Batch stats filter by sentAt — matches the Remitted tab's date filter.
+    const batchDateConditions: SQL[] = [];
+    if (input.startDate) batchDateConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) batchDateConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
     const baseSummaryWhere = summaryWhere
-      ? (orderDateConditions.length > 0 ? and(summaryWhere, ...orderDateConditions) : summaryWhere)
-      : (orderDateConditions.length > 0 ? and(...orderDateConditions) : undefined);
+      ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
+      : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
 
     const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, deliveredRows] = await Promise.all([
       baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
@@ -1974,6 +2091,7 @@ export class LogisticsService {
         .flatMap((r, i) => {
           const orderCount = orderSummaries[i]?.[0]?.count ?? 0;
           const orderAmount = orderSummaries[i]?.[0]?.amount ?? '0';
+          const orderDeliveryFeeTotal = orderSummaries[i]?.[0]?.deliveryFeeTotal ?? '0';
           const base = {
             ...r,
             locationName: locationMap.get(r.logisticsLocationId) ?? null,
@@ -1982,6 +2100,7 @@ export class LogisticsService {
             orderCount,
             duplicateOrderCount: dupCountMap.get(r.id) ?? 0,
             outcomeAmount: orderAmount,
+            deliveryFeeTotal: orderDeliveryFeeTotal,
             outcomeOrderCount: orderCount,
             outcomeReason: r.disputeReason,
           };
@@ -2059,8 +2178,41 @@ export class LogisticsService {
       );
     }
 
+    // Text search — customer name, order number, or location name
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        sql`(
+          ${schema.orders.customerName} ILIKE ${term}
+          OR CAST(${schema.orders.orderNumber} AS text) ILIKE ${term}
+        )`,
+      );
+    }
+
+    if (input.category) {
+      switch (input.category) {
+        case 'marketing':
+          conditions.push(
+            sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')`,
+            eq(schema.orders.isFollowUp, false),
+          );
+          break;
+        case 'cart':
+          conditions.push(eq(schema.orders.orderSource, 'online'));
+          break;
+        case 'follow-up':
+          conditions.push(eq(schema.orders.isFollowUp, true));
+          break;
+        case 'offline':
+          conditions.push(eq(schema.orders.orderSource, 'offline'));
+          break;
+      }
+    }
+
     const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
     const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
+    const csUser = alias(schema.users, 'rem_ord_cs');
+    const csBranch = alias(schema.branches, 'rem_ord_branch');
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -2080,6 +2232,10 @@ export class LogisticsService {
         providerName: prov.name,
         isDuplicate: schema.orders.isDuplicate,
         duplicateOfId: schema.orders.duplicateOfId,
+        orderSource: schema.orders.orderSource,
+        isFollowUp: schema.orders.isFollowUp,
+        csName: csUser.name,
+        branchName: csBranch.name,
       })
       .from(schema.deliveryRemittanceOrders)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
@@ -2088,21 +2244,36 @@ export class LogisticsService {
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
       )
       .leftJoin(loc, eq(loc.id, schema.deliveryRemittances.logisticsLocationId))
-      .leftJoin(prov, eq(prov.id, loc.providerId));
+      .leftJoin(prov, eq(prov.id, loc.providerId))
+      .leftJoin(csUser, eq(csUser.id, schema.orders.assignedCsId))
+      .leftJoin(csBranch, eq(csBranch.id, schema.orders.servicingBranchId));
 
-    const countQuery = this.db
+    const countBase = this.db
       .select({ count: count() })
       .from(schema.deliveryRemittanceOrders)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
       .innerJoin(
         schema.deliveryRemittances,
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
       );
 
+    const sortExprMap: Record<string, SQL> = {
+      sentAt: sql`${schema.deliveryRemittances.sentAt}`,
+      deliveredAt: sql`${schema.orders.deliveredAt}`,
+      totalAmount: sql`COALESCE(${schema.orders.totalAmount}, 0)`,
+      deliveryFee: sql`COALESCE(${schema.orders.deliveryFee}, 0)`,
+      orderNumber: sql`${schema.orders.orderNumber}`,
+    };
+    const sortExpr = input.sortBy ? sortExprMap[input.sortBy] ?? sql`${schema.deliveryRemittances.sentAt}` : sql`${schema.deliveryRemittances.sentAt}`;
+    // NULLS LAST so NULL delivery fees / amounts don't rank above real values
+    const sortDirection = input.sortDir === 'asc' ? 'ASC' : 'DESC';
+    const orderClauses = [sql`${sortExpr} ${sql.raw(sortDirection)} NULLS LAST`, desc(schema.orders.deliveredAt)];
+
     const [rows, totalRows] = await Promise.all([
       whereClause
-        ? baseQuery.where(whereClause).orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset)
-        : baseQuery.orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt)).limit(input.limit).offset(offset),
-      whereClause ? countQuery.where(whereClause) : countQuery,
+        ? baseQuery.where(whereClause).orderBy(...orderClauses).limit(input.limit).offset(offset)
+        : baseQuery.orderBy(...orderClauses).limit(input.limit).offset(offset),
+      whereClause ? countBase.where(whereClause) : countBase,
     ]);
 
     const total = totalRows[0]?.count ?? 0;
@@ -2123,6 +2294,12 @@ export class LogisticsService {
         providerName: r.providerName ?? null,
         isDuplicate: r.isDuplicate ?? null,
         duplicateOfId: r.duplicateOfId ?? null,
+        csName: r.csName ?? null,
+        branchName: r.branchName ?? null,
+        category: r.isFollowUp ? 'follow-up' as const
+          : r.orderSource === 'online' ? 'cart' as const
+          : r.orderSource === 'offline' ? 'offline' as const
+          : 'marketing' as const,
       })),
       pagination: {
         page: input.page,
@@ -2402,7 +2579,7 @@ export class LogisticsService {
       ).map((r) => r.orderId);
 
       if (linkedOrderIds.length > 0) {
-        await tx
+        const remittedRows = await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })
           .where(
@@ -2410,7 +2587,23 @@ export class LogisticsService {
               inArray(schema.orders.id, linkedOrderIds),
               eq(schema.orders.status, 'DELIVERED'),
             ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+
+        // Write timeline events for each order that transitioned to REMITTED
+        if (remittedRows.length > 0) {
+          await tx.insert(schema.orderTimelineEvents).values(
+            remittedRows.map((r) => ({
+              orderId: r.id,
+              eventType: 'ORDER_REMITTED' as const,
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: `Cash remittance received. Order marked as remitted.`,
+              metadata: { deliveryRemittanceId: input.deliveryRemittanceId },
+              branchId: r.branchId ?? null,
+            })),
           );
+        }
       }
 
       return found;
@@ -2652,12 +2845,8 @@ export class LogisticsService {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
 
-    if (input.startDate) {
-      conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
-    }
-    if (input.endDate) {
-      conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
-    }
+    // No date filter — eligible orders are always all-time (every unremitted
+    // delivered order is actionable). Date filters only apply to Remitted tab.
     // Company-group isolation via order's servicing branch
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       conditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
@@ -3511,6 +3700,35 @@ export class LogisticsService {
       }
     }
 
+    // 4c: owing — DELIVERED orders NOT on any remittance batch
+    const owingConditions: SQL[] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      sql`${schema.orders.id} NOT IN (SELECT dro.order_id FROM delivery_remittance_orders dro)`,
+    ];
+    if (effectiveStart) owingConditions.push(sql`${schema.orders.deliveredAt} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) owingConditions.push(sql`${schema.orders.deliveredAt} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    if (effectiveBranchIds?.length) {
+      owingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+    }
+
+    const owingRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        owingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        owingCount: count(),
+      })
+      .from(schema.orders)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.orders.logisticsLocationId),
+      )
+      .where(and(...owingConditions))
+      .groupBy(schema.logisticsLocations.providerId);
+
+    const owingByProvider = new Map(
+      owingRows.map((r) => [r.providerId, { amount: r.owingAmount, count: r.owingCount }]),
+    );
+
     // ── Pass 5: units (bottles) delivered per provider ─────────────────────
     // SUM(order_items.quantity) for DELIVERED + REMITTED orders, same period
     // and branch scope as Pass 2. Gives the CEO a "bottles sold" metric.
@@ -3691,6 +3909,8 @@ export class LogisticsService {
         remittedAmount: remit?.received ?? '0',
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
+        owingAmount: owingByProvider.get(p.id)?.amount ?? '0',
+        owingCount: owingByProvider.get(p.id)?.count ?? 0,
         unitsDelivered: unitsByProvider.get(p.id) ?? 0,
         availableStock: stockByProvider.get(p.id)?.available ?? 0,
         reservedStock: stockByProvider.get(p.id)?.reserved ?? 0,

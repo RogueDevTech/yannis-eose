@@ -173,7 +173,7 @@ export function RemitPage({
         header: 'To',
         render: (r) => (
           <span className="text-app-fg-muted">
-            {r.toProviderName ? `${r.toLocationName} — ${r.toProviderName}` : r.toLocationName}
+            {r.toProviderName ? `${r.toLocationName}: ${r.toProviderName}` : r.toLocationName}
           </span>
         ),
       },
@@ -520,7 +520,7 @@ export function RemitPage({
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
               <p className="font-medium text-app-fg">{remittanceReceiptModal.productName}</p>
               <p className="text-sm text-app-fg-muted mt-1">
-                To: {remittanceReceiptModal.toProviderName ? `${remittanceReceiptModal.toLocationName} — ${remittanceReceiptModal.toProviderName}` : remittanceReceiptModal.toLocationName}
+                To: {remittanceReceiptModal.toProviderName ? `${remittanceReceiptModal.toLocationName}: ${remittanceReceiptModal.toProviderName}` : remittanceReceiptModal.toLocationName}
               </p>
               <p className="text-sm text-app-fg-muted mt-0.5">
                 Qty: {remittanceReceiptModal.quantityReceived != null ? `${remittanceReceiptModal.quantityReceived} / ${remittanceReceiptModal.quantitySent}` : remittanceReceiptModal.quantitySent} · Sent {new Date(remittanceReceiptModal.sentAt).toLocaleDateString()} · {STATUS_LABEL[remittanceReceiptModal.status] ?? remittanceReceiptModal.status}

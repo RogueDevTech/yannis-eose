@@ -378,6 +378,110 @@ export class OrdersService {
     return row?.id ?? null;
   }
 
+  async findPendingOrderRetrackRequestId(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_STATUS_RETRACK'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  /**
+   * Check if a counterpart order (follow-up or original) is already DELIVERED/REMITTED.
+   * Returns the counterpart info for the UI warning banner, or null if no duplicate.
+   */
+  private async findDuplicateDeliveryCounterpart(
+    orderId: string,
+    order: typeof schema.orders.$inferSelect,
+  ): Promise<{ counterpartOrderNo: number; counterpartId: string; counterpartStatus: string; isFollowUp: boolean } | null> {
+    // Case 1: Check follow_up_orders table for a delivered follow-up
+    const [fuDelivered] = await this.db
+      .select({
+        id: schema.followUpOrders.id,
+        orderNumber: schema.followUpOrders.orderNumber,
+        status: schema.followUpOrders.status,
+      })
+      .from(schema.followUpOrders)
+      .where(
+        and(
+          eq(schema.followUpOrders.sourceOrderId, orderId),
+          inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.followUpOrders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (fuDelivered) {
+      return {
+        counterpartOrderNo: fuDelivered.orderNumber,
+        counterpartId: fuDelivered.id,
+        counterpartStatus: fuDelivered.status,
+        isFollowUp: true,
+      };
+    }
+
+    // Case 2: Check graduated follow-ups in orders table
+    const [graduatedFu] = await this.db
+      .select({
+        id: schema.orders.id,
+        orderNumber: schema.orders.orderNumber,
+        status: schema.orders.status,
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.followUpSourceOrderId, orderId),
+          eq(schema.orders.isFollowUp, true),
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (graduatedFu) {
+      return {
+        counterpartOrderNo: graduatedFu.orderNumber!,
+        counterpartId: graduatedFu.id,
+        counterpartStatus: graduatedFu.status,
+        isFollowUp: true,
+      };
+    }
+
+    // Case 3: This is a follow-up — check if original is already delivered
+    if (order.isFollowUp && order.followUpSourceOrderId) {
+      const [origDelivered] = await this.db
+        .select({
+          id: schema.orders.id,
+          orderNumber: schema.orders.orderNumber,
+          status: schema.orders.status,
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.id, order.followUpSourceOrderId),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (origDelivered) {
+        return {
+          counterpartOrderNo: origDelivered.orderNumber!,
+          counterpartId: origDelivered.id,
+          counterpartStatus: origDelivered.status,
+          isFollowUp: false,
+        };
+      }
+    }
+
+    return null;
+  }
+
   private async proposedLineItemPricingDiffersFromDatabase(
     orderId: string,
     items: RequestOrderLinePriceChangeInput['items'],
@@ -470,6 +574,7 @@ export class OrdersService {
   private async notifyOrderDeletionApprovers(params: {
     requestId: string;
     orderId: string;
+    superAdminOnly?: boolean;
     branchId: string | null;
     servicingBranchId: string | null;
     requesterName: string | null;
@@ -484,17 +589,92 @@ export class OrdersService {
       permissionRequestKind: 'order_deletion',
     };
 
+    const recipientIds = new Set<string>();
+
+    if (params.superAdminOnly) {
+      // Finance-initiated: only SuperAdmin/Admin approves
+      const admins = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN'])));
+      for (const r of admins) {
+        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+      }
+    } else {
+      // Admin-initiated: dual approval (HoCS + HoL + Admins)
+      const branchIdSet = new Set<string>();
+      if (params.branchId) branchIdSet.add(params.branchId);
+      if (params.servicingBranchId) branchIdSet.add(params.servicingBranchId);
+      const branchIds = [...branchIdSet];
+
+      const [admins, heads, hoLogisticsDeletion] = await Promise.all([
+        this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+        branchIds.length > 0
+          ? this.db
+              .select({ id: schema.users.id })
+              .from(schema.users)
+              .where(
+                and(
+                  eq(schema.users.status, 'ACTIVE'),
+                  inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
+                  inArray(schema.users.primaryBranchId, branchIds),
+                ),
+              )
+          : Promise.resolve([] as Array<{ id: string }>),
+        this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS'))),
+      ]);
+      for (const r of [...admins, ...heads, ...hoLogisticsDeletion]) {
+        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+      }
+    }
+
+    for (const userId of recipientIds) {
+      this.notifications.enqueueCreate({
+        userId,
+        type: 'approval:permission_request',
+        title,
+        body,
+        data,
+      });
+    }
+  }
+
+  /** Notify HoCS + HoL about a pending retrack request (fire-and-forget). */
+  private async notifyRetrackApprovers(params: {
+    requestId: string;
+    orderId: string;
+    orderNo: number | null;
+    currentStatus: string;
+    targetStatus: string;
+    branchId: string | null;
+    servicingBranchId: string | null;
+    requesterName: string | null;
+    excludeUserId: string;
+  }): Promise<void> {
+    const orderLabel = params.orderNo != null
+      ? `YNS-${params.orderNo}`
+      : params.orderId.slice(0, 8).toUpperCase();
+    const title = 'Order retrack — approval needed';
+    const body = `${params.requesterName ?? 'A teammate'} requested to retrack order ${orderLabel} from ${params.currentStatus} to ${params.targetStatus}. Review under Permission Requests.`;
+    const data: Record<string, string> = {
+      requestId: params.requestId,
+      orderId: params.orderId,
+      permissionRequestKind: 'order_retrack',
+    };
+
     const branchIdSet = new Set<string>();
     if (params.branchId) branchIdSet.add(params.branchId);
     if (params.servicingBranchId) branchIdSet.add(params.servicingBranchId);
     const branchIds = [...branchIdSet];
 
     const recipientIds = new Set<string>();
-    const [admins, heads, hoLogisticsDeletion] = await Promise.all([
-      this.db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+    const [heads, hoLogistics] = await Promise.all([
       branchIds.length > 0
         ? this.db
             .select({ id: schema.users.id })
@@ -512,7 +692,7 @@ export class OrdersService {
         .from(schema.users)
         .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS'))),
     ]);
-    for (const r of [...admins, ...heads, ...hoLogisticsDeletion]) {
+    for (const r of [...heads, ...hoLogistics]) {
       if (r.id !== params.excludeUserId) recipientIds.add(r.id);
     }
 
@@ -795,6 +975,76 @@ export class OrdersService {
   }
 
   /**
+   * Block delivery if the counterpart (follow-up or original) is already DELIVERED/REMITTED.
+   * Prevents double-counted deliveries in Cash Remittances.
+   */
+  private async blockDuplicateDelivery(
+    orderId: string,
+    order: typeof schema.orders.$inferSelect,
+  ): Promise<void> {
+    // Case 1: This is an original order — check if any follow-up already delivered.
+    // Check follow_up_orders table (not yet graduated)
+    const [fuDelivered] = await this.db
+      .select({ id: schema.followUpOrders.id, orderNumber: schema.followUpOrders.orderNumber })
+      .from(schema.followUpOrders)
+      .where(
+        and(
+          eq(schema.followUpOrders.sourceOrderId, orderId),
+          inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.followUpOrders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (fuDelivered) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot mark as delivered — follow-up order FU-${fuDelivered.orderNumber} has already been delivered for this customer.`,
+      });
+    }
+
+    // Check graduated follow-ups in orders table
+    const [graduatedFu] = await this.db
+      .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.followUpSourceOrderId, orderId),
+          eq(schema.orders.isFollowUp, true),
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (graduatedFu) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot mark as delivered — follow-up order YNS-${graduatedFu.orderNumber} has already been delivered for this customer.`,
+      });
+    }
+
+    // Case 2: This is a graduated follow-up — check if the original already delivered.
+    if (order.isFollowUp && order.followUpSourceOrderId) {
+      const [origDelivered] = await this.db
+        .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.id, order.followUpSourceOrderId),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (origDelivered) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot mark as delivered — original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+        });
+      }
+    }
+  }
+
+  /**
    * Soft-delete: transitions order to DELETED status and sets `deleted_at`.
    * DELETED orders are excluded from ALL metrics/counts but the row stays in
    * the DB for audit trail. Admin/SuperAdmin can restore to UNPROCESSED.
@@ -943,10 +1193,15 @@ export class OrdersService {
       });
     }
 
+    // Finance-access users (not admin-level) → SuperAdmin-only approval.
+    // Admin-level requesters → dual approval (HoCS + HoL) as before.
+    const isSuperAdminOnly = !isAdminLevel(actor);
+
     const payload = {
       orderId: input.orderId,
       orderNo: order.orderNumber ?? null,
       orderStatus: order.status,
+      ...(isSuperAdminOnly ? { superAdminOnly: true } : {}),
     };
 
     const [req] = await withActor(this.db, actor, async (tx) =>
@@ -971,7 +1226,156 @@ export class OrdersService {
 
     void this.notifyOrderDeletionApprovers({
       requestId: req.id,
+      superAdminOnly: isSuperAdminOnly,
       orderId: input.orderId,
+      branchId: order.branchId ?? null,
+      servicingBranchId: order.servicingBranchId ?? null,
+      requesterName: actor.name ?? null,
+      excludeUserId: actor.id,
+    });
+
+    return { success: true as const, requestId: req.id };
+  }
+
+  /**
+   * Finance-access users request a status retrack on a DELIVERED/REMITTED order.
+   * Creates a permission_request of type ORDER_STATUS_RETRACK; requires dual
+   * approval from HoCS + HoL before the actual retrack executes.
+   */
+  async requestOrderRetrack(
+    input: { orderId: string; targetStatus: string; reason: string },
+    actor: SessionUser,
+  ): Promise<{ success: true; requestId: string }> {
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    // Retrack via this finance flow is scoped to DELIVERED orders. The approval
+    // executor reverses the FIFO delivery deduction on the way out of DELIVERED,
+    // so inventory reconciles cleanly. REMITTED is deliberately excluded: a
+    // remitted order belongs to a settled multi-order delivery-remittance batch,
+    // and there is no un-remit primitive to void that cash record — retracking it
+    // here would leave the remittance outcome overstated (breaks Financial Truth).
+    // The accountant must unwind the remittance first, which cascades the order
+    // back to DELIVERED; it can then be retracked.
+    if (order.status === 'REMITTED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'This order is remitted. Reverse the cash remittance first (which returns it to Delivered), then retrack.',
+      });
+    }
+    if (order.status !== 'DELIVERED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only delivered orders can be retrack-requested via this flow.',
+      });
+    }
+
+    // Permission gate: finance access or orders.retrack.request
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    if (
+      !hasFinanceAccess(actor) &&
+      !perms.includes(canonicalPermissionCode('orders.retrack.request'))
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to request an order status retrack.',
+      });
+    }
+
+    // Validate target status is a valid backward step
+    const RETRACK_LIFECYCLE: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const currentPos = RETRACK_LIFECYCLE[order.status] ?? -1;
+    const targetPos = RETRACK_LIFECYCLE[input.targetStatus] ?? -1;
+    if (targetPos < 0 || targetPos >= currentPos) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot retrack from ${order.status} to ${input.targetStatus}.`,
+      });
+    }
+    // Finance retrack requests only allow rolling back to CONFIRMED or later
+    if (targetPos < 3) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Finance retrack requests can only roll back to Confirmed or later.',
+      });
+    }
+    // The target must be a single valid backward hop in the state machine —
+    // otherwise the request is approvable but throws at execution time (e.g.
+    // REMITTED only retracks to DELIVERED, never straight to CONFIRMED). Reject
+    // unexecutable requests up front so dual-approval never dead-ends.
+    if (!isTransitionAllowed(order.status as OrderStatus, input.targetStatus as OrderStatus)) {
+      const allowed = getAllowedNextStatuses(order.status as OrderStatus)
+        .filter((s) => (RETRACK_LIFECYCLE[s] ?? 99) < currentPos);
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: allowed.length
+          ? `Cannot retrack ${order.status} directly to ${input.targetStatus}. Allowed: ${allowed.join(', ')}.`
+          : `Cannot retrack an order in ${order.status}.`,
+      });
+    }
+
+    // Check for existing pending request
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_STATUS_RETRACK'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
+        ),
+      )
+      .limit(1);
+    if (duplicate) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'A retrack request is already pending for this order.',
+      });
+    }
+
+    const payload = {
+      orderId: input.orderId,
+      orderNo: order.orderNumber ?? null,
+      currentStatus: order.status,
+      targetStatus: input.targetStatus,
+    };
+
+    const [req] = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.permissionRequests)
+        .values({
+          type: 'ORDER_STATUS_RETRACK',
+          status: 'PENDING',
+          requesterId: actor.id,
+          reason: input.reason,
+          payload: payload as unknown as Record<string, unknown>,
+        })
+        .returning({ id: schema.permissionRequests.id }),
+    );
+
+    if (!req?.id) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to create retrack request',
+      });
+    }
+
+    void this.notifyRetrackApprovers({
+      requestId: req.id,
+      orderId: input.orderId,
+      orderNo: order.orderNumber ?? null,
+      currentStatus: order.status,
+      targetStatus: input.targetStatus,
       branchId: order.branchId ?? null,
       servicingBranchId: order.servicingBranchId ?? null,
       requesterName: actor.name ?? null,
@@ -2802,7 +3206,7 @@ export class OrdersService {
     //   3) pending permission_request to archive (soft-delete) the order.
     // Previously these ran sequentially (3 RTTs); fanning out collapses them
     // to a single wall-clock round-trip on the cache-miss detail load.
-    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId] =
+    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId, pendingRetrackRequestId, duplicateDeliveryWarning] =
       await Promise.all([
         this.db
           .select({
@@ -2819,6 +3223,8 @@ export class OrdersService {
         this.findPendingOrderLinePriceRequest(orderId),
         this.findPendingOrderDeletionRequestId(orderId),
         this.findPendingDeliveredOrderDeletionRequestId(orderId),
+        this.findPendingOrderRetrackRequestId(orderId),
+        this.findDuplicateDeliveryCounterpart(orderId, order),
       ]);
 
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
@@ -2850,6 +3256,8 @@ export class OrdersService {
       } : null,
       pendingOrderDeletionRequestId,
       pendingDeliveredOrderDeletionRequestId,
+      pendingRetrackRequestId,
+      duplicateDeliveryWarning,
     };
   }
 
@@ -3645,6 +4053,9 @@ export class OrdersService {
     if (input.logisticsLocationId) {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
+    if (input.servicingBranchId) {
+      conditions.push(eq(schema.orders.servicingBranchId, input.servicingBranchId));
+    }
     if (input.fromCart) {
       // Recovered-from-cart filter — orders.cart_id back-link populated when
       // the order was created from an abandoned/converted cart. Index lives on
@@ -4337,6 +4748,10 @@ export class OrdersService {
       }
       // Delivery note is optional (CEO directive 2026-04-24 reversed the prior mandatory rule).
       // The note + screenshot fields are still persisted when provided.
+
+      // Guard: block delivery if a follow-up (or original) order already delivered.
+      // Prevents double-counted deliveries in Cash Remittances.
+      await this.blockDuplicateDelivery(input.orderId, order);
     }
 
     // Block ALL forward transitions while a line-item change approval is
@@ -4587,6 +5002,7 @@ export class OrdersService {
       RETURNED: 'ORDER_RETURNED',
       RESTOCKED: 'ORDER_RESTOCKED',
       WRITTEN_OFF: 'ORDER_WRITTEN_OFF',
+      REMITTED: 'ORDER_REMITTED',
     };
     // Detect retrack (backward transition) by lifecycle position
     const LIFECYCLE_POSITION: Record<string, number> = {
@@ -5751,6 +6167,10 @@ export class OrdersService {
     /** When true, also exclude cart-graduated orders (order_source='online').
      *  CS funnel passes true (cart orders have their own strip). */
     excludeCartGraduated?: boolean,
+    /** When true, only count offline orders (order_source='offline'). */
+    onlyOffline?: boolean,
+    /** Optional servicingBranchId filters to that servicing branch (for Logistics Orders page branch filter). */
+    servicingBranchId?: string,
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -5763,9 +6183,10 @@ export class OrdersService {
       // Exclude graduated follow-up orders (is_follow_up=true).
       conditions.push(eq(schema.orders.isFollowUp, false));
       if (excludeCartGraduated) {
-        // Also exclude cart-graduated orders (order_source='online').
-        // CS funnel passes this — cart orders have their own strip.
-        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`);
+        // Exclude cart-graduated orders — CS funnel; cart orders have their own strip.
+        // Primary: order_source='online' (stamped since cart graduation was added).
+        // Fallback: catch any legacy un-stamped graduations via cartId + DELIVERED.
+        conditions.push(sql`NOT (${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`);
       }
     } else if (isFollowUp === true) {
       conditions.push(eq(schema.orders.isFollowUp, true));
@@ -5776,7 +6197,9 @@ export class OrdersService {
         sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
       );
     }
-    if (excludeOffline) {
+    if (onlyOffline) {
+      conditions.push(eq(schema.orders.orderSource, 'offline'));
+    } else if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
       // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus
       // cart-graduated orders ('online') so recovered carts count for the MB.
@@ -5788,6 +6211,7 @@ export class OrdersService {
       supervisorScope,
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
+    if (servicingBranchId) conditions.push(eq(schema.orders.servicingBranchId, servicingBranchId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
@@ -5829,7 +6253,7 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
-  ): Promise<{ offlineCount: number; duplicateCount: number }> {
+  ): Promise<{ offlineCount: number; offlineDeliveredCount: number; duplicateCount: number }> {
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.isFollowUp, false),
     ];
@@ -5855,7 +6279,7 @@ export class OrdersService {
     if (endDate) deliveredFollowUpOfflineConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const deliveredFollowUpOfflineWhere = and(...deliveredFollowUpOfflineConditions);
 
-    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows] = await Promise.all([
+    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows, offlineDeliveredRows] = await Promise.all([
       this.db
         .select({ count: count() })
         .from(schema.orders)
@@ -5868,12 +6292,18 @@ export class OrdersService {
         .select({ count: count() })
         .from(schema.orders)
         .where(and(whereClause, sql`${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != ''`)),
+      // Offline orders that reached DELIVERED or REMITTED (for CS Delivered breakdown)
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(and(whereClause, eq(schema.orders.orderSource, 'offline'), inArray(schema.orders.status, ['DELIVERED', 'REMITTED']))),
     ]);
 
     return {
       // Merge delivered follow-up offline orders into the offline count so they
       // surface in the "Offline orders" stat strip tile (CEO 2026-06-09).
       offlineCount: (offlineRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
+      offlineDeliveredCount: (offlineDeliveredRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
       duplicateCount: duplicateRows[0]?.count ?? 0,
     };
   }
@@ -7555,18 +7985,31 @@ export class OrdersService {
       .from(schema.orderItems)
       .where(eq(schema.orderItems.orderId, updatedOrder.id));
 
-    // Retrack out of REMITTED / DELIVERED — reverse the ledger entries posted on
-    // the way up so the GL stays truthful (append-only reversal, idempotent,
-    // non-fatal). REMITTED→earlier undoes the cash settlement; DELIVERED→earlier
-    // undoes the sale (AR + COGS). Ordering: undo payment before sale.
-    const LIFECYCLE_RANK: Record<string, number> = {
+    // ── Retrack reconciliation (stock + ledger) ─────────────────────────────
+    // A backward transition out of DELIVERED / REMITTED must undo the effects
+    // posted on the way up, in two dimensions:
+    //   1. Inventory — restore the delivery-time FIFO deduction, else the units
+    //      stay depleted while the CONFIRMED case below layers a fresh
+    //      RESERVATION on top (double-counted stock loss).
+    //   2. General ledger — reverse the GL vouchers (append-only reversal,
+    //      idempotent, non-fatal): leaving DELIVERED undoes the sale (AR + COGS);
+    //      leaving REMITTED undoes the cash settlement. Order: undo payment
+    //      before sale.
+    const LIFECYCLE_POS: Record<string, number> = {
       UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
       AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
     };
-    const fromRank = LIFECYCLE_RANK[previousOrder.status] ?? -1;
-    const toRank = LIFECYCLE_RANK[newStatus] ?? -1;
-    if (toRank >= 0 && fromRank > toRank) {
-      if (fromRank >= 8 && toRank < 8) {
+    const prevPos = LIFECYCLE_POS[previousOrder.status] ?? -1;
+    const nextPos = LIFECYCLE_POS[newStatus] ?? -1;
+    const isRetrackSideEffect = prevPos > nextPos && newStatus !== 'UNPROCESSED';
+
+    if (isRetrackSideEffect) {
+      if (previousOrder.status === 'DELIVERED') {
+        // Reverse the FIFO delivery deduction before the switch re-reserves stock.
+        await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+      }
+      // GL reversals mirror the postings made on the way up.
+      if (prevPos >= 8 && nextPos < 8) {
         // Leaving REMITTED — the settlement JE is posted per-remittance-batch and
         // may cover many orders, so we can't cleanly reverse one order's slice by
         // voucher. Only auto-reverse when this order is the SOLE order on its
@@ -7595,7 +8038,7 @@ export class OrdersService {
           this.logger.warn(`GL payment reversal on retract for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
         }
       }
-      if (fromRank >= 7 && toRank < 7) {
+      if (prevPos >= 7 && nextPos < 7) {
         // Leaving DELIVERED — reverse the sale (AR + COGS).
         try {
           await this.generalLedger.reverseVoucher('SALES_INVOICE', updatedOrder.id, actor, 'order retracted out of DELIVERED');

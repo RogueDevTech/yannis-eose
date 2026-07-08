@@ -596,7 +596,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                 <p>{revertCount} untouched order{revertCount !== 1 ? 's' : ''} will be reverted to their original state.</p>
               )}
               {workedCount > 0 && (
-                <p className="text-app-fg">{workedCount} order{workedCount !== 1 ? 's have' : ' has'} been worked on — they will remain with their assigned closer as normal orders.</p>
+                <p className="text-app-fg">{workedCount} order{workedCount !== 1 ? 's have' : ' has'} been worked on. They will remain with their assigned closer as normal orders.</p>
               )}
             </div>
           );

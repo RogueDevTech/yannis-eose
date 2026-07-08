@@ -1,6 +1,7 @@
 import { Link } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import type { ReactNode } from 'react';
+import { DotSeparator } from '~/components/ui/dot-separator';
 import type { TimelineEvent } from '~/features/orders/types';
 
 const UUID_RE =
@@ -112,7 +113,8 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
     return (
       <>
         {base}
-        {' — attributed to media buyer '}
+        <DotSeparator />
+        {'attributed to media buyer '}
         <TimelineLink to={`/hr/users/${mbId}`}>{label}</TimelineLink>
       </>
     );
@@ -257,14 +259,26 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
     if (riderId && isLinkableUserId(riderId)) {
       return (
         <>
-          {event.description}{' '}
-          — <TimelineLink to={`/hr/users/${riderId}`}>Rider profile</TimelineLink>
+          {event.description}
+          <DotSeparator />
+          <TimelineLink to={`/hr/users/${riderId}`}>Rider profile</TimelineLink>
         </>
       );
     }
   }
 
-  return event.description;
+  return splitEmDash(event.description);
+}
+
+/** Replace ` — ` in plain-text descriptions with the dot separator component. */
+function splitEmDash(text: string): ReactNode {
+  if (!text.includes(' — ')) return text;
+  const parts = text.split(' — ');
+  return parts.reduce<ReactNode[]>((acc, part, i) => {
+    if (i > 0) acc.push(<DotSeparator key={`dot-${i}`} />);
+    acc.push(part);
+    return acc;
+  }, []);
 }
 
 function csOrderCommentBody(event: TimelineEvent): string {

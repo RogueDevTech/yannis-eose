@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import type { OrderInvoice } from '~/features/orders/types';
+import { formatOrderNumber } from '@yannis/shared';
 import { Link, useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
@@ -26,6 +27,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { RemittanceInfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { SearchInput } from '~/components/ui/search-input';
+import { SortMenu } from '~/components/ui/sort-menu';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { useNavigate } from '@remix-run/react';
@@ -117,6 +119,8 @@ export interface DeliveryRemittancesPageProps {
     periodAllTime: boolean;
     /** Server-side search for the Awaiting remittance tab (`q` query param). */
     eligibleQ: string;
+    /** Server-side search for the Remitted tab (`rq` query param). */
+    remittanceSearch: string;
   };
   userMap: Record<string, string>;
   /** Phase 18 — accountants (Finance / admin / Finance hat) for the Sent by select. */
@@ -151,6 +155,9 @@ export interface RemittanceOrderRow {
   providerName: string | null;
   isDuplicate: string | null;
   duplicateOfId: string | null;
+  csName: string | null;
+  branchName: string | null;
+  category: 'marketing' | 'cart' | 'follow-up' | 'offline';
 }
 
 function formatDeliveredAt(iso: string | null): string {
@@ -227,10 +234,14 @@ export function DeliveryRemittancesPage({
     () => new Map(),
   );
   const [eligibleSearchDraft, setEligibleSearchDraft] = useState(filters.eligibleQ);
+  const [remittanceSearchDraft, setRemittanceSearchDraft] = useState(filters.remittanceSearch);
   const [infoModal, setInfoModal] = useState<string | null>(null);
   useEffect(() => {
     setEligibleSearchDraft(filters.eligibleQ);
   }, [filters.eligibleQ]);
+  useEffect(() => {
+    setRemittanceSearchDraft(filters.remittanceSearch);
+  }, [filters.remittanceSearch]);
 
   /**
    * Default: Awaiting remittance; `?tab=remittances` is the batch list.
@@ -300,6 +311,18 @@ export function DeliveryRemittancesPage({
     });
   };
 
+  const handleRemittanceSearchChange = (value: string) => {
+    const trimmed = value.trim();
+    primeSamePathRefetch();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (!trimmed) next.delete('rq');
+      else next.set('rq', trimmed);
+      return next;
+    });
+  };
+
   const handleSentByChange = (userId: string) => {
     primeSamePathRefetch();
     setSearchParams((p) => {
@@ -342,16 +365,20 @@ export function DeliveryRemittancesPage({
     let n = 0;
     if (filters.location) n += 1;
     if (filters.sentBy) n += 1;
+    if (filters.remittanceSearch) n += 1;
     return n;
-  }, [filters.location, filters.sentBy]);
+  }, [filters.location, filters.sentBy, filters.remittanceSearch]);
 
   const remittanceColumns: CompactTableColumn<DeliveryRemittanceListItem>[] = useMemo(
     () => [
       {
-        key: 'id',
-        header: 'ID',
-        tight: true,
-        render: (r) => <span className="font-mono text-xs text-app-fg-muted">{r.id.slice(0, 8)}…</span>,
+        key: 'sn',
+        header: 'S/N',
+        render: (_r, i) => (
+          <span className="text-xs font-mono text-app-fg-muted">
+            {(page - 1) * pageSize + i + 1}
+          </span>
+        ),
       },
       {
         key: 'location',
@@ -360,7 +387,7 @@ export function DeliveryRemittancesPage({
           <span className="text-sm text-app-fg">
             {r.locationName
               ? r.locationProviderName
-                ? `${r.locationName} — ${r.locationProviderName}`
+                ? `${r.locationName}: ${r.locationProviderName}`
                 : r.locationName
               : '—'}
           </span>
@@ -403,12 +430,14 @@ export function DeliveryRemittancesPage({
         ),
       },
       {
-        key: 'status',
-        header: 'Status',
+        key: 'deliveryFee',
+        header: 'Del. Fee',
+        align: 'right',
+        nowrap: true,
         render: (r) => (
-          <StatusBadge
-            status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)}
-            label={STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)]}
+          <NairaPrice
+            amount={Number((r as any).deliveryFeeTotal ?? 0)}
+            className="text-sm tabular-nums text-app-fg-muted"
           />
         ),
       },
@@ -432,10 +461,12 @@ export function DeliveryRemittancesPage({
         nowrap: true,
         render: (r) => r.receivedAt ? (
           <span className="text-sm text-app-fg-muted">
-            {new Date(r.receivedAt).toLocaleDateString('en-NG', {
+            {new Date(r.receivedAt).toLocaleString('en-NG', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
             })}
           </span>
         ) : (
@@ -449,12 +480,20 @@ export function DeliveryRemittancesPage({
         align: 'right',
         tight: true,
         render: (r) => (
-          <CompactTableActionButton
-            to={`/admin/finance/delivery-remittances/${r.id}`}
-            state={remittanceDetailLinkState}
-          >
-            {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
-          </CompactTableActionButton>
+          <div className="flex items-center gap-1">
+            <CompactTableActionButton
+              to={`/admin/finance/delivery-remittances/${r.id}?edit=true`}
+              state={remittanceDetailLinkState}
+            >
+              Edit
+            </CompactTableActionButton>
+            <CompactTableActionButton
+              to={`/admin/finance/delivery-remittances/${r.id}`}
+              state={remittanceDetailLinkState}
+            >
+              {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
+            </CompactTableActionButton>
+          </div>
         ),
       },
     ],
@@ -531,7 +570,7 @@ export function DeliveryRemittancesPage({
         render: (o) =>
           o.logisticsLocationName
             ? o.logisticsLocationProviderName
-              ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+              ? `${o.logisticsLocationName}: ${o.logisticsLocationProviderName}`
               : o.logisticsLocationName
             : '—',
       },
@@ -750,32 +789,128 @@ export function DeliveryRemittancesPage({
       <LocalExportModal
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
-        title="Export Delivery Remittances"
-        description="Choose format and columns for delivery remittances export."
-        filenamePrefix="cash-remittances"
-        rows={remittances.map((r) => ({
-          id: r.id,
-          location: r.locationName ?? '',
-          sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
-          orderCount: r.orderCount,
-          batchTotal: Number(r.outcomeAmount ?? 0),
-          status:
-            STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
-            (r.outcomeStatus ?? r.status),
-          sentAt: new Date(r.sentAt).toLocaleString(),
-          receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
-        }))}
-        columns={[
-          { key: 'id', label: 'ID' },
-          { key: 'location', label: 'Location' },
-          { key: 'sentBy', label: 'Sent by' },
-          { key: 'orderCount', label: 'Orders' },
-          { key: 'batchTotal', label: 'Batch total (₦)' },
-          { key: 'status', label: 'Status' },
-          { key: 'sentAt', label: 'Sent at' },
-          { key: 'receivedAt', label: 'Received at' },
-        ]}
-        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt', 'receivedAt']}
+        title={viewMode === 'orders' ? 'Export Remittance Orders' : 'Export Delivery Remittances'}
+        description={viewMode === 'orders' ? 'Export individual orders with category breakdown.' : 'Choose format and columns for delivery remittances export.'}
+        filenamePrefix={viewMode === 'orders' ? 'remittance-orders' : 'cash-remittances'}
+        totalRows={viewMode === 'orders' ? (remittanceOrdersPagination?.total ?? 0) : pagination.total}
+        rows={viewMode === 'orders'
+          ? remittanceOrders.map((r) => ({
+              orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
+              category: r.category,
+              customerName: r.customerName,
+              totalAmount: Number(r.totalAmount || 0),
+              deliveryFee: Number(r.deliveryFee || 0),
+              netAmount: Number(r.totalAmount || 0) - Number(r.deliveryFee || 0),
+              location: r.locationName ?? '',
+              provider: r.providerName ?? '',
+              deliveredAt: r.deliveredAt ? new Date(r.deliveredAt).toLocaleString() : '',
+              sentAt: new Date(r.sentAt).toLocaleString(),
+              status: r.remittanceStatus,
+              isDuplicate: r.isDuplicate ? 'Yes' : 'No',
+            }))
+          : remittances.map((r) => ({
+              id: r.id,
+              location: r.locationName ?? '',
+              sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
+              orderCount: r.orderCount,
+              batchTotal: Number(r.outcomeAmount ?? 0),
+              deliveryFee: Number((r as any).deliveryFeeTotal ?? 0),
+              status:
+                STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
+                (r.outcomeStatus ?? r.status),
+              sentAt: new Date(r.sentAt).toLocaleString(),
+              receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
+            }))
+        }
+        fetchAllRows={(() => {
+          if (viewMode === 'orders') {
+            const ordersTotal = remittanceOrdersPagination?.total ?? 0;
+            if (ordersTotal <= remittanceOrders.length) return undefined;
+            return async () => {
+              const params: Record<string, unknown> = { page: 1, limit: 10000 };
+              if (filters.status) params.status = filters.status;
+              if (filters.location) params.logisticsLocationId = filters.location;
+              if (filters.sentBy) params.sentBy = filters.sentBy;
+              if (filters.startDate) params.startDate = filters.startDate;
+              if (filters.endDate) params.endDate = filters.endDate;
+              if (filters.remittanceSearch) params.search = filters.remittanceSearch;
+              const res = await fetch(`/trpc/logistics.listDeliveryRemittanceOrders?input=${encodeURIComponent(JSON.stringify(params))}`);
+              const json = await res.json();
+              const allOrders: RemittanceOrderRow[] = json?.result?.data?.orders ?? [];
+              return allOrders.map((r) => ({
+                orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
+                category: r.category,
+                customerName: r.customerName,
+                totalAmount: Number(r.totalAmount || 0),
+                deliveryFee: Number(r.deliveryFee || 0),
+                netAmount: Number(r.totalAmount || 0) - Number(r.deliveryFee || 0),
+                location: r.locationName ?? '',
+                provider: r.providerName ?? '',
+                deliveredAt: r.deliveredAt ? new Date(r.deliveredAt).toLocaleString() : '',
+                sentAt: new Date(r.sentAt).toLocaleString(),
+                status: r.remittanceStatus,
+                isDuplicate: r.isDuplicate ? 'Yes' : 'No',
+              }));
+            };
+          }
+          if (pagination.total <= remittances.length) return undefined;
+          return async () => {
+            const params: Record<string, unknown> = { page: 1, limit: 10000 };
+            if (filters.status) params.status = filters.status;
+            if (filters.location) params.logisticsLocationId = filters.location;
+            if (filters.sentBy) params.sentBy = filters.sentBy;
+            if (filters.startDate) params.startDate = filters.startDate;
+            if (filters.endDate) params.endDate = filters.endDate;
+            if (filters.remittanceSearch) params.search = filters.remittanceSearch;
+            const res = await fetch(`/trpc/logistics.deliveryRemittancesPageBundle?input=${encodeURIComponent(JSON.stringify(params))}`);
+            const json = await res.json();
+            const allRemittances: DeliveryRemittanceListItem[] = json?.result?.data?.remittances?.records ?? [];
+            return allRemittances.map((r) => ({
+              id: r.id,
+              location: r.locationName ?? '',
+              sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
+              orderCount: r.orderCount,
+              batchTotal: Number(r.outcomeAmount ?? 0),
+              deliveryFee: Number((r as any).deliveryFeeTotal ?? 0),
+              status:
+                STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
+                (r.outcomeStatus ?? r.status),
+              sentAt: new Date(r.sentAt).toLocaleString(),
+              receivedAt: r.receivedAt ? new Date(r.receivedAt).toLocaleString() : '',
+            }));
+          };
+        })()}
+        columns={viewMode === 'orders'
+          ? [
+              { key: 'orderNumber', label: 'Order #' },
+              { key: 'category', label: 'Category' },
+              { key: 'customerName', label: 'Customer' },
+              { key: 'totalAmount', label: 'Gross (₦)' },
+              { key: 'deliveryFee', label: 'Delivery fee (₦)' },
+              { key: 'netAmount', label: 'Net (₦)' },
+              { key: 'location', label: 'Location' },
+              { key: 'provider', label: 'Provider' },
+              { key: 'deliveredAt', label: 'Delivered at' },
+              { key: 'sentAt', label: 'Sent at' },
+              { key: 'status', label: 'Status' },
+              { key: 'isDuplicate', label: 'Duplicate' },
+            ]
+          : [
+              { key: 'id', label: 'ID' },
+              { key: 'location', label: 'Location' },
+              { key: 'sentBy', label: 'Sent by' },
+              { key: 'orderCount', label: 'Orders' },
+              { key: 'batchTotal', label: 'Batch total (₦)' },
+              { key: 'deliveryFee', label: 'Delivery fee (₦)' },
+              { key: 'status', label: 'Status' },
+              { key: 'sentAt', label: 'Sent at' },
+              { key: 'receivedAt', label: 'Received at' },
+            ]
+        }
+        defaultColumns={viewMode === 'orders'
+          ? ['orderNumber', 'category', 'customerName', 'totalAmount', 'deliveryFee', 'netAmount', 'location', 'deliveredAt', 'sentAt', 'status']
+          : ['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt', 'receivedAt']
+        }
       />
 
       {(() => {
@@ -799,13 +934,7 @@ export function DeliveryRemittancesPage({
               mobileGrid
               items={[
                 {
-                  label: <span className="flex items-center">Delivered ({Number(summary.deliveredCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('delivered')} /></span>,
-                  value: <NairaPrice amount={Number(summary.deliveredAmount ?? 0)} />,
-                  valueClassName: 'text-app-fg tabular-nums',
-                  title: 'Total value = Awaiting + Remitted + Pending + Disputed',
-                },
-                {
-                  label: <span className="flex items-center">Awaiting ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
+                  label: <span className="flex items-center">Awaiting · All time ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
                   value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
                   valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
                   title: 'Not yet on any remittance batch',
@@ -821,21 +950,21 @@ export function DeliveryRemittancesPage({
                   active: viewTab === 'remittances' && pendingStatus === 'RECEIVED',
                 },
                 {
-                  label: <span className="flex items-center">Pending ({Number(summary.pendingCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('pending')} /></span>,
+                  label: <span className="flex items-center">Pending Confirmation ({Number(summary.pendingCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('pending')} /></span>,
                   value: <NairaPrice amount={pendingGross} />,
                   valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
                   title: 'Sent but not yet confirmed by Finance',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'SENT'); n.set('page', '1'); return n; }, { replace: true }); },
                   active: viewTab === 'remittances' && pendingStatus === 'SENT',
                 },
-                ...(Number(summary.disputedCount ?? 0) > 0 ? [{
+                {
                   label: <span className="flex items-center">Disputed ({Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('disputed')} /></span>,
                   value: <NairaPrice amount={disputedGross} />,
                   valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' as const,
                   title: 'Needs resolution',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p: URLSearchParams) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'DISPUTED'); n.set('page', '1'); return n; }, { replace: true }); },
                   active: viewTab === 'remittances' && pendingStatus === 'DISPUTED',
-                }] : []),
+                },
               ]}
             />
           );
@@ -890,7 +1019,7 @@ export function DeliveryRemittancesPage({
           lines={[
             { label: 'Awaiting', amount: Number(summary.awaitingGrossAmount ?? summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
             { label: 'Remitted (received)', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? 0) },
-            { label: 'Pending (sent)', amount: Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
+            { label: 'Pending confirmation', amount: Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
             ...(Number(summary.disputedCount ?? 0) > 0 ? [{ label: 'Disputed', amount: Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0), type: 'value' as const, count: Number(summary.disputedCount ?? 0) }] : []),
             { label: 'Delivered', amount: Number(summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
           ]}
@@ -929,7 +1058,7 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'disputed'}
           onClose={() => setInfoModal(null)}
           title="Disputed"
-          description="Net value of orders on remittance batches that have been flagged as disputed — the amount was not received as expected."
+          description="Net value of orders on remittance batches that have been flagged as disputed. The amount was not received as expected."
           lines={[
             { label: 'Orders on DISPUTED batches', amount: Number(summary.disputedAmount ?? 0), type: 'value', count: Number(summary.disputedCount ?? 0) },
           ]}
@@ -965,8 +1094,27 @@ export function DeliveryRemittancesPage({
 
       <Tabs
         variant="underline"
-        value={viewTab}
-        onChange={(v) => setViewTab(v as 'remittances' | 'eligible')}
+        value={viewTab === 'eligible' ? 'eligible' : (pendingStatus || 'RECEIVED')}
+        onChange={(v) => {
+          primeSamePathRefetch();
+          if (v === 'eligible') {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.delete('tab');
+              next.delete('status');
+              next.set('page', '1');
+              return next;
+            }, { replace: true });
+          } else {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.set('tab', 'remittances');
+              next.set('status', v);
+              next.set('page', '1');
+              return next;
+            }, { replace: true });
+          }
+        }}
         tabs={[
           {
             value: 'eligible',
@@ -978,7 +1126,9 @@ export function DeliveryRemittancesPage({
                 </span>
               ) : null,
           },
-          { value: 'remittances', label: viewMode === 'orders' ? `Remitted (${remittedOrderCount} orders)` : `Remitted (${Number(summary.totalCount)} batches)` },
+          { value: 'RECEIVED', label: `Remitted (${receivedOrderCount})` },
+          { value: 'SENT', label: `Pending Confirmation (${Number(summary.pendingCount)})` },
+          { value: 'DISPUTED', label: `Disputed (${disputedOrderCount})` },
         ]}
       />
 
@@ -991,6 +1141,25 @@ export function DeliveryRemittancesPage({
               badgeCount={remittanceToolbarFilterBadge}
               desktopInlineFilters={
                 <>
+                  <form
+                    className="contents"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleRemittanceSearchChange(remittanceSearchDraft);
+                    }}
+                  >
+                    <SearchInput
+                      value={remittanceSearchDraft}
+                      onChange={(v) => {
+                        setRemittanceSearchDraft(v);
+                        if (v.trim() === '') handleRemittanceSearchChange('');
+                      }}
+                      withSubmitButton
+                      placeholder="Search customer or order #"
+                      controlSize="md"
+                      wrapperClassName="w-full sm:min-w-[400px]"
+                    />
+                  </form>
                   <div className="relative">
                     {!!filters.location && (
                       <FilterDismiss onClear={() => handleLocationChange('')} />
@@ -1029,18 +1198,6 @@ export function DeliveryRemittancesPage({
                     />
                   </div>
                   <FormSelect
-                    value={pendingStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={[
-                      { value: '', label: viewMode === 'orders' ? `All (${remittedOrderCount} orders)` : `All (${Number(summary.totalCount)} batches)` },
-
-                      { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
-                      { value: 'RECEIVED', label: `Received (${receivedOrderCount})` },
-                      { value: 'DISPUTED', label: `Disputed (${disputedOrderCount})` },
-                    ]}
-                    wrapperClassName="w-full sm:w-52"
-                  />
-                  <FormSelect
                     value={viewMode}
                     onChange={(e) => {
                       const params = new URLSearchParams(location.search);
@@ -1054,6 +1211,60 @@ export function DeliveryRemittancesPage({
                       { value: 'orders', label: 'Orders' },
                     ]}
                     wrapperClassName="w-full sm:w-32"
+                  />
+                  {viewMode === 'orders' && (
+                    <FormSelect
+                      value={new URLSearchParams(location.search).get('category') ?? ''}
+                      onChange={(e) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          if (e.target.value) next.set('category', e.target.value);
+                          else next.delete('category');
+                          next.set('page', '1');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: '', label: 'All categories' },
+                        { value: 'marketing', label: 'Marketing orders', dot: 'bg-blue-500' },
+                        { value: 'cart', label: 'Cart orders', dot: 'bg-purple-500' },
+                        { value: 'follow-up', label: 'Follow-up orders', dot: 'bg-amber-500' },
+                        { value: 'offline', label: 'Offline orders', dot: 'bg-gray-400' },
+                      ]}
+                      wrapperClassName="w-full sm:w-44"
+                    />
+                  )}
+                  <SortMenu
+                    value={{
+                      sortBy: new URLSearchParams(location.search).get('sortBy') ?? 'sentAt',
+                      sortDir: (new URLSearchParams(location.search).get('sortDir') as 'asc' | 'desc') ?? 'desc',
+                    }}
+                    onChange={(next) => {
+                      setSearchParams((p) => {
+                        const params = new URLSearchParams(p);
+                        if (next.sortBy !== 'sentAt') params.set('sortBy', next.sortBy);
+                        else params.delete('sortBy');
+                        if (next.sortDir !== 'desc') params.set('sortDir', next.sortDir);
+                        else params.delete('sortDir');
+                        params.set('page', '1');
+                        return params;
+                      });
+                    }}
+                    options={viewMode === 'orders'
+                      ? [
+                          { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+                          { value: 'deliveredAt', label: 'Delivered date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+                          { value: 'totalAmount', label: 'Amount', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+                          { value: 'deliveryFee', label: 'Delivery fee', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+                          { value: 'orderNumber', label: 'Order #', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+                        ]
+                      : [
+                          { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+                          { value: 'orderCount', label: 'Order count', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
+                          { value: 'batchTotal', label: 'Batch total', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+                        ]
+                    }
+                    defaultValue={{ sortBy: 'sentAt', sortDir: 'desc' }}
                   />
                 </>
               }
@@ -1103,18 +1314,6 @@ export function DeliveryRemittancesPage({
                     </div>
                   </div>
                   <FormSelect
-                    value={pendingStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={[
-                      { value: '', label: viewMode === 'orders' ? `All (${remittedOrderCount} orders)` : `All (${Number(summary.totalCount)} batches)` },
-
-                      { value: 'SENT', label: `Pending (${Number(summary.pendingCount)})` },
-                      { value: 'RECEIVED', label: `Received (${receivedOrderCount})` },
-                      { value: 'DISPUTED', label: `Disputed (${disputedOrderCount})` },
-                    ]}
-                    wrapperClassName="w-full"
-                  />
-                  <FormSelect
                     value={viewMode}
                     onChange={(e) => {
                       const params = new URLSearchParams(location.search);
@@ -1138,36 +1337,67 @@ export function DeliveryRemittancesPage({
             <CompactTable<RemittanceOrderRow>
               columns={[
                 {
+                  key: 'sn',
+                  header: 'S/N',
+                  render: (_r, i) => (
+                    <span className="text-xs font-mono text-app-fg-muted">
+                      {(page - 1) * pageSize + i + 1}
+                    </span>
+                  ),
+                },
+                {
                   key: 'orderNumber',
                   header: 'Order',
                   render: (r) => (
                     <span className="text-xs font-mono text-app-fg-muted">
-                      {r.orderNumber ?? `${r.id.slice(0, 10)}…`}
+                      {r.orderNumber ? formatOrderNumber(Number(r.orderNumber)) : `${r.id.slice(0, 10)}…`}
                     </span>
                   ),
                 },
                 {
                   key: 'customerName',
                   header: 'Customer',
-                  render: (r) => (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm text-app-fg truncate max-w-[10rem] inline-block align-bottom">{r.customerName}</span>
-                      {r.isDuplicate && (
-                        <span className="shrink-0 rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300" title="This order has a similar order for the same customer and product">
-                          Duplicate
-                        </span>
-                      )}
-                    </div>
-                  ),
+                  render: (r) => {
+                    const dotColors: Record<string, string> = {
+                      marketing: 'bg-blue-500',
+                      cart: 'bg-purple-500',
+                      'follow-up': 'bg-amber-500',
+                      offline: 'bg-gray-400',
+                    };
+                    const dotLabels: Record<string, string> = {
+                      marketing: 'Marketing order',
+                      cart: 'Cart order',
+                      'follow-up': 'Follow-up order',
+                      offline: 'Offline order',
+                    };
+                    return (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm text-app-fg truncate max-w-[10rem] inline-block align-bottom">{r.customerName}</span>
+                        <span className={`ml-1 inline-flex shrink-0 w-2 h-2 rounded-full ${dotColors[r.category] ?? 'bg-blue-500'}`} title={dotLabels[r.category] ?? 'Marketing order'} />
+                        {r.isDuplicate && (
+                          <span className="shrink-0 rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300" title="This order has a similar order for the same customer and product">
+                            Duplicate
+                          </span>
+                        )}
+                      </div>
+                    );
+                  },
                 },
                 {
                   key: 'locationName',
                   header: 'Location',
+                  className: 'max-w-[10rem] overflow-hidden text-ellipsis whitespace-nowrap',
+                  cellTitle: (r) =>
+                    r.locationName
+                      ? r.providerName
+                        ? `${r.locationName}: ${r.providerName}`
+                        : r.locationName
+                      : undefined,
                   render: (r) => (
-                    <span className="text-sm text-app-fg-muted truncate max-w-[12rem] block">
+                    <span className="text-sm text-app-fg-muted">
                       {r.locationName
                         ? r.providerName
-                          ? `${r.locationName} — ${r.providerName}`
+                          ? `${r.locationName}: ${r.providerName}`
                           : r.locationName
                         : '—'}
                     </span>
@@ -1184,6 +1414,15 @@ export function DeliveryRemittancesPage({
                   },
                 },
                 {
+                  key: 'deliveryFee',
+                  header: 'Del. Fee',
+                  headerClassName: 'text-right',
+                  className: 'text-right',
+                  render: (r) => (
+                    <NairaPrice amount={Number(r.deliveryFee || 0)} className="text-sm tabular-nums text-app-fg-muted" />
+                  ),
+                },
+                {
                   key: 'deliveredAt',
                   header: 'Delivered',
                   render: (r) => (
@@ -1191,16 +1430,8 @@ export function DeliveryRemittancesPage({
                   ),
                 },
                 {
-                  key: 'remittanceStatus',
-                  header: 'Status',
-                  render: (r) => {
-                    const label = r.remittanceStatus === 'SENT' ? 'Pending' : r.remittanceStatus === 'RECEIVED' ? 'Received' : r.remittanceStatus === 'DISPUTED' ? 'Disputed' : r.remittanceStatus;
-                    return <StatusBadge status={r.remittanceStatus} label={label} />;
-                  },
-                },
-                {
                   key: 'sentAt',
-                  header: 'Sent',
+                  header: 'Remitted',
                   render: (r) => (
                     <span className="text-sm text-app-fg-muted">
                       {new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -1221,6 +1452,9 @@ export function DeliveryRemittancesPage({
                       )}
                       <CompactTableActionButton to={`/admin/orders/${r.id}`}>
                         Order
+                      </CompactTableActionButton>
+                      <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}?edit=true`}>
+                        Edit
                       </CompactTableActionButton>
                       <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}`}>
                         Batch
@@ -1271,10 +1505,10 @@ export function DeliveryRemittancesPage({
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-app-fg truncate">{r.customerName}</p>
                         <p className="text-xs text-app-fg-muted truncate">
-                          {r.orderNumber ?? `${r.id.slice(0, 10)}…`} ·{' '}
+                          {r.orderNumber ? formatOrderNumber(Number(r.orderNumber)) : `${r.id.slice(0, 10)}…`} ·{' '}
                           {r.locationName
                             ? r.providerName
-                              ? `${r.locationName} — ${r.providerName}`
+                              ? `${r.locationName}: ${r.providerName}`
                               : r.locationName
                             : '—'}
                         </p>
@@ -1331,7 +1565,7 @@ export function DeliveryRemittancesPage({
                       <p className="text-sm font-medium text-app-fg truncate">
                         {r.locationName
                           ? r.locationProviderName
-                            ? `${r.locationName} — ${r.locationProviderName}`
+                            ? `${r.locationName}: ${r.locationProviderName}`
                             : r.locationName
                           : '—'}
                       </p>
@@ -1544,7 +1778,7 @@ export function DeliveryRemittancesPage({
                   <span className="truncate">
                     {o.logisticsLocationName
                       ? o.logisticsLocationProviderName
-                        ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+                        ? `${o.logisticsLocationName}: ${o.logisticsLocationProviderName}`
                         : o.logisticsLocationName
                       : '—'}
                   </span>

@@ -376,7 +376,7 @@ export class AuthService {
     requestMeta: { ipAddress?: string | null; userAgent?: string | null },
   ): Promise<SessionUser> {
     if (actor.mirroredBy) {
-      throw new ForbiddenException('Already in mirror mode — exit current mirror first.');
+      throw new ForbiddenException('Already in mirror mode. Exit current mirror first.');
     }
 
     const targetRows = await this.db

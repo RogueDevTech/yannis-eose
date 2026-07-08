@@ -9,6 +9,7 @@ import {
   requestOrderLinePriceChangeSchema,
   requestOrderDeletionSchema,
   requestDeliveredOrderDeletionSchema,
+  requestOrderRetrackSchema,
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
@@ -905,6 +906,18 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Finance-initiated retrack request for DELIVERED/REMITTED orders.
+   * Requires dual approval (HoCS + HoL) before the retrack executes.
+   */
+  requestOrderRetrack: authedProcedure
+    .input(requestOrderRetrackSchema)
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().requestOrderRetrack(input, ctx.user);
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
+    }),
+
+  /**
    * Assign an order to a Sales closer.
    * - Pre-engagement statuses (UNPROCESSED / CS_ASSIGNED / CS_ENGAGED): allowed for
    *   `orders.reassign` (HoCS / Admin) or a branch Sales team supervisor.
@@ -1008,6 +1021,7 @@ export const ordersRouter = router({
           mediaBuyerId: z.string().uuid().optional(),
           assignedCsId: z.string().uuid().optional(),
           logisticsLocationId: z.string().uuid().optional(),
+          servicingBranchId: z.string().uuid().optional(),
           statuses: z.array(z.enum([
             'UNPROCESSED',
             'CS_ASSIGNED',
@@ -1085,6 +1099,8 @@ export const ordersRouter = router({
           undefined,
           excludeGraduated,
           excludeCartGraduated,
+          undefined,
+          input?.servicingBranchId,
         );
       }
 
@@ -1098,6 +1114,7 @@ export const ordersRouter = router({
           isFollowUp,
           branchScope,
           effectiveBranchIds: ctx.effectiveBranchIds,
+          servicingBranchId: input?.servicingBranchId,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1116,6 +1133,8 @@ export const ordersRouter = router({
           undefined,
           excludeGraduated,
           excludeCartGraduated,
+          undefined,
+          input?.servicingBranchId,
         ),
       );
     }),

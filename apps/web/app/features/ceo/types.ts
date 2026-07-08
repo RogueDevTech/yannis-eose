@@ -34,6 +34,7 @@ export interface CEODashboardData {
     returned: number;
     statusCounts: Record<string, number>;
     offlineCount?: number;
+    offlineStatusCounts?: Record<string, number>;
   };
 
   // Marketing

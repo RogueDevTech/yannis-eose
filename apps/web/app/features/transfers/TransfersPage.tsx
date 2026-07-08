@@ -1417,7 +1417,7 @@ export function TransfersPage({
         description={
           cancelTarget
             ? cancelTarget.transferStatus === 'PENDING'
-              ? `This transfer is still awaiting approval — cancelling leaves stock at ${getLocationLabel(cancelTarget.fromLocationId)} unchanged. The row stays for audit but flips to CANCELLED.`
+              ? `This transfer is still awaiting approval. Cancelling leaves stock at ${getLocationLabel(cancelTarget.fromLocationId)} unchanged. The row stays for audit but flips to CANCELLED.`
               : `This will add ${cancelTarget.quantitySent} unit(s) back to ${getLocationLabel(cancelTarget.fromLocationId)} and remove ${cancelTarget.quantityReceived ?? cancelTarget.quantitySent} unit(s) from ${getLocationLabel(cancelTarget.toLocationId)}. The transfer row stays for audit but flips to CANCELLED.`
             : ''
         }

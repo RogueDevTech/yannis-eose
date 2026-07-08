@@ -1315,7 +1315,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         eventType: 'QUANTITY_UPDATED',
         actorId: actor.id,
         actorName: actor.name,
-        description: `Adjusted order items — new total ₦${totalAmount.toLocaleString('en-NG')}.`,
+        description: `Adjusted order items. New total ₦${totalAmount.toLocaleString('en-NG')}.`,
         metadata: { items, totalAmount },
         branchId: order.servicingBranchId,
       });
@@ -1555,6 +1555,28 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (newStatus === 'DISPATCHED') timestampUpdates.dispatchedAt = new Date();
     if (newStatus === 'DELIVERED') timestampUpdates.deliveredAt = new Date();
 
+    // Guard: block delivery if the original order is already DELIVERED/REMITTED.
+    // Prevents double-counted deliveries in Cash Remittances.
+    if (newStatus === 'DELIVERED' && order.sourceOrderId) {
+      const [origDelivered] = await this.db
+        .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.id, order.sourceOrderId),
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (origDelivered) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot mark as delivered. Original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+        });
+      }
+    }
+
     // Persist logistics fields from metadata (mirrors regular order transitions)
     const logisticsUpdates: Record<string, unknown> = {};
     if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
@@ -1602,7 +1624,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // Build a descriptive timeline message
       let description: string | undefined;
       if (isRetrack) {
-        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? ` — ${note}` : ''}`;
+        description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? `. ${note}` : ''}`;
       } else if (note) {
         description = note;
       }
@@ -2225,8 +2247,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
       // Timeline event — only mention follow-up if a copy actually exists
       const defaultMsg = hasFollowUp
-        ? 'Order unfrozen — CS can resume. Follow-up copy continues independently.'
-        : 'Order unfrozen — CS can resume.';
+        ? 'Order unfrozen. CS can resume. Follow-up copy continues independently.'
+        : 'Order unfrozen. CS can resume.';
       await tx.insert(schema.orderTimelineEvents).values({
         orderId,
         eventType: 'ORDER_UNFROZEN',
@@ -2352,8 +2374,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           eligibleIds.map((orderId) => {
             const hasFollowUp = hasFollowUpSet.has(orderId);
             const defaultMsg = hasFollowUp
-              ? 'Order unfrozen — CS can resume. Follow-up copy continues independently.'
-              : 'Order unfrozen — CS can resume.';
+              ? 'Order unfrozen. CS can resume. Follow-up copy continues independently.'
+              : 'Order unfrozen. CS can resume.';
             return {
               orderId,
               eventType: 'ORDER_UNFROZEN' as const,

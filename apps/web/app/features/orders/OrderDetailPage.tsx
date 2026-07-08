@@ -114,6 +114,7 @@ function canCopyOrderSummaryForChat(
   userRole: string,
   currentBranchId: string | null | undefined,
   order: OrderDetail,
+  permissions?: string[],
 ): boolean {
   if (
     ['CS_CLOSER', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER', 'TPL_MANAGER'].includes(userRole)
@@ -121,6 +122,7 @@ function canCopyOrderSummaryForChat(
     return true;
   }
   if (isAdminLevel({ role: userRole })) return true;
+  if (hasFinanceAccess({ role: userRole, permissions })) return true;
   return (
     userRole === 'BRANCH_ADMIN' &&
     !!order.branchId &&
@@ -305,7 +307,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     getValue: (o) => o.paymentMethod,
     format: (_, o) =>
       o.paymentMethod === 'PAY_ONLINE'
-        ? `Pay online${o.paymentStatus ? ` — ${o.paymentStatus}` : ''}${o.paymentReference ? ` (ref: ${o.paymentReference})` : ''}`
+        ? `Pay online${o.paymentStatus ? `: ${o.paymentStatus}` : ''}${o.paymentReference ? ` (ref: ${o.paymentReference})` : ''}`
         : 'Pay on delivery',
     ddClassName: (_, o) => {
       if (o.paymentMethod === 'PAY_ON_DELIVERY') return 'font-medium text-success-600 dark:text-success-400';
@@ -702,7 +704,7 @@ function VoipCallPanel({
           not the browser. Always shown so first-time users immediately know what to expect. */}
       <div className="mb-3 rounded-md bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-800/50 px-3 py-2 text-xs text-info-700 dark:text-info-300">
         <p>
-          <strong>Click Call</strong> — {voipProviderDisplayName} will ring your phone first, then
+          <strong>Click Call</strong>. {voipProviderDisplayName} will ring your phone first, then
           bridge you to the customer. Make sure your phone number is set in your profile and
           keep it nearby.
         </p>
@@ -1026,6 +1028,10 @@ export function OrderDetailPage({
   const [deliveredDeletionModalOpen, setDeliveredDeletionModalOpen] = useState(false);
   const [deliveredDeletionReason, setDeliveredDeletionReason] = useState('');
   const deliveredDeletionFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [retrackRequestModalOpen, setRetrackRequestModalOpen] = useState(false);
+  const [retrackRequestTarget, setRetrackRequestTarget] = useState('');
+  const [retrackRequestReason, setRetrackRequestReason] = useState('');
+  const retrackRequestFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [assignToId, setAssignToId] = useState('');
   const [lateStageTransferReason, setLateStageTransferReason] = useState('');
@@ -1311,13 +1317,21 @@ export function OrderDetailPage({
     skipErrorToast: addCommentModalOpen,
   });
   useFetcherToast(deliveredDeletionFetcher.data, {
-    successMessage: 'Deletion request submitted — awaiting HoCS + HoL approval',
+    successMessage: 'Deletion request submitted — awaiting approval',
   });
   useCloseOnFetcherSuccess(deliveredDeletionFetcher, () => {
     setDeliveredDeletionModalOpen(false);
     setDeliveredDeletionReason('');
   }, { intent: 'requestDeliveredOrderDeletion' });
-  const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
+  useFetcherToast(retrackRequestFetcher.data, {
+    successMessage: 'Retrack request submitted — awaiting HoCS + HoL approval',
+  });
+  useCloseOnFetcherSuccess(retrackRequestFetcher, () => {
+    setRetrackRequestModalOpen(false);
+    setRetrackRequestTarget('');
+    setRetrackRequestReason('');
+  }, { intent: 'requestOrderRetrack' });
+  const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order, permissions);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
       ? logisticsLocations.find(
@@ -1394,6 +1408,13 @@ export function OrderDetailPage({
   const canEditOrderStatus =
     userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT' ||
     userRole === 'HEAD_OF_LOGISTICS' || userRole === 'HEAD_OF_CS';
+  // Finance-access users who are NOT already covered by the main Order Actions
+  // card get a separate finance actions section on DELIVERED/REMITTED orders.
+  const isFinanceOnlyViewer =
+    hasFinanceAccess({ role: userRole, permissions }) &&
+    !isCSOrHoS &&
+    !canEditOrderStatus &&
+    (order.status === 'DELIVERED' || order.status === 'REMITTED');
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
   // CEO directive 2026-06-10: block ALL forward transitions while item/price
   // approval is pending — not just CONFIRMED.
@@ -1847,6 +1868,27 @@ export function OrderDetailPage({
           </div>
         </div>
       ) : null}
+      {order.isDuplicate === 'CART_EDGE_FORM_DUPE' && (
+        <div className="rounded-lg border border-app-border bg-app-hover px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="text-sm text-app-fg">
+              <p className="font-semibold">Duplicate — cart order matched an existing edge-form order</p>
+              <p className="mt-0.5 text-app-fg-muted">
+                This order was automatically deleted because the same customer and product already exists
+                in the main orders pipeline. The original order is the source of truth.
+              </p>
+            </div>
+            {order.duplicateOfId && (
+              <Link
+                to={`/admin/orders/${order.duplicateOfId}`}
+                className="btn-secondary btn-sm inline-flex shrink-0"
+              >
+                View original order →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
       {(order.isDuplicate === 'FLAGGED' || order.isDuplicate === 'POSSIBLY_DUPLICATE') && (
         <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2069,6 +2111,83 @@ export function OrderDetailPage({
         </>
       )}
 
+      {order.pendingRetrackRequestId && (
+        <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg
+              className="h-5 w-5 shrink-0 text-warning-600 dark:text-warning-400 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div className="flex-1 min-w-0 text-sm text-warning-900 dark:text-warning-100">
+              <p className="font-semibold">Retrack request pending approval</p>
+              <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+                A status retrack has been requested. Both the Head of CS and Head of Logistics must approve before it executes.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {order.pendingDeliveredOrderDeletionRequestId && (
+        <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg
+              className="h-5 w-5 shrink-0 text-warning-600 dark:text-warning-400 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div className="flex-1 min-w-0 text-sm text-warning-900 dark:text-warning-100">
+              <p className="font-semibold">Deletion request pending approval</p>
+              <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+                A deletion of this delivered order has been requested and is awaiting approval.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {order.duplicateDeliveryWarning && (
+        <div className="rounded-lg border border-danger-300 dark:border-danger-700/60 bg-danger-50 dark:bg-danger-900/20 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg
+              className="h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div className="flex-1 min-w-0 text-sm text-danger-900 dark:text-danger-100">
+              <p className="font-semibold">Duplicate delivery detected</p>
+              <p className="mt-0.5 text-danger-800 dark:text-danger-200/90">
+                {order.duplicateDeliveryWarning.isFollowUp
+                  ? `A follow-up order (YNS-${order.duplicateDeliveryWarning.counterpartOrderNo}) has already been delivered for this customer. This order should not be delivered again.`
+                  : `The original order (YNS-${order.duplicateDeliveryWarning.counterpartOrderNo}) has already been delivered for this customer. This follow-up should not be delivered again.`
+                }
+              </p>
+              <Link
+                to={`/admin/orders/${order.duplicateDeliveryWarning.counterpartId}`}
+                className="inline-block mt-1.5 text-sm font-medium text-danger-700 dark:text-danger-300 underline underline-offset-2 hover:text-danger-900 dark:hover:text-danger-100"
+              >
+                View YNS-{order.duplicateDeliveryWarning.counterpartOrderNo}
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left column — `contents` collapses this wrapper on mobile so the
@@ -2812,11 +2931,6 @@ export function OrderDetailPage({
                       Request deletion
                     </Button>
                   )}
-                  {order.pendingDeliveredOrderDeletionRequestId && (
-                    <p className="text-xs text-warning-600 dark:text-warning-400 font-medium">
-                      Deletion request pending approval
-                    </p>
-                  )}
 
                   {/* Assign / Reassign closer */}
                   {showCsAssignForm && csClosersForAssign && csClosersForAssign.length > 0 && (
@@ -2942,6 +3056,63 @@ export function OrderDetailPage({
                   </Button>
                 </div>
               )}
+
+            {/* Finance-access actions — users with finance access who are not CS/Admin see
+                a limited actions card on DELIVERED/REMITTED orders: comment, copy, retrack (request), delete (request). */}
+            {isFinanceOnlyViewer && (
+              <div className="card order-[-2] lg:order-none">
+                <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setAddCommentModalOpen(true)}
+                    disabled={csCommentFetcher.state === 'submitting'}
+                  >
+                    Add comment
+                  </Button>
+                  {showCopyOrderSummary && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => void handleCopyOrderSummary()}
+                    >
+                      Copy order
+                    </Button>
+                  )}
+                  {/* Retrack is scoped to DELIVERED only — a REMITTED order must have its
+                      cash remittance reversed first (backend rejects REMITTED retracks). */}
+                  {order.status === 'DELIVERED' && !order.pendingRetrackRequestId && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setRetrackRequestTarget('');
+                        setRetrackRequestReason('');
+                        setRetrackRequestModalOpen(true);
+                      }}
+                      disabled={retrackRequestFetcher.state === 'submitting'}
+                    >
+                      Retrack order status
+                    </Button>
+                  )}
+                  {!order.pendingDeliveredOrderDeletionRequestId && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                      onClick={() => setDeliveredDeletionModalOpen(true)}
+                      disabled={deliveredDeletionFetcher.state === 'submitting'}
+                    >
+                      Request deletion
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Open Logistics Group Chat + missing-group hint — kept outside Order Actions
                 because they depend on the allocated location and only make sense post-allocation. */}
@@ -3456,6 +3627,67 @@ export function OrderDetailPage({
                 </Button>
               </deliveredDeletionFetcher.Form>
             </div>
+        </Modal>
+      )}
+
+      {/* Finance retrack request modal — dual-approval (HoCS + HoL) */}
+      {retrackRequestModalOpen && (
+        <Modal
+          open
+          onClose={() => { setRetrackRequestModalOpen(false); setRetrackRequestTarget(''); setRetrackRequestReason(''); }}
+          maxWidth="max-w-sm"
+          contentClassName="p-6 space-y-4"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Request status retrack</h3>
+          <p className="text-sm text-app-fg-muted">
+            Roll this order back to an earlier status. Both the Head of CS and Head of Logistics must approve before the retrack executes.
+          </p>
+          <FormSelect
+            label="Roll back to"
+            value={retrackRequestTarget}
+            onChange={(e) => setRetrackRequestTarget(e.target.value)}
+            options={(() => {
+              // Only expose customer-meaningful statuses — internal logistics steps
+              // (Agent Assigned / Dispatched / In Transit) are hidden. Both targets
+              // below are valid single-hop retracks in the state machine, so the
+              // request never dead-ends at execution.
+              // REMITTED can only step back to DELIVERED; DELIVERED steps back to Confirmed.
+              if (order.status === 'REMITTED') {
+                return [{ value: 'DELIVERED', label: 'Delivered' }];
+              }
+              return [{ value: 'CONFIRMED', label: 'Confirmed' }];
+            })()}
+          />
+          <Textarea
+            label="Reason"
+            value={retrackRequestReason}
+            onChange={(e) => setRetrackRequestReason(e.target.value)}
+            placeholder="Why should this order be retracked?"
+            rows={2}
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => { setRetrackRequestModalOpen(false); setRetrackRequestTarget(''); setRetrackRequestReason(''); }}>
+              Cancel
+            </Button>
+            <retrackRequestFetcher.Form method="post">
+              <input type="hidden" name="intent" value="requestOrderRetrack" />
+              <input type="hidden" name="targetStatus" value={retrackRequestTarget} />
+              <input type="hidden" name="reason" value={retrackRequestReason} />
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={
+                  !retrackRequestTarget ||
+                  retrackRequestReason.trim().length < 10 ||
+                  retrackRequestFetcher.state === 'submitting'
+                }
+                loading={retrackRequestFetcher.state === 'submitting'}
+                loadingText="Submitting…"
+              >
+                Submit request
+              </Button>
+            </retrackRequestFetcher.Form>
+          </div>
         </Modal>
       )}
 
@@ -3995,7 +4227,7 @@ export function OrderDetailPage({
                           setPhoneUnmasked(true);
                           setTimeout(() => setCopyFeedback(false), 2000);
                         },
-                        () => toast.error('Copy failed', 'Could not copy the number — try again.'),
+                        () => toast.error('Copy failed', 'Could not copy the number. Try again.'),
                       );
                       ensureBranchForAction({
                         actionLabel: 'recording customer call',
@@ -4298,7 +4530,7 @@ export function OrderDetailPage({
                             }`}
                           >
                             <p className="text-sm font-semibold text-app-fg">Custom</p>
-                            <p className="text-xs text-app-fg-muted mt-1">Set your own quantity & price — requires approval</p>
+                            <p className="text-xs text-app-fg-muted mt-1">Set your own quantity & price. Requires approval.</p>
                           </button>
                         </div>
                       </div>

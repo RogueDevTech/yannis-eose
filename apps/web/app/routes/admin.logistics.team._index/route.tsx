@@ -135,6 +135,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
             return p.returned;
           case 'locations':
             return p.locationCount;
+          case 'owingAmount':
+            return Number(p.owingAmount) || 0;
           default:
             return 0;
         }

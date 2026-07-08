@@ -9,7 +9,7 @@ export type LoaderApiFailureResponse = { ok: boolean; status: number; data: unkn
  */
 export function describeApiFetchFailure(label: string, res: LoaderApiFailureResponse): string {
   if (res.status === 504) {
-    return `${label} timed out before the API responded. Try Reload data — the service may still be warming up.`;
+    return `${label} timed out before the API responded. Try Reload data. The service may still be warming up.`;
   }
   if (isApiNetworkFailure(res)) {
     return `${label} could not be reached. Check that the API is running, then try Reload data.`;

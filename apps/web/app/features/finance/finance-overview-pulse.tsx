@@ -17,8 +17,8 @@ export function FinanceCashRemittanceSection({
 }) {
   const [infoModal, setInfoModal] = useState<string | null>(null);
 
-  // Use the actual delivered count/amount from the query — matches the Cash Remittances page
-  const totalDelivered = pulse.deliveredNetAmount || pulse.deliveredAmount || (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
+  // Use gross delivered amount to match the Cash Remittances page
+  const totalDelivered = pulse.deliveredAmount || pulse.deliveredNetAmount || (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
   const totalDeliveredOrders = pulse.deliveredCount || (pulse.awaitingOrderCount + pulse.totalRemittedCount);
   const netRemittable = pulse.grossOrderValue - pulse.totalDeliveryFees - pulse.totalCommitmentFees - pulse.totalPosFees - pulse.totalFailedDeliveryCosts;
 
@@ -164,7 +164,7 @@ export function FinanceCashRemittanceSection({
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
           title="Total Delivered"
-          description="Gross value of all orders with status DELIVERED or REMITTED in the selected period. This is the total amount customers paid — before any delivery fees or other deductions."
+          description="Gross value of all orders with status DELIVERED or REMITTED in the selected period. This is the total amount customers paid, before any delivery fees or other deductions."
           lines={[
             { label: 'All delivered + remitted orders', amount: totalDelivered, type: 'value', count: totalDeliveredOrders },
           ]}
@@ -173,36 +173,34 @@ export function FinanceCashRemittanceSection({
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
           title="Remitted"
-          description="Net value of orders on remittance batches that Finance has marked as received. This is the actual cash collected — order value minus delivery fees."
+          description="Gross value of orders on remittance batches that Finance has marked as received."
           lines={[
-            { label: 'Orders on received batches (gross)', amount: pulse.receivedAmount + pulse.totalDeliveryFees, type: 'value' },
-            { label: 'Delivery fees already deducted', amount: pulse.totalDeliveryFees, type: 'deduction' },
-            { label: 'Remitted (net received)', amount: pulse.receivedAmount, type: 'result', count: pulse.receivedCount },
+            { label: 'Orders on received batches (gross)', amount: pulse.receivedAmount, type: 'value', count: pulse.receivedCount },
           ]}
         />
         <FormulaBreakdownModal
           open={infoModal === 'awaiting'}
           onClose={() => setInfoModal(null)}
           title="Awaiting Batch"
-          description="Net value of delivered orders that have not been placed on any remittance batch yet. These orders are waiting for an accountant to create a remittance."
+          description="Gross value of delivered orders that have not been placed on any remittance batch yet. These orders are waiting for an accountant to create a remittance."
           lines={[
-            { label: 'Delivered orders not on any batch (net of delivery fees)', amount: pulse.awaitingCash, type: 'value', count: pulse.awaitingOrderCount },
+            { label: 'Delivered orders not on any batch (gross)', amount: pulse.awaitingCash, type: 'value', count: pulse.awaitingOrderCount },
           ]}
         />
         <FormulaBreakdownModal
           open={infoModal === 'pending'}
           onClose={() => setInfoModal(null)}
           title="Pending"
-          description="Net value of orders on remittance batches that have been sent but not yet marked as received by Finance."
+          description="Gross value of orders on remittance batches that have been sent but not yet marked as received by Finance."
           lines={[
-            { label: 'Orders on SENT batches (net of delivery fees)', amount: pulse.pendingRemittanceAmount, type: 'value', count: pulse.pendingRemittanceBatchCount },
+            { label: 'Orders on SENT batches (gross)', amount: pulse.pendingRemittanceAmount, type: 'value', count: pulse.pendingRemittanceBatchCount },
           ]}
         />
         <FormulaBreakdownModal
           open={infoModal === 'disputed'}
           onClose={() => setInfoModal(null)}
           title="Disputed"
-          description="Net value of orders on remittance batches that have been flagged as disputed — the amount was not received as expected."
+          description="Net value of orders on remittance batches that have been flagged as disputed. The amount was not received as expected."
           lines={[
             { label: 'Orders on DISPUTED batches', amount: pulse.disputedRemittanceAmount, type: 'value', count: pulse.disputedRemittanceBatchCount },
           ]}
@@ -211,12 +209,9 @@ export function FinanceCashRemittanceSection({
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
-          description="Total order value of all orders on a remittance batch (any status). Before deductions. Only batched orders — orders awaiting a batch are not counted."
+          description="Total order value of all orders on received remittance batches. Before deductions."
           lines={[
-            { label: 'Received batches', amount: pulse.receivedAmount, type: 'value', count: pulse.receivedCount },
-            { label: 'Pending batches', amount: pulse.pendingRemittanceAmount, type: 'value', count: pulse.pendingRemittanceBatchCount },
-            { label: 'Disputed batches', amount: pulse.disputedRemittanceAmount, type: 'value', count: pulse.disputedRemittanceBatchCount },
-            { label: 'Gross Order Value', amount: pulse.grossOrderValue, type: 'result' },
+            { label: 'Orders on received batches (gross)', amount: pulse.grossOrderValue, type: 'value', count: pulse.receivedCount },
           ]}
         />
         <FormulaBreakdownModal

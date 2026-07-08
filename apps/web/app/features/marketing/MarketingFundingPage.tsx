@@ -1214,7 +1214,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                           : 'Head of Marketing';
                   return {
                     value: r.id,
-                    label: `${r.name} — ${roleLabel}${r.isPreferred ? ' (default)' : ''}`,
+                    label: `${r.name}: ${roleLabel}${r.isPreferred ? ' (default)' : ''}`,
                   };
                 })}
                 placeholder={fundingRequestRecipients.length === 0 ? 'No recipients available' : 'Select recipient'}
@@ -1469,7 +1469,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             <input type="hidden" name="requestId" value={approvingRequest.id} />
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Amount ({'₦'})<span className="text-app-fg-muted/70"> — requested {'₦'}{Number(approvingRequest.amount).toLocaleString()}</span>
+                Amount ({'₦'})<span className="text-app-fg-muted/70">. Requested {'₦'}{Number(approvingRequest.amount).toLocaleString()}</span>
               </label>
               <AmountInput
                 name="amount"
@@ -2052,7 +2052,7 @@ function FundingMetricsStrip({
       valueClassName: Number(summary.totalReceived) > 0
         ? 'text-success-600 dark:text-success-400'
         : 'text-app-fg',
-      title: `Sum of confirmed (mark-received) incoming transfers${summary.receivedCount ? ` — ${summary.receivedCount} transfer${summary.receivedCount !== 1 ? 's' : ''}` : ''}`,
+      title: `Sum of confirmed (mark-received) incoming transfers${summary.receivedCount ? `: ${summary.receivedCount} transfer${summary.receivedCount !== 1 ? 's' : ''}` : ''}`,
       onClick: () => onFilter({ section: 'received', entryType: 'transfer' }),
       active: isActive('received', 'transfer'),
     },
@@ -2064,7 +2064,7 @@ function FundingMetricsStrip({
             valueClassName: Number(summary.totalDistributed) > 0
               ? 'text-orange-600 dark:text-orange-400'
               : 'text-app-fg',
-            title: `Sum of all transfers you have sent${summary.distributedCount ? ` — ${summary.distributedCount} transfer${summary.distributedCount !== 1 ? 's' : ''}` : ''}`,
+            title: `Sum of all transfers you have sent${summary.distributedCount ? `: ${summary.distributedCount} transfer${summary.distributedCount !== 1 ? 's' : ''}` : ''}`,
             onClick: () => onFilter({ section: 'distributing', entryType: 'transfer' }),
             active: isActive('distributing', 'transfer'),
           },
@@ -2104,7 +2104,7 @@ function FundingMetricsStrip({
           ? 'text-warning-600 dark:text-warning-400'
           : 'text-app-fg',
       title: canDistribute
-        ? `${pendingRequestsByMe} funding request${pendingRequestsByMe !== 1 ? 's' : ''} you sent to Finance / SuperAdmin — still awaiting approval`
+        ? `${pendingRequestsByMe} funding request${pendingRequestsByMe !== 1 ? 's' : ''} you sent to Finance / SuperAdmin. Still awaiting approval.`
         : `${pendingRequestsByMe} funding request${pendingRequestsByMe !== 1 ? 's' : ''} still awaiting approval from Head of Marketing`,
       onClick: () => onFilter({ section: 'received', entryType: 'request', entryStatus: 'PENDING' }),
       active: isActive('received', 'request', 'PENDING'),
@@ -2549,11 +2549,16 @@ function UnifiedDistributingTable({
         key: 'date',
         header: 'Date',
         nowrap: true,
-        render: (entry) => (
-          <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
-          </span>
-        ),
+        render: (entry) => {
+          const d = new Date(entry.createdAt);
+          return (
+            <span className="text-app-fg-muted text-sm">
+              {d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+              {' '}
+              <span className="text-app-fg-muted/60">{d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+            </span>
+          );
+        },
       },
       {
         key: 'actions',
@@ -2680,6 +2685,8 @@ function UnifiedDistributingTable({
             })()}
             <div className="text-xs text-app-fg-muted">
               {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {' '}
+              <span className="opacity-60">{new Date(entry.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
             </div>
           </button>
         </>
@@ -2962,11 +2969,16 @@ function UnifiedReceivedTable({
         key: 'date',
         header: 'Date',
         nowrap: true,
-        render: (entry) => (
-          <span className="text-app-fg-muted text-sm">
-            {new Date(entry.createdAt).toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
-          </span>
-        ),
+        render: (entry) => {
+          const d = new Date(entry.createdAt);
+          return (
+            <span className="text-app-fg-muted text-sm">
+              {d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' })}
+              {' '}
+              <span className="text-app-fg-muted/60">{d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+            </span>
+          );
+        },
       },
       {
         key: 'actions',
@@ -3079,6 +3091,8 @@ function UnifiedReceivedTable({
             </div>
             <div className="text-xs text-app-fg-muted">
               {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {' '}
+              <span className="opacity-60">{new Date(entry.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
             </div>
           </button>
         </>

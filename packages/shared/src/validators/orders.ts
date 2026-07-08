@@ -269,6 +269,14 @@ export const requestDeliveredOrderDeletionSchema = z.object({
 
 export type RequestDeliveredOrderDeletionInput = z.infer<typeof requestDeliveredOrderDeletionSchema>;
 
+export const requestOrderRetrackSchema = z.object({
+  orderId: z.string().uuid(),
+  targetStatus: z.string().min(1),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+});
+
+export type RequestOrderRetrackInput = z.infer<typeof requestOrderRetrackSchema>;
+
 /**
  * Assign order to Sales closer — manual assignment or bulk reassign.
  */
@@ -332,6 +340,7 @@ export const listOrdersSchema = z
     productId: z.string().uuid().optional(),
     riderId: z.string().uuid().optional(),
     logisticsLocationId: z.string().uuid().optional(),
+    servicingBranchId: z.string().uuid().optional(),
     /**
      * When true, returns only orders that were recovered from a dropped-off cart
      * (i.e. `orders.cart_id IS NOT NULL`). Used by the `/admin/orders` "Recovered

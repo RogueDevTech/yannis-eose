@@ -4,7 +4,7 @@ import { eq, desc, count, and, or, inArray, sql, type SQL } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
-import type { CreateStaffInput, UpdateStaffInput, UpdateOrderInput } from '@yannis/shared';
+import type { CreateStaffInput, UpdateStaffInput, UpdateOrderInput, TransitionOrderInput } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -28,6 +28,7 @@ const APPROVE_PERMISSION_BY_TYPE: Record<string, string> = {
   ORDER_LINE_PRICE_CHANGE: 'permission_requests.order_line_price.approve',
   ORDER_DELETION: 'permission_requests.order_deletion.approve',
   DELIVERED_ORDER_DELETION: 'permission_requests.delivered_order_deletion.approve',
+  ORDER_STATUS_RETRACK: 'permission_requests.order_retrack.approve',
 };
 
 /** True when `viewer.permissions` contains `code` (canonical-aware). */
@@ -532,8 +533,8 @@ export class PermissionRequestsService {
           actorId: approver.id,
           actorName: approver.name ?? null,
           description:
-            `${approver.name ?? 'Approver'} approved the line price change — ` +
-            `new total ₦${approvedTotal.toLocaleString('en-NG')}.`,
+            `${approver.name ?? 'Approver'} approved the line price change. ` +
+            `New total ₦${approvedTotal.toLocaleString('en-NG')}.`,
           metadata: {
             permissionRequestId: requestId,
             approvedItems: items,
@@ -553,13 +554,60 @@ export class PermissionRequestsService {
       }
       await this.ordersService.softDeleteOrder(orderId, approver, { approverNote: reason });
     } else if (req.type === 'DELIVERED_ORDER_DELETION') {
-      const payload = req.payload as { orderId?: string; orderNo?: number | null } | null;
+      const payload = req.payload as { orderId?: string; orderNo?: number | null; superAdminOnly?: boolean } | null;
       const orderId = payload?.orderId;
       if (!orderId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'Invalid payload for delivered order deletion request.',
         });
+      }
+
+      // Finance-initiated requests require only SuperAdmin approval (single).
+      if (payload?.superAdminOnly) {
+        const isSuperAdmin = approver.role === 'SUPER_ADMIN' || approver.role === 'ADMIN';
+        if (!isSuperAdmin) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Only SuperAdmin can approve finance-initiated deletion requests.',
+          });
+        }
+
+        // Execute the deletion with stock reversal
+        await this.ordersService.softDeleteDeliveredOrder(orderId, approver, {
+          approverNote: reason,
+          csApproverName: approver.name ?? undefined,
+          logiApproverName: approver.name ?? undefined,
+        });
+
+        // Stamp APPROVED on the request
+        const now = new Date();
+        await withActor(this.db, approver, async (tx) => {
+          await tx
+            .update(schema.permissionRequests)
+            .set({
+              status: 'APPROVED',
+              approverId: approver.id,
+              approvalReason: reason,
+              approvedAt: now,
+              updatedAt: now,
+            })
+            .where(eq(schema.permissionRequests.id, requestId));
+        });
+
+        const orderLabel = payload?.orderNo != null
+          ? formatOrderNumber(payload.orderNo)
+          : orderId.slice(0, 8).toUpperCase();
+
+        this.notificationsService.enqueueCreate({
+          userId: req.requesterId,
+          type: 'approval:permission_request',
+          title: 'Deletion request approved',
+          body: `Your request to delete delivered order ${orderLabel} was approved by ${approver.name ?? 'Admin'}. The order has been removed and stock reversed.`,
+          data: { requestId, action: 'APPROVED' },
+        });
+
+        return { success: true, action: 'APPROVED' };
       }
 
       // Determine which side the approver represents
@@ -630,7 +678,7 @@ export class PermissionRequestsService {
         this.notificationsService.enqueueCreate({
           userId: req.requesterId,
           type: 'approval:permission_request',
-          title: 'Deletion request — partial approval',
+          title: 'Deletion request: partial approval',
           body: `${sideLabel} has approved the deletion of order ${orderLabel}. Awaiting the other department's approval.`,
           data: { requestId, action: 'PARTIAL_APPROVAL' },
         });
@@ -680,6 +728,127 @@ export class PermissionRequestsService {
         type: 'approval:permission_request',
         title: 'Deletion request approved',
         body: `Your request to delete delivered order ${orderLabelFinal} was approved by both CS and Logistics. The order has been removed and stock reversed.`,
+        data: { requestId, action: 'APPROVED' },
+      });
+
+      return { success: true, action: 'APPROVED' };
+    } else if (req.type === 'ORDER_STATUS_RETRACK') {
+      // ── Dual-approval retrack: HoCS + HoL must both sign off ──
+      const payload = req.payload as {
+        orderId?: string;
+        orderNo?: number | null;
+        currentStatus?: string;
+        targetStatus?: string;
+      } | null;
+      const orderId = payload?.orderId;
+      const targetStatus = payload?.targetStatus;
+      if (!orderId || !targetStatus) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid payload for order retrack request.',
+        });
+      }
+
+      const isCSApprover =
+        approver.role === 'HEAD_OF_CS' ||
+        approver.role === 'BRANCH_ADMIN';
+      const isLogiApprover =
+        approver.role === 'HEAD_OF_LOGISTICS';
+      const isSuperAdmin = approver.role === 'SUPER_ADMIN' || approver.role === 'ADMIN';
+
+      let stampCS = false;
+      let stampLogi = false;
+      if (isSuperAdmin) {
+        if (!req.csApprovedBy) stampCS = true;
+        else if (!req.logiApprovedBy) stampLogi = true;
+        else {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Both sides have already approved.' });
+        }
+      } else if (isCSApprover) {
+        if (req.csApprovedBy) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'CS side has already approved this retrack request.' });
+        }
+        stampCS = true;
+      } else if (isLogiApprover) {
+        if (req.logiApprovedBy) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Logistics side has already approved this retrack request.' });
+        }
+        stampLogi = true;
+      } else {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only Head of CS, Head of Logistics, Branch Admin, or Admin can approve retrack requests.',
+        });
+      }
+
+      const now = new Date();
+      const updateSet: Record<string, unknown> = { updatedAt: now };
+      if (stampCS) {
+        updateSet.csApprovedBy = approver.id;
+        updateSet.csApprovedAt = now;
+        updateSet.csNote = reason || null;
+      }
+      if (stampLogi) {
+        updateSet.logiApprovedBy = approver.id;
+        updateSet.logiApprovedAt = now;
+        updateSet.logiNote = reason || null;
+      }
+
+      await withActor(this.db, approver, async (tx) => {
+        await tx
+          .update(schema.permissionRequests)
+          .set(updateSet)
+          .where(eq(schema.permissionRequests.id, requestId));
+      });
+
+      const bothApproved =
+        (stampCS && !!req.logiApprovedBy) || (stampLogi && !!req.csApprovedBy) || (stampCS && stampLogi);
+
+      const orderLabel = payload?.orderNo != null
+        ? formatOrderNumber(payload.orderNo)
+        : orderId.slice(0, 8).toUpperCase();
+
+      if (!bothApproved) {
+        const sideLabel = stampCS ? 'CS' : 'Logistics';
+        this.notificationsService.enqueueCreate({
+          userId: req.requesterId,
+          type: 'approval:permission_request',
+          title: 'Retrack request: partial approval',
+          body: `${sideLabel} has approved the retrack of order ${orderLabel}. Awaiting the other department's approval.`,
+          data: { requestId, action: 'PARTIAL_APPROVAL' },
+        });
+        return { success: true, action: 'PARTIAL_APPROVAL' };
+      }
+
+      // Both sides approved — execute the actual retrack transition
+      await this.ordersService.transition(
+        {
+          orderId,
+          newStatus: targetStatus as TransitionOrderInput['newStatus'],
+          metadata: { reason: `Approved retrack request. ${reason ?? ''}`.trim() },
+        },
+        approver,
+      );
+
+      // Stamp APPROVED on the request
+      await withActor(this.db, approver, async (tx) => {
+        await tx
+          .update(schema.permissionRequests)
+          .set({
+            status: 'APPROVED',
+            approverId: approver.id,
+            approvalReason: reason,
+            approvedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(schema.permissionRequests.id, requestId));
+      });
+
+      this.notificationsService.enqueueCreate({
+        userId: req.requesterId,
+        type: 'approval:permission_request',
+        title: 'Retrack request approved',
+        body: `Your request to retrack order ${orderLabel} to ${targetStatus} was approved by both CS and Logistics.`,
         data: { requestId, action: 'APPROVED' },
       });
 

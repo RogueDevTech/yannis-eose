@@ -116,7 +116,7 @@ const COPY_BY_CODE: Record<ApiUnavailableCode, { title: string; description: str
   },
   API_UNREACHABLE: {
     title: 'Can’t reach the server',
-    description: 'Check your connection — we’ll retry automatically.',
+    description: "Check your connection. We’ll retry automatically.",
   },
   API_RATE_LIMITED: {
     title: 'Too many requests',

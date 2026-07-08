@@ -244,6 +244,7 @@ export const permissionRequestTypeEnum = pgEnum('permission_request_type', [
   'ORDER_LINE_PRICE_CHANGE',
   'ORDER_DELETION',
   'DELIVERED_ORDER_DELETION',
+  'ORDER_STATUS_RETRACK',
 ]);
 
 export const permissionRequestStatusEnum = pgEnum('permission_request_status', [
@@ -394,6 +395,7 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'ORDER_DUPLICATE_FLAGGED',
   'ORDER_UNFROZEN',
   'ORDER_FROZEN',
+  'ORDER_REMITTED',
 ]);
 
 /** Staff onboarding workflow — non-blocking record-keeping flow. */
