@@ -33,16 +33,28 @@ import {
   listWhtSchema,
   generateWhtCertificateSchema,
   vatReturnSummarySchema,
+  createBankReconciliationSchema,
+  matchLineSchema,
+  unmatchLineSchema,
+  completeBankReconciliationSchema,
+  listBankReconciliationsSchema,
+  getBankReconciliationSchema,
+  consolidatedPLSchema,
+  consolidatedBSSchema,
+  consolidatedCFSchema,
 } from '@yannis/shared';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { GeneralLedgerService } from '../../finance/general-ledger.service';
 import { AssetRegisterService } from '../../finance/asset-register.service';
 import { ExpenseSubmissionService } from '../../finance/expense-submission.service';
+import { BankReconciliationService } from '../../finance/bank-reconciliation.service';
+import { isAdminLevel } from '../../common/authz';
 
 let generalLedgerServiceInstance: GeneralLedgerService | null = null;
 let assetRegisterServiceInstance: AssetRegisterService | null = null;
 let expenseSubmissionServiceInstance: ExpenseSubmissionService | null = null;
+let bankReconciliationServiceInstance: BankReconciliationService | null = null;
 
 export function setGeneralLedgerService(service: GeneralLedgerService) {
   generalLedgerServiceInstance = service;
@@ -75,6 +87,17 @@ export function getExpenseSubmissionService(): ExpenseSubmissionService {
     throw new Error('ExpenseSubmissionService not initialized. Call setExpenseSubmissionService() first.');
   }
   return expenseSubmissionServiceInstance;
+}
+
+export function setBankReconciliationService(service: BankReconciliationService) {
+  bankReconciliationServiceInstance = service;
+}
+
+export function getBankReconciliationService(): BankReconciliationService {
+  if (!bankReconciliationServiceInstance) {
+    throw new Error('BankReconciliationService not initialized. Call setBankReconciliationService() first.');
+  }
+  return bankReconciliationServiceInstance;
 }
 
 /**
@@ -405,5 +428,76 @@ export const generalLedgerRouter = router({
         input.startDate,
         input.endDate,
       );
+    }),
+
+  // ─── Phase 6D: Bank Reconciliation ────────────────────────────────────
+  createBankReconciliation: permissionProcedure('finance.ledger.write')
+    .input(createBankReconciliationSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getBankReconciliationService().createReconciliation(
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { id: ctx.user.id },
+      );
+    }),
+
+  matchBankReconLine: permissionProcedure('finance.ledger.write')
+    .input(matchLineSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getBankReconciliationService().matchLine(input, { id: ctx.user.id });
+    }),
+
+  unmatchBankReconLine: permissionProcedure('finance.ledger.write')
+    .input(unmatchLineSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getBankReconciliationService().unmatchLine(input, { id: ctx.user.id });
+    }),
+
+  completeBankReconciliation: permissionProcedure('finance.ledger.write')
+    .input(completeBankReconciliationSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getBankReconciliationService().completeReconciliation(input, { id: ctx.user.id });
+    }),
+
+  listBankReconciliations: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(listBankReconciliationsSchema)
+    .query(async ({ input, ctx }) => {
+      return getBankReconciliationService().listReconciliations({
+        ...input,
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+      });
+    }),
+
+  getBankReconciliation: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(getBankReconciliationSchema)
+    .query(async ({ input }) => {
+      return getBankReconciliationService().getReconciliation(input);
+    }),
+
+  // ─── Phase 6E: Consolidated Multi-Company Reports ────────────────────
+  consolidatedPL: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(consolidatedPLSchema)
+    .query(async ({ ctx, input }) => {
+      if (!isAdminLevel(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Consolidated reports require admin access.' });
+      }
+      return getGeneralLedgerService().consolidatedProfitAndLoss(input.startDate, input.endDate);
+    }),
+
+  consolidatedBS: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(consolidatedBSSchema)
+    .query(async ({ ctx, input }) => {
+      if (!isAdminLevel(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Consolidated reports require admin access.' });
+      }
+      return getGeneralLedgerService().consolidatedBalanceSheet(input.asOfDate);
+    }),
+
+  consolidatedCF: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(consolidatedCFSchema)
+    .query(async ({ ctx, input }) => {
+      if (!isAdminLevel(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Consolidated reports require admin access.' });
+      }
+      return getGeneralLedgerService().consolidatedCashFlow(input.startDate, input.endDate);
     }),
 });

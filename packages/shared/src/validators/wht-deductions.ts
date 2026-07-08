@@ -81,3 +81,24 @@ export interface VatTransaction {
   credit: number;
   remarks: string | null;
 }
+
+// ============================================
+// Consolidated Multi-Company Reports (Phase 6E)
+// ============================================
+
+export const consolidatedPLSchema = z.object({
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+});
+export type ConsolidatedPLInput = z.infer<typeof consolidatedPLSchema>;
+
+export const consolidatedBSSchema = z.object({
+  asOfDate: z.string().date().optional(),
+});
+export type ConsolidatedBSInput = z.infer<typeof consolidatedBSSchema>;
+
+export const consolidatedCFSchema = z.object({
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+});
+export type ConsolidatedCFInput = z.infer<typeof consolidatedCFSchema>;

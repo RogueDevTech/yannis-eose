@@ -840,7 +840,7 @@ export function LogisticsTeamPage({
               )}
               <div className="hidden md:block relative shrink-0">
                 {(sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
-                  <FilterDismiss onClear={() => mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })} />
+                  <FilterDismiss onClear={() => mergeListParams({ sortBy: 'assigned', sortDir: 'desc', page: 1 })} />
                 )}
                 <SortMenu
                   value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
@@ -857,7 +857,7 @@ export function LogisticsTeamPage({
               {(sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
                 <FilterDismiss
                   onClear={() =>
-                    mergeListParams({ sortBy: 'deliveryRate', sortDir: 'desc', page: 1 })
+                    mergeListParams({ sortBy: 'assigned', sortDir: 'desc', page: 1 })
                   }
                 />
               )}

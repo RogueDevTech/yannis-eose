@@ -457,6 +457,12 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
       },
+      {
+        label: 'Bank Reconciliation',
+        href: '/admin/finance/bank-reconciliation',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
     ],
   },
   {

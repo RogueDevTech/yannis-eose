@@ -639,13 +639,16 @@ export type {
   GetExpenseInput,
 } from './expense-submissions';
 
-// WHT deductions / Budget vs Actual / VAT return validators (Phase 6)
+// WHT deductions / Budget vs Actual / VAT return / Consolidated report validators (Phase 6)
 export {
   recordWhtSchema,
   listWhtSchema,
   generateWhtCertificateSchema,
   budgetVsActualSchema,
   vatReturnSummarySchema,
+  consolidatedPLSchema,
+  consolidatedBSSchema,
+  consolidatedCFSchema,
 } from './wht-deductions';
 
 export type {
@@ -657,7 +660,29 @@ export type {
   VatReturnSummaryInput,
   VatReturnSummary,
   VatTransaction,
+  ConsolidatedPLInput,
+  ConsolidatedBSInput,
+  ConsolidatedCFInput,
 } from './wht-deductions';
+
+// Bank reconciliation validators (Phase 6D)
+export {
+  createReconciliationSchema as createBankReconciliationSchema,
+  matchLineSchema,
+  unmatchLineSchema,
+  completeReconciliationSchema as completeBankReconciliationSchema,
+  listReconciliationsSchema as listBankReconciliationsSchema,
+  getReconciliationSchema as getBankReconciliationSchema,
+} from './bank-reconciliation';
+
+export type {
+  CreateReconciliationInput as CreateBankReconciliationInput,
+  MatchLineInput,
+  UnmatchLineInput,
+  CompleteReconciliationInput as CompleteBankReconciliationInput,
+  ListReconciliationsInput as ListBankReconciliationsInput,
+  GetReconciliationInput as GetBankReconciliationInput,
+} from './bank-reconciliation';
 
 // User filter preferences validators
 export {

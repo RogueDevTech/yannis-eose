@@ -30,16 +30,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const defaults = defaultThisMonthRange();
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;
+  const consolidated = url.searchParams.get('consolidated') === 'true';
 
   const pageData = (async () => {
+    if (consolidated) {
+      const input = encodeURIComponent(JSON.stringify({ startDate, endDate }));
+      const res = await apiRequest<unknown>(
+        `/trpc/generalLedger.consolidatedPL?input=${input}`,
+        { method: 'GET', cookie },
+      );
+      const data = res.ok
+        ? ((res.data as { result?: { data?: ProfitAndLossPageProps } })?.result?.data ?? EMPTY)
+        : EMPTY;
+      return { ...data, consolidated: true };
+    }
+
     const input = encodeURIComponent(JSON.stringify({ startDate, endDate }));
     const res = await apiRequest<unknown>(
       `/trpc/generalLedger.profitAndLoss?input=${input}`,
       { method: 'GET', cookie },
     );
-    return res.ok
+    const data = res.ok
       ? ((res.data as { result?: { data?: ProfitAndLossPageProps } })?.result?.data ?? EMPTY)
       : EMPTY;
+    return { ...data, consolidated: false };
   })();
 
   return defer({ pageData });
@@ -49,7 +63,7 @@ export default function ProfitLossRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<ProfitAndLossPage {...EMPTY} />}>
-      {(data) => <ProfitAndLossPage {...data} />}
+      {(data) => <ProfitAndLossPage {...data} consolidated={data.consolidated} />}
     </CachedAwait>
   );
 }

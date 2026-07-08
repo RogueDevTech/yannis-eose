@@ -2211,6 +2211,171 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     };
   }
 
+  // ─── Phase 6E: Consolidated Multi-Company Reports ──────────────────────────
+
+  /**
+   * Consolidated Profit & Loss: aggregate across all companies (branch groups).
+   * Calls profitAndLoss for each group and sums the results.
+   */
+  async consolidatedProfitAndLoss(startDate?: string, endDate?: string) {
+    const groups = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups);
+
+    // Include null-group for single-company installs
+    const groupIds: (string | null)[] = groups.length
+      ? groups.map((g) => g.id)
+      : [null];
+
+    const reports = await Promise.all(
+      groupIds.map((gid) =>
+        this.profitAndLoss({ groupId: gid, startDate, endDate }),
+      ),
+    );
+
+    // Merge per-account rows across companies by code+name
+    const incomeMap = new Map<string, { code: string; name: string; amount: number }>();
+    const expenseMap = new Map<string, { code: string; name: string; amount: number }>();
+
+    for (const report of reports) {
+      for (const row of report.income) {
+        const existing = incomeMap.get(row.code);
+        if (existing) existing.amount += row.amount;
+        else incomeMap.set(row.code, { ...row });
+      }
+      for (const row of report.expense) {
+        const existing = expenseMap.get(row.code);
+        if (existing) existing.amount += row.amount;
+        else expenseMap.set(row.code, { ...row });
+      }
+    }
+
+    const income = [...incomeMap.values()];
+    const expense = [...expenseMap.values()];
+    const totalIncome = income.reduce((s, r) => s + r.amount, 0);
+    const totalExpense = expense.reduce((s, r) => s + r.amount, 0);
+
+    return {
+      income,
+      expense,
+      totalIncome,
+      totalExpense,
+      netProfit: totalIncome - totalExpense,
+      period: { startDate: startDate ?? null, endDate: endDate ?? null },
+      companyCount: groupIds.length,
+    };
+  }
+
+  /**
+   * Consolidated Balance Sheet: aggregate across all companies.
+   */
+  async consolidatedBalanceSheet(asOfDate?: string) {
+    const groups = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups);
+
+    const groupIds: (string | null)[] = groups.length
+      ? groups.map((g) => g.id)
+      : [null];
+
+    const reports = await Promise.all(
+      groupIds.map((gid) =>
+        this.balanceSheet({ groupId: gid, asOfDate }),
+      ),
+    );
+
+    const merge = (
+      allRows: Array<{ code: string; name: string; amount: number }>,
+    ) => {
+      const map = new Map<string, { code: string; name: string; amount: number }>();
+      for (const row of allRows) {
+        const existing = map.get(row.code);
+        if (existing) existing.amount += row.amount;
+        else map.set(row.code, { ...row });
+      }
+      return [...map.values()];
+    };
+
+    const assets = merge(reports.flatMap((r) => r.assets));
+    const liabilities = merge(reports.flatMap((r) => r.liabilities));
+    const equity = merge(reports.flatMap((r) => r.equity));
+    const retainedEarnings = reports.reduce((s, r) => s + r.retainedEarnings, 0);
+    const totalAssets = assets.reduce((s, r) => s + r.amount, 0);
+    const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
+    const totalEquity = equity.reduce((s, r) => s + r.amount, 0) + retainedEarnings;
+
+    return {
+      assets,
+      liabilities,
+      equity,
+      retainedEarnings,
+      totalAssets,
+      totalLiabilities,
+      totalEquity,
+      balanced: Math.round(totalAssets * 100) === Math.round((totalLiabilities + totalEquity) * 100),
+      asOfDate: asOfDate ?? null,
+      companyCount: groupIds.length,
+    };
+  }
+
+  /**
+   * Consolidated Cash Flow: aggregate across all companies.
+   */
+  async consolidatedCashFlow(startDate?: string, endDate?: string) {
+    const groups = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups);
+
+    const groupIds: (string | null)[] = groups.length
+      ? groups.map((g) => g.id)
+      : [null];
+
+    const reports = await Promise.all(
+      groupIds.map((gid) =>
+        this.cashFlow({ groupId: gid, startDate, endDate }),
+      ),
+    );
+
+    // Merge accounts by code
+    const accountMap = new Map<
+      string,
+      { code: string; name: string; opening: number; inflow: number; outflow: number; closing: number }
+    >();
+
+    for (const report of reports) {
+      for (const acc of report.accounts) {
+        const existing = accountMap.get(acc.code);
+        if (existing) {
+          existing.opening += acc.opening;
+          existing.inflow += acc.inflow;
+          existing.outflow += acc.outflow;
+          existing.closing += acc.closing;
+        } else {
+          accountMap.set(acc.code, { ...acc });
+        }
+      }
+    }
+
+    const accounts = [...accountMap.values()];
+    const totals = accounts.reduce(
+      (acc, a) => {
+        acc.opening += a.opening;
+        acc.inflow += a.inflow;
+        acc.outflow += a.outflow;
+        acc.closing += a.closing;
+        return acc;
+      },
+      { opening: 0, inflow: 0, outflow: 0, closing: 0 },
+    );
+
+    return {
+      accounts,
+      totals,
+      period: { startDate: startDate ?? null, endDate: endDate ?? null },
+      companyCount: groupIds.length,
+    };
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   /**
