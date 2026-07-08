@@ -4025,6 +4025,9 @@ export class OrdersService {
     if (input.logisticsLocationId) {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
+    if (input.servicingBranchId) {
+      conditions.push(eq(schema.orders.servicingBranchId, input.servicingBranchId));
+    }
     if (input.fromCart) {
       // Recovered-from-cart filter — orders.cart_id back-link populated when
       // the order was created from an abandoned/converted cart. Index lives on
@@ -6136,6 +6139,10 @@ export class OrdersService {
     /** When true, also exclude cart-graduated orders (order_source='online').
      *  CS funnel passes true (cart orders have their own strip). */
     excludeCartGraduated?: boolean,
+    /** When true, only count offline orders (order_source='offline'). */
+    onlyOffline?: boolean,
+    /** Optional servicingBranchId filters to that servicing branch (for Logistics Orders page branch filter). */
+    servicingBranchId?: string,
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -6162,7 +6169,9 @@ export class OrdersService {
         sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
       );
     }
-    if (excludeOffline) {
+    if (onlyOffline) {
+      conditions.push(eq(schema.orders.orderSource, 'offline'));
+    } else if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
       // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus
       // cart-graduated orders ('online') so recovered carts count for the MB.
@@ -6174,6 +6183,7 @@ export class OrdersService {
       supervisorScope,
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
+    if (servicingBranchId) conditions.push(eq(schema.orders.servicingBranchId, servicingBranchId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);

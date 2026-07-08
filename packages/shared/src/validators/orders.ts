@@ -340,6 +340,7 @@ export const listOrdersSchema = z
     productId: z.string().uuid().optional(),
     riderId: z.string().uuid().optional(),
     logisticsLocationId: z.string().uuid().optional(),
+    servicingBranchId: z.string().uuid().optional(),
     /**
      * When true, returns only orders that were recovered from a dropped-off cart
      * (i.e. `orders.cart_id IS NOT NULL`). Used by the `/admin/orders` "Recovered

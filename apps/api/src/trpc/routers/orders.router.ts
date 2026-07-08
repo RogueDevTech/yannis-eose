@@ -1021,6 +1021,7 @@ export const ordersRouter = router({
           mediaBuyerId: z.string().uuid().optional(),
           assignedCsId: z.string().uuid().optional(),
           logisticsLocationId: z.string().uuid().optional(),
+          servicingBranchId: z.string().uuid().optional(),
           statuses: z.array(z.enum([
             'UNPROCESSED',
             'CS_ASSIGNED',
@@ -1098,6 +1099,8 @@ export const ordersRouter = router({
           undefined,
           excludeGraduated,
           excludeCartGraduated,
+          undefined,
+          input?.servicingBranchId,
         );
       }
 
@@ -1111,6 +1114,7 @@ export const ordersRouter = router({
           isFollowUp,
           branchScope,
           effectiveBranchIds: ctx.effectiveBranchIds,
+          servicingBranchId: input?.servicingBranchId,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1129,6 +1133,8 @@ export const ordersRouter = router({
           undefined,
           excludeGraduated,
           excludeCartGraduated,
+          undefined,
+          input?.servicingBranchId,
         ),
       );
     }),

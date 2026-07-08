@@ -58,6 +58,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const isTplManager = user.role === 'TPL_MANAGER';
+  const branchFilter = url.searchParams.get('branch') || undefined;
   const userLocationFilter = url.searchParams.get('location') || undefined;
   const effectiveLogisticsLocationId =
     isTplManager && user.logisticsLocationId
@@ -97,6 +98,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
+    ...(branchFilter && { servicingBranchId: branchFilter }),
     // Logistics must see graduated follow-up + cart orders for remittance.
     excludeGraduated: false as const,
   };
@@ -104,6 +106,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     startDate?: string;
     endDate?: string;
     logisticsLocationId?: string;
+    servicingBranchId?: string;
     statuses?: readonly string[];
     isFollowUp?: boolean;
     excludeGraduated?: boolean;
@@ -111,6 +114,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
   if (effectiveLogisticsLocationId) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
+  if (branchFilter) countsInput.servicingBranchId = branchFilter;
   // Stat strip always shows unfiltered totals across all logistics statuses —
   // the selected status filter only affects the table rows, not the overview.
   countsInput.statuses = [...LOGISTICS_STATUS_SCOPE];
@@ -135,6 +139,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter: status,
     searchFilter: search ?? '',
     locationFilter: userLocationFilter ?? '',
+    branchFilter: branchFilter ?? '',
     isTplManagerScoped: isTplManager && !!user.logisticsLocationId,
     canEditDeliveryDate: false,
     allocationOnDetailOnly: true,
@@ -168,6 +173,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     let statusCounts: Record<string, number> = {};
     let locations: Location[] = [];
+    let branches: Array<{ id: string; name: string }> = [];
     try {
       const overdueCountInput = {
         page: 1,
@@ -178,7 +184,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ...(endDate && { endDate }),
         ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
       };
-      const [countsRes, locationsRes, overdueRes] = await Promise.all([
+      const [countsRes, locationsRes, overdueRes, branchesRes] = await Promise.all([
         apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
         apiRequest<unknown>(
           `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 200, status: 'ACTIVE' }))}`,
@@ -188,6 +194,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(overdueCountInput))}`,
           { method: 'GET', cookie },
         ),
+        apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>('/trpc/branches.list', { method: 'GET', cookie }),
       ]);
       statusCounts = countsRes.ok
         ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
@@ -200,6 +207,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ? (overdueRes.data as { result?: { data?: { pagination?: { total?: number } } } })?.result?.data
         : null;
       statusCounts['__OVERDUE'] = overdueData?.pagination?.total ?? 0;
+      branches = branchesRes.ok ? branchesRes.data?.result?.data ?? [] : [];
     } catch {
       statusCounts = {};
       locations = [];
@@ -214,9 +222,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusFilter: logisticsOrdersShell.statusFilter,
       searchFilter: logisticsOrdersShell.searchFilter,
       locationFilter: logisticsOrdersShell.locationFilter,
+      branchFilter: logisticsOrdersShell.branchFilter,
       listErrorMessage,
       statusCounts,
       locations,
+      branches,
       riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>,
       dailyCounts: undefined,
       filters: logisticsOrdersShell.filters,
@@ -421,6 +431,7 @@ export default function LogisticsOrdersRoute() {
           listErrorMessage={undefined}
           statusCounts={{}}
           locations={[]}
+          branches={[]}
           riders={[]}
           page={logisticsOrdersShell.page}
           limit={logisticsOrdersShell.limit}
