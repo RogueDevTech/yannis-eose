@@ -431,7 +431,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               const csCR = csTotal > 0 ? (csConfirmedAndBeyond / csTotal) * 100 : 0;
               const csDR = csTotal > 0 ? (csDelivered / csTotal) * 100 : 0;
               return (
-                <>
                 <div>
                   <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
                     CS Order Funnel

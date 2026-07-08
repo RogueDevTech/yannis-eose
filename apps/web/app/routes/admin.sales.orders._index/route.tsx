@@ -384,6 +384,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isCSCloser,
         showCSCloserColumn,
         canCreateOffline,
+        orderSource: 'edge-form',
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -891,6 +892,8 @@ export default function CSOrdersRoute() {
               : ['REMITTED', 'DELETED']
           }
           enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT'}
+          hideOfflineAndCartStats
+          canCreateOffline={false}
         />
       )}
     </CachedAwait>
