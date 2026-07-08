@@ -137,6 +137,15 @@ export function UserDetailPage({
   overviewOnboardingSlice = null,
   overviewPermissionsSlice = null,
   usersBasePath = '/hr/users',
+  // Page-bundle data — when present, skips client-side resource route fetchers
+  bundleProducts,
+  bundleRoleTemplates,
+  bundleLocations,
+  bundlePlans,
+  bundlePendingEmailChange,
+  bundlePushStatus,
+  bundleMarketingMetrics,
+  bundleFundingBalance,
 }: UserDetailPageProps) {
   const actionData = useActionData<{
     error?: string;
@@ -357,9 +366,14 @@ export function UserDetailPage({
     generatedAt?: string;
   }>();
 
+  // When page-bundle data is available, skip client-side resource route fetchers.
+  const hasBundleCore = !!(bundleProducts || bundleRoleTemplates || bundleLocations || bundlePlans);
+  const hasBundleMarketing = bundleMarketingMetrics !== undefined || bundleFundingBalance !== undefined;
+
   useEffect(() => {
+    if (hasBundleCore) return; // Bundle provides core data
     void coreFetcher.load(`/api/hr-user-detail-overview-core/${user.id}`);
-  }, [user.id]);
+  }, [user.id, hasBundleCore]);
 
   useEffect(() => {
     if (!showOnboardingTab) return;
@@ -375,8 +389,9 @@ export function UserDetailPage({
 
   useEffect(() => {
     if (!isMarketingRole) return;
+    if (hasBundleMarketing) return; // Bundle provides marketing data
     void marketingFetcher.load(`/api/hr-user-detail-marketing/${user.id}`);
-  }, [isMarketingRole, user.id]);
+  }, [isMarketingRole, user.id, hasBundleMarketing]);
 
   useEffect(() => {
     if (openModal !== 'payroll' && openModal !== 'activity' && openModal !== 'finance') return;
@@ -394,13 +409,15 @@ export function UserDetailPage({
   const activityBundle = activityFetcher.data?.ok ? activityFetcher.data : null;
 
   const pendingEmailChangeResolved =
-    coreBundle?.pendingEmailChange ??
-    pendingEmailChange ??
-    Promise.resolve(null as PendingEmailChange | null);
+    bundlePendingEmailChange !== undefined
+      ? bundlePendingEmailChange
+      : coreBundle?.pendingEmailChange ??
+        pendingEmailChange ??
+        Promise.resolve(null as PendingEmailChange | null);
   const locationsResolved =
-    coreBundle?.locations ?? locations ?? Promise.resolve([] as UserCreateLocation[]);
+    bundleLocations ?? coreBundle?.locations ?? locations ?? Promise.resolve([] as UserCreateLocation[]);
   const plansResolved =
-    coreBundle?.plans ?? plans ?? Promise.resolve([] as UserCreateCommissionPlan[]);
+    bundlePlans ?? coreBundle?.plans ?? plans ?? Promise.resolve([] as UserCreateCommissionPlan[]);
   const payoutsResolved =
     activityBundle?.payouts ?? payouts ?? Promise.resolve([] as UserPayoutRecord[]);
   const adjustmentsResolved =
@@ -408,7 +425,9 @@ export function UserDetailPage({
   const auditLogResolved =
     activityBundle?.auditLog ?? auditLog ?? Promise.resolve([] as UserAuditEntry[]);
   const pushStatusResolved =
-    coreBundle?.pushStatus ?? pushStatus ?? Promise.resolve(null as UserPushStatus | null);
+    bundlePushStatus !== undefined
+      ? bundlePushStatus
+      : coreBundle?.pushStatus ?? pushStatus ?? Promise.resolve(null as UserPushStatus | null);
 
   const financeActivityForDeferred: Promise<{ approvals: UserApprovalRecord[]; total: number }> =
     activityBundle?.financeActivity != null
@@ -418,10 +437,12 @@ export function UserDetailPage({
         : Promise.resolve({ approvals: [] as UserApprovalRecord[], total: 0 });
 
   useEffect(() => {
-    if (coreBundle?.roleTemplates) {
+    if (bundleRoleTemplates) {
+      setResolvedRoleTemplates(bundleRoleTemplates);
+    } else if (coreBundle?.roleTemplates) {
       setResolvedRoleTemplates(coreBundle.roleTemplates);
     }
-  }, [coreBundle]);
+  }, [bundleRoleTemplates, coreBundle]);
 
   useLayoutEffect(() => {
     if (!overviewPermissionsSlice) return;
@@ -544,6 +565,26 @@ export function UserDetailPage({
     !overviewOnboardingSlice &&
     (onboardingFetcher.state === 'loading' ||
       (onboardingFetcher.state === 'idle' && onboardingFetcher.data == null));
+
+  // ── Resolved marketing data — prefer bundle, fall back to fetcher ──
+  // Wraps both sources into the same shape so downstream JSX stays unchanged.
+  const resolvedMarketingData = useMemo(() => {
+    if (hasBundleMarketing) {
+      return {
+        ok: true as const,
+        marketingMetrics: bundleMarketingMetrics ?? null,
+        fundingBalance: bundleFundingBalance ?? null,
+      };
+    }
+    if (marketingFetcher.data?.ok === true) return marketingFetcher.data;
+    if (marketingFetcher.data?.ok === false) return marketingFetcher.data;
+    return null;
+  }, [hasBundleMarketing, bundleMarketingMetrics, bundleFundingBalance, marketingFetcher.data]);
+
+  const marketingDataLoading =
+    !hasBundleMarketing &&
+    (marketingFetcher.state === 'loading' ||
+      (marketingFetcher.state === 'idle' && marketingFetcher.data == null));
 
   // Detail-page-only role flags — used for tab visibility and the right-rail cards.
   const isCSRole = ['CS_CLOSER', 'HEAD_OF_CS'].includes(user.role);
@@ -856,7 +897,7 @@ export function UserDetailPage({
     // the core bundle. If `restrictProductAccess` is off, the user effectively
     // has the whole catalog regardless of `assignedProductIds`.
     if (user.role === 'MEDIA_BUYER') {
-      const productsCatalog = coreBundle?.products ?? [];
+      const productsCatalog = bundleProducts ?? coreBundle?.products ?? [];
       const assignedIds = user.assignedProductIds ?? [];
       const productById = new Map(productsCatalog.map((p) => [p.id, p.name]));
       let productsValue: ReactNode;
@@ -899,6 +940,7 @@ export function UserDetailPage({
     user.role,
     user.restrictProductAccess,
     user.assignedProductIds,
+    bundleProducts,
     coreBundle?.products,
     showOnboardingTab,
     onboardingOverviewLoading,
@@ -1441,61 +1483,60 @@ export function UserDetailPage({
                 ×
               </button>
             </div>
-            {marketingFetcher.state === 'loading' ||
-            (marketingFetcher.state === 'idle' && marketingFetcher.data == null) ? (
+            {marketingDataLoading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 animate-pulse">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="h-16 rounded-lg bg-app-hover" />
                 ))}
               </div>
-            ) : marketingFetcher.data?.ok === false ? (
+            ) : resolvedMarketingData?.ok === false ? (
               <p className="text-sm text-app-fg-muted">
-                {typeof marketingFetcher.data.error === 'string'
-                  ? marketingFetcher.data.error
+                {typeof (resolvedMarketingData as { error?: string }).error === 'string'
+                  ? (resolvedMarketingData as { error: string }).error
                   : 'Could not load marketing performance.'}
               </p>
-            ) : marketingFetcher.data?.ok && marketingFetcher.data.marketingMetrics ? (
+            ) : resolvedMarketingData?.ok && resolvedMarketingData.marketingMetrics ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <MetricCard
                   label="Total Spend"
-                  value={formatNaira(Number(marketingFetcher.data.marketingMetrics.totalSpend))}
+                  value={formatNaira(Number(resolvedMarketingData.marketingMetrics.totalSpend))}
                 />
                 <MetricCard
                   label="Total Orders"
-                  value={String(marketingFetcher.data.marketingMetrics.totalOrders)}
+                  value={String(resolvedMarketingData.marketingMetrics.totalOrders)}
                 />
                 <MetricCard
                   label="Delivered"
-                  value={String(marketingFetcher.data.marketingMetrics.deliveredOrders)}
+                  value={String(resolvedMarketingData.marketingMetrics.deliveredOrders)}
                   accent="success"
                 />
                 <MetricCard
                   label="Confirmed"
-                  value={String(marketingFetcher.data.marketingMetrics.confirmedOrders)}
+                  value={String(resolvedMarketingData.marketingMetrics.confirmedOrders)}
                   accent="success"
                 />
                 <MetricCard
                   label="Revenue"
                   value={formatNaira(
-                    Number(marketingFetcher.data.marketingMetrics.deliveredRevenue),
+                    Number(resolvedMarketingData.marketingMetrics.deliveredRevenue),
                   )}
                   accent="success"
                 />
                 <MetricCard
                   label="Conf. Rate"
-                  value={`${Number(marketingFetcher.data.marketingMetrics.confirmationRate).toFixed(1)}%`}
+                  value={`${Number(resolvedMarketingData.marketingMetrics.confirmationRate).toFixed(1)}%`}
                 />
                 <MetricCard
                   label="CPA"
-                  value={formatNaira(Number(marketingFetcher.data.marketingMetrics.cpa))}
+                  value={formatNaira(Number(resolvedMarketingData.marketingMetrics.cpa))}
                 />
                 <MetricCard
                   label="True ROAS"
-                  value={`${Number(marketingFetcher.data.marketingMetrics.trueRoas).toFixed(2)}x`}
+                  value={`${Number(resolvedMarketingData.marketingMetrics.trueRoas).toFixed(2)}x`}
                   accent={
-                    marketingFetcher.data.marketingMetrics.trueRoas >= 2
+                    resolvedMarketingData.marketingMetrics.trueRoas >= 2
                       ? 'success'
-                      : marketingFetcher.data.marketingMetrics.trueRoas >= 1
+                      : resolvedMarketingData.marketingMetrics.trueRoas >= 1
                         ? 'warning'
                         : 'danger'
                   }
@@ -1526,13 +1567,13 @@ export function UserDetailPage({
             <p className="text-xs text-app-fg-muted">
               Confirmed funding received minus approved ad spend
             </p>
-            {marketingFetcher.data?.ok && marketingFetcher.data.fundingBalance ? (
+            {resolvedMarketingData?.ok && resolvedMarketingData.fundingBalance ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <p className="text-xs text-app-fg-muted">Total received</p>
                   <p className="text-lg font-medium text-app-fg">
                     {formatNaira(
-                      Number(marketingFetcher.data.fundingBalance.totalReceived),
+                      Number(resolvedMarketingData.fundingBalance.totalReceived),
                     )}
                   </p>
                 </div>
@@ -1541,7 +1582,7 @@ export function UserDetailPage({
                   <p className="text-lg font-medium text-app-fg">
                     {user.role === 'MEDIA_BUYER'
                       ? formatNaira(
-                          Number(marketingFetcher.data.fundingBalance.totalSpend),
+                          Number(resolvedMarketingData.fundingBalance.totalSpend),
                         )
                       : '—'}
                   </p>
@@ -1549,7 +1590,7 @@ export function UserDetailPage({
                 <div>
                   <p className="text-xs text-app-fg-muted">Balance</p>
                   <p className="text-xl font-bold text-brand-600 dark:text-brand-400">
-                    {formatNaira(Number(marketingFetcher.data.fundingBalance.balance))}
+                    {formatNaira(Number(resolvedMarketingData.fundingBalance.balance))}
                   </p>
                 </div>
               </div>

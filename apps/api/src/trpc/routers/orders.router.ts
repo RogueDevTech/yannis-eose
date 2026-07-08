@@ -1048,6 +1048,8 @@ export const ordersRouter = router({
            *  Defaults to true for funnel pages; logistics passes false so
            *  graduated deliveries remain visible for remittance. */
           excludeGraduated: z.boolean().optional(),
+          /** Filter counts to a specific order source. */
+          orderSource: z.enum(['offline', 'edge-form']).optional(),
         })
         .optional(),
     )
@@ -1082,6 +1084,8 @@ export const ordersRouter = router({
       // CS funnel (servicing scope) also excludes cart-graduated orders —
       // they have their own Cart Orders strip. Marketing keeps them (MB credit).
       const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
+      const onlyOffline = input?.orderSource === 'offline' ? true : undefined;
+      const excludeOffline = input?.orderSource === 'edge-form' ? true : undefined;
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -1096,11 +1100,10 @@ export const ordersRouter = router({
           branchScope,
           ctx.effectiveBranchIds,
           isFollowUp,
-          undefined,
+          excludeOffline,
           excludeGraduated,
           excludeCartGraduated,
-          undefined,
-          input?.servicingBranchId,
+          onlyOffline,
         );
       }
 
@@ -1114,7 +1117,7 @@ export const ordersRouter = router({
           isFollowUp,
           branchScope,
           effectiveBranchIds: ctx.effectiveBranchIds,
-          servicingBranchId: input?.servicingBranchId,
+          orderSource: input?.orderSource,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1130,11 +1133,10 @@ export const ordersRouter = router({
           branchScope,
           ctx.effectiveBranchIds,
           isFollowUp,
-          undefined,
+          excludeOffline,
           excludeGraduated,
           excludeCartGraduated,
-          undefined,
-          input?.servicingBranchId,
+          onlyOffline,
         ),
       );
     }),
@@ -1446,6 +1448,7 @@ export const ordersRouter = router({
         productsForOfflineOrder,
         cartAbandonmentCount,
         supplementaryCounts,
+        offlineStatusCounts,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
           scope.mediaBuyerId,
@@ -1509,6 +1512,20 @@ export const ordersRouter = router({
           bundleBranchScope,
           ctx.effectiveBranchIds,
         ),
+        // Offline orders — separate funnel strip on HoCS/closer dashboards.
+        getOrdersService().getStatusCounts(
+          scope.mediaBuyerId,
+          scope.startDate,
+          scope.endDate,
+          scope.assignedCsId,
+          undefined,
+          aggregateBranchId,
+          undefined,
+          scope.supervisorScope,
+          bundleBranchScope,
+          ctx.effectiveBranchIds,
+          false, false, false, false, true, // onlyOffline
+        ),
       ]);
 
       return {
@@ -1529,6 +1546,7 @@ export const ordersRouter = router({
         productsForOfflineOrder: productsForOfflineOrder?.products ?? [],
         cartAbandonmentCount: cartAbandonmentCount ?? 0,
         offlineCount: supplementaryCounts.offlineCount,
+        offlineStatusCounts: offlineStatusCounts ?? {},
       };
       }; // end fetchBundle
 

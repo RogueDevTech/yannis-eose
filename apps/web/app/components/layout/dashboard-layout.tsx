@@ -198,7 +198,7 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
-        label: 'Order Funnel',
+        label: 'Funnel Orders',
         href: '/admin/sales/orders',
         icon: SidebarIcons.orders,
         permission: 'orders.read',

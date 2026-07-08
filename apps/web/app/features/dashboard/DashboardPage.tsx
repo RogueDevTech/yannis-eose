@@ -392,7 +392,6 @@ function CSDashboard({
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
-              { label: 'Offline', value: offlineCount.toString(), valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg', to: '/admin/sales/orders?orderSource=offline' },
               { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
@@ -419,6 +418,42 @@ function CSDashboard({
           Live-bucket `Confirmed` is current CONFIRMED count; `Delivered` / rate use
           the selected date range from `marketing.metrics`. Per-status counts remain
           on `/admin/sales/orders` via the status filter pills. */}
+
+      {/* ── Offline Orders ── */}
+      {(() => {
+        const offSc = (data.offlineStatusCounts ?? {}) as Record<string, number>;
+        const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
+        const offUnassigned = offSc['UNPROCESSED'] ?? 0;
+        const offAssigned = offSc['CS_ASSIGNED'] ?? 0;
+        const offEngaged = offSc['CS_ENGAGED'] ?? 0;
+        const offConfirmed =
+          (offSc['CONFIRMED'] ?? 0) +
+          (offSc['AGENT_ASSIGNED'] ?? 0) +
+          (offSc['DISPATCHED'] ?? 0) +
+          (offSc['IN_TRANSIT'] ?? 0);
+        const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+        const offCR = offTotal > 0 ? (offConfirmed + offDelivered) / offTotal * 100 : 0;
+        const offDR = offTotal > 0 ? offDelivered / offTotal * 100 : 0;
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Offline Orders</h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="min-w-[6rem]"
+              items={[
+                { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: '/admin/sales/offline-orders' },
+                { label: 'Unassigned', value: offUnassigned, valueClassName: offUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: '/admin/sales/offline-orders?status=UNPROCESSED' },
+                { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/offline-orders?status=CS_ASSIGNED' },
+                { label: 'Engaged', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/offline-orders?status=CS_ENGAGED' },
+                { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/offline-orders?status=CONFIRMED' },
+                { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/offline-orders?status=DELIVERED' },
+                { label: 'CR', value: `${offCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(offCR) },
+                { label: 'DR', value: `${offDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(offDR) },
+              ]}
+            />
+          </div>
+        );
+      })()}
 
       <FollowUpDashboardStrip filters={dateFilters} />
       <CartOrdersDashboardStrip filters={dateFilters} />

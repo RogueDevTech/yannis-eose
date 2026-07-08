@@ -106,8 +106,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .then((r) => r.ok ? ((r.data as { result?: { data?: { offlineCount: number } } })?.result?.data?.offlineCount ?? 0) : 0)
         .catch(() => 0)
     : Promise.resolve(0);
+  // Offline per-status counts for separate funnel strip
+  const offlineCountsInput = JSON.stringify({ startDate, endDate, orderSource: 'offline' });
+  const offlineStatusP = needsOffline
+    ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(offlineCountsInput)}`, deferredOpt)
+        .then((r) => r.ok ? ((r.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}) : {})
+        .catch(() => ({} as Record<string, number>))
+    : Promise.resolve({} as Record<string, number>);
 
-  const pageData = Promise.all([ordersP, countsP, supplementaryP]).then(([ordersRes, countsRes, offlineCount]): OrdersAndCounts => {
+  const pageData = Promise.all([ordersP, countsP, supplementaryP, offlineStatusP]).then(([ordersRes, countsRes, offlineCount, offlineStatusCounts]): OrdersAndCounts => {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
       : null;
@@ -119,8 +126,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalOrders: ordersData?.pagination?.total ?? 0,
       recentOrders: ordersData?.orders ?? [],
       offlineCount,
+      offlineStatusCounts,
     };
-  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [], offlineCount: 0 }));
+  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [], offlineCount: 0, offlineStatusCounts: {} }));
 
   return defer({
     variant: 'dashboard' as const,

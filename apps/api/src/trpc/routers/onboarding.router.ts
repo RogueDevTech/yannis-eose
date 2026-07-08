@@ -45,6 +45,11 @@ function getService(): OnboardingService {
   return serviceInstance;
 }
 
+/** Exported for cross-router lookups (e.g. `userDetailPageBundle`). */
+export function getOnboardingService(): OnboardingService {
+  return getService();
+}
+
 export const onboardingRouter = router({
   /** Self-read by default; pass `userId` to read someone else's (HR / admin only). */
   get: authedProcedure.input(getOnboardingSchema).query(async ({ input, ctx }) => {
