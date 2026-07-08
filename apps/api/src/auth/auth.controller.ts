@@ -385,18 +385,30 @@ export class AuthController {
       null;
     const userAgent = (req.headers['user-agent'] as string) ?? null;
 
-    const session = await this.authService.startMirror(sessionToken, actor, body.targetUserId, {
-      ipAddress,
-      userAgent,
-    });
+    let session: SessionUser;
+    try {
+      session = await this.authService.startMirror(sessionToken, actor, body.targetUserId, {
+        ipAddress,
+        userAgent,
+      });
+    } catch (err) {
+      console.error(`mirror_start_failed actor=${actor.id} target=${body.targetUserId}: ${err instanceof Error ? err.stack ?? err.message : err}`);
+      throw err;
+    }
 
     // The session's effective identity has changed — re-issue the bundle so
     // the Remix server reflects the target user (role, permissions, scope,
     // mirroredBy) on the very next loader. Without this, the original admin
     // would keep using their cached bundle for up to BUNDLE_TTL_SECONDS.
-    const mirroredUser = await this.branchTeams.attachTeamSupervisorSessionFlags(
-      session as unknown as SessionUser,
-    );
+    let mirroredUser: SessionUser;
+    try {
+      mirroredUser = await this.branchTeams.attachTeamSupervisorSessionFlags(
+        session as unknown as SessionUser,
+      );
+    } catch (err) {
+      console.error(`mirror_attach_flags_failed target=${body.targetUserId}: ${err instanceof Error ? err.stack ?? err.message : err}`);
+      throw err;
+    }
     setBundleCookie(res, mirroredUser, BUNDLE_TTL_SECONDS * 60);
 
     return {
