@@ -1966,8 +1966,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Awaiting remittance is always all-time — every unremitted delivered
-    // order is actionable regardless of when it was created/delivered.
+    // Date filter by createdAt — matches delivered count scoping.
+    if (input.startDate) awaitingConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) awaitingConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
