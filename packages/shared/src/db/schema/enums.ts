@@ -496,3 +496,21 @@ export const fiscalYearStatusEnum = pgEnum('fiscal_year_status', [
   'OPEN',
   'CLOSED',
 ]);
+
+// ============================================
+// Fixed Asset Register
+// ============================================
+
+/** Depreciation calculation method for a fixed asset. */
+export const assetDepreciationMethodEnum = pgEnum('asset_depreciation_method', [
+  'STRAIGHT_LINE',
+  'REDUCING_BALANCE',
+  'UNITS_OF_PRODUCTION',
+]);
+
+/** Lifecycle status of a fixed asset. */
+export const assetStatusEnum = pgEnum('asset_status', [
+  'ACTIVE',
+  'FULLY_DEPRECIATED',
+  'DISPOSED',
+]);

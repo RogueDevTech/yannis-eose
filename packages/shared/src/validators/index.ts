@@ -420,6 +420,23 @@ export type {
   PostOpeningBalancesInput,
 } from './general-ledger';
 
+// Asset register validators (Phase 4A)
+export {
+  createAssetSchema,
+  listAssetsSchema,
+  getAssetSchema,
+  disposeAssetSchema,
+  runDepreciationSchema,
+} from './asset-register';
+
+export type {
+  CreateAssetInput,
+  ListAssetsInput,
+  GetAssetInput,
+  DisposeAssetInput,
+  RunDepreciationInput,
+} from './asset-register';
+
 // Notification validators
 export {
   listNotificationsSchema,

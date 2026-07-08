@@ -240,6 +240,7 @@ export default function FollowUpConfigRoute() {
       closers={Array.isArray(data.closers) ? data.closers as never[] : []}
       excludedIds={Array.isArray(data.excludedIds) ? data.excludedIds : []}
       activeCsBranchIds={Array.isArray(data.activeCsBranchIds) ? data.activeCsBranchIds : []}
+      teams={Array.isArray(data.teams) ? data.teams as never[] : []}
     />
   );
 }

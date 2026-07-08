@@ -15,11 +15,18 @@ import {
   cashFlowSchema,
   agingSchema,
   postOpeningBalancesSchema,
+  createAssetSchema,
+  listAssetsSchema,
+  getAssetSchema,
+  disposeAssetSchema,
+  runDepreciationSchema,
 } from '@yannis/shared';
 import { router, permissionProcedure } from '../trpc';
 import { GeneralLedgerService } from '../../finance/general-ledger.service';
+import { AssetRegisterService } from '../../finance/asset-register.service';
 
 let generalLedgerServiceInstance: GeneralLedgerService | null = null;
+let assetRegisterServiceInstance: AssetRegisterService | null = null;
 
 export function setGeneralLedgerService(service: GeneralLedgerService) {
   generalLedgerServiceInstance = service;
@@ -30,6 +37,17 @@ export function getGeneralLedgerService(): GeneralLedgerService {
     throw new Error('GeneralLedgerService not initialized. Call setGeneralLedgerService() first.');
   }
   return generalLedgerServiceInstance;
+}
+
+export function setAssetRegisterService(service: AssetRegisterService) {
+  assetRegisterServiceInstance = service;
+}
+
+export function getAssetRegisterService(): AssetRegisterService {
+  if (!assetRegisterServiceInstance) {
+    throw new Error('AssetRegisterService not initialized. Call setAssetRegisterService() first.');
+  }
+  return assetRegisterServiceInstance;
 }
 
 /**
@@ -183,6 +201,46 @@ export const generalLedgerRouter = router({
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().seedChartOfAccounts(
         resolveGroupId(input.groupId, ctx.activeGroupId),
+        { id: ctx.user.id },
+      );
+    }),
+
+  // ─── Asset Register (Phase 4A) ──────────────────────────────────────────
+  listAssets: permissionProcedure('finance.ledger.read')
+    .input(listAssetsSchema)
+    .query(async ({ input, ctx }) => {
+      return getAssetRegisterService().listAssets({
+        ...input,
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+      });
+    }),
+
+  getAsset: permissionProcedure('finance.ledger.read')
+    .input(getAssetSchema)
+    .query(async ({ input }) => {
+      return getAssetRegisterService().getAsset(input);
+    }),
+
+  createAsset: permissionProcedure('finance.ledger.write')
+    .input(createAssetSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAssetRegisterService().createAsset(
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { id: ctx.user.id },
+      );
+    }),
+
+  disposeAsset: permissionProcedure('finance.ledger.write')
+    .input(disposeAssetSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAssetRegisterService().disposeAsset(input, { id: ctx.user.id });
+    }),
+
+  runDepreciation: permissionProcedure('finance.ledger.write')
+    .input(runDepreciationSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAssetRegisterService().runMonthlyDepreciation(
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
         { id: ctx.user.id },
       );
     }),

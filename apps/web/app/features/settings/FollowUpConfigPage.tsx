@@ -63,6 +63,7 @@ interface Props {
   closers?: CloserWithBranches[];
   excludedIds?: string[];
   activeCsBranchIds?: string[];
+  teams?: Array<{ id: string; name: string | null; department: string }>;
 }
 
 const STATUS_OPTIONS = [
@@ -116,7 +117,7 @@ function formatAge(r: Rule) {
   return r.maxAgeDays ? `${r.ageThresholdDays}–${r.maxAgeDays}d` : `>${r.ageThresholdDays}d`;
 }
 
-export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUpGroups = [], closers = [], excludedIds = [], activeCsBranchIds = [] }: Props) {
+export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUpGroups = [], closers = [], excludedIds = [], activeCsBranchIds = [], teams = [] }: Props) {
   const [tab, setTab] = useState('rules');
   const [modalOpen, setModalOpen] = useState(false);
   const [editRule, setEditRule] = useState<Rule | null>(null);
@@ -195,6 +196,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const [targetType, setTargetType] = useState<'all' | 'branch' | 'group'>('all');
   const [targetBranchId, setTargetBranchId] = useState<string | null>(null);
   const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [freezeOriginal, setFreezeOriginal] = useState(true);
 
@@ -218,7 +220,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const openCreate = () => {
     setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeValue('7'); setMaxAgeDays(null);
     setAgeRelativeTo('STATUS_TIMESTAMP'); setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
-    setEnabled(true); setFreezeOriginal(true); setModalOpen(true);
+    setTeamId(null); setEnabled(true); setFreezeOriginal(true); setModalOpen(true);
   };
   const openEdit = (rule: Rule) => {
     setEditRule(rule); setName(rule.name); setSourceStatus(rule.sourceStatus);
@@ -226,6 +228,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
     setSourceBranchId(rule.sourceBranchId);
     setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
     setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
+    setTeamId((rule as Record<string, unknown>).teamId as string | null ?? null);
     setEnabled(rule.enabled); setFreezeOriginal(rule.freezeOriginal ?? true); setModalOpen(true);
   };
   const handleSave = () => {
@@ -235,6 +238,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
       targetBranchId: targetType === 'branch' ? targetBranchId : null,
       targetGroupId: targetType === 'group' ? targetGroupId : null,
       targetAll: targetType === 'all',
+      teamId: teamId || null,
       priority: 0, enabled, freezeOriginal,
     };
     if (editRule) payload.ruleId = editRule.id;
@@ -718,6 +722,21 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             <div>
               <label className="block text-xs font-medium text-app-fg-muted mb-1">Target group</label>
               <SearchableSelect value={targetGroupId ?? ''} onChange={(v) => setTargetGroupId(v || null)} options={groupOptions} placeholder="Select group" searchPlaceholder="Search..." />
+            </div>
+          )}
+
+          {teams.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Target team (optional)</label>
+              <SearchableSelect
+                value={teamId ?? ''}
+                onChange={(v) => setTeamId(v || null)}
+                options={teams.map((t) => ({ value: t.id, label: t.name || 'Unnamed team' }))}
+                placeholder="Any closer in the branch"
+                searchPlaceholder="Search teams..."
+                clearable
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Auto-assign only to closers in this team.</p>
             </div>
           )}
 
