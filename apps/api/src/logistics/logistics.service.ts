@@ -2240,17 +2240,17 @@ export class LogisticsService {
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
       );
 
-    const sortColumnMap = {
-      sentAt: schema.deliveryRemittances.sentAt,
-      deliveredAt: schema.orders.deliveredAt,
-      totalAmount: schema.orders.totalAmount,
-      deliveryFee: schema.orders.deliveryFee,
-      orderNumber: schema.orders.orderNumber,
-    } as const;
-    const sortCol = input.sortBy ? sortColumnMap[input.sortBy as keyof typeof sortColumnMap] ?? schema.deliveryRemittances.sentAt : schema.deliveryRemittances.sentAt;
+    const sortExprMap: Record<string, SQL> = {
+      sentAt: sql`${schema.deliveryRemittances.sentAt}`,
+      deliveredAt: sql`${schema.orders.deliveredAt}`,
+      totalAmount: sql`COALESCE(${schema.orders.totalAmount}, 0)`,
+      deliveryFee: sql`COALESCE(${schema.orders.deliveryFee}, 0)`,
+      orderNumber: sql`${schema.orders.orderNumber}`,
+    };
+    const sortExpr = input.sortBy ? sortExprMap[input.sortBy] ?? sql`${schema.deliveryRemittances.sentAt}` : sql`${schema.deliveryRemittances.sentAt}`;
     // NULLS LAST so NULL delivery fees / amounts don't rank above real values
     const sortDirection = input.sortDir === 'asc' ? 'ASC' : 'DESC';
-    const orderClauses = [sql`${sortCol} ${sql.raw(sortDirection)} NULLS LAST`, desc(schema.orders.deliveredAt)];
+    const orderClauses = [sql`${sortExpr} ${sql.raw(sortDirection)} NULLS LAST`, desc(schema.orders.deliveredAt)];
 
     const [rows, totalRows] = await Promise.all([
       whereClause
