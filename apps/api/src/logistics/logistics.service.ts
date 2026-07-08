@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import {
   eq,
@@ -49,16 +49,20 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { OrdersService } from '../orders/orders.service';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
 @Injectable()
 export class LogisticsService {
+  private readonly logger = new Logger(LogisticsService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly notifications: NotificationsService,
     @Inject(forwardRef(() => OrdersService)) private readonly ordersService: OrdersService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {}
 
   /**
@@ -1539,6 +1543,19 @@ export class LogisticsService {
       return { remittance: row, orderRows, markReceivedNow, completedAmountTotal };
     });
 
+    // Phase 3 — when a remittance is created already RECEIVED, post its cash
+    // settlement to the ledger too (same non-fatal, idempotent contract).
+    if (result.markReceivedNow) {
+      try {
+        const posted = await this.generalLedger.postRemittanceSettlement(result.remittance.id, actor);
+        if (!posted.posted && posted.reason && posted.reason !== 'already-posted') {
+          this.logger.warn(`Remittance GL not posted for ${result.remittance.id}: ${posted.reason}`);
+        }
+      } catch (err) {
+        this.logger.warn(`Remittance GL posting for ${result.remittance.id} failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     // Note: per-order order:status_changed socket events are intentionally not
     // emitted here. The Finance page revalidates on its own action submit and
     // Order detail re-fetches on the next open. Adding socket fan-out is a
@@ -2240,17 +2257,17 @@ export class LogisticsService {
         eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
       );
 
-    const sortColumnMap = {
-      sentAt: schema.deliveryRemittances.sentAt,
-      deliveredAt: schema.orders.deliveredAt,
-      totalAmount: schema.orders.totalAmount,
-      deliveryFee: schema.orders.deliveryFee,
-      orderNumber: schema.orders.orderNumber,
-    } as const;
-    const sortCol = input.sortBy ? sortColumnMap[input.sortBy as keyof typeof sortColumnMap] ?? schema.deliveryRemittances.sentAt : schema.deliveryRemittances.sentAt;
+    const sortExprMap: Record<string, SQL> = {
+      sentAt: sql`${schema.deliveryRemittances.sentAt}`,
+      deliveredAt: sql`${schema.orders.deliveredAt}`,
+      totalAmount: sql`COALESCE(${schema.orders.totalAmount}, 0)`,
+      deliveryFee: sql`COALESCE(${schema.orders.deliveryFee}, 0)`,
+      orderNumber: sql`${schema.orders.orderNumber}`,
+    };
+    const sortExpr = input.sortBy ? sortExprMap[input.sortBy] ?? sql`${schema.deliveryRemittances.sentAt}` : sql`${schema.deliveryRemittances.sentAt}`;
     // NULLS LAST so NULL delivery fees / amounts don't rank above real values
     const sortDirection = input.sortDir === 'asc' ? 'ASC' : 'DESC';
-    const orderClauses = [sql`${sortCol} ${sql.raw(sortDirection)} NULLS LAST`, desc(schema.orders.deliveredAt)];
+    const orderClauses = [sql`${sortExpr} ${sql.raw(sortDirection)} NULLS LAST`, desc(schema.orders.deliveredAt)];
 
     const [rows, totalRows] = await Promise.all([
       whereClause
@@ -2591,6 +2608,18 @@ export class LogisticsService {
 
       return found;
     });
+
+    // Phase 3 — post the cash settlement to the general ledger (Dr Bank + fees /
+    // Cr Debtors per order), nets the AR raised at delivery. Non-fatal + idempotent:
+    // a ledger hiccup must never undo a confirmed remittance.
+    try {
+      const res = await this.generalLedger.postRemittanceSettlement(remittance.id, actor);
+      if (!res.posted && res.reason && res.reason !== 'already-posted') {
+        this.logger.warn(`Remittance GL not posted for ${remittance.id}: ${res.reason}`);
+      }
+    } catch (err) {
+      this.logger.warn(`Remittance GL posting for ${remittance.id} failed: ${err instanceof Error ? err.message : err}`);
+    }
 
     this.notifications
       .createForLocation(remittance.logisticsLocationId, {

@@ -34,6 +34,8 @@ export const logisticsLocations = pgTable('logistics_locations', {
   name: text('name').notNull(),
   address: text('address').notNull(),
   coordinates: text('coordinates'),
+  // Branch this location belongs to (added in migration 0041, later converted to uuid).
+  branchId: uuid('branch_id'),
   dispatchLocked: boolean('dispatch_locked').default(false).notNull(),
   /**
    * Optional WhatsApp group invite link used by the CS "Share to logistics company" flow.

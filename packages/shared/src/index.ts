@@ -17,6 +17,7 @@ export * from './marketing/form-field-order';
 export * from './storage/asset-storage';
 export * from './storage/object-storage';
 export { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from './marketing/default-form-accent';
+export * from './accounting/chart-of-accounts';
 export * from './orders/order-clipboard-summary';
 export * from './orders/customer-phone-display';
 export * from './orders/format-order-number';

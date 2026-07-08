@@ -44,6 +44,7 @@ import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { CsOrderRoutingService } from './cs-order-routing.service';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { CacheService } from '../common/cache/cache.service';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 
@@ -147,6 +148,7 @@ export class OrdersService {
     private readonly branchTeams: BranchTeamsService,
     private readonly cache: CacheService,
     private readonly csOrderRouting: CsOrderRoutingService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {}
 
   /** Per-order detail cache key used by `getById`. Kept here so the router-side
@@ -1442,6 +1444,32 @@ export class OrdersService {
         `[softDeleteDeliveredOrder] Stock reversal failed for order ${orderId}:`,
         err,
       );
+    }
+
+    // Reverse the ledger: undo the sale (AR + COGS) and any remittance settlement
+    // so a deleted delivered order leaves no phantom revenue/AR/cash. Non-fatal.
+    try {
+      const rem = await this.db
+        .select({ id: schema.deliveryRemittanceOrders.deliveryRemittanceId })
+        .from(schema.deliveryRemittanceOrders)
+        .where(eq(schema.deliveryRemittanceOrders.orderId, orderId));
+      for (const r of rem) {
+        const countRows = await this.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.deliveryRemittanceOrders)
+          .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id));
+        const n = countRows[0]?.n ?? 0;
+        if (n === 1) {
+          await this.generalLedger.reverseVoucher('PAYMENT', r.id, actor, 'delivered order deleted');
+        } else {
+          this.logger.warn(
+            `Deleted delivered order ${orderId} is on remittance ${r.id} covering ${n} orders — settlement JE not auto-reversed; manual finance adjustment required.`,
+          );
+        }
+      }
+      await this.generalLedger.reverseVoucher('SALES_INVOICE', orderId, actor, 'delivered order deleted');
+    } catch (err) {
+      this.logger.warn(`GL reversal on delivered-order delete for ${orderId} failed: ${err instanceof Error ? err.message : err}`);
     }
 
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
@@ -4025,6 +4053,9 @@ export class OrdersService {
     if (input.logisticsLocationId) {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
+    if (input.servicingBranchId) {
+      conditions.push(eq(schema.orders.servicingBranchId, input.servicingBranchId));
+    }
     if (input.fromCart) {
       // Recovered-from-cart filter — orders.cart_id back-link populated when
       // the order was created from an abandoned/converted cart. Index lives on
@@ -6136,6 +6167,10 @@ export class OrdersService {
     /** When true, also exclude cart-graduated orders (order_source='online').
      *  CS funnel passes true (cart orders have their own strip). */
     excludeCartGraduated?: boolean,
+    /** When true, only count offline orders (order_source='offline'). */
+    onlyOffline?: boolean,
+    /** Optional servicingBranchId filters to that servicing branch (for Logistics Orders page branch filter). */
+    servicingBranchId?: string,
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -6162,7 +6197,9 @@ export class OrdersService {
         sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
       );
     }
-    if (excludeOffline) {
+    if (onlyOffline) {
+      conditions.push(eq(schema.orders.orderSource, 'offline'));
+    } else if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
       // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus
       // cart-graduated orders ('online') so recovered carts count for the MB.
@@ -6174,6 +6211,7 @@ export class OrdersService {
       supervisorScope,
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
+    if (servicingBranchId) conditions.push(eq(schema.orders.servicingBranchId, servicingBranchId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
@@ -7947,17 +7985,16 @@ export class OrdersService {
       .from(schema.orderItems)
       .where(eq(schema.orderItems.orderId, updatedOrder.id));
 
-    // ── Retrack reconciliation ──────────────────────────────────────────────
-    // A backward transition out of DELIVERED must UNDO the delivery-time
-    // inventory deduction — otherwise the units stay depleted while the CONFIRMED
-    // case below layers a fresh RESERVATION on top (double-counted stock loss).
-    // The delivery reversal restores the on-hand count; the normal side-effect
-    // switch then re-establishes the reservation/allocation for the target state.
-    //
-    // REMITTED can only retrack one step to DELIVERED (state machine), which is a
-    // pure status flip — no cash-remittance reversal is performed here yet, so we
-    // intentionally do NOT reconcile financials on that hop. Guard against any
-    // future REMITTED→(below DELIVERED) path landing here silently.
+    // ── Retrack reconciliation (stock + ledger) ─────────────────────────────
+    // A backward transition out of DELIVERED / REMITTED must undo the effects
+    // posted on the way up, in two dimensions:
+    //   1. Inventory — restore the delivery-time FIFO deduction, else the units
+    //      stay depleted while the CONFIRMED case below layers a fresh
+    //      RESERVATION on top (double-counted stock loss).
+    //   2. General ledger — reverse the GL vouchers (append-only reversal,
+    //      idempotent, non-fatal): leaving DELIVERED undoes the sale (AR + COGS);
+    //      leaving REMITTED undoes the cash settlement. Order: undo payment
+    //      before sale.
     const LIFECYCLE_POS: Record<string, number> = {
       UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
       AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
@@ -7966,9 +8003,49 @@ export class OrdersService {
     const nextPos = LIFECYCLE_POS[newStatus] ?? -1;
     const isRetrackSideEffect = prevPos > nextPos && newStatus !== 'UNPROCESSED';
 
-    if (isRetrackSideEffect && previousOrder.status === 'DELIVERED') {
-      // Reverse the FIFO delivery deduction before the switch re-reserves stock.
-      await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+    if (isRetrackSideEffect) {
+      if (previousOrder.status === 'DELIVERED') {
+        // Reverse the FIFO delivery deduction before the switch re-reserves stock.
+        await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+      }
+      // GL reversals mirror the postings made on the way up.
+      if (prevPos >= 8 && nextPos < 8) {
+        // Leaving REMITTED — the settlement JE is posted per-remittance-batch and
+        // may cover many orders, so we can't cleanly reverse one order's slice by
+        // voucher. Only auto-reverse when this order is the SOLE order on its
+        // remittance; otherwise flag for manual finance adjustment (log) rather
+        // than wrongly reversing the whole batch.
+        try {
+          const rem = await this.db
+            .select({ id: schema.deliveryRemittanceOrders.deliveryRemittanceId })
+            .from(schema.deliveryRemittanceOrders)
+            .where(eq(schema.deliveryRemittanceOrders.orderId, updatedOrder.id));
+          for (const r of rem) {
+            const countRows = await this.db
+              .select({ n: sql<number>`count(*)::int` })
+              .from(schema.deliveryRemittanceOrders)
+              .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id));
+            const n = countRows[0]?.n ?? 0;
+            if (n === 1) {
+              await this.generalLedger.reverseVoucher('PAYMENT', r.id, actor, 'order retracted out of REMITTED');
+            } else {
+              this.logger.warn(
+                `Order ${updatedOrder.id} retracted out of REMITTED but its remittance ${r.id} covers ${n} orders — settlement JE not auto-reversed; manual finance adjustment required.`,
+              );
+            }
+          }
+        } catch (err) {
+          this.logger.warn(`GL payment reversal on retract for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      if (prevPos >= 7 && nextPos < 7) {
+        // Leaving DELIVERED — reverse the sale (AR + COGS).
+        try {
+          await this.generalLedger.reverseVoucher('SALES_INVOICE', updatedOrder.id, actor, 'order retracted out of DELIVERED');
+        } catch (err) {
+          this.logger.warn(`GL sales reversal on retract for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
+        }
+      }
     }
 
     switch (newStatus) {
@@ -8102,6 +8179,17 @@ export class OrdersService {
           await this.autoCreateInvoiceForOrder(updatedOrder.id, actor, updatedOrder);
         } catch (err) {
           this.logger.warn(`Auto-invoice backfill on DELIVERED for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
+        }
+        // Phase 2 — post the sale to the general ledger (Dr Debtors / Cr Sale +
+        // Dr COGS / Cr Stock In Hand). Non-fatal: a missing account or fiscal year
+        // must never block a delivery. Idempotent per order.
+        try {
+          const res = await this.generalLedger.postSalesInvoice(updatedOrder.id, actor);
+          if (!res.posted && res.reason && res.reason !== 'already-posted') {
+            this.logger.warn(`Sales GL not posted for order ${updatedOrder.id}: ${res.reason}`);
+          }
+        } catch (err) {
+          this.logger.warn(`Sales GL posting on DELIVERED for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
         }
         break;
       }

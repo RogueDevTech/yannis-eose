@@ -82,9 +82,11 @@ interface LogisticsOrdersPageProps {
   statusFilter?: string;
   searchFilter?: string;
   locationFilter?: string;
+  branchFilter?: string;
   listErrorMessage?: string;
   /** Omitted when `deferredSecondary` is used. */
   locations?: Location[];
+  branches?: Array<{ id: string; name: string }>;
   /** Stream counts + locations (+ optional riders / TPL allocatable list) after `orders.list`. */
   deferredSecondary?: Promise<LogisticsOrdersDeferredSecondary>;
   /** When provided (e.g. TPL), only these locations in allocate dropdown; else locations where !dispatchLocked */
@@ -189,8 +191,10 @@ function LogisticsOrdersPageImpl({
   statusFilter,
   searchFilter,
   locationFilter: locationFilterProp,
+  branchFilter: branchFilterProp,
   listErrorMessage,
   locations: locationsProp,
+  branches: branchesProp,
   allocatableLocations: allocatableLocationsProp,
   riders,
   filters,
@@ -207,6 +211,7 @@ function LogisticsOrdersPageImpl({
 }: LogisticsOrdersPageProps & { deferredLoading?: boolean }) {
   const statusCounts = statusCountsProp ?? {};
   const locations = locationsProp ?? [];
+  const branches = branchesProp ?? [];
 
   const displayOrders = useMemo((): LogisticsOrderRow[] => {
     const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
@@ -236,6 +241,7 @@ function LogisticsOrdersPageImpl({
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedLocation, setSelectedLocation] = useState(locationFilterProp || '');
+  const [selectedBranch, setSelectedBranch] = useState(branchFilterProp || '');
 
   const handleLocationChange = (locationId: string) => {
     setSelectedLocation(locationId);
@@ -244,6 +250,17 @@ function LogisticsOrdersPageImpl({
       next.set('page', '1');
       if (locationId) next.set('location', locationId);
       else next.delete('location');
+      return next;
+    });
+  };
+
+  const handleBranchChange = (branchId: string) => {
+    setSelectedBranch(branchId);
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (branchId) next.set('branch', branchId);
+      else next.delete('branch');
       return next;
     });
   };
@@ -374,8 +391,8 @@ function LogisticsOrdersPageImpl({
   };
 
   const logisticsOrdersToolbarFilterBadge = useMemo(
-    () => (selectedStatus !== 'ALL' ? 1 : 0) + (selectedLocation ? 1 : 0),
-    [selectedStatus, selectedLocation],
+    () => (selectedStatus !== 'ALL' ? 1 : 0) + (selectedLocation ? 1 : 0) + (selectedBranch ? 1 : 0),
+    [selectedStatus, selectedLocation, selectedBranch],
   );
 
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
@@ -698,6 +715,31 @@ function LogisticsOrdersPageImpl({
                       </div>
                     </div>
                   )}
+                  {branches.length > 0 && (
+                    <div className="relative w-full">
+                      {!!selectedBranch && (
+                        <FilterDismiss onClear={() => handleBranchChange('')} />
+                      )}
+                      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                        <SearchableSelect
+                          id="logistics-branch-filter-mobile"
+                          value={selectedBranch}
+                          onChange={handleBranchChange}
+                          options={[
+                            { value: '', label: 'All branches' },
+                            ...branches.map((b) => ({
+                              value: b.id,
+                              label: b.name,
+                            })),
+                          ]}
+                          triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
+                          wrapperClassName="w-full"
+                          placeholder="All branches"
+                          searchPlaceholder="Search branches..."
+                        />
+                      </div>
+                    </div>
+                  )}
                 </>
               }
               sheet={({ closeSheet }) => (
@@ -940,6 +982,28 @@ function LogisticsOrdersPageImpl({
                     wrapperClassName="w-full min-w-0 sm:w-48"
                   />
                 </div>
+                {branches.length > 0 && (
+                  <div className="relative w-full min-w-0 sm:w-48">
+                    {!!selectedBranch && (
+                      <FilterDismiss onClear={() => handleBranchChange('')} />
+                    )}
+                    <SearchableSelect
+                      id="logistics-branch-filter-desktop"
+                      value={selectedBranch}
+                      onChange={handleBranchChange}
+                      options={[
+                        { value: '', label: 'All branches' },
+                        ...branches.map((b) => ({
+                          value: b.id,
+                          label: b.name,
+                        })),
+                      ]}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches..."
+                      wrapperClassName="w-full min-w-0 sm:w-48"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           }

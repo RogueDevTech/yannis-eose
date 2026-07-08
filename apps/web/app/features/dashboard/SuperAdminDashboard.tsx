@@ -158,6 +158,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     offlineCount: data?.orderPipeline?.offlineCount ?? 0,
     offlineDeliveredCount: (data?.orderPipeline as Record<string, number> | undefined)?.offlineDeliveredCount ?? 0,
     csStatusCounts: (data?.orderPipeline as Record<string, unknown> | undefined)?.csStatusCounts as Record<string, number> ?? {},
+    offlineStatusCounts: (data?.orderPipeline as Record<string, unknown> | undefined)?.offlineStatusCounts as Record<string, number> ?? {},
     totalOrdersCounts: (data as unknown as Record<string, unknown> | undefined)?.totalOrdersCounts as Record<string, number> ?? {},
   };
   // Deliveries per Brand + Stock Available per Product removed 2026-05-19 per
@@ -413,7 +414,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             </div>
             {(() => {
               const csSc = orderPipeline.csStatusCounts;
-              const csTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
+              const csRawTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
+              // Exclude offline orders from the CS funnel — they have their own strip below.
+              const csTotal = csRawTotal - offlineCount;
               const csUnassigned = csSc['UNPROCESSED'] ?? 0;
               const csAssigned = csSc['CS_ASSIGNED'] ?? 0;
               const csUnconfirmed = csSc['CS_ENGAGED'] ?? 0;
@@ -476,13 +479,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         label: 'CR',
                         value: pct(csCR),
                         valueClassName: confirmationRateColorClass(csCR),
-                        title: 'Confirmation Rate — confirmed-or-beyond / total (includes offline)',
+                        title: 'Confirmation Rate — confirmed-or-beyond / total (excludes offline)',
                       },
                       {
                         label: 'DR',
                         value: pct(csDR),
                         valueClassName: deliveryRateColorClass(csDR),
-                        title: 'Delivery Rate — delivered / total (includes offline)',
+                        title: 'Delivery Rate — delivered / total (excludes offline)',
                       },
                       {
                         label: 'Deleted',
@@ -490,55 +493,108 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         valueClassName: 'text-danger-600 dark:text-danger-400',
                         to: salesLink({ status: 'DELETED' }),
                       },
-                      {
-                        label: <span className="flex items-center">Offline<FunnelInfoIcon onClick={() => setBreakdownModal('offline')} /></span>,
-                        value: offlineCount,
-                        valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
-                        title: 'Orders created manually via offline order',
-                        to: salesLink({ orderSource: 'offline' }),
-                      },
                     ]}
                   />
                   <FunnelBreakdownModal
                     open={breakdownModal === 'csTotal'}
                     onClose={() => setBreakdownModal(null)}
                     title="CS Total: Breakdown"
-                    description="Form orders + offline orders. Excludes graduated follow-up and cart orders (they have their own strips)."
+                    description="Form orders only. Excludes offline, graduated follow-up, and cart orders (they have their own strips)."
                     lines={[
-                      { label: 'Form orders', value: csTotal - offlineCount },
-                      { label: 'Offline orders', value: offlineCount, muted: true },
-                      { label: 'CS Total', value: csTotal, bold: true },
+                      { label: 'Form orders', value: csTotal },
                     ]}
                   />
-                  {(() => {
-                    const offDel = orderPipeline.offlineDeliveredCount ?? 0;
-                    const mktDel = csDelivered - offDel;
-                    return (
-                      <>
-                      <FunnelBreakdownModal
-                        open={breakdownModal === 'csDelivered'}
-                        onClose={() => setBreakdownModal(null)}
-                        title="CS Delivered: Breakdown"
-                        description="Marketing orders delivered + offline orders delivered from the CS pipeline."
-                        lines={[
-                          { label: 'Marketing orders delivered', value: mktDel },
-                          { label: 'Offline orders delivered', value: offDel, muted: true },
-                          { label: 'CS Delivered', value: csDelivered, bold: true },
-                        ]}
-                      />
-                      <FunnelBreakdownModal
-                        open={breakdownModal === 'offline'}
-                        onClose={() => setBreakdownModal(null)}
-                        title="Offline Orders: Breakdown"
-                        description="Offline orders created vs delivered in this period."
-                        lines={[
-                          { label: 'Offline created', value: offlineCount },
-                          { label: 'Offline delivered', value: offDel },
-                        ]}
-                      />
-                      </>
-                    );
-                  })()}
+                </div>
+              );
+            })()}
+
+            {/* ── Offline Orders ── */}
+            {(() => {
+              const offSc = orderPipeline.offlineStatusCounts ?? {};
+              const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
+              const offUnassigned = offSc['UNPROCESSED'] ?? 0;
+              const offAssigned = offSc['CS_ASSIGNED'] ?? 0;
+              const offUnconfirmed = offSc['CS_ENGAGED'] ?? 0;
+              const offConfirmed =
+                (offSc['CONFIRMED'] ?? 0) +
+                (offSc['AGENT_ASSIGNED'] ?? 0) +
+                (offSc['DISPATCHED'] ?? 0) +
+                (offSc['IN_TRANSIT'] ?? 0);
+              const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+              const offDeleted = offSc['DELETED'] ?? 0;
+              const offConfirmedAndBeyond = offConfirmed + offDelivered;
+              const offCR = offTotal > 0 ? (offConfirmedAndBeyond / offTotal) * 100 : 0;
+              const offDR = offTotal > 0 ? (offDelivered / offTotal) * 100 : 0;
+              const offlineLink = (params?: Record<string, string>) => {
+                const base = '/admin/sales/offline-orders';
+                if (!params) return buildLink(base);
+                return buildLink(base, params);
+              };
+              return (
+                <div>
+                  <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                    Offline Orders
+                  </h2>
+                  <OverviewStatStrip
+                    mobileGrid
+                    tileClassName="!py-2.5"
+                    items={[
+                      {
+                        label: 'Total',
+                        value: offTotal,
+                        valueClassName: 'text-app-fg',
+                        to: offlineLink(),
+                      },
+                      {
+                        label: 'Unassigned',
+                        value: offUnassigned,
+                        valueClassName: offUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                        to: offlineLink({ status: 'UNPROCESSED' }),
+                      },
+                      {
+                        label: 'Assigned',
+                        value: offAssigned,
+                        valueClassName: 'text-info-600 dark:text-info-400',
+                        to: offlineLink({ status: 'CS_ASSIGNED' }),
+                      },
+                      {
+                        label: 'Unconfirmed',
+                        value: offUnconfirmed,
+                        valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                        to: offlineLink({ status: 'CS_ENGAGED' }),
+                      },
+                      {
+                        label: 'Confirmed',
+                        value: offConfirmed,
+                        valueClassName: 'text-brand-600 dark:text-brand-400',
+                        to: offlineLink({ status: 'CONFIRMED' }),
+                      },
+                      {
+                        label: 'Delivered',
+                        value: offDelivered,
+                        valueClassName: 'text-success-600 dark:text-success-400',
+                        to: offlineLink({ status: 'DELIVERED' }),
+                      },
+                      {
+                        label: 'CR',
+                        value: pct(offCR),
+                        valueClassName: confirmationRateColorClass(offCR),
+                        title: 'Confirmation Rate — confirmed-or-beyond / total',
+                      },
+                      {
+                        label: 'DR',
+                        value: pct(offDR),
+                        valueClassName: deliveryRateColorClass(offDR),
+                        title: 'Delivery Rate — delivered / total',
+                      },
+                      {
+                        label: 'Deleted',
+                        value: offDeleted,
+                        valueClassName: 'text-danger-600 dark:text-danger-400',
+                        to: offlineLink({ status: 'DELETED' }),
+                      },
+                    ]}
+                  />
                 </div>
               );
             })()}

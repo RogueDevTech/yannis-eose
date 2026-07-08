@@ -435,3 +435,62 @@ export const shipmentStatusEnum = pgEnum('shipment_status', [
   'CLOSED',
   'CANCELLED',
 ]);
+
+// ============================================
+// Double-Entry General Ledger (Phase 1)
+// ============================================
+
+/** The 5 accounting roots. Every account rolls up to exactly one. */
+export const glRootTypeEnum = pgEnum('gl_root_type', [
+  'ASSET',
+  'LIABILITY',
+  'EQUITY',
+  'INCOME',
+  'EXPENSE',
+]);
+
+/**
+ * Semantic account tag (mirrors ERPNext `account_type`). Drives posting logic
+ * in later phases (which account is the Bank, the Receivable, COGS, etc.).
+ * Nullable on group/root accounts. Superset so Phase 2 needn't touch enums.
+ */
+export const glAccountTypeEnum = pgEnum('gl_account_type', [
+  'BANK',
+  'CASH',
+  'RECEIVABLE',
+  'PAYABLE',
+  'STOCK',
+  'COST_OF_GOODS_SOLD',
+  'TAX',
+  'FIXED_ASSET',
+  'INDIRECT_EXPENSE',
+  'INDIRECT_INCOME',
+  'DIRECT_INCOME',
+  'EQUITY',
+  'ROUND_OFF',
+  'TEMPORARY',
+  'DEPRECIATION',
+  'EXPENSE_ACCOUNT',
+  'CHARGEABLE',
+  'STOCK_RECEIVED_BUT_NOT_BILLED',
+]);
+
+/** What kind of voucher produced a GL entry. */
+export const glVoucherTypeEnum = pgEnum('gl_voucher_type', [
+  'JOURNAL_ENTRY',
+  'SALES_INVOICE',
+  'PAYMENT',
+  'PURCHASE_RECEIPT',
+]);
+
+/** Journal entry lifecycle. Post-only in Phase 1 (no DRAFT). */
+export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
+  'POSTED',
+  'CANCELLED',
+]);
+
+/** Fiscal year state. CLOSED = period locked (no postings). */
+export const fiscalYearStatusEnum = pgEnum('fiscal_year_status', [
+  'OPEN',
+  'CLOSED',
+]);

@@ -934,7 +934,7 @@ export function DeliveryRemittancesPage({
               mobileGrid
               items={[
                 {
-                  label: <span className="flex items-center">Awaiting ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
+                  label: <span className="flex items-center">Awaiting · All time ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
                   value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
                   valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
                   title: 'Not yet on any remittance batch',

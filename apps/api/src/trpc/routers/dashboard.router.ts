@@ -65,6 +65,7 @@ async function _ceoOverviewFetch(params: {
     statusCountsWhenDated,
     csStatusCountsResult,
     supplementaryCounts,
+    offlineStatusCountsResult,
     invoiceSummary,
     marketingMetrics,
     payoutSummary,
@@ -80,10 +81,11 @@ async function _ceoOverviewFetch(params: {
     (hasDateRange || isBranchScoped)
       ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, true, true).catch(logErr('statusCounts'))
       : Promise.resolve(undefined),
-    // CS funnel: servicing branch scope, includes offline orders, excludes
-    // graduated follow-up and cart orders (they have their own funnels).
+    // CS funnel: servicing branch scope, excludes offline + graduated follow-up + cart orders.
     ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, true, true).catch(logErr('csStatusCounts')),
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
+    // Offline orders — separate funnel on dashboard.
+    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, false, false, true).catch(logErr('offlineStatusCounts')),
     financeService!.getInvoiceSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('payoutSummary')),
@@ -205,8 +207,10 @@ async function _ceoOverviewFetch(params: {
       statusCounts,
       offlineCount: supplementaryCounts.offlineCount,
       offlineDeliveredCount: supplementaryCounts.offlineDeliveredCount,
-      // CS funnel: includes offline orders, scoped by servicing branch
+      // CS funnel: excludes offline, scoped by servicing branch
       csStatusCounts: (csStatusCountsResult ?? {}) as Record<string, number>,
+      // Offline orders — separate funnel
+      offlineStatusCounts: (offlineStatusCountsResult ?? {}) as Record<string, number>,
     },
     marketing: {
       totalSpend: safeMarketingMetrics.totalSpend ?? 0,

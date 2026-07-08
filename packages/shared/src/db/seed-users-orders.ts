@@ -203,7 +203,7 @@ async function main() {
   for (const u of USERS) {
     const existing = await sql`SELECT id FROM users WHERE email = ${u.email} LIMIT 1`;
     if (existing.length > 0) {
-      u.id = existing[0].id;
+      u.id = existing[0]!.id;
       await sql`
         UPDATE users SET name = ${u.name}, role = ${u.role}, password_hash = ${passwordHash}, status = 'ACTIVE'
         WHERE id = ${u.id}
@@ -236,7 +236,7 @@ async function main() {
   for (const p of PRODUCTS) {
     const existing = await sql`SELECT id FROM products WHERE name = ${p.name} LIMIT 1`;
     if (existing.length > 0) {
-      p.id = existing[0].id;
+      p.id = existing[0]!.id;
     } else {
       await sql`
         INSERT INTO products (id, name, base_sale_price, cost_price, category, status)
@@ -249,7 +249,7 @@ async function main() {
   // 4. Seed campaign
   const mb = byRole('MEDIA_BUYER');
   const existingCampaign = await sql`SELECT id FROM campaigns WHERE name = 'Lagos Health Campaign' LIMIT 1`;
-  const campaignId = existingCampaign.length > 0 ? existingCampaign[0].id : CAMPAIGN_ID;
+  const campaignId = existingCampaign.length > 0 ? existingCampaign[0]!.id : CAMPAIGN_ID;
   if (existingCampaign.length === 0) {
     await sql`
       INSERT INTO campaigns (id, media_buyer_id, name, product_ids, status, branch_id, deployment_type)
@@ -264,14 +264,13 @@ async function main() {
 
   // 5. Seed orders
   const closer = byRole('CS_CLOSER');
-  const hocs = byRole('HEAD_OF_CS');
   const now = new Date();
   let created = 0;
 
   for (let i = 0; i < ORDER_STATUSES.length; i++) {
-    const status = ORDER_STATUSES[i];
-    const customer = CUSTOMERS[i];
-    const product = PRODUCTS[i % PRODUCTS.length];
+    const status = ORDER_STATUSES[i]!;
+    const customer = CUSTOMERS[i]!;
+    const product = PRODUCTS[i % PRODUCTS.length]!;
     const orderId = uuidv7();
     const phoneHash = hashPhone(customer.phone);
 
@@ -349,9 +348,6 @@ async function main() {
   const [mktDept] = await sql`SELECT id FROM branch_departments WHERE branch_id = ${BRANCH_ID} AND department = 'MARKETING' LIMIT 1`;
 
   // 6b. Create teams
-  const allClosers = USERS.filter((u) => u.role === 'CS_CLOSER');
-  const allMBs = USERS.filter((u) => u.role === 'MEDIA_BUYER');
-
   // CS Team Alpha (supervisor: closer2 — Ebenezzar) + CS Team Beta (supervisor: closer5 — Mercy)
   const csTeams = [
     { name: 'CS Team Alpha', supervisorEmail: 'closer2@yannis.dev', memberEmails: ['closer@yannis.dev', 'closer3@yannis.dev', 'closer4@yannis.dev', 'closer10@yannis.dev', 'closer11@yannis.dev', 'closer12@yannis.dev', 'closer13@yannis.dev'] },
@@ -379,7 +375,7 @@ async function main() {
       SELECT id FROM branch_teams WHERE branch_id = ${BRANCH_ID} AND department = ${department} AND name = ${teamName} LIMIT 1
     `;
     if (existingTeam.length > 0) {
-      teamId = existingTeam[0].id;
+      teamId = existingTeam[0]!.id;
     } else {
       teamId = uuidv7();
       await sql`
@@ -421,11 +417,11 @@ async function main() {
 
   const seededCsTeams = [];
   for (const t of csTeams) {
-    const result = await seedTeam(t.name, 'CS', csDept.id, t.supervisorEmail, t.memberEmails);
+    const result = await seedTeam(t.name, 'CS', csDept!.id, t.supervisorEmail, t.memberEmails);
     seededCsTeams.push(result);
   }
   for (const t of mktTeams) {
-    await seedTeam(t.name, 'MARKETING', mktDept.id, t.supervisorEmail, t.memberEmails);
+    await seedTeam(t.name, 'MARKETING', mktDept!.id, t.supervisorEmail, t.memberEmails);
   }
   console.log('  Teams: 2 CS + 2 Marketing teams seeded with supervisors');
 
@@ -462,8 +458,8 @@ async function main() {
   const nextCustomer = () => EXTRA_CUSTOMERS[extraCustIdx++ % EXTRA_CUSTOMERS.length];
 
   async function seedOrderForUser(csId: string, mbId: string, status: string, offsetHours: number) {
-    const customer = nextCustomer();
-    const product = PRODUCTS[extraCustIdx % PRODUCTS.length];
+    const customer = nextCustomer()!;
+    const product = PRODUCTS[extraCustIdx % PRODUCTS.length]!;
     const orderId = uuidv7();
     const phoneHash = hashPhone(customer.phone);
     const createdAt = new Date(now.getTime() - offsetHours * 60 * 60 * 1000);
@@ -507,12 +503,12 @@ async function main() {
   for (const csTeam of seededCsTeams) {
     // 5 orders for the supervisor
     for (let i = 0; i < TEAM_ORDER_STATUSES.length; i++) {
-      await seedOrderForUser(csTeam.supervisor.id, mb.id, TEAM_ORDER_STATUSES[i], 10 + i * 6);
+      await seedOrderForUser(csTeam.supervisor.id, mb.id, TEAM_ORDER_STATUSES[i]!, 10 + i * 6);
     }
     // 3 orders for each team member
     for (const memberId of csTeam.memberIds) {
       for (let i = 0; i < MEMBER_ORDER_STATUSES.length; i++) {
-        await seedOrderForUser(memberId, mb.id, MEMBER_ORDER_STATUSES[i], 20 + i * 8);
+        await seedOrderForUser(memberId, mb.id, MEMBER_ORDER_STATUSES[i]!, 20 + i * 8);
       }
     }
   }
