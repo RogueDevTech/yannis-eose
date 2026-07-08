@@ -1391,6 +1391,8 @@ export const ordersRouter = router({
         // Cart abandonment moved to Follow-Up page only (CEO 2026-06-09).
         // Kept for backward compat with cached clients — always ignored now.
         includeCartAbandonment: z.boolean().optional().default(false),
+        /** When set, scope status counts to this order source only. */
+        orderSource: z.enum(['offline', 'edge-form']).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -1457,9 +1459,10 @@ export const ordersRouter = router({
           bundleBranchScope,
           ctx.effectiveBranchIds,
           false, // exclude follow-up orders — matches orders.list default
-          undefined,
+          input.orderSource === 'edge-form' ? true : undefined, // excludeOffline for edge-form
           true, // exclude graduated follow-up orders from funnel counts
           bundleBranchScope === 'servicing', // CS also excludes cart-graduated (own strip)
+          input.orderSource === 'offline' ? true : undefined, // onlyOffline
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(

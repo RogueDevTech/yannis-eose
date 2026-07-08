@@ -8,6 +8,7 @@ import { inventoryRouter } from './inventory.router';
 import { logisticsRouter } from './logistics.router';
 import { marketingRouter } from './marketing.router';
 import { financeRouter } from './finance.router';
+import { generalLedgerRouter } from './general-ledger.router';
 import { hrRouter } from './hr.router';
 import { notificationsRouter } from './notifications.router';
 import { auditRouter } from './audit.router';
@@ -39,6 +40,7 @@ export const appRouter = router({
   logistics: logisticsRouter,
   marketing: marketingRouter,
   finance: financeRouter,
+  generalLedger: generalLedgerRouter,
   hr: hrRouter,
   notifications: notificationsRouter,
   audit: auditRouter,

@@ -8,6 +8,11 @@ declare module '@remix-run/node' {
   }
 }
 
+// Dev proxy target for /trpc and /socket.io. Honors API_URL so the whole stack
+// (SSR loaders + browser proxy) can be pointed at a non-default API port with a
+// single env var, e.g. when another checkout already occupies 4444.
+const DEV_API_TARGET = process.env['API_URL']?.trim() || 'http://127.0.0.1:4444';
+
 export default defineConfig({
   ssr: {
     noExternal: ['@remix-run/react'],
@@ -37,13 +42,13 @@ export default defineConfig({
       // Remix loaders run in Node and call API_URL; default in dev is this dev server so cookies + host line up.
       // Forward /trpc to Nest so permissions.listCatalog and other procedures work without a manual API_URL.
       '/trpc': {
-        target: 'http://127.0.0.1:4444',
+        target: DEV_API_TARGET,
         changeOrigin: true,
       },
       // Do NOT proxy `/auth` — browser navigations to `/auth` must hit Remix. SSR posts to `/auth/*`
       // use api.server `resolveServerApiBase` (direct :4444 in dev).
       '/socket.io': {
-        target: 'http://127.0.0.1:4444',
+        target: DEV_API_TARGET,
         ws: true,
         changeOrigin: true,
       },

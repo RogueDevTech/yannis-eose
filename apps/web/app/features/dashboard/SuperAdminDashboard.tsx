@@ -414,7 +414,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             </div>
             {(() => {
               const csSc = orderPipeline.csStatusCounts;
-              const csTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
+              const csRawTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
+              // Exclude offline orders from the CS funnel — they have their own strip below.
+              const csTotal = csRawTotal - offlineCount;
               const csUnassigned = csSc['UNPROCESSED'] ?? 0;
               const csAssigned = csSc['CS_ASSIGNED'] ?? 0;
               const csUnconfirmed = csSc['CS_ENGAGED'] ?? 0;
@@ -477,13 +479,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         label: 'CR',
                         value: pct(csCR),
                         valueClassName: confirmationRateColorClass(csCR),
-                        title: 'Confirmation Rate — confirmed-or-beyond / total (includes offline)',
+                        title: 'Confirmation Rate — confirmed-or-beyond / total (excludes offline)',
                       },
                       {
                         label: 'DR',
                         value: pct(csDR),
                         valueClassName: deliveryRateColorClass(csDR),
-                        title: 'Delivery Rate — delivered / total (includes offline)',
+                        title: 'Delivery Rate — delivered / total (excludes offline)',
                       },
                       {
                         label: 'Deleted',

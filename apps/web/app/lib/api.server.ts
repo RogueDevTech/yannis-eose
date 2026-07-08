@@ -752,6 +752,27 @@ export async function requireOnboardingHrPagesAccess(request: Request): Promise<
  * Require auth; allow specific roles without permission, others need one of the permissions.
  * Use for routes where Super Admin and Head of Marketing should always have access.
  */
+/**
+ * True when the Accounting (double-entry ledger) section is enabled for this
+ * environment. Gated behind `ENABLE_ACCOUNTING=true` so the still-in-test ledger
+ * ships dark to prod. Defaults OFF — must be explicitly turned on (dev `.env`).
+ */
+export function isAccountingEnabled(): boolean {
+  return process.env.ENABLE_ACCOUNTING === 'true';
+}
+
+/**
+ * Route guard for the Accounting section. Call at the top of every accounting
+ * loader/action. When the flag is off, throws a 404 so the pages are not merely
+ * hidden from the nav but genuinely unreachable by URL in prod (defense in
+ * depth — a hidden nav link is not access control).
+ */
+export function requireAccountingEnabled(): void {
+  if (!isAccountingEnabled()) {
+    throw new Response('Not Found', { status: 404 });
+  }
+}
+
 export async function requirePermissionOrRoles(
   request: Request,
   options: {

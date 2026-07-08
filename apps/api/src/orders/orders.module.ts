@@ -11,6 +11,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { BranchesModule } from '../branches/branches.module';
 import { CacheModule } from '../common/cache/cache.module';
+import { LedgerModule } from '../finance/ledger.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CacheModule } from '../common/cache/cache.module';
     InventoryModule,
     BranchesModule,
     CacheModule,
+    LedgerModule,
     forwardRef(() => PaymentsModule),
   ],
   providers: [OrdersService, CsOrderRoutingService, TestOrderPurgeService, FollowUpConfigService],

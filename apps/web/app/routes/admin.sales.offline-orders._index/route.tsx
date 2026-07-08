@@ -272,6 +272,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isCSCloser,
         showCSCloserColumn,
         canCreateOffline,
+        orderSource: 'offline',
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -697,6 +698,8 @@ export default function OfflineOrdersRoute() {
               ? ['REMITTED', 'DELETED', 'UNPROCESSED']
               : ['REMITTED', 'DELETED']
           }
+          hideOfflineAndCartStats
+          canImportOrders={false}
         />
       )}
     </CachedAwait>

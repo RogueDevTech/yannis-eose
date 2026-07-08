@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -20,6 +20,7 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel } from '../common/authz';
 import { canonicalPermissionCode } from '@yannis/shared';
 import { InventoryService } from './inventory.service';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 
 type ShipmentLineReceipt = VerifyShipmentInput['lines'][number];
 
@@ -38,10 +39,13 @@ type ShipmentLineReceipt = VerifyShipmentInput['lines'][number];
  */
 @Injectable()
 export class ShipmentsService {
+  private readonly logger = new Logger(ShipmentsService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
     private readonly inventory: InventoryService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {}
 
   // ============================================================
@@ -1009,6 +1013,18 @@ export class ShipmentsService {
     this.events.emitToRoom('inventory', 'stock:updated', { shipmentId: input.shipmentId });
     for (const tl of result.touchedLevels) {
       this.inventory.scheduleLowStockCheck(tl.productId, tl.locationId);
+    }
+
+    // Phase 4 — capitalise the stock intake to the ledger (Dr Stock In Hand /
+    // Cr Creditors). Non-fatal + idempotent: a ledger issue must never undo a
+    // verified receipt.
+    try {
+      const posted = await this.generalLedger.postPurchaseReceipt(input.shipmentId, actor);
+      if (!posted.posted && posted.reason && posted.reason !== 'already-posted') {
+        this.logger.warn(`Purchase GL not posted for shipment ${input.shipmentId}: ${posted.reason}`);
+      }
+    } catch (err) {
+      this.logger.warn(`Purchase GL posting for shipment ${input.shipmentId} failed: ${err instanceof Error ? err.message : err}`);
     }
 
     return { success: true };

@@ -185,8 +185,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
   const testOrders = testOrdersParam && canFilterTestOrders;
 
-  const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | null;
-  const orderSource = orderSourceParam === 'offline' ? 'offline' : undefined;
+  // Default to edge-form orders only — offline orders have their own page.
+  // Allow ?orderSource=offline to still work for direct links/backwards compat.
+  const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
+  const orderSource = orderSourceParam === 'offline' ? 'offline' : 'edge-form';
 
   const productIdParam = url.searchParams.get('productId') || undefined;
   const frozenParam = url.searchParams.get('frozen') || undefined;
@@ -382,6 +384,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isCSCloser,
         showCSCloserColumn,
         canCreateOffline,
+        orderSource: 'edge-form',
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -889,6 +892,8 @@ export default function CSOrdersRoute() {
               : ['REMITTED', 'DELETED']
           }
           enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT'}
+          hideOfflineAndCartStats
+          canCreateOffline={false}
         />
       )}
     </CachedAwait>
