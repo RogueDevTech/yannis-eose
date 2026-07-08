@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from '@remix-run/react';
+import { Link, useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
@@ -10,6 +10,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { FilterPills } from '~/components/ui/filter-pills';
+import { FormSelect } from '~/components/ui/form-select';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
@@ -51,7 +52,10 @@ export function DashboardPage({
   isMarketingTeamSupervisor = false,
   isCsTeamSupervisor = false,
 }: DashboardPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const firstName = userName?.split(' ')[0] ?? 'User';
+  const teamsForFilter = data.teamsForFilter ?? [];
+  const hasTeamFilter = teamsForFilter.length > 1;
   const isKnownRole = role && KNOWN_ROLES.includes(role as (typeof KNOWN_ROLES)[number]);
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const naira = (amount: number, opts?: Parameters<typeof formatNaira>[1]) => formatNaira(amount, opts);
@@ -80,8 +84,44 @@ export function DashboardPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime ?? false} chrome="pill" />
+                {hasTeamFilter && (
+                  <FormSelect
+                    value={searchParams.get('teamId') || ''}
+                    onChange={(e) => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        if (e.target.value) next.set('teamId', e.target.value);
+                        else next.delete('teamId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: '', label: 'All teams' },
+                      ...teamsForFilter.map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
+                    ]}
+                    wrapperClassName="w-44"
+                  />
+                )}
               </>
             }
+            sheet={hasTeamFilter ? (
+              <FormSelect
+                value={searchParams.get('teamId') || ''}
+                onChange={(e) => {
+                  setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    if (e.target.value) next.set('teamId', e.target.value);
+                    else next.delete('teamId');
+                    return next;
+                  });
+                }}
+                options={[
+                  { value: '', label: 'All teams' },
+                  ...teamsForFilter.map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
+                ]}
+                wrapperClassName="w-full"
+              />
+            ) : undefined}
           />
         }
       />

@@ -146,6 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (scheduleKind === 'delivery_on_day' && !!scheduleDate) ||
     (scheduleKind === 'callback_on_day' && !!scheduleDate);
 
+  const teamIdParam = url.searchParams.get('teamId') || undefined;
   const productIdParam = url.searchParams.get('productId') || undefined;
   const frozenParam = url.searchParams.get('frozen') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
@@ -175,6 +176,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(productIdParam && { productId: productIdParam }),
     ...(frozenParam === 'frozen' || frozenParam === 'active' ? { frozenFilter: frozenParam } : {}),
     orderSource,
+    ...(teamIdParam && { teamId: teamIdParam }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -273,6 +275,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         showCSCloserColumn,
         canCreateOffline,
         orderSource: 'offline',
+        ...(teamIdParam && { teamId: teamIdParam }),
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -317,6 +320,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       productsForFilter: (bundle?.productsForOfflineOrder ?? []).map((p) => ({ id: p.id, name: p.name })),
       offlineCount: bundle?.offlineCount ?? 0,
       cartAbandonmentCount: bundle?.cartAbandonmentCount ?? 0,
+      teamsForFilter: (bundle as Record<string, unknown>)?.teamsForFilter as Array<{ id: string; name: string | null; department: string }> ?? [],
     };
   })();
 

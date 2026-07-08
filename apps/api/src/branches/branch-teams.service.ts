@@ -924,6 +924,40 @@ export class BranchTeamsService {
   }
 
   /**
+   * Get all user IDs belonging to a specific team (both supervisor and members).
+   * Used for team-scoped filtering on order pages.
+   */
+  async listTeamMemberIds(teamId: string): Promise<string[]> {
+    return this.safeBranchTeamsRead([], async () => {
+      const rows = await this.db
+        .select({ userId: schema.branchTeamMembers.userId })
+        .from(schema.branchTeamMembers)
+        .where(eq(schema.branchTeamMembers.teamId, teamId));
+      return rows.map((r) => r.userId);
+    });
+  }
+
+  /**
+   * List teams available for a branch + department, for the team filter dropdown.
+   */
+  async listTeamsForFilter(branchId: string, department?: 'CS' | 'MARKETING'): Promise<Array<{ id: string; name: string | null; department: string }>> {
+    return this.safeBranchTeamsRead([], async () => {
+      const conditions = [eq(schema.branchTeams.branchId, branchId)];
+      if (department) conditions.push(eq(schema.branchTeams.department, department));
+      const rows = await this.db
+        .select({
+          id: schema.branchTeams.id,
+          name: schema.branchTeams.name,
+          department: schema.branchTeams.department,
+        })
+        .from(schema.branchTeams)
+        .where(and(...conditions))
+        .orderBy(schema.branchTeams.name);
+      return rows;
+    });
+  }
+
+  /**
    * Redis-cached per-(user, branch) team-supervisor flags for both lanes.
    *
    * This feeds {@link attachTeamSupervisorSessionFlags}, which runs on EVERY

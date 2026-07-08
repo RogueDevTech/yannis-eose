@@ -1129,6 +1129,16 @@ export const branchesRouter = router({
       };
     }),
 
+  /** Lightweight team list for filter dropdowns — returns id + name only. */
+  listTeamsForFilter: authedProcedure
+    .input(z.object({
+      branchId: z.string().uuid(),
+      department: z.enum(['CS', 'MARKETING']).optional(),
+    }))
+    .query(async ({ input }) => {
+      return getBranchTeamsService().listTeamsForFilter(input.branchId, input.department);
+    }),
+
   listTeamsWithMembers: authedProcedure
     .input(z.object({ branchId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {

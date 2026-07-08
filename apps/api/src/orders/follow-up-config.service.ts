@@ -568,6 +568,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               customFields: orig.customFields,
               branchId: orig.branchId,
               servicingBranchId: assignedBranch,
+              routingTeamId: rule.teamId ?? null,
               cartId: orig.cartId,
             })
             .returning({ id: schema.followUpOrders.id });
@@ -788,6 +789,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               customFields: cart.customFieldValues,
               branchId: null,
               servicingBranchId: assignedBranch,
+              routingTeamId: rule.teamId ?? null,
               cartId: cart.id,
             })
             .returning({ id: schema.followUpOrders.id });

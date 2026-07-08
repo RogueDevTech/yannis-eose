@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { useLoaderData } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
@@ -59,6 +60,14 @@ const CS_QUEUE_LIVE_EVENTS = [
 export const meta: MetaFunction = () => [
   { title: 'Live Activities — Yannis EOSE' },
 ];
+
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formMethod,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;

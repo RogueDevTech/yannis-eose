@@ -1,11 +1,20 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { FollowUpConfigPage } from '~/features/settings/FollowUpConfigPage';
 
 export const meta: MetaFunction = () => [{ title: 'Follow-up config — Yannis EOSE' }];
+
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formMethod,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'orders.followUpConfig');

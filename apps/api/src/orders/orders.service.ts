@@ -102,8 +102,15 @@ export function appendOrdersAggregateScopeConditions(
     mediaBuyerId?: string;
     assignedCsId?: string;
     supervisorScope?: OrdersAggregateSupervisorScope;
+    /** Team filter: only orders assigned to these CS user IDs. */
+    teamMemberIds?: string[];
   },
 ): void {
+  // Team filter takes priority — scopes to exactly these closers.
+  if (opts.teamMemberIds && opts.teamMemberIds.length > 0) {
+    conditions.push(inArray(schema.orders.assignedCsId, opts.teamMemberIds));
+    return;
+  }
   if (opts.supervisorScope) {
     const { csUserIds, mediaBuyerIds } = opts.supervisorScope;
     const orParts: ReturnType<typeof inArray>[] = [];
@@ -3943,6 +3950,8 @@ export class OrdersService {
       /** When true, also exclude cart-graduated orders (order_source='online').
        *  CS surfaces pass true (cart orders have their own strip). */
       excludeCartGraduated?: boolean;
+      /** Team filter: only orders assigned to these CS user IDs. Resolved from teamId at the router. */
+      teamMemberIds?: string[];
     },
   ) {
     // Skip the exclusion gate when explicitly querying DELETED orders —
@@ -4028,6 +4037,10 @@ export class OrdersService {
       if (input.mediaBuyerId) {
         conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
       }
+    }
+    // Team filter: only orders assigned to members of a specific team.
+    if (listOpts?.teamMemberIds && listOpts.teamMemberIds.length > 0) {
+      conditions.push(inArray(schema.orders.assignedCsId, listOpts.teamMemberIds));
     }
     if (input.campaignId) {
       conditions.push(eq(schema.orders.campaignId, input.campaignId));
@@ -6171,6 +6184,8 @@ export class OrdersService {
     onlyOffline?: boolean,
     /** Optional servicingBranchId filters to that servicing branch (for Logistics Orders page branch filter). */
     servicingBranchId?: string,
+    /** Team filter: only count orders assigned to these user IDs. */
+    teamMemberIds?: string[],
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -6209,6 +6224,7 @@ export class OrdersService {
       mediaBuyerId,
       assignedCsId,
       supervisorScope,
+      teamMemberIds,
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (servicingBranchId) conditions.push(eq(schema.orders.servicingBranchId, servicingBranchId));
