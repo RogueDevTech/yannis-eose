@@ -5,6 +5,7 @@ import {
   apiRequest,
   getSessionCookie,
   requirePermissionOrRoles,
+  requireAccountingEnabled,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -19,6 +20,7 @@ export const meta: MetaFunction = () => [{ title: 'Chart of Accounts — Account
 export { cachedClientLoader as clientLoader };
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
@@ -43,6 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  requireAccountingEnabled();
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
 

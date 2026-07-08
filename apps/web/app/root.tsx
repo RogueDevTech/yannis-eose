@@ -44,6 +44,8 @@ declare global {
       OBJECT_STORAGE_PUBLIC_BASE_URL?: string;
       ASSET_ENV_PREFIX: string;
       VAPID_PUBLIC_KEY?: string;
+      /** Dev-only: gates the Accounting (double-entry ledger) section. */
+      ENABLE_ACCOUNTING?: boolean;
     };
   }
 }
@@ -83,6 +85,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         process.env.OBJECT_STORAGE_PUBLIC_BASE_URL ?? process.env.GCS_PUBLIC_BASE_URL ?? '',
       ASSET_ENV_PREFIX: process.env.ASSET_ENV_PREFIX ?? 'dev',
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
+      // Dev-only: the Accounting section is hidden unless ENABLE_ACCOUNTING=true.
+      ENABLE_ACCOUNTING: process.env.ENABLE_ACCOUNTING === 'true',
     },
   });
 }

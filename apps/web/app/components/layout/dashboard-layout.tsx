@@ -104,6 +104,12 @@ interface NavItemDef {
 interface NavGroupDef {
   group: string | null;
   items: NavItemDef[];
+  /**
+   * Dev-only group: hidden entirely unless `window.__ENV.ENABLE_ACCOUNTING` is
+   * true. Used to ship in-test sections (Accounting ledger) dark to prod. The
+   * matching route loaders also 404 when the flag is off (defense in depth).
+   */
+  devOnly?: boolean;
 }
 
 const navStructure: NavGroupDef[] = [
@@ -194,6 +200,12 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Order Funnel',
         href: '/admin/sales/orders',
+        icon: SidebarIcons.orders,
+        permission: 'orders.read',
+      },
+      {
+        label: 'Offline Orders',
+        href: '/admin/sales/offline-orders',
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
@@ -363,6 +375,9 @@ const navStructure: NavGroupDef[] = [
   },
   {
     group: 'Accounting',
+    // Dev-only until the double-entry ledger is fully tested. Hidden in prod
+    // unless ENABLE_ACCOUNTING=true; the route loaders also 404 when off.
+    devOnly: true,
     items: [
       {
         label: 'Chart of Accounts',
@@ -589,6 +604,14 @@ function getNavGroupsForUser(
   const hoLogisticsHiddenGroups = ['Catalog', 'HR', 'Analytics'];
 
   for (const groupDef of navStructure) {
+    // Dev-only groups (e.g. Accounting) are hidden unless the env flag is on.
+    // `window.__ENV` is undefined during SSR — treat that as "off" so the group
+    // never flashes before hydration in prod.
+    if (
+      groupDef.devOnly &&
+      !(typeof window !== 'undefined' && window.__ENV?.ENABLE_ACCOUNTING === true)
+    )
+      continue;
     // Head of Logistics has their own Logistics Orders page; hide Sales & CS group.
     // Finance Officer has no business in CS; hide Sales & CS group.
     if (

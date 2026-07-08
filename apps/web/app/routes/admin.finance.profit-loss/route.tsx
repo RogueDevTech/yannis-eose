@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, requireAccountingEnabled, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { ProfitAndLossPage, type ProfitAndLossPageProps } from '~/features/accounting/ProfitAndLossPage';
@@ -20,6 +20,7 @@ const EMPTY: ProfitAndLossPageProps = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',

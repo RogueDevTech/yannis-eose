@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, requireAccountingEnabled } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { BalanceSheetPage, type BalanceSheetPageProps } from '~/features/accounting/BalanceSheetPage';
@@ -23,6 +23,7 @@ const EMPTY: BalanceSheetPageProps = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
