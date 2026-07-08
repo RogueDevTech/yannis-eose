@@ -433,6 +433,12 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.inventory,
         permission: 'finance.ledger.read',
       },
+      {
+        label: 'Expenses',
+        href: '/admin/finance/expenses',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
     ],
   },
   {

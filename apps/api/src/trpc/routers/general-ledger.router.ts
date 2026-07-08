@@ -20,13 +20,20 @@ import {
   getAssetSchema,
   disposeAssetSchema,
   runDepreciationSchema,
+  submitExpenseSchema,
+  approveExpenseSchema,
+  rejectExpenseSchema,
+  listExpensesSchema,
+  getExpenseSchema,
 } from '@yannis/shared';
-import { router, permissionProcedure } from '../trpc';
+import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { GeneralLedgerService } from '../../finance/general-ledger.service';
 import { AssetRegisterService } from '../../finance/asset-register.service';
+import { ExpenseSubmissionService } from '../../finance/expense-submission.service';
 
 let generalLedgerServiceInstance: GeneralLedgerService | null = null;
 let assetRegisterServiceInstance: AssetRegisterService | null = null;
+let expenseSubmissionServiceInstance: ExpenseSubmissionService | null = null;
 
 export function setGeneralLedgerService(service: GeneralLedgerService) {
   generalLedgerServiceInstance = service;
@@ -48,6 +55,17 @@ export function getAssetRegisterService(): AssetRegisterService {
     throw new Error('AssetRegisterService not initialized. Call setAssetRegisterService() first.');
   }
   return assetRegisterServiceInstance;
+}
+
+export function setExpenseSubmissionService(service: ExpenseSubmissionService) {
+  expenseSubmissionServiceInstance = service;
+}
+
+export function getExpenseSubmissionService(): ExpenseSubmissionService {
+  if (!expenseSubmissionServiceInstance) {
+    throw new Error('ExpenseSubmissionService not initialized. Call setExpenseSubmissionService() first.');
+  }
+  return expenseSubmissionServiceInstance;
 }
 
 /**
@@ -243,5 +261,43 @@ export const generalLedgerRouter = router({
         { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
         { id: ctx.user.id },
       );
+    }),
+
+  // ─── Expense Submissions (Phase 4B) ────────────────────────────────────
+  submitExpense: authedProcedure
+    .input(submitExpenseSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getExpenseSubmissionService().submitExpense(
+        input,
+        { id: ctx.user.id },
+        resolveGroupId(null, ctx.activeGroupId),
+      );
+    }),
+
+  approveExpense: permissionProcedure('finance.ledger.write')
+    .input(approveExpenseSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getExpenseSubmissionService().approveExpense(input, { id: ctx.user.id });
+    }),
+
+  rejectExpense: permissionProcedure('finance.ledger.write')
+    .input(rejectExpenseSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getExpenseSubmissionService().rejectExpense(input, { id: ctx.user.id });
+    }),
+
+  listExpenses: permissionProcedure('finance.ledger.read')
+    .input(listExpensesSchema)
+    .query(async ({ input, ctx }) => {
+      return getExpenseSubmissionService().listExpenses({
+        ...input,
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+      });
+    }),
+
+  getExpense: permissionProcedure('finance.ledger.read')
+    .input(getExpenseSchema)
+    .query(async ({ input }) => {
+      return getExpenseSubmissionService().getExpense(input);
     }),
 });

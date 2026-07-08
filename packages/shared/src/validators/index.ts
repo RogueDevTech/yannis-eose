@@ -615,6 +615,23 @@ export type {
   ListCartOrderRoutingRulesInput,
 } from './cart-orders';
 
+// Expense submission validators (Phase 4B)
+export {
+  submitExpenseSchema,
+  approveExpenseSchema,
+  rejectExpenseSchema,
+  listExpensesSchema,
+  getExpenseSchema,
+} from './expense-submissions';
+
+export type {
+  SubmitExpenseInput,
+  ApproveExpenseInput,
+  RejectExpenseInput,
+  ListExpensesInput,
+  GetExpenseInput,
+} from './expense-submissions';
+
 // User filter preferences validators
 export {
   pageKeySchema,
