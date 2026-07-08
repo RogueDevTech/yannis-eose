@@ -1239,6 +1239,7 @@ export class CartOrdersService {
         ca.custom_field_values
       FROM cart_abandonments ca
       LEFT JOIN campaigns camp ON camp.id = ca.campaign_id
+      LEFT JOIN products p ON p.id = ca.product_id
       WHERE ca.id IN (${safeIdList})
         AND ca.status IN ('PENDING', 'ABANDONED')
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
