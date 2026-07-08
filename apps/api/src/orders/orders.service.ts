@@ -1426,6 +1426,7 @@ export class OrdersService {
 
     const now = new Date();
     await withActor(this.db, actor, async (tx) => {
+      // 1. Mark order as DELETED
       await tx
         .update(schema.orders)
         .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
@@ -1439,22 +1440,52 @@ export class OrdersService {
         metadata: { dualApproval: true, ...(note ? { note } : {}) },
         branchId: order.branchId ?? null,
       });
+
+      // 2. Reverse stock INSIDE the same transaction — if this fails, the
+      //    entire deletion rolls back so we never have a deleted order with
+      //    un-reversed stock.
+      const deliveryMovements = await tx
+        .select()
+        .from(schema.stockMovements)
+        .where(
+          and(
+            eq(schema.stockMovements.referenceId, orderId),
+            eq(schema.stockMovements.movementType, 'DELIVERY'),
+          ),
+        );
+      for (const mov of deliveryMovements) {
+        const reverseQty = Math.abs(mov.quantity);
+        const locationId = mov.fromLocationId;
+        await tx.insert(schema.stockMovements).values({
+          productId: mov.productId,
+          movementType: 'ADJUSTMENT',
+          quantity: reverseQty,
+          toLocationId: locationId,
+          referenceId: orderId,
+          reason: `Stock reversal: delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
+          actorId: actor.id,
+        });
+        if (locationId) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(schema.inventoryLevels.productId, mov.productId),
+                eq(schema.inventoryLevels.locationId, locationId),
+              ),
+            );
+        }
+      }
     });
 
-    // Reverse stock: create ADJUSTMENT movements to undo the DELIVERY deduction
-    try {
-      await this.inventoryService.reverseDeliveryForOrder(orderId, actor);
-    } catch (err) {
-      // Stock reversal is critical but shouldn't block the deletion.
-      // Log the error — manual inventory correction may be needed.
-      console.error(
-        `[softDeleteDeliveredOrder] Stock reversal failed for order ${orderId}:`,
-        err,
-      );
-    }
-
-    // Reverse the ledger: undo the sale (AR + COGS) and any remittance settlement
-    // so a deleted delivered order leaves no phantom revenue/AR/cash. Non-fatal.
+    // GL reversal runs outside the stock tx — non-fatal by design. A failed GL
+    // reversal is a bookkeeping discrepancy (fixable via manual JE), not a stock
+    // integrity issue. Keeping it outside avoids blocking the deletion if the GL
+    // account is missing or the fiscal year is closed.
     try {
       const rem = await this.db
         .select({ id: schema.deliveryRemittanceOrders.deliveryRemittanceId })
