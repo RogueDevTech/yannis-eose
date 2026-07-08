@@ -15,6 +15,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Modal } from '~/components/ui/modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { FundingLedgerEntry, FundingLedgerLoaderData } from './types';
@@ -267,7 +268,29 @@ export function FundingLedgerPage({
                 )}
               </>
             }
-            sheet={<PageRefreshButton />}
+            sheet={
+              <>
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
+                {entries.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowExport(true)}
+                    className="btn-secondary btn-sm gap-1.5"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Export
+                  </button>
+                )}
+                <PageRefreshButton />
+              </>
+            }
           />
         }
       />
@@ -298,74 +321,153 @@ export function FundingLedgerPage({
             ]}
           />
 
-          <div className="flex flex-col sm:flex-row gap-2">
-            {mediaBuyers.length > 1 && (
-              <div className="w-full sm:w-56">
-                <SearchableSelect
-                  id="ledger-user-filter"
-                  value={selectedUserId}
-                  onChange={(val) => {
+          <ToolbarFiltersCollapsible
+            badgeCount={(entryTypeFilter !== 'all' ? 1 : 0) + (mediaBuyers.length > 1 && selectedUserId ? 1 : 0)}
+            desktopInlineFilters={
+              <>
+                <form
+                  className="contents"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                      else next.delete('search');
+                      return next;
+                    });
+                  }}
+                >
+                  <SearchInput
+                    name="search"
+                    placeholder="Search by name or description..."
+                    value={searchQuery}
+                    onChange={(val) => {
+                      setSearchQuery(val);
+                      if (!val.trim() && searchParams.get('search')) {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.delete('search');
+                          next.set('page', '1');
+                          return next;
+                        });
+                      }
+                    }}
+                    withSubmitButton
+                    wrapperClassName="w-full sm:min-w-[280px]"
+                  />
+                </form>
+                {mediaBuyers.length > 1 && (
+                  <SearchableSelect
+                    id="ledger-user-filter"
+                    value={selectedUserId}
+                    onChange={(val) => {
+                      const next = new URLSearchParams(searchParams);
+                      if (val) next.set('userId', val);
+                      else next.delete('userId');
+                      next.delete('page');
+                      setSearchParams(next);
+                    }}
+                    options={[
+                      { value: '', label: 'All users' },
+                      ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
+                    ]}
+                    placeholder="All users"
+                    clearable
+                    wrapperClassName="w-full sm:w-52"
+                  />
+                )}
+                <FormSelect
+                  label=""
+                  value={entryTypeFilter}
+                  onChange={(e) => {
                     const next = new URLSearchParams(searchParams);
-                    if (val) next.set('userId', val);
-                    else next.delete('userId');
+                    next.set('entryType', e.target.value);
                     next.delete('page');
                     setSearchParams(next);
                   }}
-                  options={[
-                    { value: '', label: 'All users' },
-                    ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
-                  ]}
-                  placeholder="All users"
-                  clearable
+                  options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
+                  wrapperClassName="w-full sm:w-36"
                 />
-              </div>
-            )}
-            <FormSelect
-              label=""
-              value={entryTypeFilter}
-              onChange={(e) => {
-                const next = new URLSearchParams(searchParams);
-                next.set('entryType', e.target.value);
-                next.delete('page');
-                setSearchParams(next);
-              }}
-              options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
-              wrapperClassName="w-full sm:w-44"
-            />
-            <form
-              method="get"
-              className="flex min-w-0 flex-1 gap-2 items-center"
-              onSubmit={(e) => {
-                e.preventDefault();
-                setSearchParams((p) => {
-                  const next = new URLSearchParams(p);
-                  next.set('page', '1');
-                  if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                  else next.delete('search');
-                  return next;
-                });
-              }}
-            >
-              <SearchInput
-                name="search"
-                placeholder="Search by name or description..."
-                value={searchQuery}
-                onChange={(val) => {
-                  setSearchQuery(val);
-                  if (!val.trim() && searchParams.get('search')) {
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.delete('search');
-                      next.set('page', '1');
-                      return next;
-                    });
-                  }
-                }}
-                withSubmitButton
-                wrapperClassName="min-w-0 w-full flex-1"
-              />
-            </form>
-          </div>
+              </>
+            }
+            sheetFilterBody={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Search</span>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                        else next.delete('search');
+                        return next;
+                      });
+                    }}
+                  >
+                    <SearchInput
+                      name="search"
+                      placeholder="Search..."
+                      value={searchQuery}
+                      onChange={(val) => {
+                        setSearchQuery(val);
+                        if (!val.trim() && searchParams.get('search')) {
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.delete('search');
+                            next.set('page', '1');
+                            return next;
+                          });
+                        }
+                      }}
+                      withSubmitButton
+                      wrapperClassName="w-full"
+                    />
+                  </form>
+                </div>
+                {mediaBuyers.length > 1 && (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">User</span>
+                    <SearchableSelect
+                      id="ledger-user-filter-sheet"
+                      value={selectedUserId}
+                      onChange={(val) => {
+                        const next = new URLSearchParams(searchParams);
+                        if (val) next.set('userId', val);
+                        else next.delete('userId');
+                        next.delete('page');
+                        setSearchParams(next);
+                      }}
+                      options={[
+                        { value: '', label: 'All users' },
+                        ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
+                      ]}
+                      placeholder="All users"
+                      clearable
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Type</span>
+                  <FormSelect
+                    label=""
+                    value={entryTypeFilter}
+                    onChange={(e) => {
+                      const next = new URLSearchParams(searchParams);
+                      next.set('entryType', e.target.value);
+                      next.delete('page');
+                      setSearchParams(next);
+                    }}
+                    options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+              </>
+            }
+          />
 
           {entries.length === 0 ? (
             <EmptyState
