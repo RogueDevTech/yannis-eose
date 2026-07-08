@@ -67,7 +67,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   } catch { /* non-critical */ }
 
-  return json({ rules, branches, groups, syncLogs, closers, excludedIds, activeCsBranchIds });
+  // Fetch teams for the team dropdown on rules
+  const branchIds = (branches as Array<{ id: string }>).map((b) => b.id);
+  const teamsResults = await Promise.all(
+    branchIds.map((bid) =>
+      apiRequest<unknown>(
+        `/trpc/branches.listTeamsForFilter?input=${encodeURIComponent(JSON.stringify({ branchId: bid, department: 'CS' }))}`,
+        { method: 'GET', cookie },
+      ).then((r) => r.ok ? ((r.data as { result?: { data?: unknown[] } })?.result?.data ?? []) : [])
+       .catch(() => []),
+    ),
+  );
+  const teams = teamsResults.flat();
+
+  return json({ rules, branches, groups, syncLogs, closers, excludedIds, activeCsBranchIds, teams });
 }
 
 export async function action({ request }: ActionFunctionArgs) {

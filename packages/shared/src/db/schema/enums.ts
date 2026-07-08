@@ -481,6 +481,8 @@ export const glVoucherTypeEnum = pgEnum('gl_voucher_type', [
   'SALES_INVOICE',
   'PAYMENT',
   'PURCHASE_RECEIPT',
+  'PAYROLL',
+  'EXPENSE',
 ]);
 
 /** Journal entry lifecycle. Post-only in Phase 1 (no DRAFT). */

@@ -52,7 +52,7 @@ describe.skipIf(SKIP_IF_NO_DB)('PayrollBatchService — org-wide department head
     const headUser = await createTestUser(db as any, { role: 'HEAD_OF_CS' });
     await setSessionActor(pgClient, headUser.id, null);
 
-    const svc = new PayrollBatchService(db as any, {} as any);
+    const svc = new PayrollBatchService(db as any, {} as any, {} as any);
     const out = await svc.listMonthlyPayrolls(
       {},
       { id: headUser.id, role: 'HEAD_OF_CS', currentBranchId: null } as any,
@@ -93,7 +93,7 @@ describe.skipIf(SKIP_IF_NO_DB)('PayrollBatchService — org-wide department head
     const headUser = await createTestUser(db as any, { role: 'HEAD_OF_CS' });
     await setSessionActor(pgClient, headUser.id, null);
 
-    const svc = new PayrollBatchService(db as any, {} as any);
+    const svc = new PayrollBatchService(db as any, {} as any, {} as any);
     const out = await svc.listMonthlyPayrolls(
       { branchId: b1.id },
       { id: headUser.id, role: 'HEAD_OF_CS', currentBranchId: null } as any,

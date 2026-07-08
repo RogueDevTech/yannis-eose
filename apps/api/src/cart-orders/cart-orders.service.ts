@@ -1399,6 +1399,7 @@ export class CartOrdersService {
           name: input.name,
           sourceBranchId: input.sourceBranchId ?? null,
           targetBranchId: input.targetBranchId ?? null,
+          teamId: input.teamId ?? null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
         })
@@ -1412,6 +1413,7 @@ export class CartOrdersService {
     if (input.name !== undefined) updateFields['name'] = input.name;
     if (input.sourceBranchId !== undefined) updateFields['sourceBranchId'] = input.sourceBranchId;
     if (input.targetBranchId !== undefined) updateFields['targetBranchId'] = input.targetBranchId;
+    if (input.teamId !== undefined) updateFields['teamId'] = input.teamId;
     if (input.priority !== undefined) updateFields['priority'] = input.priority;
     if (input.enabled !== undefined) updateFields['enabled'] = input.enabled;
 

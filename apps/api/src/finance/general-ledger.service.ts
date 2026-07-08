@@ -43,7 +43,7 @@ export interface PostVoucherLine {
   remarks?: string | null;
 }
 
-export type GlVoucherType = 'JOURNAL_ENTRY' | 'SALES_INVOICE' | 'PAYMENT' | 'PURCHASE_RECEIPT';
+export type GlVoucherType = 'JOURNAL_ENTRY' | 'SALES_INVOICE' | 'PAYMENT' | 'PURCHASE_RECEIPT' | 'PAYROLL' | 'EXPENSE';
 
 export interface PostVoucherInput {
   groupId: string | null;
@@ -691,6 +691,134 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
             partyType: 'SUPPLIER',
             remarks: ship.supplierName ?? undefined,
           },
+        ],
+      });
+
+      return { posted: true };
+    });
+  }
+
+  // ─── Phase 2C: Payroll batch → salary expense + payable clearance ───────────
+
+  /**
+   * Post the double-entry for a paid payroll batch.
+   *
+   *   Dr Salary              batch.totalAmount
+   *     Cr Payroll Payable   batch.totalAmount
+   *
+   * Simplified single-entry: the full PAYE/Pension breakdown is deferred to
+   * Phase 5B (tax tracking). For now we record the gross salary expense against
+   * the payroll payable account. Idempotent per batchId, non-fatal by contract.
+   */
+  async postPayrollBatch(batchId: string, actor: Actor): Promise<{ posted: boolean; reason?: string }> {
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'PAYROLL', batchId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+
+      const [batch] = await tx
+        .select({
+          id: schema.payrollBatches.id,
+          totalAmount: schema.payrollBatches.totalAmount,
+          periodMonth: schema.payrollBatches.periodMonth,
+          branchId: schema.payrollBatches.branchId,
+          department: schema.payrollBatches.department,
+          financeProcessedAt: schema.payrollBatches.financeProcessedAt,
+        })
+        .from(schema.payrollBatches)
+        .where(eq(schema.payrollBatches.id, batchId))
+        .limit(1);
+      if (!batch) return { posted: false, reason: 'batch-not-found' };
+
+      const amount = Number(batch.totalAmount ?? 0);
+      if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+
+      // Resolve company groupId from batch branch
+      let groupId: string | null = null;
+      if (batch.branchId) {
+        const [branch] = await tx
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, batch.branchId))
+          .limit(1);
+        groupId = branch?.groupId ?? null;
+      }
+
+      const salary = await this.resolveAccountByCode(tx, groupId, 'Salary');
+      const payrollPayable = await this.resolveAccountByCode(tx, groupId, 'Payroll Payable');
+      if (!salary || !payrollPayable) {
+        return { posted: false, reason: 'missing-salary-or-payroll-payable-account' };
+      }
+
+      const postingDate = (batch.financeProcessedAt ?? new Date()).toISOString().slice(0, 10);
+      const dept = batch.department ?? 'General';
+
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate,
+        voucherType: 'PAYROLL',
+        voucherId: batchId,
+        lines: [
+          { accountId: salary.id, debit: amount, credit: 0, remarks: `${dept} payroll` },
+          { accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` },
+        ],
+      });
+
+      return { posted: true };
+    });
+  }
+
+  // ─── Phase 2C: Marketing funding → ad spend expense ─────────────────────────
+
+  /**
+   * Post the double-entry for an approved marketing fund disbursement.
+   *
+   *   Dr Marketing Expenses   sentAmount
+   *     Cr Bank               sentAmount
+   *
+   * Simplified: records the immediate expense against bank. Idempotent per
+   * funding request ID, non-fatal by contract.
+   */
+  async postMarketingFunding(
+    fundingRequestId: string,
+    sentAmount: number,
+    branchId: string | null,
+    actor: Actor,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'EXPENSE', fundingRequestId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+
+      if (sentAmount <= 0) return { posted: false, reason: 'zero-amount' };
+
+      // Resolve company groupId from branch
+      let groupId: string | null = null;
+      if (branchId) {
+        const [branch] = await tx
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, branchId))
+          .limit(1);
+        groupId = branch?.groupId ?? null;
+      }
+
+      const marketing = await this.resolveAccountByCode(tx, groupId, 'Marketing Expenses');
+      const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
+      if (!marketing || !bank) {
+        return { posted: false, reason: 'missing-marketing-or-bank-account' };
+      }
+
+      const postingDate = new Date().toISOString().slice(0, 10);
+
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate,
+        voucherType: 'EXPENSE',
+        voucherId: fundingRequestId,
+        lines: [
+          { accountId: marketing.id, debit: sentAmount, credit: 0, remarks: 'Ad spend disbursement' },
+          { accountId: bank.id, debit: 0, credit: sentAmount, remarks: 'Ad spend disbursement' },
         ],
       });
 
