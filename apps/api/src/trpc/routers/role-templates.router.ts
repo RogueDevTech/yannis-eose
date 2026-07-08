@@ -42,6 +42,11 @@ function svc(): RoleTemplatesService {
   return roleTemplatesServiceInstance;
 }
 
+/** Exported for cross-router lookups (e.g. `userDetailPageBundle`). */
+export function getRoleTemplatesService(): RoleTemplatesService {
+  return svc();
+}
+
 export const roleTemplatesRouter = router({
   /** Read-only catalog for staff create/edit — aligned with `RoleTemplatesService.listTemplates` gate. */
   list: permissionProcedure(

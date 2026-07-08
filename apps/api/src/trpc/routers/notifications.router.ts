@@ -33,7 +33,8 @@ export function setPushSchedulerService(service: PushSchedulerService) {
   pushSchedulerServiceInstance = service;
 }
 
-function getNotificationsService(): NotificationsService {
+/** Exported for cross-router lookups (e.g. `userDetailPageBundle`). */
+export function getNotificationsService(): NotificationsService {
   if (!notificationsServiceInstance) {
     throw new Error('NotificationsService not initialized. Call setNotificationsService() first.');
   }

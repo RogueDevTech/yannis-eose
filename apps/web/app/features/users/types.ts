@@ -363,11 +363,35 @@ export interface UserDetailLoaderData {
   showOnboardingTab?: boolean;
   /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). */
   viewerCanManageHrOnboarding?: boolean;
+
+  // ── Page bundle data (replaces client-side resource route fetchers) ──
+
+  /** Products for product-access dropdown (from page bundle). */
+  bundleProducts?: UserCreateProduct[];
+  /** Role templates for role template dropdown (from page bundle). */
+  bundleRoleTemplates?: RoleTemplateOption[];
+  /** Logistics locations for location dropdown (from page bundle). */
+  bundleLocations?: UserCreateLocation[];
+  /** Commission plans for plan dropdown (from page bundle). */
+  bundlePlans?: UserCreateCommissionPlan[];
+  /** Pending email change (from page bundle). */
+  bundlePendingEmailChange?: PendingEmailChange | null;
+  /** Push notification status (from page bundle, admin only). */
+  bundlePushStatus?: UserPushStatus | null;
+  /** Marketing metrics (from page bundle, MB/HoM only). */
+  bundleMarketingMetrics?: UserMarketingMetrics | null;
+  /** Funding balance (from page bundle, MB/HoM only). */
+  bundleFundingBalance?: {
+    totalReceived: string;
+    totalDistributed: string;
+    totalSpend: string;
+    balance: string;
+  } | null;
 }
 
 /**
  * Props for `UserDetailPage` after `UserDetailPageWithMirror` strips `mirrorUi`.
- * Optional promises are legacy/test-only fallbacks; production hydrates from resource routes.
+ * Optional promises are legacy/test-only fallbacks; production hydrates from page bundle.
  */
 export type UserDetailPageProps = Omit<
   UserDetailLoaderData,

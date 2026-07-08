@@ -8,27 +8,27 @@ import {
   apiRequest,
   getSessionCookie,
   HR_ONBOARDING_PAGE_PERMISSIONS,
-  requireStaffAccountsAccess,
   getCurrentUser,
   safeStatus,
   DEFERRED_LOADER_TIMEOUT_MS,
   USER_WRITE_ACTION_TIMEOUT_MS,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { actorUserIdsMatch, canEditUser, isAdminLevel } from '~/lib/rbac';
+import { canEditUser, isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
 import { UserDetailShellSkeleton } from '~/features/users/UserDetailShellSkeleton';
-import type { UserDetail, UserDetailLoaderData } from '~/features/users/types';
-import {
-  fetchHrUserDetailOnboardingSlice,
-  fetchHrUserDetailPermissionsSlice,
-} from '~/lib/hr-user-detail-overview-slices.server';
+import type {
+  UserDetail,
+  UserDetailLoaderData,
+  UserOnboardingSummary,
+  PermissionCatalogBundle,
+} from '~/features/users/types';
 
 export const meta: MetaFunction = () => [{ title: 'User Detail — Yannis EOSE' }];
 
 // Only revalidate after mutations on this route — tab navigation and sibling
-// route changes must NOT re-fire the heavy loader (20+ API calls).
+// route changes must NOT re-fire the loader (single page-bundle API call).
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   defaultShouldRevalidate,
   formMethod,
@@ -53,93 +53,42 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   }
 
-  // Fetch profile user first (getById is authed — any logged-in user can call)
-  const userRes = await apiRequest<unknown>(
-    `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
-    { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
-  );
-  if (!userRes.ok) {
-    return defer({ userDetail: Promise.resolve({ notFound: true as const }) });
-  }
-  const trpcData = userRes.data as { result?: { data?: UserDetail } };
-  const profileUser = trpcData?.result?.data;
-  if (!profileUser) {
-    return defer({ userDetail: Promise.resolve({ notFound: true as const }) });
-  }
-
-  // Access model for /hr/users/:id:
-  //  - Self-view: any authenticated user may open their own profile (drives /admin/profile).
-  //  - Head of CS  may view their Sales team (CS_CLOSER, HEAD_OF_CS) — nothing else.
-  //  - Head of Marketing may view their Marketing team (MEDIA_BUYER, HEAD_OF_MARKETING) — nothing else.
-  //  - Branch-team supervisors may view the squad-mates they supervise
-  //    (CEO directive 2026-05-11). The supervisor flag lives on
-  //    `branch_team_members.is_supervisor` so we ask the API.
-  //  - Everyone else must hold `hr.read` (HR_MANAGER) or be admin-level.
-  // HoM/HoCS still carry `users.read` globally for other features (team leaderboards, push
-  // target search, etc.), so we can't just require `users.read` — we'd leak unrelated profiles.
-  const isSelfView =
-    actorUserIdsMatch(currentUser.id, profileUser.id) || actorUserIdsMatch(currentUser.id, userId);
-  // A department head may only open a TEAM MEMBER's profile when they share a
-  // branch: the head's selected branch when one is active, otherwise any of
-  // the head's own branches ("All branches" = the union they belong to, never
-  // the whole company). Peer heads are not branch-bounded. Mirrors
-  // canAccessStaffHrUserDetail in apps/api/src/common/authz.ts.
-  const headSharesBranchWithProfile = (): boolean => {
-    const targetBranches = (profileUser.branchMemberships ?? []).map((m) => m.branchId);
-    if (targetBranches.length === 0) return false;
-    if (currentUser.currentBranchId) {
-      return targetBranches.includes(currentUser.currentBranchId);
-    }
-    const ownBranches = new Set(currentUser.branchIds ?? []);
-    return targetBranches.some((b) => ownBranches.has(b));
-  };
-  const headOfCSViewingTeam =
-    currentUser.role === 'HEAD_OF_CS' &&
-    (profileUser.role === 'HEAD_OF_CS' ||
-      (profileUser.role === 'CS_CLOSER' && headSharesBranchWithProfile()));
-  const headOfMarketingViewingTeam =
-    currentUser.role === 'HEAD_OF_MARKETING' &&
-    (profileUser.role === 'HEAD_OF_MARKETING' ||
-      (profileUser.role === 'MEDIA_BUYER' && headSharesBranchWithProfile()));
-  const isHoMOrHoCS = currentUser.role === 'HEAD_OF_MARKETING' || currentUser.role === 'HEAD_OF_CS';
-
-  // Branch-team supervisor relationship check — only fires when no cheaper
-  // gate already passed. A MEDIA_BUYER who supervises a marketing squad can
-  // see their squad-mates here; same for CS_CLOSER supervisors over their
-  // Sales team. The check is server-authoritative — we don't trust the session
-  // flag alone since it's per active branch and the profile may be on the
-  // viewer's other branch teams.
-  let isSupervisorViewingSupervisee = false;
-  if (!isSelfView && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
-    const supervisorCheck = await apiRequest<unknown>(
-      `/trpc/branches.amISupervisorOfUser?input=${encodeURIComponent(
-        JSON.stringify({ superviseeId: profileUser.id }),
-      )}`,
+  // Single page bundle call replaces ~20-30 HTTP round-trips. The API procedure
+  // handles authorization, fetches the target user once, then fans out all
+  // sub-slices (products, templates, locations, plans, permissions, onboarding,
+  // marketing, mirror eligibility) in parallel via Promise.all.
+  const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
+    const bundleInput = encodeURIComponent(JSON.stringify({ userId }));
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/hr.userDetailPageBundle?input=${bundleInput}`,
       { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
     );
-    if (supervisorCheck.ok) {
-      const data = (supervisorCheck.data as { result?: { data?: boolean } })?.result?.data;
-      isSupervisorViewingSupervisee = data === true;
+
+    if (!bundleRes.ok) {
+      const status = bundleRes.status;
+      if (status === 404) {
+        return { notFound: true as const };
+      }
+      if (status === 403) {
+        throw new Response('Not allowed to view this user.', { status: 403 });
+      }
+      return { notFound: true as const };
     }
-  }
 
-  if (!isSelfView && isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
-    throw new Response('This user is not on your team.', { status: 403 });
-  }
-  if (
-    !isSelfView &&
-    !headOfCSViewingTeam &&
-    !headOfMarketingViewingTeam &&
-    !isSupervisorViewingSupervisee
-  ) {
-    await requireStaffAccountsAccess(request);
-  }
+    const bundle = (bundleRes.data as { result?: { data?: Record<string, unknown> } })?.result
+      ?.data;
+    if (!bundle || !bundle.user) {
+      return { notFound: true as const };
+    }
 
-  const user = profileUser;
+    const user = bundle.user as UserDetail;
+    const isSelfView = bundle.isSelfView as boolean;
 
-  const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
-    // Treat ADMIN the same as SUPER_ADMIN for admin-level capabilities on this page.
-    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPPORT';
+    // ── Derive client-side flags from currentUser + profileUser ──
+    const isSuperAdmin =
+      currentUser?.role === 'SUPER_ADMIN' ||
+      currentUser?.role === 'ADMIN' ||
+      currentUser?.role === 'SUPPORT';
     const permsSetForReactivate = new Set(
       (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
     );
@@ -150,81 +99,63 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       permsSetForReactivate.has(canonicalPermissionCode('users.staff.deactivate'));
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
     const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
-    // Per-target edit access — single source of truth in rbac.ts (mirrored on
-    // the API in common/authz.ts and re-checked in users.service.ts:1094-1148).
-    //   'full'    → admin-class or HR_MANAGER on branch — can change any field.
-    //   'limited' → team-lead supervised scope (HoCS over CS_CLOSER, HoM over
-    //               MEDIA_BUYER, same branch) — restricted whitelist.
-    //   'none'    → cannot edit. Hides the "Edit user" link below.
     const editAccessLevel = canEditUser(currentUser, {
-      id: profileUser.id,
-      role: profileUser.role,
-      primaryBranchId: profileUser.primaryBranchId ?? null,
+      id: user.id,
+      role: user.role,
+      primaryBranchId: user.primaryBranchId ?? null,
     });
     const canEditLimited = editAccessLevel === 'limited';
 
-    // Post-mount slices: `/api/hr-user-detail-overview-core|onboarding|permissions|marketing/:userId`
-    // plus `/api/hr-user-detail-activity-bundle/:userId` (orders / payroll / activity tab).
+    const showOnboardingTab = !isAdminLevel({ role: user.role });
     const permsSetForOnboarding = new Set(
       (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
     );
-    const showOnboardingTab = !isAdminLevel({ role: user.role });
     const viewerCanManageHrOnboarding =
       isAdminLevel(currentUser) ||
       HR_ONBOARDING_PAGE_PERMISSIONS.some((c) =>
         permsSetForOnboarding.has(canonicalPermissionCode(c)),
       );
 
-    const mirrorPromise = apiRequest<unknown>(
-      `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: user.id }))}`,
-      { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
-    );
-
-    const onboardingSlicePromise = showOnboardingTab
-      ? fetchHrUserDetailOnboardingSlice({ cookie, userId })
-      : Promise.resolve(null);
-
-    const permissionsSlicePromise =
-      user.role === 'SUPER_ADMIN'
-        ? Promise.resolve(null)
-        : fetchHrUserDetailPermissionsSlice({
-            cookie,
-            currentUser,
-            profileUser: user,
-            userId,
-          });
-
-    const [mirrorRes, overviewOnboardingSlice, overviewPermissionsSlice] = await Promise.all([
-      mirrorPromise,
-      onboardingSlicePromise,
-      permissionsSlicePromise,
-    ]);
-
-    const mirrorData = mirrorRes.data as
-      | {
-          result?: {
-            data?: {
-              allowed: boolean;
-              previewEligible: boolean;
-              nestedMirrorSession: boolean;
-            };
-          };
-        }
-      | undefined;
-    const m = mirrorData?.result?.data;
+    // ── Mirror UI flags ──
+    const mirrorEligibility = bundle.mirrorEligibility as {
+      allowed: boolean;
+      previewEligible: boolean;
+      nestedMirrorSession: boolean;
+    } | null;
     const mirrorUi = {
       viewerShowsMirror:
         user.status === 'ACTIVE' &&
-        mirrorRes.ok &&
-        !!m &&
-        (m.allowed === true || m.previewEligible === true),
+        !!mirrorEligibility &&
+        (mirrorEligibility.allowed === true || mirrorEligibility.previewEligible === true),
       mirrorSubmitDisabled:
         user.status === 'ACTIVE' &&
-        mirrorRes.ok &&
-        !!m &&
-        m.allowed !== true &&
-        m.previewEligible === true,
+        !!mirrorEligibility &&
+        mirrorEligibility.allowed !== true &&
+        mirrorEligibility.previewEligible === true,
     };
+
+    // ── Onboarding slice ──
+    const rawOnboarding = bundle.onboardingSummary as UserOnboardingSummary | null;
+    const overviewOnboardingSlice = rawOnboarding
+      ? { onboardingSummary: rawOnboarding }
+      : null;
+
+    // ── Permissions slice ──
+    const permissionCatalog = bundle.permissionCatalog as PermissionCatalogBundle | undefined;
+    const templatePermissionsById = bundle.templatePermissionsById as Record<string, string[]> | undefined;
+    const userStampPreview = bundle.userStampPreview as {
+      userOverrides: Record<string, boolean>;
+      templateCodes: string[];
+      effectiveCodes: string[];
+    } | undefined;
+    const overviewPermissionsSlice =
+      permissionCatalog && templatePermissionsById && userStampPreview
+        ? { permissionCatalog, templatePermissionsById, userStampPreview }
+        : null;
+
+    // ── Marketing slice ──
+    const bundleMarketingMetrics = (bundle.marketingMetrics ?? null) as UserDetailLoaderData['bundleMarketingMetrics'];
+    const bundleFundingBalance = (bundle.fundingBalance ?? null) as UserDetailLoaderData['bundleFundingBalance'];
 
     return {
       user,
@@ -239,6 +170,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       isSelfView,
       showOnboardingTab,
       viewerCanManageHrOnboarding,
+      // Page bundle data — replaces client-side resource route fetchers
+      bundleProducts: (bundle.products ?? []) as UserDetailLoaderData['bundleProducts'],
+      bundleRoleTemplates: (bundle.roleTemplates ?? []) as UserDetailLoaderData['bundleRoleTemplates'],
+      bundleLocations: (bundle.locations ?? []) as UserDetailLoaderData['bundleLocations'],
+      bundlePlans: (bundle.plans ?? []) as UserDetailLoaderData['bundlePlans'],
+      bundlePendingEmailChange: (bundle.pendingEmailChange ?? null) as UserDetailLoaderData['bundlePendingEmailChange'],
+      bundlePushStatus: (bundle.pushStatus ?? null) as UserDetailLoaderData['bundlePushStatus'],
+      bundleMarketingMetrics,
+      bundleFundingBalance,
     } satisfies UserDetailLoaderData;
   })();
 
@@ -675,13 +615,15 @@ export function UserDetailPageWithMirror({
   data: UserDetailLoaderData;
   usersBasePath?: string;
 }) {
-  const { mirrorUi, ...rest } = data;
+  const { mirrorUi, overviewOnboardingSlice, overviewPermissionsSlice, ...rest } = data;
   return (
     <UserDetailPage
       {...rest}
       usersBasePath={usersBasePath}
       viewerShowsMirror={mirrorUi.viewerShowsMirror}
       mirrorSubmitDisabled={mirrorUi.mirrorSubmitDisabled}
+      overviewOnboardingSlice={overviewOnboardingSlice}
+      overviewPermissionsSlice={overviewPermissionsSlice}
     />
   );
 }
