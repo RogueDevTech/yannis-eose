@@ -31,17 +31,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const asOfDate = url.searchParams.get('asOfDate') || '';
+  const consolidated = url.searchParams.get('consolidated') === 'true';
 
   const pageData = (async () => {
+    if (consolidated) {
+      const input: Record<string, unknown> = {};
+      if (asOfDate) input.asOfDate = asOfDate;
+      const res = await apiRequest<unknown>(
+        `/trpc/generalLedger.consolidatedBS?input=${encodeURIComponent(JSON.stringify(input))}`,
+        { method: 'GET', cookie },
+      );
+      const data = res.ok
+        ? ((res.data as { result?: { data?: BalanceSheetPageProps } })?.result?.data ?? EMPTY)
+        : EMPTY;
+      return { ...data, consolidated: true };
+    }
+
     const input: Record<string, unknown> = {};
     if (asOfDate) input.asOfDate = asOfDate;
     const res = await apiRequest<unknown>(
       `/trpc/generalLedger.balanceSheet?input=${encodeURIComponent(JSON.stringify(input))}`,
       { method: 'GET', cookie },
     );
-    return res.ok
+    const data = res.ok
       ? ((res.data as { result?: { data?: BalanceSheetPageProps } })?.result?.data ?? EMPTY)
       : EMPTY;
+    return { ...data, consolidated: false };
   })();
 
   return defer({ pageData });
@@ -51,7 +66,7 @@ export default function BalanceSheetRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<BalanceSheetPage {...EMPTY} />}>
-      {(data) => <BalanceSheetPage {...data} />}
+      {(data) => <BalanceSheetPage {...data} consolidated={data.consolidated} />}
     </CachedAwait>
   );
 }

@@ -3,6 +3,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface PLRow {
   code: string;
@@ -25,7 +26,8 @@ export function ProfitAndLossPage({
   totalIncome,
   totalExpense,
   netProfit,
-}: ProfitAndLossPageProps) {
+  consolidated,
+}: ProfitAndLossPageProps & { consolidated?: boolean }) {
   const columns: CompactTableColumn<PLRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
     { key: 'amount', header: 'Amount', align: 'right', render: (r) => <NairaPrice amount={r.amount} /> },
@@ -36,8 +38,9 @@ export function ProfitAndLossPage({
   return (
     <>
       <PageHeader
-        title="Profit &amp; Loss"
+        title={consolidated ? 'Consolidated Profit & Loss' : 'Profit & Loss'}
         description="Income less expenses over the period, straight from the ledger."
+        actions={<ConsolidatedToggle active={consolidated} />}
       />
 
       <OverviewStatStrip

@@ -1966,8 +1966,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Awaiting remittance is always all-time — every unremitted delivered
-    // order is actionable regardless of when it was created/delivered.
+    // Date filter by createdAt — matches delivered count scoping.
+    if (input.startDate) awaitingConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) awaitingConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
@@ -2007,9 +2008,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Delivered count is all-time — must equal Awaiting + Remitted.
-    // Awaiting is all-time, Remitted filters by sentAt. Delivered stays
-    // unfiltered so the stat strip reconciles correctly.
+    // Date filter by createdAt — matches dashboard/marketing/sales funnels.
+    if (input.startDate) deliveredConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) deliveredConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
@@ -2205,6 +2206,23 @@ export class LogisticsService {
           break;
         case 'offline':
           conditions.push(eq(schema.orders.orderSource, 'offline'));
+          break;
+      }
+    }
+
+    if (input.deduction) {
+      switch (input.deduction) {
+        case 'deliveryFee':
+          conditions.push(sql`COALESCE(${schema.orders.deliveryFee}, 0) > 0`);
+          break;
+        case 'commitmentFee':
+          conditions.push(sql`COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0`);
+          break;
+        case 'posFee':
+          conditions.push(sql`COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0`);
+          break;
+        case 'failedDeliveryCost':
+          conditions.push(sql`COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0`);
           break;
       }
     }
@@ -3617,11 +3635,40 @@ export class LogisticsService {
       );
     }
 
-    // 4a: approved + disputed from outcomes table
+    // 4a: RECEIVED batches — sum order totals (matches Cash Remittances page)
+    const receivedConditions: SQL[] = [eq(schema.deliveryRemittances.status, 'RECEIVED'), ...remitSentAtConditions];
     const outcomeRows = await this.db
       .select({
         providerId: schema.logisticsLocations.providerId,
-        remittedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
+        remittedAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        remittedOrderCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittanceOrders.orderId})::text`,
+        disputedRemittanceAmount: sql<string>`'0'`,
+      })
+      .from(schema.deliveryRemittances)
+      .innerJoin(
+        schema.deliveryRemittanceOrders,
+        eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.deliveryRemittances.logisticsLocationId),
+      )
+      .innerJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(and(...receivedConditions))
+      .groupBy(schema.logisticsLocations.providerId);
+
+    // 4a-disputed: DISPUTED batches from outcomes
+    const disputedConditions: SQL[] = [...remitSentAtConditions];
+    if (activeGroupId) {
+      // already in remitSentAtConditions
+    }
+    const disputedRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
         disputedRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
@@ -3637,7 +3684,7 @@ export class LogisticsService {
         schema.logisticsProviders,
         eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
       )
-      .where(remitSentAtConditions.length > 0 ? and(...remitSentAtConditions) : undefined)
+      .where(disputedConditions.length > 0 ? and(...disputedConditions) : undefined)
       .groupBy(schema.logisticsLocations.providerId);
 
     // 4b: pending (SENT) batches — no outcome rows yet, sum from order totals
@@ -3672,28 +3719,30 @@ export class LogisticsService {
       .where(and(...pendingConditions))
       .groupBy(schema.logisticsLocations.providerId);
 
-    // Merge outcome + pending results per provider
-    const remittanceRows = [...outcomeRows, ...pendingRows].reduce<
-      Array<{ providerId: string | null; remittedAmount: string; pendingRemittanceAmount: string; disputedRemittanceAmount: string }>
+    // Merge outcome + pending + disputed results per provider
+    const remittanceRows = [...outcomeRows, ...pendingRows, ...disputedRows].reduce<
+      Array<{ providerId: string | null; remittedAmount: string; remittedOrderCount: string; pendingRemittanceAmount: string; disputedRemittanceAmount: string }>
     >((acc, _row) => {
       const row = _row as Record<string, string | null>;
       const pid = row.providerId;
       let entry = acc.find((e) => e.providerId === pid);
       if (!entry) {
-        entry = { providerId: pid ?? null, remittedAmount: '0', pendingRemittanceAmount: '0', disputedRemittanceAmount: '0' };
+        entry = { providerId: pid ?? null, remittedAmount: '0', remittedOrderCount: '0', pendingRemittanceAmount: '0', disputedRemittanceAmount: '0' };
         acc.push(entry);
       }
-      if ('remittedAmount' in row) entry.remittedAmount = row.remittedAmount ?? '0';
-      if ('pendingRemittanceAmount' in row) entry.pendingRemittanceAmount = row.pendingRemittanceAmount ?? '0';
-      if ('disputedRemittanceAmount' in row) entry.disputedRemittanceAmount = row.disputedRemittanceAmount ?? '0';
+      if ('remittedAmount' in row && row.remittedAmount !== '0') entry.remittedAmount = row.remittedAmount ?? '0';
+      if ('remittedOrderCount' in row && row.remittedOrderCount !== '0') entry.remittedOrderCount = row.remittedOrderCount ?? '0';
+      if ('pendingRemittanceAmount' in row && row.pendingRemittanceAmount !== '0') entry.pendingRemittanceAmount = row.pendingRemittanceAmount ?? '0';
+      if ('disputedRemittanceAmount' in row && row.disputedRemittanceAmount !== '0') entry.disputedRemittanceAmount = row.disputedRemittanceAmount ?? '0';
       return acc;
     }, []);
 
-    const remittanceByProvider = new Map<string, { received: string; pending: string; disputed: string }>();
+    const remittanceByProvider = new Map<string, { received: string; receivedOrderCount: string; pending: string; disputed: string }>();
     for (const r of remittanceRows) {
       if (r.providerId) {
         remittanceByProvider.set(r.providerId, {
           received: r.remittedAmount,
+          receivedOrderCount: r.remittedOrderCount,
           pending: r.pendingRemittanceAmount,
           disputed: r.disputedRemittanceAmount,
         });
@@ -3907,6 +3956,7 @@ export class LogisticsService {
         delinquencyRate,
         statusBreakdown,
         remittedAmount: remit?.received ?? '0',
+        remittedOrderCount: Number(remit?.receivedOrderCount ?? '0'),
         pendingRemittanceAmount: remit?.pending ?? '0',
         disputedRemittanceAmount: remit?.disputed ?? '0',
         owingAmount: owingByProvider.get(p.id)?.amount ?? '0',

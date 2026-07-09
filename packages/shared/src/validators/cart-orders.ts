@@ -71,6 +71,7 @@ export const createCartOrderRoutingRuleSchema = z.object({
   name: z.string().min(1).max(200),
   sourceBranchId: z.string().uuid().nullable().optional(),
   targetBranchId: z.string().uuid().nullable().optional(),
+  teamId: z.string().uuid().nullable().optional(),
   priority: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
 });
@@ -80,6 +81,7 @@ export const updateCartOrderRoutingRuleSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   sourceBranchId: z.string().uuid().nullable().optional(),
   targetBranchId: z.string().uuid().nullable().optional(),
+  teamId: z.string().uuid().nullable().optional(),
   priority: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
 });

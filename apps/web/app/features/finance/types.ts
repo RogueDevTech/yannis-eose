@@ -153,6 +153,24 @@ export interface GeneralLedgerLoaderData {
   searchFilter: string;
 }
 
+/** Financial KPIs from GL data. */
+export interface FinancialKPIs {
+  currentRatio: number;
+  quickRatio: number;
+  cashRatio: number;
+  grossProfitMargin: number;
+  operatingProfitMargin: number;
+  netProfitMargin: number;
+  returnOnAssets: number;
+  returnOnEquity: number;
+  debtToEquity: number;
+  daysSalesOutstanding: number;
+  inventoryTurnover: number;
+  daysInventoryOutstanding: number;
+  interestCoverage: number;
+  cashConversionCycle: number;
+}
+
 /** `/admin/finance/overview` loader shape */
 export interface FinanceOverviewLoaderData {
   profit: ProfitReport;
@@ -178,4 +196,6 @@ export interface FinanceOverviewLoaderData {
   byProduct?: RemittanceBreakdownRow[];
   /** Delivered/remitted orders breakdown by logistics location. */
   byLocation?: RemittanceBreakdownRow[];
+  /** Financial health KPIs derived from live GL data. */
+  kpis?: FinancialKPIs | null;
 }

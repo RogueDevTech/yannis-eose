@@ -204,6 +204,8 @@ export const listDeliveryRemittancesSchema = z.object({
   search: z.string().trim().max(200).optional(),
   /** Filter by order category in the orders view. */
   category: z.enum(['marketing', 'cart', 'follow-up', 'offline']).optional(),
+  /** Filter orders by deduction type — only show orders with this deduction > 0. */
+  deduction: z.enum(['deliveryFee', 'commitmentFee', 'posFee', 'failedDeliveryCost']).optional(),
   /** Sort field for the orders view. */
   sortBy: z.enum(['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber']).optional(),
   sortDir: z.enum(['asc', 'desc']).optional(),

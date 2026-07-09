@@ -49,6 +49,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
       notificationsStub,
       new BranchTeamsService(db as any, createFakeCacheService()),
       settingsStub,
+      {} as any,
     );
 
   beforeEach(async () => {
@@ -489,6 +490,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing supervisor — funding balances + ad s
       notificationsStub,
       new BranchTeamsService(db as never, createFakeCacheService()),
       settingsStub,
+      {} as any,
     );
 
   function sessionUser(p: {

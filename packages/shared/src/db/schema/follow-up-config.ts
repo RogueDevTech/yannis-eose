@@ -36,6 +36,9 @@ export const followUpRules = pgTable('follow_up_rules', {
    *  CREATED_AT = order creation date.
    *  PREFERRED_DELIVERY_DATE = scheduled delivery date. */
   ageRelativeTo: text('age_relative_to').notNull().default('STATUS_TIMESTAMP'),
+  /** Optional target team: auto-assign follow-up orders only to closers in this team.
+   *  NULL = any closer in the target branch. */
+  teamId: uuid('team_id'),
   /** Higher priority = evaluated first. */
   priority: integer('priority').notNull().default(0),
   /** Disabled rules are skipped during sync. */
@@ -101,6 +104,8 @@ export const followUpOrders = pgTable('follow_up_orders', {
   customFields: jsonb('custom_fields'),
   branchId: uuid('branch_id'),
   servicingBranchId: uuid('servicing_branch_id'),
+  /** Target team for auto-assignment. NULL = any closer in the branch. */
+  routingTeamId: uuid('routing_team_id'),
   cartId: uuid('cart_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),

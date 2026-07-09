@@ -3,6 +3,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface BSRow {
   code: string;
@@ -22,8 +23,8 @@ export interface BalanceSheetPageProps {
   asOfDate: string | null;
 }
 
-export function BalanceSheetPage(props: BalanceSheetPageProps) {
-  const { assets, liabilities, equity, retainedEarnings, totalAssets, totalLiabilities, totalEquity, balanced } = props;
+export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?: boolean }) {
+  const { assets, liabilities, equity, retainedEarnings, totalAssets, totalLiabilities, totalEquity, balanced, consolidated } = props;
 
   const columns: CompactTableColumn<BSRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
@@ -51,19 +52,22 @@ export function BalanceSheetPage(props: BalanceSheetPageProps) {
   return (
     <>
       <PageHeader
-        title="Balance Sheet"
+        title={consolidated ? 'Consolidated Balance Sheet' : 'Balance Sheet'}
         description="Assets versus liabilities and equity, as of a date."
         actions={
-          <span
-            className={[
-              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
-              balanced
-                ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                : 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
-            ].join(' ')}
-          >
-            {balanced ? '✓ Balanced' : '⚠ Out of balance'}
-          </span>
+          <div className="flex items-center gap-2">
+            <ConsolidatedToggle active={consolidated} />
+            <span
+              className={[
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
+                balanced
+                  ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                  : 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
+              ].join(' ')}
+            >
+              {balanced ? 'Balanced' : 'Out of balance'}
+            </span>
+          </div>
         }
       />
 

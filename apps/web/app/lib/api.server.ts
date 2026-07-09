@@ -667,15 +667,17 @@ export async function requireRole(request: Request, allowedRoles: string[]) {
 
 /**
  * Check if this session should bypass permission checks. True when:
- * - The user's own role is SUPER_ADMIN or SUPPORT, OR
- * - The session is in Mirror Mode and the original actor is SUPER_ADMIN or SUPPORT.
+ * - The user's own role is SUPER_ADMIN or SUPPORT.
  *
- * This ensures that a SuperAdmin mirroring a lower-privileged user can still
- * navigate all pages (read-only — mutations are blocked by the tRPC mirror guard).
+ * Mirror Mode sessions are NOT bypassed — the mirrored user sees only the
+ * pages their own role permits. This prevents a CS Closer from accessing
+ * Users, Finance, HR, etc. just because a SuperAdmin initiated the mirror.
+ * Mutations are separately blocked by the tRPC mirror guard on the API.
  */
 function sessionBypassesPermissions(user: { role: string; mirroredBy?: { role: string } | null }): boolean {
+  // In mirror mode, enforce the target user's actual permissions — never bypass.
+  if (user.mirroredBy) return false;
   if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return true;
-  if (user.mirroredBy?.role === 'SUPER_ADMIN' || user.mirroredBy?.role === 'SUPPORT') return true;
   return false;
 }
 

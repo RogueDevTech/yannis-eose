@@ -37,7 +37,7 @@ const CS_ORDERS_VISIBLE_STATUSES = new Set([
   'DELETED',
 ]);
 export const meta: MetaFunction = () => [
-  { title: 'Sales Orders — Yannis EOSE' },
+  { title: 'Order Funnel — Yannis EOSE' },
 ];
 
 const CS_ORDERS_LIVE_EVENTS = [
@@ -190,6 +190,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
   const orderSource = orderSourceParam === 'offline' ? 'offline' : 'edge-form';
 
+  const teamIdParam = url.searchParams.get('teamId') || undefined;
   const productIdParam = url.searchParams.get('productId') || undefined;
   const frozenParam = url.searchParams.get('frozen') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
@@ -219,6 +220,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(frozenParam === 'frozen' || frozenParam === 'active' ? { frozenFilter: frozenParam } : {}),
     ...(testOrders && { testOrders: true }),
     ...(orderSource && { orderSource }),
+    ...(teamIdParam && { teamId: teamIdParam }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -385,6 +387,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         showCSCloserColumn,
         canCreateOffline,
         orderSource: 'edge-form',
+        ...(teamIdParam && { teamId: teamIdParam }),
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -429,6 +432,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       productsForFilter: (bundle?.productsForOfflineOrder ?? []).map((p) => ({ id: p.id, name: p.name })),
       offlineCount: bundle?.offlineCount ?? 0,
       cartAbandonmentCount: bundle?.cartAbandonmentCount ?? 0,
+      teamsForFilter: (bundle as Record<string, unknown>)?.teamsForFilter as Array<{ id: string; name: string | null; department: string }> ?? [],
     };
   })();
 

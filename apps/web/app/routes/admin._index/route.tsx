@@ -50,6 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
+  const teamIdParam = url.searchParams.get('teamId') || undefined;
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' && user?.id ? { assignedCsId: user.id } : {};
   // Stock Manager / Finance see ALL deliveries (follow-up + cart included) so
@@ -61,6 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...assignedCsParam,
     isFollowUp: false,
     ...(includeAllDeliveries ? { excludeGraduated: false } : {}),
+    ...(teamIdParam && { teamId: teamIdParam }),
   });
 
   // SuperAdmin: full CEO metrics directly on /admin (CEO directive 2026-05-18).
@@ -107,14 +109,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => 0)
     : Promise.resolve(0);
   // Offline per-status counts for separate funnel strip
-  const offlineCountsInput = JSON.stringify({ startDate, endDate, orderSource: 'offline' });
+  const offlineCountsInput = JSON.stringify({ startDate, endDate, orderSource: 'offline', ...(teamIdParam && { teamId: teamIdParam }) });
   const offlineStatusP = needsOffline
     ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(offlineCountsInput)}`, deferredOpt)
         .then((r) => r.ok ? ((r.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}) : {})
         .catch(() => ({} as Record<string, number>))
     : Promise.resolve({} as Record<string, number>);
 
-  const pageData = Promise.all([ordersP, countsP, supplementaryP, offlineStatusP]).then(([ordersRes, countsRes, offlineCount, offlineStatusCounts]): OrdersAndCounts => {
+  // Fetch teams for the team filter dropdown (HoCS / supervisor)
+  const primaryBranchId = (user as Record<string, unknown>)?.primaryBranchId as string | undefined;
+  const teamsP = needsOffline && primaryBranchId
+    ? apiRequest<unknown>(
+        `/trpc/branches.listTeamsForFilter?input=${encodeURIComponent(JSON.stringify({ branchId: primaryBranchId, department: 'CS' }))}`,
+        deferredOpt,
+      ).then((r) => r.ok ? ((r.data as { result?: { data?: Array<{ id: string; name: string | null; department: string }> } })?.result?.data ?? []) : [])
+       .catch(() => [] as Array<{ id: string; name: string | null; department: string }>)
+    : Promise.resolve([] as Array<{ id: string; name: string | null; department: string }>);
+
+  const pageData = Promise.all([ordersP, countsP, supplementaryP, offlineStatusP, teamsP]).then(([ordersRes, countsRes, offlineCount, offlineStatusCounts, teamsForFilter]): OrdersAndCounts => {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
       : null;
@@ -127,8 +139,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       recentOrders: ordersData?.orders ?? [],
       offlineCount,
       offlineStatusCounts,
+      teamsForFilter,
     };
-  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [], offlineCount: 0, offlineStatusCounts: {} }));
+  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [], offlineCount: 0, offlineStatusCounts: {}, teamsForFilter: [] }));
 
   return defer({
     variant: 'dashboard' as const,

@@ -99,6 +99,8 @@ export const DEFAULT_CHART_OF_ACCOUNTS: ChartOfAccountsEntry[] = [
   { code: 'Asset Received But Not Billed', name: 'Asset Received But Not Billed', rootType: 'LIABILITY', accountType: null, isGroup: false, parentCode: 'Stock Liabilities' },
   { code: 'Duties and Taxes', name: 'Duties and Taxes', rootType: 'LIABILITY', accountType: 'TAX', isGroup: true, parentCode: 'Current Liabilities' },
   { code: 'VAT', name: 'VAT', rootType: 'LIABILITY', accountType: 'TAX', isGroup: false, parentCode: 'Duties and Taxes' },
+  { code: 'PAYE Tax', name: 'PAYE Tax', rootType: 'LIABILITY', accountType: 'TAX', isGroup: false, parentCode: 'Duties and Taxes' },
+  { code: 'Pension Payable', name: 'Pension Payable', rootType: 'LIABILITY', accountType: null, isGroup: false, parentCode: 'Accounts Payable' },
   { code: 'Loans (Liabilities)', name: 'Loans (Liabilities)', rootType: 'LIABILITY', accountType: null, isGroup: true, parentCode: 'Current Liabilities' },
   { code: 'Secured Loans', name: 'Secured Loans', rootType: 'LIABILITY', accountType: null, isGroup: false, parentCode: 'Loans (Liabilities)' },
   { code: 'Unsecured Loans', name: 'Unsecured Loans', rootType: 'LIABILITY', accountType: null, isGroup: false, parentCode: 'Loans (Liabilities)' },

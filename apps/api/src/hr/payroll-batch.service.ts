@@ -19,6 +19,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActorAndBranch } from '../common/db/with-actor';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -109,6 +110,7 @@ export class PayrollBatchService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly notifications: NotificationsService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {}
 
   private async isBranchTeamSupervisorForDept(
@@ -769,6 +771,13 @@ export class PayrollBatchService {
         return rows[0];
       },
     );
+
+    // GL auto-post: salary expense (non-fatal — never blocks payroll)
+    try {
+      await this.generalLedger.postPayrollBatch(input.batchId, actor);
+    } catch (err) {
+      console.warn(`GL postPayrollBatch failed for batch ${input.batchId}: ${err instanceof Error ? err.message : err}`);
+    }
 
     // Notify HR + the originating Head + every staff in the batch
     await this.notifyByRoleOnBranch('HR_MANAGER', batch.branchId, {

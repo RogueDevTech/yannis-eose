@@ -36,7 +36,10 @@ import { FinanceService } from '../finance/finance.service';
 import { setFinanceService } from './routers/finance.router';
 import { LedgerModule } from '../finance/ledger.module';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
-import { setGeneralLedgerService } from './routers/general-ledger.router';
+import { AssetRegisterService } from '../finance/asset-register.service';
+import { ExpenseSubmissionService } from '../finance/expense-submission.service';
+import { BankReconciliationService } from '../finance/bank-reconciliation.service';
+import { setGeneralLedgerService, setAssetRegisterService, setExpenseSubmissionService, setBankReconciliationService } from './routers/general-ledger.router';
 import { HrModule } from '../hr/hr.module';
 import { HrService } from '../hr/hr.service';
 import { PayrollBatchService } from '../hr/payroll-batch.service';
@@ -131,6 +134,9 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly marketingService: MarketingService,
     private readonly financeService: FinanceService,
     private readonly generalLedgerService: GeneralLedgerService,
+    private readonly assetRegisterService: AssetRegisterService,
+    private readonly expenseSubmissionService: ExpenseSubmissionService,
+    private readonly bankReconciliationService: BankReconciliationService,
     private readonly hrService: HrService,
     private readonly payrollBatchService: PayrollBatchService,
     private readonly notificationsService: NotificationsService,
@@ -172,6 +178,9 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setMarketingService(this.marketingService);
     setFinanceService(this.financeService);
     setGeneralLedgerService(this.generalLedgerService);
+    setAssetRegisterService(this.assetRegisterService);
+    setExpenseSubmissionService(this.expenseSubmissionService);
+    setBankReconciliationService(this.bankReconciliationService);
     setHrService(this.hrService);
     setPayrollBatchService(this.payrollBatchService);
     setNotificationsService(this.notificationsService);

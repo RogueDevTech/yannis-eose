@@ -5,9 +5,10 @@ import { MarketingService } from './marketing.service';
 import { AdSpendComplianceService } from './ad-spend-compliance.service';
 import { BranchesModule } from '../branches/branches.module';
 import { SettingsModule } from '../settings/settings.module';
+import { LedgerModule } from '../finance/ledger.module';
 
 @Module({
-  imports: [EventsModule, NotificationsModule, BranchesModule, SettingsModule],
+  imports: [EventsModule, NotificationsModule, BranchesModule, SettingsModule, LedgerModule],
   providers: [MarketingService, AdSpendComplianceService],
   exports: [MarketingService],
 })

@@ -1,4 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -26,6 +27,14 @@ import type {
 export const meta: MetaFunction = () => [
   { title: 'Add User — Yannis EOSE' },
 ];
+
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formMethod,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 // ─── Loader ─────────────────────────────────────────────
 
