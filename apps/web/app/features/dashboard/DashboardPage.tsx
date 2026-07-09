@@ -349,12 +349,11 @@ function CSDashboard({
   const showsTeamManagementCard = role === 'HEAD_OF_CS' || isCsTeamSupervisor;
   const offlineCount = data.offlineCount ?? 0;
   const counts = data.orderCounts as Record<string, number>;
-  // `pendingQueue` rolls UNPROCESSED + CS_ASSIGNED into one waiting-on-engagement
-  // bucket for the top stat strip. Deeper per-status breakdown lives on
-  // `/admin/sales/orders` via the status filter.
-  const unprocessed = counts['UNPROCESSED'] ?? 0;
-  const csAssigned = counts['CS_ASSIGNED'] ?? 0;
-  const engaged = counts['CS_ENGAGED'] ?? 0;
+  const offSc = (data.offlineStatusCounts ?? {}) as Record<string, number>;
+  // Funnel counts exclude offline orders — offline has its own strip below.
+  const unprocessed = (counts['UNPROCESSED'] ?? 0) - (offSc['UNPROCESSED'] ?? 0);
+  const csAssigned = (counts['CS_ASSIGNED'] ?? 0) - (offSc['CS_ASSIGNED'] ?? 0);
+  const engaged = (counts['CS_ENGAGED'] ?? 0) - (offSc['CS_ENGAGED'] ?? 0);
   const pendingQueue = unprocessed + csAssigned;
 
   // Sales Closers get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
@@ -429,33 +428,41 @@ function CSDashboard({
       <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={(data.offlineStatusCounts ?? {}) as Record<string, number>} offlineCount={offlineCount} />
 
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-        {(metrics) => (
+        {(metrics) => {
+          const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+          const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+          const offConfirmed = (offSc['CONFIRMED'] ?? 0) + (offSc['AGENT_ASSIGNED'] ?? 0) + (offSc['DISPATCHED'] ?? 0) + (offSc['IN_TRANSIT'] ?? 0);
+          const funnelTotal = metrics.totalOrders - offTotal;
+          const funnelDelivered = metrics.deliveredOrders - offDelivered;
+          const funnelConfirmed = metrics.confirmedOrders - offConfirmed - offDelivered;
+          return (
           <div>
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Funnel Orders</h2>
           <OverviewStatStrip
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
-              { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
-              { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
-              { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
-              { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
-              { label: 'Confirmed', value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
-              { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
+              { label: 'Total', value: Math.max(0, funnelTotal).toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
+              { label: 'Unassigned', value: Math.max(0, unprocessed).toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
+              { label: 'Assigned', value: Math.max(0, pendingQueue).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
+              { label: 'Engaged', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
+              { label: 'Confirmed', value: Math.max(0, funnelConfirmed).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
+              { label: 'Delivered', value: Math.max(0, funnelDelivered).toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
               {
                 label: 'CR',
-                value: `${metrics.confirmationRate.toFixed(1)}%`,
-                valueClassName: confirmationRateColorClass(metrics.confirmationRate),
+                value: (() => { const cr = funnelTotal > 0 ? ((Math.max(0, funnelConfirmed) + Math.max(0, funnelDelivered)) / funnelTotal) * 100 : 0; return `${cr.toFixed(1)}%`; })(),
+                valueClassName: (() => { const cr = funnelTotal > 0 ? ((Math.max(0, funnelConfirmed) + Math.max(0, funnelDelivered)) / funnelTotal) * 100 : 0; return confirmationRateColorClass(cr); })(),
               },
               {
                 label: 'DR',
-                value: `${metrics.deliveryRate.toFixed(1)}%`,
-                valueClassName: deliveryRateColorClass(metrics.deliveryRate),
+                value: (() => { const dr = funnelTotal > 0 ? (Math.max(0, funnelDelivered) / funnelTotal) * 100 : 0; return `${dr.toFixed(1)}%`; })(),
+                valueClassName: (() => { const dr = funnelTotal > 0 ? (Math.max(0, funnelDelivered) / funnelTotal) * 100 : 0; return deliveryRateColorClass(dr); })(),
               },
             ]}
           />
           </div>
-        )}
+          );
+        }}
       </DashboardMetricsSection>
 
       {/* Order Pipeline strip retired 2026-05-03 — the KPI row above (queue health +
