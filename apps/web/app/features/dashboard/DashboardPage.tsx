@@ -376,7 +376,7 @@ function CSDashboard({
               items={[
                 { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
                 { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
-                { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
+                { label: 'Unconfirmed', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
                 { label: 'Confirmed', value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
                 { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
                 {
@@ -445,7 +445,7 @@ function CSDashboard({
               { label: 'Total', value: Math.max(0, funnelTotal).toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
               { label: 'Unassigned', value: Math.max(0, unprocessed).toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
               { label: 'Assigned', value: Math.max(0, pendingQueue).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
-              { label: 'Engaged', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
+              { label: 'Unconfirmed', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
               { label: 'Confirmed', value: Math.max(0, funnelConfirmed).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
               { label: 'Delivered', value: Math.max(0, funnelDelivered).toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
               {
@@ -497,7 +497,7 @@ function CSDashboard({
                 { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: '/admin/sales/offline-orders' },
                 { label: 'Unassigned', value: offUnassigned, valueClassName: offUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: '/admin/sales/offline-orders?status=UNPROCESSED' },
                 { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/offline-orders?status=CS_ASSIGNED' },
-                { label: 'Engaged', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/offline-orders?status=CS_ENGAGED' },
+                { label: 'Unconfirmed', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/offline-orders?status=CS_ENGAGED' },
                 { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/offline-orders?status=CONFIRMED' },
                 { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/offline-orders?status=DELIVERED' },
                 { label: 'CR', value: `${offCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(offCR) },
@@ -1233,7 +1233,7 @@ function FollowUpDashboardStrip({ showUnassigned = true, filters }: { showUnassi
                   to: followUpLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
-                  label: 'Engaged',
+                  label: 'Unconfirmed',
                   value: engaged,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
                   to: followUpLink({ status: 'CS_ENGAGED' }),
@@ -1326,7 +1326,7 @@ function CartOrdersDashboardStrip({ showUnassigned = true, filters }: { showUnas
                   to: cartOrdersLink({ status: 'CS_ASSIGNED' }),
                 },
                 {
-                  label: 'Engaged',
+                  label: 'Unconfirmed',
                   value: engaged,
                   valueClassName: 'text-cyan-600 dark:text-cyan-400',
                   to: cartOrdersLink({ status: 'CS_ENGAGED' }),
