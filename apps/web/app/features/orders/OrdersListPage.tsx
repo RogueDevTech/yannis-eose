@@ -27,9 +27,8 @@ import { Pagination } from '~/components/ui/pagination';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Textarea } from '~/components/ui/textarea';
-import { ExportModal } from '~/components/ui/export-modal';
-import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
+import { CreateDeliveredFollowUpModal } from '~/features/orders/CreateDeliveredFollowUpModal';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -40,7 +39,6 @@ import {
   STATUS_TEXT_CLASS,
   formatStatus,
 } from '~/features/shared/order-status';
-import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-return';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -78,6 +76,7 @@ export type CsOrdersDeferredSecondary = {
   productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   productsForFilter?: Array<{ id: string; name: string }>;
   offlineCount: number;
+  deliveredFollowUpCount: number;
   cartAbandonmentCount: number;
 };
 import type { ListOrdersScheduleKind } from '@yannis/shared';
@@ -235,14 +234,16 @@ export interface OrdersListPageProps {
   campaignsForFilter?: Array<{ id: string; name: string }>;
   /** Available products for the Product filter dropdown. */
   productsForFilter?: Array<{ id: string; name: string }>;
+  /** Active offline order category filter from URL: 'website_order' | 'referrals' | undefined. */
+  categoryFilter?: string;
   /** Active frozen filter from URL: 'frozen' | 'active' | undefined. */
   frozenFilter?: string;
   /** Permission-driven (orders.freeze) — controls Freeze / Unfreeze bulk action visibility. */
   canFreeze?: boolean;
   /** When true, show "Create offline order" button (CS_CLOSER / HEAD_OF_CS). */
   canCreateOffline?: boolean;
-  /** When true, show "Import orders" link (SuperAdmin only). */
-  canImportOrders?: boolean;
+  /** Which create modal to render when canCreateOffline is true. Default: 'offline'. */
+  createModalVariant?: 'offline' | 'delivered_follow_up';
   /**
    * When false (default), the Export / Export Selected buttons are hidden.
    * Server still enforces `orders.export` on the actual download — this is the UI gate.
@@ -291,6 +292,7 @@ export interface OrdersListPageProps {
   /** Show "Test orders" filter option. Admin only. */
   enableTestOrdersOption?: boolean;
   offlineCount?: number;
+  deliveredFollowUpCount?: number;
   cartAbandonmentCount?: number;
   /** Branches available for the "Move to branch" bulk action (Admin/HoCS only). */
   branchesForMove?: Array<{ id: string; name: string }>;
@@ -332,6 +334,7 @@ function OrdersListPageImpl({
   showCampaignColumn = false,
   campaignFilter,
   productFilter,
+  categoryFilter,
   frozenFilter: frozenFilterProp,
   canFreeze = false,
   campaignsForFilter,
@@ -343,7 +346,7 @@ function OrdersListPageImpl({
   myWorkload = null,
   liveEvents,
   canCreateOffline = false,
-  canImportOrders = false,
+  createModalVariant = 'offline',
   canExport = false,
   productsForOfflineOrder = [],
   dailyCounts,
@@ -355,6 +358,7 @@ function OrdersListPageImpl({
   isCartAbandonmentView = false,
   enableTestOrdersOption = false,
   offlineCount = 0,
+  deliveredFollowUpCount = 0,
   cartAbandonmentCount = 0,
   bulkSelectAllMatchingInput,
   bulkSelectEndpoint,
@@ -410,8 +414,6 @@ function OrdersListPageImpl({
     setSelectedStatus(synced);
   }, [statusFilter, offlineUrlActive, testOrdersUrlActive, enableTestOrdersOption, fromCartUrlActive, enableFromCartStatusOption]);
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
@@ -1526,6 +1528,7 @@ function OrdersListPageImpl({
     if (scheduleFilters?.scheduleKind) n += 1;
     if (productFilter) n += 1;
     if (showCampaignColumn && campaignFilter) n += 1;
+    if (categoryFilter) n += 1;
     if (frozenFilterProp) n += 1;
     if (searchParams.get('teamId')) n += 1;
     return n;
@@ -1538,6 +1541,7 @@ function OrdersListPageImpl({
     productFilter,
     showCampaignColumn,
     campaignFilter,
+    categoryFilter,
     frozenFilterProp,
   ]);
 
@@ -1626,7 +1630,14 @@ function OrdersListPageImpl({
 
   return (
     <div className="space-y-4">
-      {canCreateOffline && (
+      {canCreateOffline && createModalVariant === 'delivered_follow_up' ? (
+        <CreateDeliveredFollowUpModal
+          open={createOfflineOpen}
+          onClose={() => setCreateOfflineOpen(false)}
+          onSuccess={() => setCreateOfflineOpen(false)}
+          products={productsForOfflineOrder}
+        />
+      ) : canCreateOffline ? (
         <CreateOfflineOrderModal
           open={createOfflineOpen}
           onClose={() => setCreateOfflineOpen(false)}
@@ -1634,11 +1645,11 @@ function OrdersListPageImpl({
           products={productsForOfflineOrder}
           canEditPrices={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_MARKETING'}
         />
-      )}
+      ) : null}
 
       {/* Page header — Live tag sits directly in front of the refresh button per Sales request. */}
       <PageHeader
-        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Order Funnel')}
+        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Funnel Orders')}
         mobileInlineActions
         backTo={backTo}
         description={pageDescription ?? (isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders')}
@@ -1798,6 +1809,48 @@ function OrdersListPageImpl({
                       />
                     </div>
                   ) : null}
+                  {categoryFilter !== undefined ? (
+                    <div className={mobileFilterBoxClass}>
+                      {(categoryFilter || 'ALL') !== 'ALL' && (
+                        <FilterDismiss
+                          onClear={() => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.delete('category');
+                              next.set('page', '1');
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
+                      <FormSelect
+                        value={categoryFilter || 'ALL'}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('category', v);
+                            else next.delete('category');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All categories' },
+                          { value: 'website_order', label: 'Website order' },
+                          { value: 'referrals', label: 'Referrals' },
+                        ]}
+                        controlSize="sm"
+                        openAs="modal"
+                        wrapperClassName="w-full"
+                        className={mobileSelectTransparent} inlineChevron
+                      />
+                    </div>
+                  ) : null}
                   {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
                     <div className={mobileFilterBoxClass}>
                       {(campaignFilter || 'ALL') !== 'ALL' && (
@@ -1862,19 +1915,9 @@ function OrdersListPageImpl({
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
-                {canExport && (
-                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                    Generate report
-                  </Button>
-                )}
-                {canImportOrders && (
-                  <Link to="/admin/sales/orders/import" prefetch="intent" className="btn-secondary btn-sm">
-                    Import orders
-                  </Link>
-                )}
                 {canCreateOffline && (
                   <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
-                    <span className="hidden sm:inline">Create offline order</span>
+                    <span className="hidden sm:inline">{createModalVariant === 'delivered_follow_up' ? 'Create delivered follow-up' : 'Create offline order'}</span>
                     <span className="sm:hidden">+ Order</span>
                   </Button>
                 )}
@@ -1909,30 +1952,7 @@ function OrdersListPageImpl({
                       setCreateOfflineOpen(true);
                     }}
                   >
-                    Create offline order
-                  </Button>
-                )}
-                {canImportOrders && (
-                  <Link
-                    to="/admin/sales/orders/import"
-                    prefetch="intent"
-                    className="btn-secondary btn-sm h-12 w-full justify-center"
-                    onClick={() => closeSheet()}
-                  >
-                    Import orders
-                  </Link>
-                )}
-                {canExport && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      setShowExportModal(true);
-                    }}
-                  >
-                    Generate report
+                    {createModalVariant === 'delivered_follow_up' ? 'Create delivered follow-up' : 'Create offline order'}
                   </Button>
                 )}
                 {isTestOrdersView && (
@@ -2062,6 +2082,12 @@ function OrdersListPageImpl({
               onClick: () => handleStatusSelect(OFFLINE_STATUS_VALUE),
               active: selectedStatus === OFFLINE_STATUS_VALUE,
             }]),
+            ...(hideOfflineAndCartStats ? [] : [{
+              label: 'Delivered F/U',
+              value: deliveredFollowUpCount ?? 0,
+              valueClassName: 'text-teal-600 dark:text-teal-400',
+              title: 'Follow-up orders for previously delivered customers',
+            }]),
             ...pipelineItems,
             {
               label: 'CR',
@@ -2170,12 +2196,6 @@ function OrdersListPageImpl({
                   {bulkTransitionLabel(status)}
                 </Button>
               ))}
-              {/* Export selected — same orders.export gate as the full report button. */}
-              {canExport && (
-                <Button variant="secondary" size="sm" onClick={() => setShowSelectedExportModal(true)}>
-                  Export Selected
-                </Button>
-              )}
               {/* Freeze — all selected must be unfrozen */}
               {allSelectedUnfrozen && (
                 <Button
@@ -2261,32 +2281,6 @@ function OrdersListPageImpl({
         </div>
       )}
 
-      <LocalExportModal
-        open={showSelectedExportModal}
-        onClose={() => setShowSelectedExportModal(false)}
-        title="Export Selected Orders"
-        description="Choose format and columns for selected orders."
-        filenamePrefix="orders-selected"
-        rows={selectedOrders.map((o) => ({
-          id: o.id,
-          customer: o.customerName,
-          assignedCs: o.assignedCsName ?? '—',
-          phone: o.customerPhoneDisplay,
-          status: o.status,
-          amount: o.totalAmount ?? '',
-          created: formatOrderTimestamp(o.createdAt),
-        }))}
-        columns={[
-          { key: 'id', label: 'Order ID' },
-          { key: 'customer', label: 'Customer' },
-          ...(showCSCloserColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
-          { key: 'phone', label: 'Phone' },
-          { key: 'status', label: 'Status' },
-          { key: 'amount', label: 'Amount' },
-          { key: 'created', label: 'Created' },
-        ]}
-        defaultColumns={showCSCloserColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
-      />
 
       {/* Move to Branch Modal */}
       <Modal
@@ -2543,6 +2537,45 @@ function OrdersListPageImpl({
                       wrapperClassName="w-full min-w-0 sm:w-48"
                       placeholder="All products"
                       searchPlaceholder="Search products..."
+                    />
+                  </div>
+                ) : null}
+                {categoryFilter !== undefined ? (
+                  <div className="relative">
+                    {(categoryFilter || 'ALL') !== 'ALL' && (
+                      <FilterDismiss
+                        onClear={() => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.delete('category');
+                            next.set('page', '1');
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    <FormSelect
+                      value={categoryFilter || 'ALL'}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('category', v);
+                          else next.delete('category');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All categories' },
+                        { value: 'website_order', label: 'Website order' },
+                        { value: 'referrals', label: 'Referrals' },
+                      ]}
+                      wrapperClassName="w-full min-w-0 sm:w-44"
                     />
                   </div>
                 ) : null}
@@ -3124,24 +3157,6 @@ function OrdersListPageImpl({
         </Modal>
       )}
 
-      <ExportModal
-        open={showExportModal}
-        onClose={() => setShowExportModal(false)}
-        config={EXPORT_CONFIGS.cs_orders}
-        picklists={{
-          csClosers: (csClosersForFilter ?? []).map((a) => ({ id: a.agentId, name: a.agentName })),
-        }}
-        initialFilters={{
-          status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
-          search: searchQuery || undefined,
-          assignedCsId: searchParams.get('csCloserId') || undefined,
-          ...(filters?.periodAllTime
-            ? { periodAllTime: true as const }
-            : filters?.startDate && filters?.endDate
-              ? { startDate: filters.startDate, endDate: filters.endDate }
-              : {}),
-        }}
-      />
 
       <AbandonedCartDetailModal
         cart={

@@ -9,6 +9,7 @@ export const exportReportKeySchema = z.enum([
   'disbursements',
   'inventory',
   'finance_invoices',
+  'logistics_locations',
   'logistics_partners',
 ]);
 export type ExportReportKey = z.infer<typeof exportReportKeySchema>;

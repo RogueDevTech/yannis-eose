@@ -65,6 +65,8 @@ export const orders = pgTable('orders', {
   lockedBy: uuid('locked_by').references(() => users.id),
   /** Order source for reporting: 'edge-form' (sales form) or 'offline' (CS manual entry) */
   orderSource: text('order_source'),
+  /** Category for offline orders: 'website_order' or 'referrals'. NULL for non-offline orders. */
+  offlineOrderCategory: text('offline_order_category'),
   /**
    * Custom field responses from the campaign form builder. Keyed by `formConfig.customFields[].id`.
    * Values are strings, numbers, booleans, or string arrays depending on the field type.
@@ -105,6 +107,8 @@ export const orders = pgTable('orders', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   /** Set to true when an order is a follow-up copy. Excludes from normal order views. */
   isFollowUp: boolean('is_follow_up').default(false).notNull(),
+  /** When true, order belongs to the Delivered Follow-Up pipeline. Migration 0247. */
+  isDeliveredFollowUp: boolean('is_delivered_follow_up').default(false).notNull(),
   /** Links a follow-up copy back to the original order. NULL for normal orders. */
   followUpSourceOrderId: uuid('follow_up_source_order_id'),
   /** When true, order is frozen — no further status transitions, assignments, or edits allowed.

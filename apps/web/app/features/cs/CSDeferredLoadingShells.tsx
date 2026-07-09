@@ -482,7 +482,7 @@ export function CSOrdersLoadingShell({
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title={isCSCloser ? 'My Orders' : 'Order Funnel'}
+        title={isCSCloser ? 'My Orders' : 'Funnel Orders'}
         mobileInlineActions
         description={
           isCSCloser ? 'Your assigned orders and pipeline' : 'All customer orders for the Sales team'
