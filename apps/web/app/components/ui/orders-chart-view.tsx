@@ -149,9 +149,9 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
   const yTicks = Array.from({ length: yTop / 10 + 1 }, (_, i) => i * 10);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Trend: created (indigo) vs delivered (green, by delivered_at). Y-axis min height 50, step 10. */}
-      <div className="card">
+      <div className="card overflow-hidden">
         <h3 className="text-sm font-semibold text-app-fg mb-3">{scopeLabel} over time</h3>
         {trendData.length === 0 ? (
           <EmptyState
@@ -221,7 +221,7 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div className="card">
+      <div className="card overflow-hidden">
         <h3 className="text-sm font-semibold text-app-fg mb-3">{scopeLabel} by status</h3>
         <ClientOnly fallback={skeleton}>
           <ResponsiveContainer width="100%" height={320}>
@@ -250,7 +250,7 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
         </ClientOnly>
       </div>
 
-      <div className="card">
+      <div className="card overflow-hidden">
         <h3 className="text-sm font-semibold text-app-fg mb-3">{scopeLabel} ranked by volume</h3>
         <ClientOnly fallback={skeleton}>
           <ResponsiveContainer width="100%" height={320}>

@@ -10,8 +10,9 @@ import { resolveRoleTemplateBaselineCodes } from '../../permissions/role-templat
 import { computeEffectivePermissionsLegacyUnion } from '../../permissions/permissions.service';
 import { CacheService } from '../../common/cache/cache.service';
 
-/** Staff UI for someone else's matrix — or self-service profile (`/admin/profile`). */
-function actorMayViewUserPermissionMatrix(actor: SessionUser, targetUserId: string): boolean {
+/** Staff UI for someone else's matrix — or self-service profile (`/admin/profile`).
+ *  Exported for `userDetailPageBundle` cross-router usage. */
+export function actorMayViewUserPermissionMatrix(actor: SessionUser, targetUserId: string): boolean {
   if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') return true;
   if (actor.id === targetUserId) return true;
   const required = ['users.staff.view', 'users.staff.update', 'rbac.templates.manage'].map((c) =>
@@ -37,6 +38,11 @@ function db(): PostgresJsDatabase<typeof schema> {
     throw new Error('Permissions db not initialized. Call setPermissionsDb() from TrpcModule.');
   }
   return permissionsDbInstance;
+}
+
+/** Exported for cross-router lookups (e.g. `userDetailPageBundle`). */
+export function getPermissionsDb(): PostgresJsDatabase<typeof schema> {
+  return db();
 }
 
 /**
