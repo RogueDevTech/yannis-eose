@@ -72,7 +72,6 @@ function renderMediaBuyerLeaderboardCard(
       prefetch="intent"
       className={`
         group relative block rounded-xl border transition-all duration-200 cursor-pointer
-        ${isHighCpa ? 'ring-2 ring-warning-400 dark:ring-warning-500' : ''}
         ${isNew
           ? 'row-new-highlight'
           : 'bg-app-elevated border-app-border'

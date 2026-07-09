@@ -1507,13 +1507,17 @@ export const ordersRouter = router({
           scope.supervisorScope,
           bundleBranchScope,
           ctx.effectiveBranchIds,
-          false, // exclude follow-up orders — matches orders.list default
+          false, // isFollowUp — matches orders.list default
           input.orderSource === 'edge-form' ? true : undefined, // excludeOffline for edge-form
-          true, // exclude graduated follow-up orders from funnel counts
-          bundleBranchScope === 'servicing', // CS also excludes cart-graduated (own strip)
-          input.orderSource === 'offline' ? true : input.orderSource === 'delivered_follow_up' ? 'delivered_follow_up' : undefined, // onlyOffline (string overload for delivered_follow_up)
+          // Sub-funnel pages (offline, delivered_follow_up) use the old exclude logic;
+          // the main Total strip uses onlyGraduateNonMarketing so non-marketing orders
+          // only contribute their DELIVERED/REMITTED counts.
+          input.orderSource ? true : undefined, // excludeGraduated — only for sub-funnels
+          input.orderSource ? (bundleBranchScope === 'servicing') : undefined, // excludeCartGraduated — only for sub-funnels
+          input.orderSource === 'offline' ? true : input.orderSource === 'delivered_follow_up' ? 'delivered_follow_up' : undefined, // onlyOffline
           undefined, // servicingBranchId
           bundleTeamMemberIds, // teamMemberIds
+          !input.orderSource ? true : undefined, // onlyGraduateNonMarketing — Total strip only
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(

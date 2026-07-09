@@ -15,8 +15,8 @@ SELECT
   gen_random_uuid(),
   o.id,
   'ORDER_DELIVERED',
-  '00000000-0000-0000-0000-000000000002',  -- SYSTEM_ACTOR_ID
-  'System',
+  (SELECT id FROM users WHERE role = 'SUPER_ADMIN' ORDER BY created_at LIMIT 1),  -- first SuperAdmin as actor
+  'System (backfill)',
   'Order restored to Delivered after duplicate cleanup review (Jul 2026). Original delivery was confirmed legitimate.',
   jsonb_build_object('backfill', true, 'reason', 'duplicate_cleanup_restore_jul2026'),
   o.branch_id,
