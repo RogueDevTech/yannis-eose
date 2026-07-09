@@ -253,7 +253,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'pageDescription'
     > & { sortBy?: string; sortOrder?: string; productFilter?: string; frozenFilter?: string }
   > => {
-  const listRes = await apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie });
+  // Fetch orders list + status counts bundle in parallel so the stat strip
+  // renders on first paint instead of showing zeros while deferred loads.
+  const bundleInputForCounts = encodeURIComponent(
+    JSON.stringify({
+      countsAssignedCsId: assignedCsId,
+      countsStartDate: apiStartDate,
+      countsEndDate: apiEndDate,
+      trendStatus: status,
+      heatYearMonth: calendarMonth,
+      heatStatus: status,
+      isCSCloser,
+      showCSCloserColumn,
+      canCreateOffline,
+      orderSource: 'offline',
+      ...(teamIdParam && { teamId: teamIdParam }),
+    }),
+  );
+  const [listRes, bundleRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.csOrdersPageBundle?input=${bundleInputForCounts}`, { method: 'GET', cookie }),
+  ]);
   const trpcData = listRes.ok
     ? (listRes.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
     : null;
@@ -262,26 +282,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const totalPages: number = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
   const deferredSecondary = (async () => {
-    // Use the same page bundle but with offline-scoped counts.
-    const bundleInput = encodeURIComponent(
-      JSON.stringify({
-        countsAssignedCsId: assignedCsId,
-        countsStartDate: apiStartDate,
-        countsEndDate: apiEndDate,
-        trendStatus: status,
-        heatYearMonth: calendarMonth,
-        heatStatus: status,
-        isCSCloser,
-        showCSCloserColumn,
-        canCreateOffline,
-        orderSource: 'offline',
-        ...(teamIdParam && { teamId: teamIdParam }),
-      }),
-    );
-    const bundleRes = await apiRequest<unknown>(
-      `/trpc/orders.csOrdersPageBundle?input=${bundleInput}`,
-      { method: 'GET', cookie },
-    );
+    // Bundle already fetched in parallel above — reuse bundleRes.
 
     type BundleData = {
       statusCounts: Record<string, number>;
