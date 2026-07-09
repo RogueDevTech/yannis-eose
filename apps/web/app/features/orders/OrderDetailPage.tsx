@@ -351,6 +351,12 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
+    label: 'Delivered by',
+    getValue: (o) => o.deliveredByName,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
     label: 'Schedule date',
     getValue: (o) => o.preferredDeliveryDate,
     format: (v) => (v ? formatScheduleDateDisplay(String(v)) : ''),

@@ -68,6 +68,8 @@ export interface OrderDetail {
   allocatedAt: string | null;
   dispatchedAt: string | null;
   deliveredAt: string | null;
+  /** Who marked this order DELIVERED (from timeline). */
+  deliveredByName?: string | null;
   assignedCsId: string | null;
   paymentMethod?: string | null;
   paymentStatus?: string | null;

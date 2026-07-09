@@ -3440,7 +3440,7 @@ export class OrdersService {
     //   3) pending permission_request to archive (soft-delete) the order.
     // Previously these ran sequentially (3 RTTs); fanning out collapses them
     // to a single wall-clock round-trip on the cache-miss detail load.
-    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId, pendingRetrackRequestId, duplicateDeliveryWarning] =
+    const [remittanceRow, pendingPriceRequest, pendingOrderDeletionRequestId, pendingDeliveredOrderDeletionRequestId, pendingRetrackRequestId, duplicateDeliveryWarning, deliveredByEvent] =
       await Promise.all([
         this.db
           .select({
@@ -3459,6 +3459,20 @@ export class OrdersService {
         this.findPendingDeliveredOrderDeletionRequestId(orderId),
         this.findPendingOrderRetrackRequestId(orderId),
         this.findDuplicateDeliveryCounterpart(orderId, order),
+        // Who marked this order DELIVERED — shown on order detail as "Delivered by [name]"
+        order.deliveredAt
+          ? this.db
+              .select({ actorName: schema.orderTimelineEvents.actorName })
+              .from(schema.orderTimelineEvents)
+              .where(
+                and(
+                  eq(schema.orderTimelineEvents.orderId, orderId),
+                  eq(schema.orderTimelineEvents.eventType, 'ORDER_DELIVERED'),
+                ),
+              )
+              .orderBy(desc(schema.orderTimelineEvents.createdAt))
+              .limit(1)
+          : Promise.resolve([]),
       ]);
 
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
@@ -3492,6 +3506,7 @@ export class OrdersService {
       pendingDeliveredOrderDeletionRequestId,
       pendingRetrackRequestId,
       duplicateDeliveryWarning,
+      deliveredByName: deliveredByEvent[0]?.actorName ?? null,
     };
   }
 
