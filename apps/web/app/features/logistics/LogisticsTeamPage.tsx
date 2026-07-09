@@ -429,6 +429,7 @@ export function LogisticsTeamPage({
     0,
   );
   const totalRemitted = providers.reduce((acc, p) => acc + (Number(p.remittedAmount) || 0), 0);
+  const totalRemittedOrders = providers.reduce((acc, p) => acc + (Number((p as Record<string, unknown>).remittedOrderCount) || 0), 0);
   const totalPending = providers.reduce((acc, p) => acc + (Number(p.pendingRemittanceAmount) || 0), 0);
   const totalOwing = providers.reduce((acc, p) => acc + (Number(p.owingAmount) || 0), 0);
   const totalAvailableStock = providers.reduce((acc, p) => acc + p.availableStock, 0);
@@ -769,7 +770,7 @@ export function LogisticsTeamPage({
           { label: 'Stock status', value: (<span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${stockBalanced ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>{stockBalanced ? '✓ Balanced' : `✗ ${inconsistentProviders} off`}</span>), plainValue: true },
           { label: 'Delivered', value: totalDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
           { label: 'Delivery rate', value: totalAssigned > 0 ? `${Math.round(overallDeliveryRate)}%` : '0%', valueClassName: deliveryRateColorClass(overallDeliveryRate) },
-          { label: 'Remitted', value: formatNaira(totalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
+          { label: `Remitted (${totalRemittedOrders.toLocaleString()})`, value: formatNaira(totalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
           ...(totalPending > 0 ? [{ label: 'Pending', value: formatNaira(totalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
           ...(totalOwing > 0 ? [{ label: 'Owing', value: formatNaira(totalOwing), valueClassName: 'text-danger-600 dark:text-danger-400' }] : []),
         ] : [

@@ -2210,6 +2210,23 @@ export class LogisticsService {
       }
     }
 
+    if (input.deduction) {
+      switch (input.deduction) {
+        case 'deliveryFee':
+          conditions.push(sql`COALESCE(${schema.orders.deliveryFee}, 0) > 0`);
+          break;
+        case 'commitmentFee':
+          conditions.push(sql`COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0`);
+          break;
+        case 'posFee':
+          conditions.push(sql`COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0`);
+          break;
+        case 'failedDeliveryCost':
+          conditions.push(sql`COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0`);
+          break;
+      }
+    }
+
     const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
     const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
     const csUser = alias(schema.users, 'rem_ord_cs');

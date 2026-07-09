@@ -1638,7 +1638,7 @@ function OrdersListPageImpl({
 
       {/* Page header — Live tag sits directly in front of the refresh button per Sales request. */}
       <PageHeader
-        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Sales Orders')}
+        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Order Funnel')}
         mobileInlineActions
         backTo={backTo}
         description={pageDescription ?? (isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders')}

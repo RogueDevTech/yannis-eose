@@ -84,6 +84,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (category && ['marketing', 'cart', 'follow-up', 'offline'].includes(category)) {
     listInput.category = category;
   }
+  const deduction = url.searchParams.get('deduction') ?? undefined;
+  if (deduction && ['deliveryFee', 'commitmentFee', 'posFee', 'failedDeliveryCost'].includes(deduction)) {
+    listInput.deduction = deduction;
+  }
   const sortBy = url.searchParams.get('sortBy') ?? undefined;
   const sortDir = url.searchParams.get('sortDir') ?? undefined;
   if (sortBy && ['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber'].includes(sortBy)) {

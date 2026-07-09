@@ -37,7 +37,7 @@ const CS_ORDERS_VISIBLE_STATUSES = new Set([
   'DELETED',
 ]);
 export const meta: MetaFunction = () => [
-  { title: 'Sales Orders — Yannis EOSE' },
+  { title: 'Order Funnel — Yannis EOSE' },
 ];
 
 const CS_ORDERS_LIVE_EVENTS = [

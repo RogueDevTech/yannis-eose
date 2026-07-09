@@ -24,6 +24,7 @@ import {
   DashboardSecondaryProvider,
   DashboardSupervisorMetricsSection,
   DashboardTotalProductsSection,
+  useDashboardSecondary,
 } from './dashboard-secondary-context';
 
 
@@ -369,7 +370,7 @@ function CSDashboard({
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
           {(metrics) => (
             <div>
-            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders Funnel</h2>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Funnel Orders</h2>
             <OverviewStatStrip
               mobileGrid
               tileClassName="min-w-[6rem]"
@@ -398,6 +399,8 @@ function CSDashboard({
         <FollowUpDashboardStrip showUnassigned={false} filters={dateFilters} />
         <CartOrdersDashboardStrip showUnassigned={false} filters={dateFilters} />
 
+        <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={{}} offlineCount={0} />
+
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
           {(metrics) => (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -423,15 +426,17 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
+      <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={(data.offlineStatusCounts ?? {}) as Record<string, number>} offlineCount={offlineCount} />
+
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
         {(metrics) => (
           <div>
-          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Orders Funnel</h2>
+          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Funnel Orders</h2>
           <OverviewStatStrip
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
-              { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
+              { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
               { label: 'Unassigned', value: unprocessed.toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
               { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
               { label: 'Engaged', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
@@ -1347,5 +1352,66 @@ function CartOrdersDashboardStrip({ showUnassigned = true, filters }: { showUnas
         );
       }}
     </DashboardCartOrdersSection>
+  );
+}
+
+// ── Total Orders — combined strip across all pipelines ──────
+function TotalOrdersStrip({
+  orderCounts,
+  offlineStatusCounts,
+  offlineCount,
+}: {
+  orderCounts: Record<string, number>;
+  offlineStatusCounts: Record<string, number>;
+  offlineCount: number;
+}) {
+  const { bundle } = useDashboardSecondary();
+  const fuSc = bundle?.followUpCounts ?? {};
+  const cartSc = bundle?.cartOrdersCounts ?? {};
+  const offSc = offlineStatusCounts;
+
+  // orderCounts already includes offline (from the orders table).
+  // Follow-up and cart are in separate tables — add them.
+  const sumStatus = (key: string) => {
+    const orders = (orderCounts[key] ?? 0); // funnel + offline combined
+    const fu = fuSc[key] ?? 0;
+    const cart = cartSc[key] ?? 0;
+    return orders + fu + cart;
+  };
+
+  const unassigned = sumStatus('UNPROCESSED');
+  const assigned = sumStatus('CS_ASSIGNED');
+  const engaged = sumStatus('CS_ENGAGED');
+  const confirmed =
+    sumStatus('CONFIRMED') +
+    sumStatus('AGENT_ASSIGNED') +
+    sumStatus('DISPATCHED') +
+    sumStatus('IN_TRANSIT');
+  const delivered = sumStatus('DELIVERED') + sumStatus('REMITTED');
+  const deleted = sumStatus('DELETED');
+  const total = unassigned + assigned + engaged + confirmed + delivered;
+  const confirmedAndBeyond = confirmed + delivered;
+  const cr = total > 0 ? (confirmedAndBeyond / total) * 100 : 0;
+  const dr = total > 0 ? (delivered / total) * 100 : 0;
+
+  return (
+    <div>
+      <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Total Orders</h2>
+      <OverviewStatStrip
+        mobileGrid
+        tileClassName="min-w-[6rem]"
+        items={[
+          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+          { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
+          { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400' },
+          { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+          { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400' },
+          { label: 'CR', value: `${cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(cr) },
+          { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
+          { label: 'Deleted', value: deleted, valueClassName: 'text-danger-600 dark:text-danger-400' },
+        ]}
+      />
+    </div>
   );
 }
