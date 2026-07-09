@@ -55,6 +55,7 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - Common bug: page bundles calling service methods without `effectiveBranchIds` → shows data from all companies.
 
 ## UI Rules
+- Never use em dashes (—) in user-facing text (descriptions, labels, placeholders). Use colons, commas, or separate sentences instead.
 - Shared components in `apps/web/app/components/ui/`. If used 2+ places, extract.
 - Key components: `<PageHeader backTo>`, `<CompactTable>`, `<Modal>`, `<StatusBadge>`, `<RoleBadge>`, `<TableActionButton>`, `<EmptyState>`, `<Pagination>`, `<SearchInput>`, `<FormSelect>`, `<SearchableSelect>`, `<FileUpload>`, `<DateFilterBar chrome="pill">`, `<PageHeaderMobileTools>`, `<ToolbarFiltersCollapsible>`, `<OverviewStatStrip>`.
 - Never `<Button size="sm">` in tables — use `<TableActionButton>`.

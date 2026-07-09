@@ -210,6 +210,12 @@ const navStructure: NavGroupDef[] = [
         permission: 'orders.read',
       },
       {
+        label: 'Delivered Follow-Up',
+        href: '/admin/sales/delivered-follow-up',
+        icon: SidebarIcons.orders,
+        permission: 'orders.read',
+      },
+      {
         label: 'Cart Orders',
         href: '/admin/sales/cart-orders',
         icon: SidebarIcons.orders,
@@ -545,6 +551,23 @@ const navStructure: NavGroupDef[] = [
         // (ROLE_PERMISSIONS); surface the link for the role like the Remix loader.
         permission: 'permission_requests.user_creation.approve',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
+      },
+    ],
+  },
+  {
+    group: 'Data',
+    items: [
+      {
+        label: 'Export',
+        href: '/admin/data/export',
+        icon: SidebarIcons.exportData,
+        permission: 'data.export',
+      },
+      {
+        label: 'Import',
+        href: '/admin/data/import',
+        icon: SidebarIcons.importData,
+        permission: 'data.import',
       },
     ],
   },

@@ -12,7 +12,7 @@
  * if (cond) conditions.push(cond);
  * ```
  */
-import { eq, inArray, type SQL, type Column } from 'drizzle-orm';
+import { eq, inArray, isNull, or, type SQL, type Column } from 'drizzle-orm';
 
 /**
  * Branch scope context — passed from routers to services as a single object.
@@ -66,11 +66,14 @@ export function branchScopeCondition(
   // Specific branch selected → exact match
   if (branchId) return eq(column, branchId);
 
-  // "All branches" for a non-global user → IN their assigned branches
+  // "All branches" for a non-global user → IN their assigned branches.
+  // Also include rows with NULL branch (e.g. offline orders created without
+  // a branch context) so they don't vanish from company-scoped views.
   if (eIds && eIds.length > 0) {
-    return eIds.length === 1
+    const inBranch = eIds.length === 1
       ? eq(column, eIds[0]!)
       : inArray(column, eIds);
+    return or(inBranch, isNull(column))!;
   }
 
   // Global user or no branch context → no filter

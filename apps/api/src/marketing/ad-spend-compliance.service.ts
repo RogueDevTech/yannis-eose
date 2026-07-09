@@ -11,8 +11,8 @@ import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
  * Hourly cron: reminds Media Buyers who haven't logged today's ad spend
  * and notifies Heads of Marketing with a summary of missing submissions.
  *
- * Runs every hour during Nigerian business hours (9 AM – 9 PM WAT).
- * Quiet outside that window to avoid overnight noise.
+ * Runs every 10 minutes from 7 PM to midnight WAT.
+ * Only notifies MBs who haven't logged spend yet; stops once they do.
  */
 @Injectable()
 export class AdSpendComplianceService {
@@ -23,8 +23,8 @@ export class AdSpendComplianceService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  // Every hour from 9 AM to 9 PM WAT (UTC+1 = 8 AM to 8 PM UTC)
-  @Cron('0 0 8-20 * * *')
+  // Every 10 minutes from 7 PM to midnight WAT (UTC+1 = 6 PM to 11 PM UTC)
+  @Cron('*/10 * 18-22 * * *')
   async handleHourlyReminder(): Promise<void> {
     try {
       await this.sendAdSpendReminders();

@@ -2372,15 +2372,15 @@ export class OrdersService {
       });
     }
 
-    // 60-day duplicate guard — block creating offline orders for a phone+product
-    // that already has an active order (any status). Catches closers who re-enter
+    // 20-day duplicate guard — block creating offline orders for a phone+product
+    // that already has an active (not yet delivered) order. Catches closers who re-enter
     // customers weeks after the original order (fraud report Jul 2026).
     const deliveredDup = await this.findDeliveredDuplicateOrder(customerPhoneHash, productIds);
     if (deliveredDup) {
       const orderLabel = deliveredDup.orderNumber ? `YNS-${deliveredDup.orderNumber}` : deliveredDup.id.slice(0, 8);
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: `This customer already has an order for ${deliveredDup.productName ?? 'this product'} (order ${orderLabel}, status: ${deliveredDup.status}). Cannot create a duplicate offline order for the same product within 60 days.`,
+        message: `This customer already has an order for ${deliveredDup.productName ?? 'this product'} (order ${orderLabel}, status: ${deliveredDup.status}). Cannot create a duplicate offline order for the same product while still active (not yet delivered).`,
       });
     }
 
@@ -2449,6 +2449,7 @@ export class OrdersService {
           totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
+          offlineOrderCategory: input.offlineOrderCategory ?? null,
           // Back-link to the cart when this offline order was created from a
           // recovered cart (Assign-from-Modal flow). NULL for direct offline orders.
           cartId: input.cartId ?? null,
@@ -2624,6 +2625,201 @@ export class OrdersService {
       actorName,
       description: `Imported from external CRM (status: ${input.targetStatus})`,
       branchId: input.branchId,
+    });
+
+    return { id: order.id };
+  }
+
+  /**
+   * Create a delivered follow-up order — CS creates orders for customers who
+   * were previously delivered to. Same lifecycle as offline orders (starts
+   * at CS_ASSIGNED) but tagged with `orderSource: 'delivered_follow_up'` and
+   * `isDeliveredFollowUp: true` for isolation from Offline / Follow-Up pages.
+   */
+  async createDeliveredFollowUp(
+    input: Omit<CreateOfflineOrderInput, 'offlineOrderCategory'>,
+    actorId: string,
+    sessionBranchId?: string | null,
+  ): Promise<{ id: string }> {
+    const customerPhoneHash = this.hashPhone(input.customerPhone);
+    const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
+
+    if (paymentMethod === 'PAY_ONLINE' && (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail))) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Email is required for Pay online. Please provide a valid email address.',
+      });
+    }
+
+    // 7-day dedup
+    const productIds = input.items.map((i) => i.productId);
+    const existingWinner = await this.findExistingOrderForDedup(customerPhoneHash, productIds);
+    if (existingWinner) {
+      await this.recordCrossFunnelAttempt({
+        customerPhoneHash,
+        customerPhone: input.customerPhone,
+        customerName: input.customerName,
+        productIds,
+        mediaBuyerId: input.mediaBuyerId ?? actorId,
+        campaignId: input.campaignId ?? null,
+        branchId: null,
+        winner: { id: existingWinner.id, mediaBuyerId: existingWinner.mediaBuyerId ?? actorId },
+      });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          `Duplicate: an order for this customer and product already exists (${existingWinner.id.slice(0, 8)}…, status: ${existingWinner.status}). Please check existing orders before creating a new one.`,
+      });
+    }
+
+    // 20-day active duplicate guard
+    const deliveredDup = await this.findDeliveredDuplicateOrder(customerPhoneHash, productIds);
+    if (deliveredDup) {
+      const orderLabel = deliveredDup.orderNumber ? `YNS-${deliveredDup.orderNumber}` : deliveredDup.id.slice(0, 8);
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `This customer already has an order for ${deliveredDup.productName ?? 'this product'} (order ${orderLabel}, status: ${deliveredDup.status}). Cannot create a duplicate order while still active (not yet delivered).`,
+      });
+    }
+
+    // Cart attribution pull (if recovering from cart)
+    if (input.cartId && (!input.campaignId || !input.mediaBuyerId)) {
+      const cartRows = await this.db
+        .select({
+          campaignId: schema.cartAbandonments.campaignId,
+          mediaBuyerId: schema.cartAbandonments.mediaBuyerId,
+        })
+        .from(schema.cartAbandonments)
+        .where(eq(schema.cartAbandonments.id, input.cartId))
+        .limit(1);
+      const cart = cartRows[0];
+      if (cart) {
+        if (!input.campaignId && cart.campaignId) input.campaignId = cart.campaignId;
+        if (!input.mediaBuyerId && cart.mediaBuyerId) input.mediaBuyerId = cart.mediaBuyerId;
+      }
+    }
+
+    // Branch resolution
+    const branchId = await this.resolveBranchIdForNewOrder({
+      campaignId: input.campaignId ?? null,
+      mediaBuyerId: input.mediaBuyerId ?? null,
+      fallbackBranchId: sessionBranchId ?? null,
+    });
+
+    let servicingBranchId = branchId;
+    if (branchId) {
+      const primaryProductId = input.items?.[0]?.productId ?? null;
+      const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
+        branchId,
+        primaryProductId,
+      );
+      if (servicingBranch) {
+        servicingBranchId = servicingBranch;
+      }
+    }
+
+    const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.orders)
+        .values({
+          campaignId: input.campaignId ?? null,
+          mediaBuyerId: input.mediaBuyerId ?? null,
+          branchId: branchId ?? null,
+          servicingBranchId: servicingBranchId ?? null,
+          assignedCsId: actorId,
+          customerName: input.customerName,
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          customerAddress: input.customerAddress ?? null,
+          deliveryAddress: input.deliveryAddress ?? null,
+          deliveryNotes: input.deliveryNotes ?? null,
+          deliveryState: input.deliveryState ?? null,
+          customerGender: input.customerGender ?? null,
+          preferredDeliveryDate: input.preferredDeliveryDate ?? null,
+          customerEmail: input.customerEmail ?? null,
+          paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+          paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+          paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
+          items: input.items,
+          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          status: 'CS_ASSIGNED',
+          orderSource: 'delivered_follow_up',
+          isDeliveredFollowUp: true,
+          cartId: input.cartId ?? null,
+          customFields: input.customFields ?? null,
+        })
+        .returning();
+
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create delivered follow-up order' });
+      }
+
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: created.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+      return created;
+    });
+
+    if (input.cartId) {
+      this.cartService.convert(input.cartId, order.id, actorId).catch(() => {});
+    }
+
+    this.events.emitNewOrder({
+      orderId: order.id,
+      productName: 'Delivered follow-up order created',
+      branchId: order.branchId ?? null,
+      servicingBranchId: servicingBranchId ?? null,
+      mediaBuyerId: order.mediaBuyerId ?? null,
+    });
+    this.events.emitToUser(actorId, 'order:assigned', { orderId: order.id });
+    this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id }, servicingBranchId ?? null);
+
+    this.notifications.enqueueCreate({
+      userId: actorId,
+      type: 'order:assigned',
+      title: 'Delivered follow-up order created',
+      body: 'You created a delivered follow-up order. It is assigned to you.',
+      data: { orderId: order.id },
+    });
+
+    const [actorRow, mediaBuyerName] = await Promise.all([
+      this.db
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, actorId))
+        .limit(1),
+      order.mediaBuyerId ? this.resolveUserNameById(order.mediaBuyerId) : Promise.resolve(null),
+    ]);
+    const actorName = actorRow[0]?.name ?? null;
+    const mbSuffix = mediaBuyerName ? ` — attributed to media buyer ${mediaBuyerName}` : '';
+
+    void this.writeTimelineEvent({
+      orderId: order.id,
+      eventType: 'ORDER_RECEIVED',
+      actorId: actorId,
+      actorName,
+      description: `Delivered follow-up order created${mbSuffix}`,
+      metadata:
+        mediaBuyerName && order.mediaBuyerId
+          ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName }
+          : undefined,
+      branchId: order.branchId ?? null,
+    });
+
+    void this.writeTimelineEvent({
+      orderId: order.id,
+      eventType: 'ORDER_MANUALLY_ASSIGNED',
+      actorId: actorId,
+      actorName,
+      description: `Assigned to ${actorName ?? 'creator'} (auto-assigned on delivered follow-up creation)`,
+      branchId: order.branchId ?? null,
     });
 
     return { id: order.id };
@@ -4118,6 +4314,9 @@ export class OrdersService {
       } else {
         conditions.push(eq(schema.orders.orderSource, input.orderSource));
       }
+    }
+    if (input.offlineOrderCategory) {
+      conditions.push(eq(schema.orders.offlineOrderCategory, input.offlineOrderCategory));
     }
     if (input.search) {
       const trimmed = input.search.trim();
@@ -6211,8 +6410,8 @@ export class OrdersService {
     /** When true, also exclude cart-graduated orders (order_source='online').
      *  CS funnel passes true (cart orders have their own strip). */
     excludeCartGraduated?: boolean,
-    /** When true, only count offline orders (order_source='offline'). */
-    onlyOffline?: boolean,
+    /** When true, only count offline orders (order_source='offline'). String overload scopes to any orderSource value. */
+    onlyOffline?: boolean | string,
     /** Optional servicingBranchId filters to that servicing branch (for Logistics Orders page branch filter). */
     servicingBranchId?: string,
     /** Team filter: only count orders assigned to these user IDs. */
@@ -6244,7 +6443,8 @@ export class OrdersService {
       );
     }
     if (onlyOffline) {
-      conditions.push(eq(schema.orders.orderSource, 'offline'));
+      const src = typeof onlyOffline === 'string' ? onlyOffline : 'offline';
+      conditions.push(eq(schema.orders.orderSource, src));
     } else if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
       // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus
@@ -6300,7 +6500,7 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
-  ): Promise<{ offlineCount: number; offlineDeliveredCount: number; duplicateCount: number }> {
+  ): Promise<{ offlineCount: number; offlineDeliveredCount: number; duplicateCount: number; deliveredFollowUpCount: number }> {
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.isFollowUp, false),
     ];
@@ -6326,7 +6526,7 @@ export class OrdersService {
     if (endDate) deliveredFollowUpOfflineConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const deliveredFollowUpOfflineWhere = and(...deliveredFollowUpOfflineConditions);
 
-    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows, offlineDeliveredRows] = await Promise.all([
+    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows, offlineDeliveredRows, deliveredFollowUpRows] = await Promise.all([
       this.db
         .select({ count: count() })
         .from(schema.orders)
@@ -6344,6 +6544,11 @@ export class OrdersService {
         .select({ count: count() })
         .from(schema.orders)
         .where(and(whereClause, eq(schema.orders.orderSource, 'offline'), inArray(schema.orders.status, ['DELIVERED', 'REMITTED']))),
+      // Delivered follow-up orders count (orderSource='delivered_follow_up')
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(and(whereClause, eq(schema.orders.orderSource, 'delivered_follow_up'))),
     ]);
 
     return {
@@ -6352,6 +6557,7 @@ export class OrdersService {
       offlineCount: (offlineRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
       offlineDeliveredCount: (offlineDeliveredRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
       duplicateCount: duplicateRows[0]?.count ?? 0,
+      deliveredFollowUpCount: deliveredFollowUpRows[0]?.count ?? 0,
     };
   }
 
@@ -8897,56 +9103,121 @@ export class OrdersService {
   ): Promise<{ id: string; mediaBuyerId: string | null; status: string; createdAt: Date } | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
-    // Use Drizzle query builder (not raw SQL) for reliable parameter binding.
-    // Step 1: find orders with same phone hash in last 7 days (index-backed, fast).
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const candidates = await this.db
-      .select({
-        id: schema.orders.id,
-        mediaBuyerId: schema.orders.mediaBuyerId,
-        status: schema.orders.status,
-        createdAt: schema.orders.createdAt,
-      })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.customerPhoneHash, phoneHash),
-          gte(schema.orders.createdAt, sevenDaysAgo),
-          notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
-          isNull(schema.orders.deletedAt),
-        ),
-      )
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(20);
+
+    // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
+    type Candidate = { id: string; mediaBuyerId: string | null; status: string; createdAt: Date; source: 'orders' | 'cart_orders' | 'follow_up_orders' };
+
+    const [orderCandidates, cartCandidates, followUpCandidates] = await Promise.all([
+      this.db
+        .select({
+          id: schema.orders.id,
+          mediaBuyerId: schema.orders.mediaBuyerId,
+          status: schema.orders.status,
+          createdAt: schema.orders.createdAt,
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.customerPhoneHash, phoneHash),
+            gte(schema.orders.createdAt, sevenDaysAgo),
+            notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.orders.createdAt))
+        .limit(20),
+      this.db
+        .select({
+          id: schema.cartOrders.id,
+          mediaBuyerId: schema.cartOrders.mediaBuyerId,
+          status: schema.cartOrders.status,
+          createdAt: schema.cartOrders.createdAt,
+        })
+        .from(schema.cartOrders)
+        .where(
+          and(
+            eq(schema.cartOrders.customerPhoneHash, phoneHash),
+            gte(schema.cartOrders.createdAt, sevenDaysAgo),
+            notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
+            isNull(schema.cartOrders.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.cartOrders.createdAt))
+        .limit(20),
+      this.db
+        .select({
+          id: schema.followUpOrders.id,
+          mediaBuyerId: schema.followUpOrders.mediaBuyerId,
+          status: schema.followUpOrders.status,
+          createdAt: schema.followUpOrders.createdAt,
+        })
+        .from(schema.followUpOrders)
+        .where(
+          and(
+            eq(schema.followUpOrders.customerPhoneHash, phoneHash),
+            gte(schema.followUpOrders.createdAt, sevenDaysAgo),
+            notInArray(schema.followUpOrders.status, ['CANCELLED', 'DELETED']),
+            isNull(schema.followUpOrders.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.followUpOrders.createdAt))
+        .limit(20),
+    ]);
+
+    const candidates: Candidate[] = [
+      ...orderCandidates.map((c) => ({ ...c, source: 'orders' as const })),
+      ...cartCandidates.map((c) => ({ ...c, source: 'cart_orders' as const })),
+      ...followUpCandidates.map((c) => ({ ...c, source: 'follow_up_orders' as const })),
+    ];
 
     if (candidates.length === 0) return null;
 
-    // Step 2: check which candidates have overlapping products.
-    const candidateIds = candidates.map((c) => c.id);
-    const matchingItems = await this.db
-      .select({ orderId: schema.orderItems.orderId })
-      .from(schema.orderItems)
-      .where(
-        and(
-          inArray(schema.orderItems.orderId, candidateIds),
-          inArray(schema.orderItems.productId, productIds),
-        ),
-      )
-      .limit(1);
+    // Step 2: check which candidates have overlapping products across all item tables.
+    const orderIds = orderCandidates.map((c) => c.id);
+    const cartIds = cartCandidates.map((c) => c.id);
+    const fuIds = followUpCandidates.map((c) => c.id);
 
-    if (matchingItems.length === 0) return null;
+    const itemQueries = await Promise.all([
+      orderIds.length > 0
+        ? this.db
+            .select({ orderId: schema.orderItems.orderId })
+            .from(schema.orderItems)
+            .where(and(inArray(schema.orderItems.orderId, orderIds), inArray(schema.orderItems.productId, productIds)))
+            .limit(1)
+        : Promise.resolve([]),
+      cartIds.length > 0
+        ? this.db
+            .select({ orderId: schema.cartOrderItems.cartOrderId })
+            .from(schema.cartOrderItems)
+            .where(and(inArray(schema.cartOrderItems.cartOrderId, cartIds), inArray(schema.cartOrderItems.productId, productIds)))
+            .limit(1)
+        : Promise.resolve([]),
+      fuIds.length > 0
+        ? this.db
+            .select({ orderId: schema.followUpOrderItems.followUpOrderId })
+            .from(schema.followUpOrderItems)
+            .where(and(inArray(schema.followUpOrderItems.followUpOrderId, fuIds), inArray(schema.followUpOrderItems.productId, productIds)))
+            .limit(1)
+        : Promise.resolve([]),
+    ]);
 
-    // Step 3: pick the winner — the candidate whose order ID matched.
-    // Since candidates are sorted by createdAt DESC, find the best one
-    // (highest lifecycle status, then oldest).
-    const matchingOrderIds = new Set(matchingItems.map((m) => m.orderId));
+    const matchingOrderIdSet = new Set([
+      ...itemQueries[0].map((m) => m.orderId),
+      ...itemQueries[1].map((m) => m.orderId),
+      ...itemQueries[2].map((m) => m.orderId),
+    ]);
+
+    if (matchingOrderIdSet.size === 0) return null;
+
+    // Step 3: pick the winner (highest lifecycle status, then oldest).
     const STATUS_RANK: Record<string, number> = {
       REMITTED: 10, DELIVERED: 9, PARTIALLY_DELIVERED: 8, IN_TRANSIT: 7,
       DISPATCHED: 6, AGENT_ASSIGNED: 5, CONFIRMED: 4, CS_ENGAGED: 3,
       CS_ASSIGNED: 2, UNPROCESSED: 1,
     };
     const matches = candidates
-      .filter((c) => matchingOrderIds.has(c.id))
+      .filter((c) => matchingOrderIdSet.has(c.id))
       .sort((a, b) => {
         const rankDiff = (STATUS_RANK[b.status] ?? 0) - (STATUS_RANK[a.status] ?? 0);
         if (rankDiff !== 0) return rankDiff;
@@ -8965,13 +9236,14 @@ export class OrdersService {
 
   /**
    * Check if an order with the same phone + any overlapping product already
-   * exists within the last 60 days (any active status — not just delivered).
-   * Returns the matching order if found, null otherwise. Used to block
-   * duplicate offline entries and duplicate cart graduations.
+   * exists within the last 20 days and is still active (not yet delivered or
+   * remitted). Returns the matching order if found, null otherwise. Used to
+   * block duplicate offline entries and duplicate cart graduations.
    *
    * Complements the 7-day `findExistingOrderForDedup` by extending coverage
-   * to 60 days, catching closers who re-enter customers weeks after the
-   * original order.
+   * to 20 days, catching closers who re-enter customers weeks after the
+   * original order. Orders that have already reached DELIVERED or REMITTED
+   * are not blocked — repeat purchases after delivery are legitimate.
    */
   async findDeliveredDuplicateOrder(
     phoneHash: string,
@@ -8981,48 +9253,103 @@ export class OrdersService {
   ): Promise<{ id: string; orderNumber: number | null; status: string; deliveredAt: Date | null; productName: string | null } | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
-    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-    const conditions = [
+    const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+    const terminalFilter = sql`status NOT IN ('CANCELLED', 'DELETED', 'DELIVERED', 'REMITTED')`;
+
+    type Candidate = { id: string; orderNumber: number | null; status: string; deliveredAt: Date | null; source: string };
+
+    const orderConditions: SQL[] = [
       eq(schema.orders.customerPhoneHash, phoneHash),
-      notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+      terminalFilter,
       isNull(schema.orders.deletedAt),
-      gte(schema.orders.createdAt, sixtyDaysAgo),
+      gte(schema.orders.createdAt, twentyDaysAgo),
     ];
     if (excludeOrderId) {
-      conditions.push(sql`${schema.orders.id} != ${excludeOrderId}`);
+      orderConditions.push(sql`${schema.orders.id} != ${excludeOrderId}`);
     }
 
-    const candidates = await this.db
-      .select({
-        id: schema.orders.id,
-        orderNumber: schema.orders.orderNumber,
-        status: schema.orders.status,
-        deliveredAt: schema.orders.deliveredAt,
-      })
-      .from(schema.orders)
-      .where(and(...conditions))
-      .orderBy(desc(schema.orders.createdAt))
-      .limit(20);
+    const cartConditions: SQL[] = [
+      eq(schema.cartOrders.customerPhoneHash, phoneHash),
+      sql`${schema.cartOrders.status} NOT IN ('CANCELLED', 'DELETED', 'DELIVERED', 'REMITTED')`,
+      isNull(schema.cartOrders.deletedAt),
+      gte(schema.cartOrders.createdAt, twentyDaysAgo),
+    ];
+    if (excludeOrderId) {
+      cartConditions.push(sql`${schema.cartOrders.id} != ${excludeOrderId}`);
+    }
+
+    const fuConditions: SQL[] = [
+      eq(schema.followUpOrders.customerPhoneHash, phoneHash),
+      sql`${schema.followUpOrders.status} NOT IN ('CANCELLED', 'DELETED', 'DELIVERED', 'REMITTED')`,
+      isNull(schema.followUpOrders.deletedAt),
+      gte(schema.followUpOrders.createdAt, twentyDaysAgo),
+    ];
+    if (excludeOrderId) {
+      fuConditions.push(sql`${schema.followUpOrders.id} != ${excludeOrderId}`);
+    }
+
+    const [orderCandidates, cartCandidates, fuCandidates] = await Promise.all([
+      this.db
+        .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber, status: schema.orders.status, deliveredAt: schema.orders.deliveredAt })
+        .from(schema.orders)
+        .where(and(...orderConditions))
+        .orderBy(desc(schema.orders.createdAt))
+        .limit(20),
+      this.db
+        .select({ id: schema.cartOrders.id, orderNumber: schema.cartOrders.orderNumber, status: schema.cartOrders.status, deliveredAt: schema.cartOrders.deliveredAt })
+        .from(schema.cartOrders)
+        .where(and(...cartConditions))
+        .orderBy(desc(schema.cartOrders.createdAt))
+        .limit(20),
+      this.db
+        .select({ id: schema.followUpOrders.id, orderNumber: schema.followUpOrders.orderNumber, status: schema.followUpOrders.status, deliveredAt: schema.followUpOrders.deliveredAt })
+        .from(schema.followUpOrders)
+        .where(and(...fuConditions))
+        .orderBy(desc(schema.followUpOrders.createdAt))
+        .limit(20),
+    ]);
+
+    const candidates: Candidate[] = [
+      ...orderCandidates.map((c) => ({ ...c, source: 'orders' })),
+      ...cartCandidates.map((c) => ({ ...c, source: 'cart_orders' })),
+      ...fuCandidates.map((c) => ({ ...c, source: 'follow_up_orders' })),
+    ];
 
     if (candidates.length === 0) return null;
 
-    const candidateIds = candidates.map((c) => c.id);
-    const matchingItems = await this.db
-      .select({
-        orderId: schema.orderItems.orderId,
-        productName: schema.products.name,
-      })
-      .from(schema.orderItems)
-      .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
-      .where(
-        and(
-          inArray(schema.orderItems.orderId, candidateIds),
-          inArray(schema.orderItems.productId, productIds),
-        ),
-      )
-      .limit(1);
+    const oIds = orderCandidates.map((c) => c.id);
+    const cIds = cartCandidates.map((c) => c.id);
+    const fIds = fuCandidates.map((c) => c.id);
 
-    const firstMatch = matchingItems[0];
+    const [orderMatches, cartMatches, fuMatches] = await Promise.all([
+      oIds.length > 0
+        ? this.db
+            .select({ orderId: schema.orderItems.orderId, productName: schema.products.name })
+            .from(schema.orderItems)
+            .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+            .where(and(inArray(schema.orderItems.orderId, oIds), inArray(schema.orderItems.productId, productIds)))
+            .limit(1)
+        : Promise.resolve([] as { orderId: string; productName: string | null }[]),
+      cIds.length > 0
+        ? this.db
+            .select({ orderId: schema.cartOrderItems.cartOrderId, productName: schema.products.name })
+            .from(schema.cartOrderItems)
+            .leftJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
+            .where(and(inArray(schema.cartOrderItems.cartOrderId, cIds), inArray(schema.cartOrderItems.productId, productIds)))
+            .limit(1)
+        : Promise.resolve([] as { orderId: string; productName: string | null }[]),
+      fIds.length > 0
+        ? this.db
+            .select({ orderId: schema.followUpOrderItems.followUpOrderId, productName: schema.products.name })
+            .from(schema.followUpOrderItems)
+            .leftJoin(schema.products, eq(schema.products.id, schema.followUpOrderItems.productId))
+            .where(and(inArray(schema.followUpOrderItems.followUpOrderId, fIds), inArray(schema.followUpOrderItems.productId, productIds)))
+            .limit(1)
+        : Promise.resolve([] as { orderId: string; productName: string | null }[]),
+    ]);
+
+    const allMatches = [...orderMatches, ...cartMatches, ...fuMatches];
+    const firstMatch = allMatches[0];
     if (!firstMatch) return null;
 
     const winner = candidates.find((c) => c.id === firstMatch.orderId);

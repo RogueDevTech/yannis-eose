@@ -116,6 +116,8 @@ export const createOfflineOrderSchema = z.object({
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
   paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
   customerEmail: z.string().email().max(255).optional(),
+  /** Category for offline orders: 'website_order' or 'referrals'. */
+  offlineOrderCategory: z.enum(['website_order', 'referrals']).optional(),
   /** Ad-hoc custom fields added by the CS rep during offline order creation. */
   customFields: z
     .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50), z.object({ label: z.string(), value: z.string() })]))
@@ -123,6 +125,16 @@ export const createOfflineOrderSchema = z.object({
 });
 
 export type CreateOfflineOrderInput = z.infer<typeof createOfflineOrderSchema>;
+
+/**
+ * Create delivered follow-up order — CS creates orders for previously-delivered customers.
+ * Same shape as offline orders but without the category field.
+ */
+export const createDeliveredFollowUpOrderSchema = createOfflineOrderSchema.omit({
+  offlineOrderCategory: true,
+});
+
+export type CreateDeliveredFollowUpOrderInput = z.infer<typeof createDeliveredFollowUpOrderSchema>;
 
 /**
  * Import order — SuperAdmin-only bulk import from external CRM.
@@ -350,8 +362,10 @@ export const listOrdersSchema = z
     fromCart: z.boolean().optional(),
     /** Filter to orders where customer_name starts with "test" (whole word). Admin only. */
     testOrders: z.boolean().optional(),
-    /** Filter by order source: 'offline' (CS manual entry) or 'edge-form' (sales form). */
-    orderSource: z.enum(['offline', 'edge-form']).optional(),
+    /** Filter by order source: 'offline' (CS manual entry), 'edge-form' (sales form), or 'delivered_follow_up'. */
+    orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up']).optional(),
+    /** Filter offline orders by category: 'website_order' or 'referrals'. */
+    offlineOrderCategory: z.enum(['website_order', 'referrals']).optional(),
     /** Filter to orders assigned to members of this team. Resolved to user IDs at the router. */
     teamId: z.string().uuid().optional(),
     search: z.string().optional(),

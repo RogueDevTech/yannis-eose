@@ -1,6 +1,7 @@
 import {
   createOrderSchema,
   createOfflineOrderSchema,
+  createDeliveredFollowUpOrderSchema,
   importOrderSchema,
   orderItemSchema,
   EDGE_FORM_ACTOR_ID,
@@ -498,6 +499,24 @@ export const ordersRouter = router({
       const { branchId, ...offlineInput } = input;
       const res = await getOrdersService().createOffline(
         offlineInput,
+        ctx.user.id,
+        branchId ?? ctx.currentBranchId,
+      );
+      await invalidateOrdersAggregatesCache();
+      return res;
+    }),
+
+  /**
+   * Create a delivered follow-up order. Same lifecycle as offline but tagged as
+   * orderSource='delivered_follow_up' with isDeliveredFollowUp=true.
+   */
+  createDeliveredFollowUp: permissionProcedure('orders.createOffline')
+    .meta({ branchScopedMutation: true })
+    .input(createDeliveredFollowUpOrderSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId, ...dfuInput } = input;
+      const res = await getOrdersService().createDeliveredFollowUp(
+        dfuInput,
         ctx.user.id,
         branchId ?? ctx.currentBranchId,
       );
@@ -1412,7 +1431,7 @@ export const ordersRouter = router({
         // Kept for backward compat with cached clients — always ignored now.
         includeCartAbandonment: z.boolean().optional().default(false),
         /** When set, scope status counts to this order source only. */
-        orderSource: z.enum(['offline', 'edge-form']).optional(),
+        orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up']).optional(),
         /** When set, scope to orders assigned to members of this team. */
         teamId: z.string().uuid().optional(),
       }),
@@ -1474,6 +1493,7 @@ export const ordersRouter = router({
         cartAbandonmentCount,
         supplementaryCounts,
         offlineStatusCounts,
+        deliveredFollowUpStatusCounts,
         teamsForFilter,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
@@ -1491,7 +1511,7 @@ export const ordersRouter = router({
           input.orderSource === 'edge-form' ? true : undefined, // excludeOffline for edge-form
           true, // exclude graduated follow-up orders from funnel counts
           bundleBranchScope === 'servicing', // CS also excludes cart-graduated (own strip)
-          input.orderSource === 'offline' ? true : undefined, // onlyOffline
+          input.orderSource === 'offline' ? true : input.orderSource === 'delivered_follow_up' ? 'delivered_follow_up' : undefined, // onlyOffline (string overload for delivered_follow_up)
           undefined, // servicingBranchId
           bundleTeamMemberIds, // teamMemberIds
         ),
@@ -1554,6 +1574,20 @@ export const ordersRouter = router({
           ctx.effectiveBranchIds,
           false, false, false, false, true, // onlyOffline
         ),
+        // Delivered follow-up orders — separate funnel strip.
+        getOrdersService().getStatusCounts(
+          scope.mediaBuyerId,
+          scope.startDate,
+          scope.endDate,
+          scope.assignedCsId,
+          undefined,
+          aggregateBranchId,
+          undefined,
+          scope.supervisorScope,
+          bundleBranchScope,
+          ctx.effectiveBranchIds,
+          false, false, false, false, 'delivered_follow_up', // onlyDeliveredFollowUp via string overload
+        ),
         // Teams for the team filter dropdown
         branchId
           ? getBranchTeamsService().listTeamsForFilter(branchId, 'CS')
@@ -1578,7 +1612,9 @@ export const ordersRouter = router({
         productsForOfflineOrder: productsForOfflineOrder?.products ?? [],
         cartAbandonmentCount: cartAbandonmentCount ?? 0,
         offlineCount: supplementaryCounts.offlineCount,
+        deliveredFollowUpCount: supplementaryCounts.deliveredFollowUpCount,
         offlineStatusCounts: offlineStatusCounts ?? {},
+        deliveredFollowUpStatusCounts: deliveredFollowUpStatusCounts ?? {},
         teamsForFilter: (teamsForFilter ?? []) as Array<{ id: string; name: string | null; department: string }>,
       };
       }; // end fetchBundle
