@@ -389,6 +389,8 @@ export {
   listFiscalYearsSchema,
   createFiscalYearSchema,
   closeFiscalYearSchema,
+  reopenFiscalYearSchema,
+  approveJournalEntrySchema,
   trialBalanceSchema,
   seedChartOfAccountsSchema,
   profitAndLossSchema,
@@ -397,6 +399,7 @@ export {
   agingSchema,
   openingBalanceLineSchema,
   postOpeningBalancesSchema,
+  financialKPIsSchema,
 } from './general-ledger';
 
 export type {
@@ -410,6 +413,8 @@ export type {
   ListFiscalYearsInput,
   CreateFiscalYearInput,
   CloseFiscalYearInput,
+  ReopenFiscalYearInput,
+  ApproveJournalEntryInput,
   TrialBalanceInput,
   SeedChartOfAccountsInput,
   ProfitAndLossInput,
@@ -418,7 +423,26 @@ export type {
   AgingInput,
   OpeningBalanceLineInput,
   PostOpeningBalancesInput,
+  FinancialKPIsInput,
+  FinancialKPIs,
 } from './general-ledger';
+
+// Asset register validators (Phase 4A)
+export {
+  createAssetSchema,
+  listAssetsSchema,
+  getAssetSchema,
+  disposeAssetSchema,
+  runDepreciationSchema,
+} from './asset-register';
+
+export type {
+  CreateAssetInput,
+  ListAssetsInput,
+  GetAssetInput,
+  DisposeAssetInput,
+  RunDepreciationInput,
+} from './asset-register';
 
 // Notification validators
 export {
@@ -597,6 +621,68 @@ export type {
   UpdateCartOrderRoutingRuleInput,
   ListCartOrderRoutingRulesInput,
 } from './cart-orders';
+
+// Expense submission validators (Phase 4B)
+export {
+  submitExpenseSchema,
+  approveExpenseSchema,
+  rejectExpenseSchema,
+  listExpensesSchema,
+  getExpenseSchema,
+} from './expense-submissions';
+
+export type {
+  SubmitExpenseInput,
+  ApproveExpenseInput,
+  RejectExpenseInput,
+  ListExpensesInput,
+  GetExpenseInput,
+} from './expense-submissions';
+
+// WHT deductions / Budget vs Actual / VAT return / Consolidated report validators (Phase 6)
+export {
+  recordWhtSchema,
+  listWhtSchema,
+  generateWhtCertificateSchema,
+  budgetVsActualSchema,
+  vatReturnSummarySchema,
+  consolidatedPLSchema,
+  consolidatedBSSchema,
+  consolidatedCFSchema,
+} from './wht-deductions';
+
+export type {
+  RecordWhtInput,
+  ListWhtInput,
+  GenerateWhtCertificateInput,
+  BudgetVsActualInput,
+  BudgetVsActualRow,
+  VatReturnSummaryInput,
+  VatReturnSummary,
+  VatTransaction,
+  ConsolidatedPLInput,
+  ConsolidatedBSInput,
+  ConsolidatedCFInput,
+} from './wht-deductions';
+
+// Bank reconciliation validators (Phase 6D)
+export {
+  createReconciliationSchema as createBankReconciliationSchema,
+  matchLineSchema,
+  unmatchLineSchema,
+  completeReconciliationSchema as completeBankReconciliationSchema,
+  listReconciliationsSchema as listBankReconciliationsSchema,
+  getReconciliationSchema as getBankReconciliationSchema,
+} from './bank-reconciliation';
+
+export type {
+  CreateReconciliationInput as CreateBankReconciliationInput,
+  MatchLineInput,
+  UnmatchLineInput,
+  CompleteReconciliationInput as CompleteBankReconciliationInput,
+  ListReconciliationsInput as ListBankReconciliationsInput,
+  GetReconciliationInput as GetBankReconciliationInput,
+} from './bank-reconciliation';
 
 // User filter preferences validators
 export {

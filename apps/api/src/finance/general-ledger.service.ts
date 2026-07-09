@@ -20,11 +20,18 @@ import {
   type ListFiscalYearsInput,
   type CreateFiscalYearInput,
   type CloseFiscalYearInput,
+  type ReopenFiscalYearInput,
+  type ApproveJournalEntryInput,
   type TrialBalanceInput,
   type ProfitAndLossInput,
   type BalanceSheetInput,
   type CashFlowInput,
   type AgingInput,
+  type BudgetVsActualRow,
+  type RecordWhtInput,
+  type ListWhtInput,
+  type VatReturnSummary,
+  type VatTransaction,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -43,7 +50,7 @@ export interface PostVoucherLine {
   remarks?: string | null;
 }
 
-export type GlVoucherType = 'JOURNAL_ENTRY' | 'SALES_INVOICE' | 'PAYMENT' | 'PURCHASE_RECEIPT';
+export type GlVoucherType = 'JOURNAL_ENTRY' | 'SALES_INVOICE' | 'PAYMENT' | 'PURCHASE_RECEIPT' | 'PAYROLL' | 'EXPENSE';
 
 export interface PostVoucherInput {
   groupId: string | null;
@@ -469,6 +476,18 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         { accountId: sale.id, debit: 0, credit: revenue },
       ];
 
+      // VAT output — 7.5% Nigerian VAT on top of revenue. Only posts if the
+      // VAT account exists in the CoA (graceful degradation for companies that
+      // haven't seeded it or are VAT-exempt).
+      const vatAccount = await this.resolveAccountByCode(tx, groupId, 'VAT');
+      if (vatAccount) {
+        const vatAmount = Math.round(revenue * 0.075 * 100) / 100; // 7.5%
+        if (vatAmount > 0) {
+          lines.push({ accountId: debtors.id, debit: vatAmount, credit: 0, partyType: 'CUSTOMER', remarks: customer });
+          lines.push({ accountId: vatAccount.id, debit: 0, credit: vatAmount, remarks: 'VAT output 7.5%' });
+        }
+      }
+
       // COGS pair — only when a FIFO cost is available.
       if (cogs > 0) {
         const cogsAcct = await this.resolveAccountByType(tx, groupId, 'COST_OF_GOODS_SOLD');
@@ -698,6 +717,134 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
+  // ─── Phase 2C: Payroll batch → salary expense + payable clearance ───────────
+
+  /**
+   * Post the double-entry for a paid payroll batch.
+   *
+   *   Dr Salary              batch.totalAmount
+   *     Cr Payroll Payable   batch.totalAmount
+   *
+   * Simplified single-entry: the full PAYE/Pension breakdown is deferred to
+   * Phase 5B (tax tracking). For now we record the gross salary expense against
+   * the payroll payable account. Idempotent per batchId, non-fatal by contract.
+   */
+  async postPayrollBatch(batchId: string, actor: Actor): Promise<{ posted: boolean; reason?: string }> {
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'PAYROLL', batchId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+
+      const [batch] = await tx
+        .select({
+          id: schema.payrollBatches.id,
+          totalAmount: schema.payrollBatches.totalAmount,
+          periodMonth: schema.payrollBatches.periodMonth,
+          branchId: schema.payrollBatches.branchId,
+          department: schema.payrollBatches.department,
+          financeProcessedAt: schema.payrollBatches.financeProcessedAt,
+        })
+        .from(schema.payrollBatches)
+        .where(eq(schema.payrollBatches.id, batchId))
+        .limit(1);
+      if (!batch) return { posted: false, reason: 'batch-not-found' };
+
+      const amount = Number(batch.totalAmount ?? 0);
+      if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+
+      // Resolve company groupId from batch branch
+      let groupId: string | null = null;
+      if (batch.branchId) {
+        const [branch] = await tx
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, batch.branchId))
+          .limit(1);
+        groupId = branch?.groupId ?? null;
+      }
+
+      const salary = await this.resolveAccountByCode(tx, groupId, 'Salary');
+      const payrollPayable = await this.resolveAccountByCode(tx, groupId, 'Payroll Payable');
+      if (!salary || !payrollPayable) {
+        return { posted: false, reason: 'missing-salary-or-payroll-payable-account' };
+      }
+
+      const postingDate = (batch.financeProcessedAt ?? new Date()).toISOString().slice(0, 10);
+      const dept = batch.department ?? 'General';
+
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate,
+        voucherType: 'PAYROLL',
+        voucherId: batchId,
+        lines: [
+          { accountId: salary.id, debit: amount, credit: 0, remarks: `${dept} payroll` },
+          { accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` },
+        ],
+      });
+
+      return { posted: true };
+    });
+  }
+
+  // ─── Phase 2C: Marketing funding → ad spend expense ─────────────────────────
+
+  /**
+   * Post the double-entry for an approved marketing fund disbursement.
+   *
+   *   Dr Marketing Expenses   sentAmount
+   *     Cr Bank               sentAmount
+   *
+   * Simplified: records the immediate expense against bank. Idempotent per
+   * funding request ID, non-fatal by contract.
+   */
+  async postMarketingFunding(
+    fundingRequestId: string,
+    sentAmount: number,
+    branchId: string | null,
+    actor: Actor,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'EXPENSE', fundingRequestId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+
+      if (sentAmount <= 0) return { posted: false, reason: 'zero-amount' };
+
+      // Resolve company groupId from branch
+      let groupId: string | null = null;
+      if (branchId) {
+        const [branch] = await tx
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, branchId))
+          .limit(1);
+        groupId = branch?.groupId ?? null;
+      }
+
+      const marketing = await this.resolveAccountByCode(tx, groupId, 'Marketing Expenses');
+      const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
+      if (!marketing || !bank) {
+        return { posted: false, reason: 'missing-marketing-or-bank-account' };
+      }
+
+      const postingDate = new Date().toISOString().slice(0, 10);
+
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate,
+        voucherType: 'EXPENSE',
+        voucherId: fundingRequestId,
+        lines: [
+          { accountId: marketing.id, debit: sentAmount, credit: 0, remarks: 'Ad spend disbursement' },
+          { accountId: bank.id, debit: 0, credit: sentAmount, remarks: 'Ad spend disbursement' },
+        ],
+      });
+
+      return { posted: true };
+    });
+  }
+
   // ─── Reversal of an auto-posted voucher (retrack / delete) ───────────────────
 
   /**
@@ -786,11 +933,52 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
   // ─── Journal Entries ───────────────────────────────────────────────────────
 
-  async createJournalEntry(input: CreateJournalEntryInput, actor: Actor) {
+  /** Approval threshold: JEs above this amount (₦500,000) require approval unless the actor has write permission. */
+  static readonly APPROVAL_THRESHOLD = 500_000;
+
+  async createJournalEntry(input: CreateJournalEntryInput, actor: Actor, forceDraft?: boolean) {
     return withActor(this.db, actor, async (tx) => {
       const totalDebit = input.lines.reduce((s, l) => s + (l.debit ?? 0), 0);
       const totalCredit = input.lines.reduce((s, l) => s + (l.credit ?? 0), 0);
+      const isDraft = input.isDraft || forceDraft || false;
 
+      if (isDraft) {
+        // DRAFT mode: save header + stash lines as JSON, but do NOT post GL entries.
+        const [header] = await tx
+          .insert(schema.journalEntries)
+          .values({
+            groupId: input.groupId ?? null,
+            postingDate: input.postingDate,
+            description: input.description,
+            totalDebit: sql`${totalDebit}::numeric`,
+            totalCredit: sql`${totalCredit}::numeric`,
+            status: 'DRAFT',
+          })
+          .returning();
+
+        // Store the draft lines in the idempotencyKey field as JSON (reusing
+        // nullable text column to avoid schema change — lines are small).
+        await tx
+          .update(schema.journalEntries)
+          .set({
+            idempotencyKey: JSON.stringify(
+              input.lines.map((l) => ({
+                accountId: l.accountId,
+                debit: l.debit ?? 0,
+                credit: l.credit ?? 0,
+                partyType: l.partyType ?? null,
+                partyId: l.partyId ?? null,
+                remarks: l.remarks ?? null,
+              })),
+            ),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.journalEntries.id, header!.id));
+
+        return { ...header!, fiscalYearId: null as string | null };
+      }
+
+      // POSTED mode: original flow.
       const [header] = await tx
         .insert(schema.journalEntries)
         .values({
@@ -824,6 +1012,72 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         .where(eq(schema.journalEntries.id, header!.id));
 
       return { ...header!, fiscalYearId };
+    });
+  }
+
+  /**
+   * Approve a DRAFT journal entry: validates it's in DRAFT status, hydrates
+   * the stashed lines from idempotencyKey, runs them through postVoucher, and
+   * flips status to POSTED. Sets approved_by/at for audit trail.
+   */
+  async approveJournalEntry(input: ApproveJournalEntryInput, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [header] = await tx
+        .select()
+        .from(schema.journalEntries)
+        .where(eq(schema.journalEntries.id, input.journalEntryId))
+        .limit(1);
+      if (!header) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
+      }
+      if (header.status !== 'DRAFT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot approve a journal entry with status "${header.status}". Only DRAFT entries can be approved.`,
+        });
+      }
+
+      // Hydrate stashed lines from idempotencyKey.
+      if (!header.idempotencyKey) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Draft journal entry has no stashed lines. Re-create it.',
+        });
+      }
+
+      let lines: PostVoucherLine[];
+      try {
+        lines = JSON.parse(header.idempotencyKey) as PostVoucherLine[];
+      } catch {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Draft journal entry has malformed stashed lines.',
+        });
+      }
+
+      const { fiscalYearId } = await this.postVoucher(tx, {
+        groupId: header.groupId,
+        postingDate: header.postingDate,
+        voucherType: 'JOURNAL_ENTRY',
+        voucherId: header.id,
+        lines,
+      });
+
+      const [updated] = await tx
+        .update(schema.journalEntries)
+        .set({
+          status: 'POSTED',
+          fiscalYearId,
+          approvedBy: actor.id,
+          approvedAt: new Date(),
+          // Clear the stashed lines now that they've been posted.
+          idempotencyKey: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.journalEntries.id, header.id))
+        .returning();
+
+      return { ...updated!, fiscalYearId };
     });
   }
 
@@ -1148,6 +1402,33 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
+  /**
+   * Reopen a closed fiscal year (SuperAdmin only — enforced in router).
+   * Allows postings to resume in the period.
+   */
+  async reopenFiscalYear(input: ReopenFiscalYearInput, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select({ status: schema.fiscalYears.status })
+        .from(schema.fiscalYears)
+        .where(eq(schema.fiscalYears.id, input.fiscalYearId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
+      }
+      if (existing.status === 'OPEN') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Fiscal year is already open.' });
+      }
+
+      const [row] = await tx
+        .update(schema.fiscalYears)
+        .set({ status: 'OPEN', updatedAt: new Date() })
+        .where(eq(schema.fiscalYears.id, input.fiscalYearId))
+        .returning();
+      return row!;
+    });
+  }
+
   // ─── Trial Balance ───────────────────────────────────────────────────────────
 
   /**
@@ -1469,6 +1750,630 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     );
 
     return { kind: input.kind, asOfDate: asOf, parties, totals: grand };
+  }
+
+  // ─── Financial KPIs (Phase 5A) ──────────────────────────────────────────────
+
+  /**
+   * Calculate 14 financial health KPIs from live GL data. Uses the trial balance
+   * to extract account-level balances by rootType and accountType, then derives
+   * ratios. All division is safe (returns 0 or Infinity on divide-by-zero).
+   */
+  async financialKPIs(
+    groupId: string | null,
+    asOfDate?: string,
+  ): Promise<{
+    currentRatio: number;
+    quickRatio: number;
+    cashRatio: number;
+    grossProfitMargin: number;
+    operatingProfitMargin: number;
+    netProfitMargin: number;
+    returnOnAssets: number;
+    returnOnEquity: number;
+    debtToEquity: number;
+    daysSalesOutstanding: number;
+    inventoryTurnover: number;
+    daysInventoryOutstanding: number;
+    interestCoverage: number;
+    cashConversionCycle: number;
+  }> {
+    // Fetch all account balances with their type metadata in one query.
+    const conds: SQL[] = [this.groupEqOn(schema.glEntries.groupId, groupId)];
+    if (asOfDate) conds.push(lte(schema.glEntries.postingDate, asOfDate));
+
+    const rows = await this.db
+      .select({
+        code: schema.accounts.code,
+        name: schema.accounts.name,
+        rootType: schema.accounts.rootType,
+        accountType: schema.accounts.accountType,
+        debit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
+        credit: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
+      })
+      .from(schema.glEntries)
+      .innerJoin(schema.accounts, eq(schema.glEntries.accountId, schema.accounts.id))
+      .where(and(...conds))
+      .groupBy(
+        schema.accounts.id,
+        schema.accounts.code,
+        schema.accounts.name,
+        schema.accounts.rootType,
+        schema.accounts.accountType,
+      )
+      .orderBy(schema.accounts.code);
+
+    // Compute net balance per account (debit-positive convention).
+    const accounts = rows.map((r) => ({
+      code: r.code,
+      name: r.name,
+      rootType: r.rootType,
+      accountType: r.accountType,
+      net: Number(r.debit) - Number(r.credit),
+    }));
+
+    // ── Aggregate by rootType / accountType ──
+
+    const sumByRoot = (rootType: string) =>
+      accounts.filter((a) => a.rootType === rootType).reduce((s, a) => s + a.net, 0);
+
+    const sumByAccountType = (accountType: string) =>
+      accounts.filter((a) => a.accountType === accountType).reduce((s, a) => s + a.net, 0);
+
+    // Assets are debit-positive. Current assets = all ASSET accounts (simplified;
+    // fixed assets are tagged FIXED_ASSET, the rest are current).
+    const totalAssets = sumByRoot('ASSET');
+    const fixedAssets = sumByAccountType('FIXED_ASSET');
+    const currentAssets = totalAssets - fixedAssets;
+
+    // Liabilities are credit-positive → negate net for natural sign.
+    const totalLiabilities = -sumByRoot('LIABILITY');
+    const currentLiabilities = totalLiabilities; // simplified: all liabilities are current
+
+    // Equity is credit-positive → negate.
+    const bookEquity = -sumByRoot('EQUITY');
+
+    // Revenue (INCOME is credit-positive → negate net).
+    const revenue = -sumByRoot('INCOME');
+
+    // Expenses are debit-positive.
+    const totalExpenses = sumByRoot('EXPENSE');
+
+    // Specific account types for KPI extraction.
+    const inventory = sumByAccountType('STOCK');
+    const cashAndBank = sumByAccountType('BANK') + sumByAccountType('CASH');
+    const accountsReceivable = sumByAccountType('RECEIVABLE');
+    const accountsPayable = -sumByAccountType('PAYABLE'); // credit-positive → negate
+    const cogs = sumByAccountType('COST_OF_GOODS_SOLD');
+
+    // Interest expense: look for expense accounts with 'Interest' in the code.
+    const interestExpense = accounts
+      .filter(
+        (a) =>
+          a.rootType === 'EXPENSE' &&
+          a.code.toLowerCase().includes('interest'),
+      )
+      .reduce((s, a) => s + a.net, 0);
+
+    // Retained earnings roll into equity for balance sheet purposes.
+    const retainedEarnings = revenue - totalExpenses;
+    const totalEquity = bookEquity + retainedEarnings;
+    const netProfit = revenue - totalExpenses; // PAT (no tax separation yet)
+    const grossProfit = revenue - cogs;
+    // EBIT = gross profit - operating expenses (everything except COGS and interest)
+    const operatingExpenses = totalExpenses - cogs - interestExpense;
+    const ebit = grossProfit - operatingExpenses;
+
+    // ── Safe division helper ──
+    const safeDiv = (num: number, den: number, fallback = 0): number => {
+      if (den === 0) return num === 0 ? fallback : num > 0 ? Infinity : -Infinity;
+      return num / den;
+    };
+
+    // ── KPIs ──
+
+    // Liquidity
+    const currentRatio = safeDiv(currentAssets, currentLiabilities);
+    const quickRatio = safeDiv(currentAssets - inventory, currentLiabilities);
+    const cashRatio = safeDiv(cashAndBank, currentLiabilities);
+
+    // Profitability (as %)
+    const grossProfitMargin = revenue === 0 ? 0 : (grossProfit / revenue) * 100;
+    const operatingProfitMargin = revenue === 0 ? 0 : (ebit / revenue) * 100;
+    const netProfitMargin = revenue === 0 ? 0 : (netProfit / revenue) * 100;
+
+    // Returns (as %)
+    const returnOnAssets = totalAssets === 0 ? 0 : (netProfit / totalAssets) * 100;
+    const returnOnEquity = totalEquity === 0 ? 0 : (netProfit / totalEquity) * 100;
+
+    // Leverage
+    const debtToEquity = safeDiv(totalLiabilities, totalEquity);
+
+    // Efficiency
+    const daysSalesOutstanding = revenue === 0 ? 0 : (accountsReceivable / revenue) * 365;
+    const inventoryTurnover = inventory === 0 ? 0 : safeDiv(cogs, inventory);
+    const daysInventoryOutstanding = cogs === 0 ? 0 : (inventory / cogs) * 365;
+
+    // Interest coverage
+    const interestCoverage =
+      interestExpense === 0 ? Infinity : safeDiv(ebit, interestExpense);
+
+    // Cash conversion cycle = DIO + DSO - AP days
+    const apDays = cogs === 0 ? 0 : (accountsPayable / cogs) * 365;
+    const cashConversionCycle = daysInventoryOutstanding + daysSalesOutstanding - apDays;
+
+    return {
+      currentRatio: Math.round(currentRatio * 100) / 100,
+      quickRatio: Math.round(quickRatio * 100) / 100,
+      cashRatio: Math.round(cashRatio * 100) / 100,
+      grossProfitMargin: Math.round(grossProfitMargin * 100) / 100,
+      operatingProfitMargin: Math.round(operatingProfitMargin * 100) / 100,
+      netProfitMargin: Math.round(netProfitMargin * 100) / 100,
+      returnOnAssets: Math.round(returnOnAssets * 100) / 100,
+      returnOnEquity: Math.round(returnOnEquity * 100) / 100,
+      debtToEquity: Math.round(debtToEquity * 100) / 100,
+      daysSalesOutstanding: Math.round(daysSalesOutstanding * 10) / 10,
+      inventoryTurnover: Math.round(inventoryTurnover * 100) / 100,
+      daysInventoryOutstanding: Math.round(daysInventoryOutstanding * 10) / 10,
+      interestCoverage: Math.round(interestCoverage * 100) / 100,
+      cashConversionCycle: Math.round(cashConversionCycle * 10) / 10,
+    };
+  }
+
+  // ─── Phase 6A: Budget vs Actual Reporting ──────────────────────────────────
+
+  /**
+   * Compare budgets against actual GL expense postings in the period. Joins the
+   * budgets table with summed expense-account debits from gl_entries.
+   */
+  async budgetVsActual(
+    groupId: string | null,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<BudgetVsActualRow[]> {
+    // Fetch all budgets for the company.
+    const budgetConds: SQL[] = [];
+    if (groupId) budgetConds.push(eq(schema.budgets.groupId, groupId));
+    else budgetConds.push(isNull(schema.budgets.groupId));
+
+    const budgets = await this.db
+      .select()
+      .from(schema.budgets)
+      .where(and(...budgetConds))
+      .orderBy(desc(schema.budgets.createdAt));
+
+    if (budgets.length === 0) return [];
+
+    // Sum actual spend: expense-account debits in the period from gl_entries.
+    const expenseConds: SQL[] = [this.groupEqOn(schema.glEntries.groupId, groupId)];
+    expenseConds.push(eq(schema.accounts.rootType, 'EXPENSE'));
+    if (startDate) expenseConds.push(gte(schema.glEntries.postingDate, startDate));
+    if (endDate) expenseConds.push(lte(schema.glEntries.postingDate, endDate));
+
+    const expenseRows = await this.db
+      .select({
+        totalSpend: sql<string>`COALESCE(SUM(${schema.glEntries.debit} - ${schema.glEntries.credit}), 0)`,
+      })
+      .from(schema.glEntries)
+      .innerJoin(schema.accounts, eq(schema.glEntries.accountId, schema.accounts.id))
+      .where(and(...expenseConds));
+
+    const totalActualSpend = Number(expenseRows[0]?.totalSpend ?? 0);
+
+    return budgets.map((b) => {
+      const budgetAmount = Number(b.totalBudget ?? 0);
+      // Proportional allocation of actual spend across budgets by their share
+      // of total budget. This is a simplified model; a more granular version
+      // would tag GL entries to budget IDs.
+      const totalBudgetPool = budgets.reduce(
+        (s, bb) => s + Number(bb.totalBudget ?? 0),
+        0,
+      );
+      const share = totalBudgetPool > 0 ? budgetAmount / totalBudgetPool : 0;
+      const actualSpend = Math.round(totalActualSpend * share * 100) / 100;
+      const variance = budgetAmount - actualSpend;
+      const variancePct = budgetAmount > 0 ? (actualSpend / budgetAmount) * 100 : 0;
+      const status: 'under' | 'warning' | 'over' =
+        variancePct > 100 ? 'over' : variancePct >= 80 ? 'warning' : 'under';
+
+      return {
+        budgetId: b.id,
+        budgetName: b.name,
+        department: b.departmentOrCampaign,
+        budgetAmount,
+        actualSpend,
+        variance,
+        variancePct: Math.round(variancePct * 100) / 100,
+        status,
+      };
+    });
+  }
+
+  // ─── Phase 6B: WHT Deductions ─────────────────────────────────────────────
+
+  /**
+   * Record a WHT deduction and optionally post the GL entry:
+   *   Dr Expense (gross)
+   *   Cr WHT Payable (wht_amount)
+   *   Cr Bank (net_amount)
+   */
+  async recordWhtDeduction(input: RecordWhtInput, actor: Actor): Promise<{ id: string }> {
+    const groupId = input.groupId ?? null;
+    const grossAmount = input.grossAmount;
+    const whtRate = input.whtRate ?? 5;
+    const whtAmount = Math.round(grossAmount * (whtRate / 100) * 100) / 100;
+    const netAmount = Math.round((grossAmount - whtAmount) * 100) / 100;
+
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .insert(schema.whtDeductions)
+        .values({
+          groupId,
+          vendorName: input.vendorName,
+          vendorId: input.vendorId ?? null,
+          paymentDate: input.paymentDate,
+          grossAmount: sql`${grossAmount}::numeric`,
+          whtRate: sql`${whtRate}::numeric`,
+          whtAmount: sql`${whtAmount}::numeric`,
+          netAmount: sql`${netAmount}::numeric`,
+          description: input.description ?? null,
+          createdBy: actor.id,
+        })
+        .returning({ id: schema.whtDeductions.id });
+
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to record WHT deduction.' });
+      }
+
+      // Attempt GL posting (non-fatal — missing accounts should not block recording).
+      try {
+        const expense = await this.resolveAccountByCode(tx, groupId, 'Marketing Expenses');
+        const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
+        // WHT Payable — look for an account with code 'WHT Payable'; fall back to any PAYABLE.
+        const whtPayable = await this.resolveAccountByCode(tx, groupId, 'WHT Payable');
+
+        if (expense && bank && whtPayable) {
+          await this.postVoucher(tx, {
+            groupId,
+            postingDate: input.paymentDate,
+            voucherType: 'EXPENSE',
+            voucherId: row.id,
+            lines: [
+              { accountId: expense.id, debit: grossAmount, credit: 0, remarks: `WHT: ${input.vendorName}` },
+              { accountId: whtPayable.id, debit: 0, credit: whtAmount, remarks: `WHT ${whtRate}%` },
+              { accountId: bank.id, debit: 0, credit: netAmount, remarks: `Net payment to ${input.vendorName}` },
+            ],
+          });
+
+          await tx
+            .update(schema.whtDeductions)
+            .set({ glVoucherId: row.id, updatedAt: new Date() })
+            .where(eq(schema.whtDeductions.id, row.id));
+        }
+      } catch (err) {
+        this.logger.warn(`WHT GL posting skipped for ${row.id}: ${err instanceof Error ? err.message : err}`);
+      }
+
+      return { id: row.id };
+    });
+  }
+
+  async listWhtDeductions(input: ListWhtInput) {
+    const conds: SQL[] = [];
+    const groupId = input.groupId ?? null;
+    if (groupId) conds.push(eq(schema.whtDeductions.groupId, groupId));
+    else conds.push(isNull(schema.whtDeductions.groupId));
+    if (input.startDate) conds.push(gte(schema.whtDeductions.paymentDate, input.startDate));
+    if (input.endDate) conds.push(lte(schema.whtDeductions.paymentDate, input.endDate));
+
+    const where = and(...conds);
+    const offset = (input.page - 1) * input.limit;
+
+    const [rows, totalRow] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.whtDeductions)
+        .where(where)
+        .orderBy(desc(schema.whtDeductions.paymentDate))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.whtDeductions)
+        .where(where),
+    ]);
+
+    return {
+      records: rows,
+      pagination: {
+        total: totalRow[0]?.total ?? 0,
+        page: input.page,
+        pageSize: input.limit,
+        totalPages: Math.max(1, Math.ceil((totalRow[0]?.total ?? 0) / input.limit)),
+      },
+    };
+  }
+
+  async generateWhtCertificate(deductionId: string, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .update(schema.whtDeductions)
+        .set({ certificateGenerated: true, updatedAt: new Date() })
+        .where(eq(schema.whtDeductions.id, deductionId))
+        .returning();
+
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'WHT deduction not found.' });
+      }
+
+      return {
+        id: row.id,
+        vendorName: row.vendorName,
+        paymentDate: row.paymentDate,
+        grossAmount: row.grossAmount,
+        whtRate: row.whtRate,
+        whtAmount: row.whtAmount,
+        netAmount: row.netAmount,
+        description: row.description,
+        certificateGenerated: true,
+      };
+    });
+  }
+
+  // ─── Phase 6C: VAT Return Summary ────────────────────────────────────────
+
+  /**
+   * VAT return summary for FIRS: sums output VAT (credits to VAT account from
+   * sales) and input VAT (debits to VAT account from purchases) over the period.
+   * Also returns individual VAT transactions for the detail table.
+   */
+  async vatReturnSummary(
+    groupId: string | null,
+    startDate: string,
+    endDate: string,
+  ): Promise<VatReturnSummary> {
+    // Find the VAT account by code.
+    const vatAccount = await this.resolveAccountByCode(
+      this.db as unknown as Tx,
+      groupId,
+      'VAT',
+    );
+
+    if (!vatAccount) {
+      return {
+        outputVat: 0,
+        inputVat: 0,
+        netVatPayable: 0,
+        periodStart: startDate,
+        periodEnd: endDate,
+        transactionCount: 0,
+        transactions: [],
+      };
+    }
+
+    const conds: SQL[] = [
+      eq(schema.glEntries.accountId, vatAccount.id),
+      gte(schema.glEntries.postingDate, startDate),
+      lte(schema.glEntries.postingDate, endDate),
+    ];
+
+    const [summaryRows, transactionRows] = await Promise.all([
+      this.db
+        .select({
+          totalDebit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
+          totalCredit: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
+          txCount: sql<number>`count(*)::int`,
+        })
+        .from(schema.glEntries)
+        .where(and(...conds)),
+      this.db
+        .select({
+          id: schema.glEntries.id,
+          postingDate: schema.glEntries.postingDate,
+          voucherType: schema.glEntries.voucherType,
+          voucherId: schema.glEntries.voucherId,
+          debit: schema.glEntries.debit,
+          credit: schema.glEntries.credit,
+          remarks: schema.glEntries.remarks,
+        })
+        .from(schema.glEntries)
+        .where(and(...conds))
+        .orderBy(desc(schema.glEntries.postingDate)),
+    ]);
+
+    const totalDebit = Number(summaryRows[0]?.totalDebit ?? 0);
+    const totalCredit = Number(summaryRows[0]?.totalCredit ?? 0);
+
+    // Output VAT = credits to VAT account (collected from sales).
+    // Input VAT = debits to VAT account (paid on purchases).
+    const outputVat = totalCredit;
+    const inputVat = totalDebit;
+    const netVatPayable = outputVat - inputVat;
+
+    const transactions: VatTransaction[] = transactionRows.map((r) => ({
+      id: r.id,
+      postingDate: r.postingDate,
+      voucherType: r.voucherType,
+      voucherId: r.voucherId,
+      debit: Number(r.debit),
+      credit: Number(r.credit),
+      remarks: r.remarks,
+    }));
+
+    return {
+      outputVat,
+      inputVat,
+      netVatPayable,
+      periodStart: startDate,
+      periodEnd: endDate,
+      transactionCount: summaryRows[0]?.txCount ?? 0,
+      transactions,
+    };
+  }
+
+  // ─── Phase 6E: Consolidated Multi-Company Reports ──────────────────────────
+
+  /**
+   * Consolidated Profit & Loss: aggregate across all companies (branch groups).
+   * Calls profitAndLoss for each group and sums the results.
+   */
+  async consolidatedProfitAndLoss(startDate?: string, endDate?: string) {
+    const groups = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups);
+
+    // Include null-group for single-company installs
+    const groupIds: (string | null)[] = groups.length
+      ? groups.map((g) => g.id)
+      : [null];
+
+    const reports = await Promise.all(
+      groupIds.map((gid) =>
+        this.profitAndLoss({ groupId: gid, startDate, endDate }),
+      ),
+    );
+
+    // Merge per-account rows across companies by code+name
+    const incomeMap = new Map<string, { code: string; name: string; amount: number }>();
+    const expenseMap = new Map<string, { code: string; name: string; amount: number }>();
+
+    for (const report of reports) {
+      for (const row of report.income) {
+        const existing = incomeMap.get(row.code);
+        if (existing) existing.amount += row.amount;
+        else incomeMap.set(row.code, { ...row });
+      }
+      for (const row of report.expense) {
+        const existing = expenseMap.get(row.code);
+        if (existing) existing.amount += row.amount;
+        else expenseMap.set(row.code, { ...row });
+      }
+    }
+
+    const income = [...incomeMap.values()];
+    const expense = [...expenseMap.values()];
+    const totalIncome = income.reduce((s, r) => s + r.amount, 0);
+    const totalExpense = expense.reduce((s, r) => s + r.amount, 0);
+
+    return {
+      income,
+      expense,
+      totalIncome,
+      totalExpense,
+      netProfit: totalIncome - totalExpense,
+      period: { startDate: startDate ?? null, endDate: endDate ?? null },
+      companyCount: groupIds.length,
+    };
+  }
+
+  /**
+   * Consolidated Balance Sheet: aggregate across all companies.
+   */
+  async consolidatedBalanceSheet(asOfDate?: string) {
+    const groups = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups);
+
+    const groupIds: (string | null)[] = groups.length
+      ? groups.map((g) => g.id)
+      : [null];
+
+    const reports = await Promise.all(
+      groupIds.map((gid) =>
+        this.balanceSheet({ groupId: gid, asOfDate }),
+      ),
+    );
+
+    const merge = (
+      allRows: Array<{ code: string; name: string; amount: number }>,
+    ) => {
+      const map = new Map<string, { code: string; name: string; amount: number }>();
+      for (const row of allRows) {
+        const existing = map.get(row.code);
+        if (existing) existing.amount += row.amount;
+        else map.set(row.code, { ...row });
+      }
+      return [...map.values()];
+    };
+
+    const assets = merge(reports.flatMap((r) => r.assets));
+    const liabilities = merge(reports.flatMap((r) => r.liabilities));
+    const equity = merge(reports.flatMap((r) => r.equity));
+    const retainedEarnings = reports.reduce((s, r) => s + r.retainedEarnings, 0);
+    const totalAssets = assets.reduce((s, r) => s + r.amount, 0);
+    const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
+    const totalEquity = equity.reduce((s, r) => s + r.amount, 0) + retainedEarnings;
+
+    return {
+      assets,
+      liabilities,
+      equity,
+      retainedEarnings,
+      totalAssets,
+      totalLiabilities,
+      totalEquity,
+      balanced: Math.round(totalAssets * 100) === Math.round((totalLiabilities + totalEquity) * 100),
+      asOfDate: asOfDate ?? null,
+      companyCount: groupIds.length,
+    };
+  }
+
+  /**
+   * Consolidated Cash Flow: aggregate across all companies.
+   */
+  async consolidatedCashFlow(startDate?: string, endDate?: string) {
+    const groups = await this.db
+      .select({ id: schema.branchGroups.id })
+      .from(schema.branchGroups);
+
+    const groupIds: (string | null)[] = groups.length
+      ? groups.map((g) => g.id)
+      : [null];
+
+    const reports = await Promise.all(
+      groupIds.map((gid) =>
+        this.cashFlow({ groupId: gid, startDate, endDate }),
+      ),
+    );
+
+    // Merge accounts by code
+    const accountMap = new Map<
+      string,
+      { code: string; name: string; opening: number; inflow: number; outflow: number; closing: number }
+    >();
+
+    for (const report of reports) {
+      for (const acc of report.accounts) {
+        const existing = accountMap.get(acc.code);
+        if (existing) {
+          existing.opening += acc.opening;
+          existing.inflow += acc.inflow;
+          existing.outflow += acc.outflow;
+          existing.closing += acc.closing;
+        } else {
+          accountMap.set(acc.code, { ...acc });
+        }
+      }
+    }
+
+    const accounts = [...accountMap.values()];
+    const totals = accounts.reduce(
+      (acc, a) => {
+        acc.opening += a.opening;
+        acc.inflow += a.inflow;
+        acc.outflow += a.outflow;
+        acc.closing += a.closing;
+        return acc;
+      },
+      { opening: 0, inflow: 0, outflow: 0, closing: 0 },
+    );
+
+    return {
+      accounts,
+      totals,
+      period: { startDate: startDate ?? null, endDate: endDate ?? null },
+      companyCount: groupIds.length,
+    };
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

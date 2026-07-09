@@ -54,6 +54,8 @@ export const createJournalEntrySchema = z
     postingDate: z.string().date(),
     description: z.string().trim().min(1).max(500),
     lines: z.array(glLineSchema).min(2),
+    /** When true, saves as DRAFT (no GL lines posted until approved). */
+    isDraft: z.boolean().optional(),
   })
   .superRefine((v, ctx) => {
     const totalDebit = v.lines.reduce((s, l) => s + minor(l.debit), 0);
@@ -72,7 +74,7 @@ export type CreateJournalEntryInput = z.infer<typeof createJournalEntrySchema>;
 
 export const listJournalEntriesSchema = z.object({
   groupId: z.string().uuid().nullish(),
-  status: z.enum(['POSTED', 'CANCELLED']).optional(),
+  status: z.enum(['POSTED', 'CANCELLED', 'DRAFT']).optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   search: z.string().trim().max(200).optional(),
@@ -135,6 +137,18 @@ export const closeFiscalYearSchema = z.object({
 });
 export type CloseFiscalYearInput = z.infer<typeof closeFiscalYearSchema>;
 
+export const reopenFiscalYearSchema = z.object({
+  fiscalYearId: z.string().uuid(),
+});
+export type ReopenFiscalYearInput = z.infer<typeof reopenFiscalYearSchema>;
+
+// ─── Journal Approval (Phase 5) ──────────────────────────────────────────────
+
+export const approveJournalEntrySchema = z.object({
+  journalEntryId: z.string().uuid(),
+});
+export type ApproveJournalEntryInput = z.infer<typeof approveJournalEntrySchema>;
+
 // ─── Trial Balance + Seeding ────────────────────────────────────────────────────
 
 export const trialBalanceSchema = z.object({
@@ -176,6 +190,31 @@ export const agingSchema = z.object({
   asOfDate: z.string().date().optional(),
 });
 export type AgingInput = z.infer<typeof agingSchema>;
+
+// ─── Financial KPIs (Phase 5A) ─────────────────────────────────────────────────
+
+export const financialKPIsSchema = z.object({
+  groupId: z.string().uuid().nullish(),
+  asOfDate: z.string().date().optional(),
+});
+export type FinancialKPIsInput = z.infer<typeof financialKPIsSchema>;
+
+export interface FinancialKPIs {
+  currentRatio: number;
+  quickRatio: number;
+  cashRatio: number;
+  grossProfitMargin: number;
+  operatingProfitMargin: number;
+  netProfitMargin: number;
+  returnOnAssets: number;
+  returnOnEquity: number;
+  debtToEquity: number;
+  daysSalesOutstanding: number;
+  inventoryTurnover: number;
+  daysInventoryOutstanding: number;
+  interestCoverage: number;
+  cashConversionCycle: number;
+}
 
 // ─── Opening balances / cutover (Phase 6) ───────────────────────────────────────
 

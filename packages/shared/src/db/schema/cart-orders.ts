@@ -63,6 +63,8 @@ export const cartOrders = pgTable('cart_orders', {
   servicingBranchId: uuid('servicing_branch_id'),
   /** Which routing rule determined the servicing branch. NULL = manual pull / fallback. */
   routingRuleId: uuid('routing_rule_id'),
+  /** Target team for auto-assignment. NULL = any closer in the branch. */
+  routingTeamId: uuid('routing_team_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),
@@ -120,6 +122,9 @@ export const cartOrderRoutingRules = pgTable('cart_order_routing_rules', {
   /** Target: push cart orders to this specific branch's CS team.
    *  NULL = round-robin across all active CS branches. */
   targetBranchId: uuid('target_branch_id').references(() => branches.id),
+  /** Optional target team: auto-assign only to closers in this team.
+   *  NULL = any closer in the target branch. */
+  teamId: uuid('team_id'),
   /** Higher priority = evaluated first. */
   priority: integer('priority').notNull().default(0),
   /** Disabled rules are skipped during routing. */

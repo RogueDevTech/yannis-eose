@@ -102,8 +102,15 @@ export function appendOrdersAggregateScopeConditions(
     mediaBuyerId?: string;
     assignedCsId?: string;
     supervisorScope?: OrdersAggregateSupervisorScope;
+    /** Team filter: only orders assigned to these CS user IDs. */
+    teamMemberIds?: string[];
   },
 ): void {
+  // Team filter takes priority — scopes to exactly these closers.
+  if (opts.teamMemberIds && opts.teamMemberIds.length > 0) {
+    conditions.push(inArray(schema.orders.assignedCsId, opts.teamMemberIds));
+    return;
+  }
   if (opts.supervisorScope) {
     const { csUserIds, mediaBuyerIds } = opts.supervisorScope;
     const orParts: ReturnType<typeof inArray>[] = [];
@@ -1419,6 +1426,7 @@ export class OrdersService {
 
     const now = new Date();
     await withActor(this.db, actor, async (tx) => {
+      // 1. Mark order as DELETED
       await tx
         .update(schema.orders)
         .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
@@ -1432,22 +1440,52 @@ export class OrdersService {
         metadata: { dualApproval: true, ...(note ? { note } : {}) },
         branchId: order.branchId ?? null,
       });
+
+      // 2. Reverse stock INSIDE the same transaction — if this fails, the
+      //    entire deletion rolls back so we never have a deleted order with
+      //    un-reversed stock.
+      const deliveryMovements = await tx
+        .select()
+        .from(schema.stockMovements)
+        .where(
+          and(
+            eq(schema.stockMovements.referenceId, orderId),
+            eq(schema.stockMovements.movementType, 'DELIVERY'),
+          ),
+        );
+      for (const mov of deliveryMovements) {
+        const reverseQty = Math.abs(mov.quantity);
+        const locationId = mov.fromLocationId;
+        await tx.insert(schema.stockMovements).values({
+          productId: mov.productId,
+          movementType: 'ADJUSTMENT',
+          quantity: reverseQty,
+          toLocationId: locationId,
+          referenceId: orderId,
+          reason: `Stock reversal: delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
+          actorId: actor.id,
+        });
+        if (locationId) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(schema.inventoryLevels.productId, mov.productId),
+                eq(schema.inventoryLevels.locationId, locationId),
+              ),
+            );
+        }
+      }
     });
 
-    // Reverse stock: create ADJUSTMENT movements to undo the DELIVERY deduction
-    try {
-      await this.inventoryService.reverseDeliveryForOrder(orderId, actor);
-    } catch (err) {
-      // Stock reversal is critical but shouldn't block the deletion.
-      // Log the error — manual inventory correction may be needed.
-      console.error(
-        `[softDeleteDeliveredOrder] Stock reversal failed for order ${orderId}:`,
-        err,
-      );
-    }
-
-    // Reverse the ledger: undo the sale (AR + COGS) and any remittance settlement
-    // so a deleted delivered order leaves no phantom revenue/AR/cash. Non-fatal.
+    // GL reversal runs outside the stock tx — non-fatal by design. A failed GL
+    // reversal is a bookkeeping discrepancy (fixable via manual JE), not a stock
+    // integrity issue. Keeping it outside avoids blocking the deletion if the GL
+    // account is missing or the fiscal year is closed.
     try {
       const rem = await this.db
         .select({ id: schema.deliveryRemittanceOrders.deliveryRemittanceId })
@@ -3943,6 +3981,8 @@ export class OrdersService {
       /** When true, also exclude cart-graduated orders (order_source='online').
        *  CS surfaces pass true (cart orders have their own strip). */
       excludeCartGraduated?: boolean;
+      /** Team filter: only orders assigned to these CS user IDs. Resolved from teamId at the router. */
+      teamMemberIds?: string[];
     },
   ) {
     // Skip the exclusion gate when explicitly querying DELETED orders —
@@ -4028,6 +4068,10 @@ export class OrdersService {
       if (input.mediaBuyerId) {
         conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
       }
+    }
+    // Team filter: only orders assigned to members of a specific team.
+    if (listOpts?.teamMemberIds && listOpts.teamMemberIds.length > 0) {
+      conditions.push(inArray(schema.orders.assignedCsId, listOpts.teamMemberIds));
     }
     if (input.campaignId) {
       conditions.push(eq(schema.orders.campaignId, input.campaignId));
@@ -6171,6 +6215,8 @@ export class OrdersService {
     onlyOffline?: boolean,
     /** Optional servicingBranchId filters to that servicing branch (for Logistics Orders page branch filter). */
     servicingBranchId?: string,
+    /** Team filter: only count orders assigned to these user IDs. */
+    teamMemberIds?: string[],
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -6209,6 +6255,7 @@ export class OrdersService {
       mediaBuyerId,
       assignedCsId,
       supervisorScope,
+      teamMemberIds,
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (servicingBranchId) conditions.push(eq(schema.orders.servicingBranchId, servicingBranchId));

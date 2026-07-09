@@ -1,11 +1,20 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { FollowUpConfigPage } from '~/features/settings/FollowUpConfigPage';
 
 export const meta: MetaFunction = () => [{ title: 'Follow-up config — Yannis EOSE' }];
+
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formMethod,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'orders.followUpConfig');
@@ -58,7 +67,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   } catch { /* non-critical */ }
 
-  return json({ rules, branches, groups, syncLogs, closers, excludedIds, activeCsBranchIds });
+  // Fetch teams for the team dropdown on rules
+  const branchIds = (branches as Array<{ id: string }>).map((b) => b.id);
+  const teamsResults = await Promise.all(
+    branchIds.map((bid) =>
+      apiRequest<unknown>(
+        `/trpc/branches.listTeamsForFilter?input=${encodeURIComponent(JSON.stringify({ branchId: bid, department: 'CS' }))}`,
+        { method: 'GET', cookie },
+      ).then((r) => r.ok ? ((r.data as { result?: { data?: unknown[] } })?.result?.data ?? []) : [])
+       .catch(() => []),
+    ),
+  );
+  const teams = teamsResults.flat();
+
+  return json({ rules, branches, groups, syncLogs, closers, excludedIds, activeCsBranchIds, teams });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -218,6 +240,7 @@ export default function FollowUpConfigRoute() {
       closers={Array.isArray(data.closers) ? data.closers as never[] : []}
       excludedIds={Array.isArray(data.excludedIds) ? data.excludedIds : []}
       activeCsBranchIds={Array.isArray(data.activeCsBranchIds) ? data.activeCsBranchIds : []}
+      teams={Array.isArray(data.teams) ? data.teams as never[] : []}
     />
   );
 }

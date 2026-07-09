@@ -427,6 +427,42 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.write',
       },
+      {
+        label: 'Asset Register',
+        href: '/admin/finance/assets',
+        icon: SidebarIcons.inventory,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Expenses',
+        href: '/admin/finance/expenses',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Budget Report',
+        href: '/admin/finance/budget-report',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'WHT Certificates',
+        href: '/admin/finance/wht-certificates',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Tax Returns',
+        href: '/admin/finance/tax-returns',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
+      {
+        label: 'Bank Reconciliation',
+        href: '/admin/finance/bank-reconciliation',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+      },
     ],
   },
   {

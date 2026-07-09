@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json, redirect } from '@remix-run/node';
 import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
@@ -29,6 +30,14 @@ import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
 export const meta: MetaFunction = () => [
   { title: 'Follow Up — Yannis EOSE' },
 ];
+
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formMethod,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 const ABANDONED_CART_STATUS = 'ABANDONED_CART';
 

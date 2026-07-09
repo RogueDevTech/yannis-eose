@@ -481,16 +481,37 @@ export const glVoucherTypeEnum = pgEnum('gl_voucher_type', [
   'SALES_INVOICE',
   'PAYMENT',
   'PURCHASE_RECEIPT',
+  'PAYROLL',
+  'EXPENSE',
 ]);
 
-/** Journal entry lifecycle. Post-only in Phase 1 (no DRAFT). */
+/** Journal entry lifecycle. DRAFT = pending approval (Phase 5). */
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
   'POSTED',
   'CANCELLED',
+  'DRAFT',
 ]);
 
 /** Fiscal year state. CLOSED = period locked (no postings). */
 export const fiscalYearStatusEnum = pgEnum('fiscal_year_status', [
   'OPEN',
   'CLOSED',
+]);
+
+// ============================================
+// Fixed Asset Register
+// ============================================
+
+/** Depreciation calculation method for a fixed asset. */
+export const assetDepreciationMethodEnum = pgEnum('asset_depreciation_method', [
+  'STRAIGHT_LINE',
+  'REDUCING_BALANCE',
+  'UNITS_OF_PRODUCTION',
+]);
+
+/** Lifecycle status of a fixed asset. */
+export const assetStatusEnum = pgEnum('asset_status', [
+  'ACTIVE',
+  'FULLY_DEPRECIATED',
+  'DISPOSED',
 ]);

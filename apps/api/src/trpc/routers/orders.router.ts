@@ -747,6 +747,13 @@ export const ordersRouter = router({
           (baseOpts as Record<string, unknown>).excludeCartGraduated = true;
         }
       }
+      // Resolve team filter → member IDs
+      if (effectiveInput.teamId) {
+        const memberIds = await getBranchTeamsService().listTeamMemberIds(effectiveInput.teamId);
+        if (memberIds.length > 0) {
+          (baseOpts as Record<string, unknown>).teamMemberIds = memberIds;
+        }
+      }
       const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
       const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
 
@@ -1050,6 +1057,8 @@ export const ordersRouter = router({
           excludeGraduated: z.boolean().optional(),
           /** Filter counts to a specific order source. */
           orderSource: z.enum(['offline', 'edge-form']).optional(),
+          /** When set, scope to orders assigned to members of this team. */
+          teamId: z.string().uuid().optional(),
         })
         .optional(),
     )
@@ -1086,6 +1095,10 @@ export const ordersRouter = router({
       const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
       const onlyOffline = input?.orderSource === 'offline' ? true : undefined;
       const excludeOffline = input?.orderSource === 'edge-form' ? true : undefined;
+      // Resolve team filter → member IDs
+      const teamMemberIds = input?.teamId
+        ? await getBranchTeamsService().listTeamMemberIds(input.teamId)
+        : undefined;
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -1104,6 +1117,8 @@ export const ordersRouter = router({
           excludeGraduated,
           excludeCartGraduated,
           onlyOffline,
+          undefined,
+          teamMemberIds,
         );
       }
 
@@ -1118,6 +1133,7 @@ export const ordersRouter = router({
           branchScope,
           effectiveBranchIds: ctx.effectiveBranchIds,
           orderSource: input?.orderSource,
+          teamId: input?.teamId,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1137,6 +1153,8 @@ export const ordersRouter = router({
           excludeGraduated,
           excludeCartGraduated,
           onlyOffline,
+          undefined,
+          teamMemberIds,
         ),
       );
     }),
@@ -1395,6 +1413,8 @@ export const ordersRouter = router({
         includeCartAbandonment: z.boolean().optional().default(false),
         /** When set, scope status counts to this order source only. */
         orderSource: z.enum(['offline', 'edge-form']).optional(),
+        /** When set, scope to orders assigned to members of this team. */
+        teamId: z.string().uuid().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -1437,6 +1457,11 @@ export const ordersRouter = router({
               status: input.heatStatus,
             };
 
+      // Resolve team filter → member IDs (outside fetchBundle so it's cached with the bundle)
+      const bundleTeamMemberIds = input.teamId
+        ? await getBranchTeamsService().listTeamMemberIds(input.teamId)
+        : undefined;
+
       const fetchBundle = async () => {
         const [
         statusCounts,
@@ -1449,6 +1474,7 @@ export const ordersRouter = router({
         cartAbandonmentCount,
         supplementaryCounts,
         offlineStatusCounts,
+        teamsForFilter,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
           scope.mediaBuyerId,
@@ -1466,6 +1492,8 @@ export const ordersRouter = router({
           true, // exclude graduated follow-up orders from funnel counts
           bundleBranchScope === 'servicing', // CS also excludes cart-graduated (own strip)
           input.orderSource === 'offline' ? true : undefined, // onlyOffline
+          undefined, // servicingBranchId
+          bundleTeamMemberIds, // teamMemberIds
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
@@ -1526,6 +1554,10 @@ export const ordersRouter = router({
           ctx.effectiveBranchIds,
           false, false, false, false, true, // onlyOffline
         ),
+        // Teams for the team filter dropdown
+        branchId
+          ? getBranchTeamsService().listTeamsForFilter(branchId, 'CS')
+          : Promise.resolve([]),
       ]);
 
       return {
@@ -1547,6 +1579,7 @@ export const ordersRouter = router({
         cartAbandonmentCount: cartAbandonmentCount ?? 0,
         offlineCount: supplementaryCounts.offlineCount,
         offlineStatusCounts: offlineStatusCounts ?? {},
+        teamsForFilter: (teamsForFilter ?? []) as Array<{ id: string; name: string | null; department: string }>,
       };
       }; // end fetchBundle
 

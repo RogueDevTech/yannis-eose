@@ -27,16 +27,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const defaults = defaultThisMonthRange();
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;
+  const consolidated = url.searchParams.get('consolidated') === 'true';
 
   const pageData = (async () => {
+    if (consolidated) {
+      const input = encodeURIComponent(JSON.stringify({ startDate, endDate }));
+      const res = await apiRequest<unknown>(
+        `/trpc/generalLedger.consolidatedCF?input=${input}`,
+        { method: 'GET', cookie },
+      );
+      const data = res.ok
+        ? ((res.data as { result?: { data?: CashFlowPageProps } })?.result?.data ?? EMPTY)
+        : EMPTY;
+      return { ...data, consolidated: true };
+    }
+
     const input = encodeURIComponent(JSON.stringify({ startDate, endDate }));
     const res = await apiRequest<unknown>(
       `/trpc/generalLedger.cashFlow?input=${input}`,
       { method: 'GET', cookie },
     );
-    return res.ok
+    const data = res.ok
       ? ((res.data as { result?: { data?: CashFlowPageProps } })?.result?.data ?? EMPTY)
       : EMPTY;
+    return { ...data, consolidated: false };
   })();
 
   return defer({ pageData });
@@ -46,7 +60,7 @@ export default function CashFlowRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<CashFlowPage {...EMPTY} />}>
-      {(data) => <CashFlowPage {...data} />}
+      {(data) => <CashFlowPage {...data} consolidated={data.consolidated} />}
     </CachedAwait>
   );
 }

@@ -1182,6 +1182,7 @@ export class CartOrdersService {
     // ── 1. Resolve routing BEFORE the transaction (read-only, can use Drizzle) ──
     let resolvedBranchId = targetBranchId;
     let resolvedRuleId: string | null = null;
+    let resolvedTeamId: string | null = null;
     if (!resolvedBranchId) {
       // Look up the first cart's campaign branch to seed routing
       const idList = cartIds.map((id) => `'${id}'`).join(', ');
@@ -1203,11 +1204,12 @@ export class CartOrdersService {
       if (routing) {
         resolvedBranchId = routing.branchId;
         resolvedRuleId = routing.ruleId;
+        resolvedTeamId = routing.teamId;
       }
     }
-
     const branchLiteral = resolvedBranchId ? `'${resolvedBranchId}'` : 'NULL';
     const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
+    const teamLiteral = resolvedTeamId ? `'${resolvedTeamId}'` : 'NULL';
     const safeIdList = cartIds.map((id) => `'${id}'`).join(', ');
 
     // ── 2. Standalone pg.unsafe() calls (simple protocol) ──────────────
@@ -1226,7 +1228,7 @@ export class CartOrdersService {
         customer_address, delivery_address, total_amount,
         delivery_notes, delivery_state, customer_gender,
         preferred_delivery_date, payment_method, customer_email,
-        order_source, branch_id, servicing_branch_id, routing_rule_id,
+        order_source, branch_id, servicing_branch_id, routing_rule_id, routing_team_id,
         custom_fields
       )
       SELECT
@@ -1235,7 +1237,7 @@ export class CartOrdersService {
         ca.customer_address, ca.delivery_address, 0,
         ca.delivery_notes, ca.delivery_state, ca.customer_gender,
         ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
-        'online', camp.branch_id, ${branchLiteral}, ${ruleLiteral},
+        'online', camp.branch_id, ${branchLiteral}, ${ruleLiteral}, ${teamLiteral},
         ca.custom_field_values
       FROM cart_abandonments ca
       LEFT JOIN campaigns camp ON camp.id = ca.campaign_id
@@ -1397,6 +1399,7 @@ export class CartOrdersService {
           name: input.name,
           sourceBranchId: input.sourceBranchId ?? null,
           targetBranchId: input.targetBranchId ?? null,
+          teamId: input.teamId ?? null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
         })
@@ -1410,6 +1413,7 @@ export class CartOrdersService {
     if (input.name !== undefined) updateFields['name'] = input.name;
     if (input.sourceBranchId !== undefined) updateFields['sourceBranchId'] = input.sourceBranchId;
     if (input.targetBranchId !== undefined) updateFields['targetBranchId'] = input.targetBranchId;
+    if (input.teamId !== undefined) updateFields['teamId'] = input.teamId;
     if (input.priority !== undefined) updateFields['priority'] = input.priority;
     if (input.enabled !== undefined) updateFields['enabled'] = input.enabled;
 
@@ -1442,7 +1446,7 @@ export class CartOrdersService {
    */
   private async resolveRoutingBranch(
     campaignBranchId: string | null,
-  ): Promise<{ branchId: string; ruleId: string; ruleName: string } | null> {
+  ): Promise<{ branchId: string; ruleId: string; ruleName: string; teamId: string | null } | null> {
     const rules = await this.db
       .select()
       .from(schema.cartOrderRoutingRules)
@@ -1457,7 +1461,7 @@ export class CartOrdersService {
       // sourceBranchId=null matches everything (org-wide catch-all)
 
       if (rule.targetBranchId) {
-        return { branchId: rule.targetBranchId, ruleId: rule.id, ruleName: rule.name };
+        return { branchId: rule.targetBranchId, ruleId: rule.id, ruleName: rule.name, teamId: rule.teamId };
       }
 
       // targetBranchId=null → round-robin across active CS branches
@@ -1470,7 +1474,7 @@ export class CartOrdersService {
         .from(schema.cartOrders)
         .where(gte(schema.cartOrders.createdAt, nigeriaDayStart(new Date().toISOString().slice(0, 10))));
       const idx = (todayCount[0]?.c ?? 0) % activeBranches.length;
-      return { branchId: activeBranches[idx]!, ruleId: rule.id, ruleName: rule.name };
+      return { branchId: activeBranches[idx]!, ruleId: rule.id, ruleName: rule.name, teamId: rule.teamId };
     }
 
     return null;

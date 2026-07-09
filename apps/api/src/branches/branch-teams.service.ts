@@ -447,6 +447,23 @@ export class BranchTeamsService {
       if (isSupervisor) {
         await this.assertSingleSupervisor(teamId, [userId]);
       }
+      // Remove from sibling teams in the same department (move semantics —
+      // a user can only be on one team per department per branch).
+      const siblings = await this.db
+        .select({ id: schema.branchTeams.id })
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.branchDepartmentId, team.branchDepartmentId));
+      const otherTeamIds = siblings.map((s) => s.id).filter((id) => id !== teamId);
+      if (otherTeamIds.length > 0) {
+        await this.db
+          .delete(schema.branchTeamMembers)
+          .where(
+            and(
+              eq(schema.branchTeamMembers.userId, userId),
+              inArray(schema.branchTeamMembers.teamId, otherTeamIds),
+            ),
+          );
+      }
       await this.db
         .delete(schema.branchDepartmentMembers)
         .where(
@@ -920,6 +937,40 @@ export class BranchTeamsService {
         )
         .limit(1);
       return rows.length > 0;
+    });
+  }
+
+  /**
+   * Get all user IDs belonging to a specific team (both supervisor and members).
+   * Used for team-scoped filtering on order pages.
+   */
+  async listTeamMemberIds(teamId: string): Promise<string[]> {
+    return this.safeBranchTeamsRead([], async () => {
+      const rows = await this.db
+        .select({ userId: schema.branchTeamMembers.userId })
+        .from(schema.branchTeamMembers)
+        .where(eq(schema.branchTeamMembers.teamId, teamId));
+      return rows.map((r) => r.userId);
+    });
+  }
+
+  /**
+   * List teams available for a branch + department, for the team filter dropdown.
+   */
+  async listTeamsForFilter(branchId: string, department?: 'CS' | 'MARKETING'): Promise<Array<{ id: string; name: string | null; department: string }>> {
+    return this.safeBranchTeamsRead([], async () => {
+      const conditions = [eq(schema.branchTeams.branchId, branchId)];
+      if (department) conditions.push(eq(schema.branchTeams.department, department));
+      const rows = await this.db
+        .select({
+          id: schema.branchTeams.id,
+          name: schema.branchTeams.name,
+          department: schema.branchTeams.department,
+        })
+        .from(schema.branchTeams)
+        .where(and(...conditions))
+        .orderBy(schema.branchTeams.name);
+      return rows;
     });
   }
 

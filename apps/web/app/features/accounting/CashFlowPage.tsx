@@ -3,6 +3,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface CashFlowRow {
   code: string;
@@ -19,7 +20,7 @@ export interface CashFlowPageProps {
   period: { startDate: string | null; endDate: string | null };
 }
 
-export function CashFlowPage({ accounts, totals }: CashFlowPageProps) {
+export function CashFlowPage({ accounts, totals, consolidated }: CashFlowPageProps & { consolidated?: boolean }) {
   const columns: CompactTableColumn<CashFlowRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
     { key: 'opening', header: 'Opening', align: 'right', render: (r) => <NairaPrice amount={r.opening} zeroAsDash /> },
@@ -31,8 +32,9 @@ export function CashFlowPage({ accounts, totals }: CashFlowPageProps) {
   return (
     <>
       <PageHeader
-        title="Cash Flow"
+        title={consolidated ? 'Consolidated Cash Flow' : 'Cash Flow'}
         description="Movement across bank and cash accounts over the period."
+        actions={<ConsolidatedToggle active={consolidated} />}
       />
 
       <OverviewStatStrip

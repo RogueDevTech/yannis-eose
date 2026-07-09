@@ -21,7 +21,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const branchesRaw = branchesRes.ok ? (branchesRes.data as Record<string, unknown>)?.result : null;
   const branches = Array.isArray(branchesRaw) ? branchesRaw : (branchesRaw as Record<string, unknown>)?.data ?? [];
 
-  return json({ rules, branches });
+  // Fetch teams across all branches for the team dropdown
+  const branchIds = (branches as Array<{ id: string }>).map((b) => b.id);
+  const teamsResults = await Promise.all(
+    branchIds.map((bid) =>
+      apiRequest<unknown>(
+        `/trpc/branches.listTeamsForFilter?input=${encodeURIComponent(JSON.stringify({ branchId: bid, department: 'CS' }))}`,
+        { method: 'GET', cookie },
+      ).then((r) => r.ok ? ((r.data as { result?: { data?: unknown[] } })?.result?.data ?? []) : [])
+       .catch(() => []),
+    ),
+  );
+  const teams = teamsResults.flat();
+
+  return json({ rules, branches, teams });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -53,11 +66,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CartOrderRoutingRoute() {
-  const { rules, branches } = useLoaderData<typeof loader>();
+  const { rules, branches, teams } = useLoaderData<typeof loader>();
   return (
     <CartOrderRoutingPage
       rules={rules as never[]}
       branches={branches as never[]}
+      teams={teams as never[]}
     />
   );
 }

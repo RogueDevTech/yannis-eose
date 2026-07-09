@@ -33,3 +33,7 @@ export * from './follow-up-config';
 export * from './cart-orders';
 export * from './user-filter-preferences';
 export * from './general-ledger';
+export * from './fixed-assets';
+export * from './expense-submissions';
+export * from './wht-deductions';
+export * from './bank-reconciliation';

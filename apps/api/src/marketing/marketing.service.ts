@@ -60,6 +60,7 @@ import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel, canViewAllBranches } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
@@ -93,6 +94,7 @@ export class MarketingService {
     private readonly notifications: NotificationsService,
     private readonly branchTeams: BranchTeamsService,
     private readonly settings: SettingsService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {}
 
   /**
@@ -2570,6 +2572,13 @@ export class MarketingService {
 
       return { updated: row, ledger: inserted };
     });
+
+    // GL auto-post: marketing expense (non-fatal — never blocks funding approval)
+    try {
+      await this.generalLedger.postMarketingFunding(requestId, sentAmount, currentBranchId, { id: approverId });
+    } catch (err) {
+      console.warn(`GL postMarketingFunding failed for request ${requestId}: ${err instanceof Error ? err.message : err}`);
+    }
 
     this.events.emitToUser(existing.requesterId, 'funding:received', {
       fundingId: ledger.id,

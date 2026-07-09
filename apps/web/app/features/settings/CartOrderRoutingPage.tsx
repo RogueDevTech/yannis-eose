@@ -21,20 +21,24 @@ interface RoutingRule {
   sourceBranchName: string | null;
   targetBranchId: string | null;
   targetBranchName: string | null;
+  teamId: string | null;
+  teamName: string | null;
   priority: number;
   enabled: boolean;
 }
 
 interface Branch { id: string; name: string; status?: string }
+interface Team { id: string; name: string | null; department: string }
 
 interface Props {
   rules: RoutingRule[];
   branches: Branch[];
+  teams?: Team[];
 }
 
 // ── Component ───────────────────────────────────────────────────────
 
-export function CartOrderRoutingPage({ rules, branches }: Props) {
+export function CartOrderRoutingPage({ rules, branches, teams = [] }: Props) {
   const [editRule, setEditRule] = useState<RoutingRule | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RoutingRule | null>(null);
@@ -63,6 +67,7 @@ export function CartOrderRoutingPage({ rules, branches }: Props) {
         <RuleFormModal
           rule={editRule}
           branches={branches}
+          teams={teams}
           onClose={() => { setShowCreate(false); setEditRule(null); }}
         />
       )}
@@ -152,10 +157,12 @@ function RulesTab({
 function RuleFormModal({
   rule,
   branches,
+  teams = [],
   onClose,
 }: {
   rule: RoutingRule | null;
   branches: Branch[];
+  teams?: Team[];
   onClose: () => void;
 }) {
   const isEdit = !!rule;
@@ -166,6 +173,7 @@ function RuleFormModal({
   const [name, setName] = useState(rule?.name ?? '');
   const [sourceBranchId, setSourceBranchId] = useState<string | null>(rule?.sourceBranchId ?? null);
   const [targetBranchId, setTargetBranchId] = useState<string | null>(rule?.targetBranchId ?? null);
+  const [teamId, setTeamId] = useState<string | null>(rule?.teamId ?? null);
   const [priority, setPriority] = useState(String(rule?.priority ?? 0));
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
 
@@ -178,6 +186,7 @@ function RuleFormModal({
       name,
       sourceBranchId: sourceBranchId || null,
       targetBranchId: targetBranchId || null,
+      teamId: teamId || null,
       priority: parseInt(priority, 10) || 0,
       enabled,
     };
@@ -225,6 +234,24 @@ function RuleFormModal({
         <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
           Route matching cart orders to this branch. Leave empty for round-robin.
         </p>
+
+        {teams.length > 0 && (
+          <>
+            <SearchableSelect
+              label="Target team (optional)"
+              placeholder="Any closer in the branch"
+              options={teams
+                .filter((t) => !targetBranchId || t.department === 'CS')
+                .map((t) => ({ value: t.id, label: t.name || 'Unnamed team' }))}
+              value={teamId ?? ''}
+              onChange={(v) => setTeamId(v || null)}
+              clearable
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Auto-assign only to closers in this team. Leave empty for any closer in the branch.
+            </p>
+          </>
+        )}
 
         <TextInput
           label="Priority"

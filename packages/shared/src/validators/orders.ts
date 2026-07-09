@@ -352,6 +352,8 @@ export const listOrdersSchema = z
     testOrders: z.boolean().optional(),
     /** Filter by order source: 'offline' (CS manual entry) or 'edge-form' (sales form). */
     orderSource: z.enum(['offline', 'edge-form']).optional(),
+    /** Filter to orders assigned to members of this team. Resolved to user IDs at the router. */
+    teamId: z.string().uuid().optional(),
     search: z.string().optional(),
     // Accept either `YYYY-MM-DD` (whole-day default) OR `YYYY-MM-DDTHH:MM[:SS]`
     // (precise moment from the time-aware DateFilterBar). API service detects the

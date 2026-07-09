@@ -304,6 +304,8 @@ export interface OrdersListPageProps {
   detailBasePath?: string;
   /** Hide Offline + Open carts stat tiles (follow-up surface — always zero). */
   hideOfflineAndCartStats?: boolean;
+  /** Teams available for the team filter dropdown. */
+  teamsForFilter?: Array<{ id: string; name: string | null; department: string }>;
 }
 
 type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
@@ -364,6 +366,7 @@ function OrdersListPageImpl({
   backTo,
   detailBasePath,
   hideOfflineAndCartStats = false,
+  teamsForFilter,
 }: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
@@ -1524,6 +1527,7 @@ function OrdersListPageImpl({
     if (productFilter) n += 1;
     if (showCampaignColumn && campaignFilter) n += 1;
     if (frozenFilterProp) n += 1;
+    if (searchParams.get('teamId')) n += 1;
     return n;
   }, [
     selectedStatus,
@@ -1634,7 +1638,7 @@ function OrdersListPageImpl({
 
       {/* Page header — Live tag sits directly in front of the refresh button per Sales request. */}
       <PageHeader
-        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Sales Orders')}
+        title={pageTitle ?? (isCSCloser ? 'My Orders' : 'Order Funnel')}
         mobileInlineActions
         backTo={backTo}
         description={pageDescription ?? (isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders')}
@@ -1708,6 +1712,48 @@ function OrdersListPageImpl({
                           searchPlaceholder="Search closers..."
                         />
                       )}
+                    </div>
+                  ) : null}
+                  {(teamsForFilter?.length ?? 0) > 1 ? (
+                    <div className={mobileFilterBoxClass}>
+                      {searchParams.get('teamId') && (
+                        <FilterDismiss
+                          onClear={() => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.delete('teamId');
+                              next.set('page', '1');
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
+                      <SearchableSelect
+                        id="orders-filter-team-sheet"
+                        value={searchParams.get('teamId') || 'ALL'}
+                        onChange={(v) => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('teamId', v);
+                            else next.delete('teamId');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All teams' },
+                          ...(teamsForFilter ?? []).map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
+                        ]}
+                        controlSize="sm"
+                        wrapperClassName="w-full"
+                        triggerClassName={mobileSelectTransparent} inlineChevron
+                        placeholder="All teams"
+                        searchPlaceholder="Search teams..."
+                      />
                     </div>
                   ) : null}
                   {(productsForFilter?.length ?? 0) > 0 ? (
@@ -2419,6 +2465,46 @@ function OrdersListPageImpl({
                       />
                     </div>
                   )
+                ) : null}
+                {(teamsForFilter?.length ?? 0) > 1 ? (
+                  <div className="relative">
+                    {searchParams.get('teamId') && (
+                      <FilterDismiss
+                        onClear={() => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.delete('teamId');
+                            next.set('page', '1');
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    <SearchableSelect
+                      id="orders-filter-team"
+                      value={searchParams.get('teamId') || 'ALL'}
+                      onChange={(v) => {
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('teamId', v);
+                          else next.delete('teamId');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: 'ALL', label: 'All teams' },
+                        ...(teamsForFilter ?? []).map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
+                      ]}
+                      wrapperClassName="w-full min-w-0 sm:w-44"
+                      placeholder="All teams"
+                      searchPlaceholder="Search teams..."
+                    />
+                  </div>
                 ) : null}
                 {(productsForFilter?.length ?? 0) > 0 ? (
                   <div className="relative">
