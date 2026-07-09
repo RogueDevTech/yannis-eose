@@ -1966,9 +1966,7 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Date filter by createdAt — matches delivered count scoping.
-    if (input.startDate) awaitingConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) awaitingConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    // Awaiting stat is date-independent: an old unremitted order is just as actionable.
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }

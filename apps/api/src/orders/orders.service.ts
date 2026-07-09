@@ -6431,6 +6431,13 @@ export class OrdersService {
     servicingBranchId?: string,
     /** Team filter: only count orders assigned to these user IDs. */
     teamMemberIds?: string[],
+    /**
+     * When true, the Total strip logic: marketing orders (edge-form / NULL source)
+     * are counted at all statuses (full funnel), while non-marketing orders
+     * (offline, follow-up, cart, delivered_follow_up) only contribute their
+     * DELIVERED/REMITTED counts. This gives a "marketing + graduated" total.
+     */
+    onlyGraduateNonMarketing?: boolean,
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -6439,7 +6446,17 @@ export class OrdersService {
       sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
     ];
 
-    if (excludeGraduated) {
+    if (onlyGraduateNonMarketing) {
+      // Marketing orders (edge-form or legacy NULL): full funnel.
+      // Everything else (offline, follow-up, cart, delivered_follow_up): only DELIVERED/REMITTED.
+      conditions.push(
+        sql`(
+          (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')
+          OR
+          (${schema.orders.status} IN ('DELIVERED', 'REMITTED'))
+        )`,
+      );
+    } else if (excludeGraduated) {
       // Exclude graduated follow-up orders (is_follow_up=true).
       conditions.push(eq(schema.orders.isFollowUp, false));
       if (excludeCartGraduated) {
