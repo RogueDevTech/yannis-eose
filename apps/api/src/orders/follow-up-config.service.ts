@@ -566,7 +566,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               preferredDeliveryDate: orig.preferredDeliveryDate,
               paymentMethod: orig.paymentMethod,
               customerEmail: orig.customerEmail,
-              orderSource: 'follow-up',
+              orderSource: rule.sourceStatus === 'DELIVERED' ? 'delivered_follow_up' : 'follow-up',
               customFields: orig.customFields,
               branchId: orig.branchId,
               servicingBranchId: assignedBranch,
@@ -1812,19 +1812,59 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     const isCartOrigin = !fuOrder.sourceOrderId && !!fuOrder.cartId;
 
-    // Resolve orderSource + original createdAt from the source order
-    let resolvedOrderSource: string = 'follow-up';
+    // Dedup guard: skip graduation if the same phone+product already has a
+    // DELIVERED or REMITTED order within 14 days (same guard as cart graduation).
+    if (fuOrder.customerPhoneHash && fuItems.length > 0) {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+      const productIds = fuItems.map((i) => i.productId).filter(Boolean) as string[];
+      if (productIds.length > 0) {
+        const existing = await this.db
+          .select({ id: schema.orders.id })
+          .from(schema.orders)
+          .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+          .where(
+            and(
+              eq(schema.orders.customerPhoneHash, fuOrder.customerPhoneHash),
+              inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.orders.deletedAt),
+              gte(schema.orders.deliveredAt, fourteenDaysAgo),
+              inArray(schema.orderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existing[0]) {
+          this.logger.warn(
+            `Follow-up order ${followUpOrderId} skipped graduation: duplicate delivery found (order ${existing[0].id}) for same phone+product`,
+          );
+          return;
+        }
+      }
+    }
+
+    // Resolve orderSource + original createdAt from the source order.
+    // DELIVERED-targeting rules set orderSource='delivered_follow_up' on
+    // the follow-up order at pull time — preserve that through graduation.
+    const isDeliveredFollowUp = fuOrder.orderSource === 'delivered_follow_up';
+    let resolvedOrderSource: string = isDeliveredFollowUp ? 'delivered_follow_up' : 'follow-up';
     let resolvedCreatedAt: Date = fuOrder.createdAt;
-    if (isCartOrigin) {
+    if (isCartOrigin && !isDeliveredFollowUp) {
       resolvedOrderSource = 'online';
       // Cart-origin: follow-up's own createdAt is the best origin date
-    } else if (fuOrder.sourceOrderId) {
+    } else if (fuOrder.sourceOrderId && !isDeliveredFollowUp) {
       const [src] = await this.db
         .select({ orderSource: schema.orders.orderSource, createdAt: schema.orders.createdAt })
         .from(schema.orders)
         .where(eq(schema.orders.id, fuOrder.sourceOrderId))
         .limit(1);
       resolvedOrderSource = src?.orderSource ?? 'follow-up';
+      if (src?.createdAt) resolvedCreatedAt = src.createdAt;
+    } else if (fuOrder.sourceOrderId && isDeliveredFollowUp) {
+      // Still resolve createdAt from source for delivered follow-ups
+      const [src] = await this.db
+        .select({ createdAt: schema.orders.createdAt })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, fuOrder.sourceOrderId))
+        .limit(1);
       if (src?.createdAt) resolvedCreatedAt = src.createdAt;
     }
 
@@ -1872,6 +1912,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           deliveryGpsLng: fuOrder.deliveryGpsLng,
           createdAt: resolvedCreatedAt,
           isFollowUp: true,
+          isDeliveredFollowUp,
           followUpSourceOrderId: fuOrder.sourceOrderId,
           confirmedAt: fuOrder.confirmedAt,
           allocatedAt: fuOrder.allocatedAt,

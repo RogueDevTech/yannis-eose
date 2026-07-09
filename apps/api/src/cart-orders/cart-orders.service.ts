@@ -1246,26 +1246,37 @@ export class CartOrdersService {
         AND ca.status IN ('PENDING', 'ABANDONED')
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
-        -- Dedup: skip if an edge-form order already exists for the same
-        -- customer + product + same total amount within 14 days.
-        -- Different amounts or 14+ day gaps are likely legitimate separate purchases.
+        -- Dedup: skip if order already exists for same customer + product within 14 days
+        -- across orders, cart_orders, and follow_up_orders.
         AND NOT EXISTS (
           SELECT 1
           FROM orders o
           JOIN order_items oi ON oi.order_id = o.id
           WHERE o.customer_phone_hash = ca.customer_phone_hash
             AND oi.product_id = ca.product_id
-            AND oi.unit_price = COALESCE(
-              (SELECT (ofr->>'price')::numeric
-               FROM jsonb_array_elements(p.offers) AS ofr
-               WHERE ofr->>'label' = ca.offer_label
-               LIMIT 1),
-              COALESCE(p.base_sale_price, 0)
-            )
-            AND (o.order_source IS NULL OR o.order_source = 'edge-form')
             AND o.deleted_at IS NULL
-            AND o.status != 'DELETED'
+            AND o.status NOT IN ('DELETED', 'CANCELLED')
             AND o.created_at >= (ca.created_at - INTERVAL '14 days')
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM cart_orders co2
+          JOIN cart_order_items coi ON coi.cart_order_id = co2.id
+          WHERE co2.customer_phone_hash = ca.customer_phone_hash
+            AND coi.product_id = ca.product_id
+            AND co2.deleted_at IS NULL
+            AND co2.status NOT IN ('DELETED', 'CANCELLED')
+            AND co2.created_at >= (ca.created_at - INTERVAL '14 days')
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM follow_up_orders fu
+          JOIN follow_up_order_items fui ON fui.follow_up_order_id = fu.id
+          WHERE fu.customer_phone_hash = ca.customer_phone_hash
+            AND fui.product_id = ca.product_id
+            AND fu.deleted_at IS NULL
+            AND fu.status NOT IN ('DELETED', 'CANCELLED')
+            AND fu.created_at >= (ca.created_at - INTERVAL '14 days')
         )
       RETURNING id, source_cart_id
     `);

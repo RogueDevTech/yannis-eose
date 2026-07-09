@@ -37,7 +37,7 @@ const CS_ORDERS_VISIBLE_STATUSES = new Set([
   'DELETED',
 ]);
 export const meta: MetaFunction = () => [
-  { title: 'Order Funnel — Yannis EOSE' },
+  { title: 'Funnel Orders — Yannis EOSE' },
 ];
 
 const CS_ORDERS_LIVE_EVENTS = [
@@ -147,7 +147,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'ADMIN' ||
     user.role === 'SUPPORT' ||
     userPerms.includes(canonicalPermissionCode('orders.export'));
-  const canImportOrders = user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT';
   // SmartPick (bulk N-pick toolbar) requires BOTH `orders.bulkAssign` AND
   // `orders.reassign`. `bulkAssignToCS` calls `assignToCS` per order and that
   // service-level path checks `orders.reassign` (or same-branch + CS-supervisor)
@@ -257,7 +256,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
     currentUserId: user.id,
     canCreateOffline,
-    canImportOrders,
     canExport,
     canBulkPick,
     canFreeze,
@@ -284,7 +282,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'canAssignDirectly'
       | 'currentUserId'
       | 'canCreateOffline'
-      | 'canImportOrders'
       | 'canExport'
       | 'canBulkPick'
       | 'canFreeze'
@@ -415,6 +412,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         offers?: Array<{ label: string; price: string; qty: number }>;
       }>;
       offlineCount: number;
+      deliveredFollowUpCount: number;
       cartAbandonmentCount: number;
     };
     const bundle = bundleRes.ok
@@ -431,6 +429,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
       productsForFilter: (bundle?.productsForOfflineOrder ?? []).map((p) => ({ id: p.id, name: p.name })),
       offlineCount: bundle?.offlineCount ?? 0,
+      deliveredFollowUpCount: bundle?.deliveredFollowUpCount ?? 0,
       cartAbandonmentCount: bundle?.cartAbandonmentCount ?? 0,
       teamsForFilter: (bundle as Record<string, unknown>)?.teamsForFilter as Array<{ id: string; name: string | null; department: string }> ?? [],
     };
@@ -463,7 +462,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT',
     currentUserId: user.id,
     canCreateOffline,
-    canImportOrders,
     canExport,
     canBulkPick,
     canFreeze,
@@ -825,7 +823,6 @@ export default function CSOrdersRoute() {
       canAssignDirectly: boolean;
       currentUserId: string;
       canCreateOffline: boolean;
-      canImportOrders: boolean;
       canFreeze: boolean;
       page: number;
       limit: number;
@@ -849,7 +846,6 @@ export default function CSOrdersRoute() {
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
-        | 'canImportOrders'
         | 'canFreeze'
         | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'

@@ -23,7 +23,6 @@ import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { STATUS_OPTIONS } from '~/features/shared/order-status';
 
-// Same status validation as the main Sales Orders route.
 const CS_ORDERS_VISIBLE_STATUSES = new Set([
   ...STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'REMITTED'),
   'CANCELLED',
@@ -31,7 +30,7 @@ const CS_ORDERS_VISIBLE_STATUSES = new Set([
 ]);
 
 export const meta: MetaFunction = () => [
-  { title: 'Offline Orders — Sales — Yannis EOSE' },
+  { title: 'Delivered Follow-Up — Sales — Yannis EOSE' },
 ];
 
 const CS_ORDERS_LIVE_EVENTS = [
@@ -148,7 +147,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const teamIdParam = url.searchParams.get('teamId') || undefined;
   const productIdParam = url.searchParams.get('productId') || undefined;
   const frozenParam = url.searchParams.get('frozen') || undefined;
-  const categoryParam = url.searchParams.get('category') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
@@ -160,8 +158,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ['DELIVERED', 'REMITTED']
       : null;
 
-  // Always filter to offline orders — this is the defining trait of this route.
-  const orderSource = 'offline' as const;
+  const orderSource = 'delivered_follow_up' as const;
 
   const listInput: Record<string, unknown> = {
     page,
@@ -175,7 +172,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(assignedCsId && { assignedCsId }),
     ...(productIdParam && { productId: productIdParam }),
     ...(frozenParam === 'frozen' || frozenParam === 'active' ? { frozenFilter: frozenParam } : {}),
-    ...(categoryParam === 'website_order' || categoryParam === 'referrals' ? { offlineOrderCategory: categoryParam } : {}),
     orderSource,
     ...(teamIdParam && { teamId: teamIdParam }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
@@ -248,13 +244,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'branchesForMove'
       | 'enableFromCartStatusOption'
       | 'isCartAbandonmentView'
-      | 'categoryFilter'
+      | 'createModalVariant'
       | 'pageTitle'
       | 'pageDescription'
     > & { sortBy?: string; sortOrder?: string; productFilter?: string; frozenFilter?: string }
   > => {
-  // Fetch orders list + status counts bundle in parallel so the stat strip
-  // renders on first paint instead of showing zeros while deferred loads.
   const bundleInputForCounts = encodeURIComponent(
     JSON.stringify({
       countsAssignedCsId: assignedCsId,
@@ -266,7 +260,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isCSCloser,
       showCSCloserColumn,
       canCreateOffline,
-      orderSource: 'offline',
+      orderSource: 'delivered_follow_up',
       ...(teamIdParam && { teamId: teamIdParam }),
     }),
   );
@@ -282,8 +276,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const totalPages: number = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
   const deferredSecondary = (async () => {
-    // Bundle already fetched in parallel above — reuse bundleRes.
-
     type BundleData = {
       statusCounts: Record<string, number>;
       myWorkload: {
@@ -327,7 +319,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   })();
 
-  // Fetch branches for the "Move to branch" bulk action (Admin / HoCS only).
   const canMoveToBranch =
     user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT' || user.role === 'HEAD_OF_CS';
   let branchesForMove: Array<{ id: string; name: string }> | undefined;
@@ -359,7 +350,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canFreeze,
     productFilter: productIdParam,
     frozenFilter: frozenParam,
-    categoryFilter: categoryParam ?? '',
     branchesForMove,
     filters: {
       startDate: startDate ?? '',
@@ -375,8 +365,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     deferredSecondary,
     enableFromCartStatusOption: false,
     isCartAbandonmentView: false,
-    pageTitle: 'Offline Orders',
-    pageDescription: 'Orders created manually by CS.',
+    createModalVariant: 'delivered_follow_up' as const,
+    pageTitle: 'Delivered Follow-Up',
+    pageDescription: 'Follow-up orders for previously delivered customers.',
   };
   })();
 
@@ -400,10 +391,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = form.get('intent') as string;
 
-  if (intent === 'createOffline') {
-    const createOfflineUser = await requirePermission(request, 'orders.read');
-    if (!['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(createOfflineUser.role)) {
-      return json({ error: 'Only closers and Head of CS can create offline orders' }, { status: 403 });
+  if (intent === 'createDeliveredFollowUp') {
+    const createUser = await requirePermission(request, 'orders.read');
+    if (!['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(createUser.role)) {
+      return json({ error: 'Only closers and Head of CS can create delivered follow-up orders' }, { status: 403 });
     }
     const customerName = form.get('customerName')?.toString()?.trim() ?? '';
     const customerPhone = form.get('customerPhone')?.toString()?.trim() ?? '';
@@ -428,13 +419,12 @@ export async function action({ request }: ActionFunctionArgs) {
     if (paymentMethod === 'PAY_ONLINE' && (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail))) {
       return json({ error: 'Valid email is required for Pay online' }, { status: 400 });
     }
-    const res = await apiRequest<{ result?: { data?: { id: string } } }>('/trpc/orders.createOffline', {
+    const res = await apiRequest<{ result?: { data?: { id: string } } }>('/trpc/orders.createDeliveredFollowUp', {
       method: 'POST',
       cookie,
       body: {
         customerName,
         customerPhone,
-        cartId: form.get('cartId')?.toString()?.trim() || undefined,
         customerAddress: form.get('customerAddress')?.toString()?.trim() || undefined,
         deliveryAddress: form.get('deliveryAddress')?.toString()?.trim() || undefined,
         deliveryNotes: form.get('deliveryNotes')?.toString()?.trim() || undefined,
@@ -445,12 +435,11 @@ export async function action({ request }: ActionFunctionArgs) {
         customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
-        offlineOrderCategory: (form.get('offlineOrderCategory') as string) || undefined,
         ...(form.get('customFields') ? { customFields: JSON.parse(form.get('customFields') as string) } : {}),
       },
     });
     if (!res.ok) {
-      return json({ error: extractApiErrorMessage(res.data, 'Failed to create offline order') }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create delivered follow-up order') }, { status: safeStatus(res.status) });
     }
     const orderId = res.data?.result?.data?.id;
     return json({ success: true, orderId });
@@ -491,7 +480,6 @@ export async function action({ request }: ActionFunctionArgs) {
         results: [],
       });
     }
-
     const data = res.data?.result?.data;
     return json({
       success: true,
@@ -504,96 +492,43 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'bulkAssign') {
     await requirePermission(request, 'orders.bulkAssign');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
-    const csCloserIdsRaw = form.get('csCloserIds')?.toString();
-    const csCloserIdSingle = (form.get('csCloserId') as string | null) ?? '';
-
-    let csCloserIds: string[] = [];
-    if (csCloserIdsRaw) {
-      try {
-        const parsed = JSON.parse(csCloserIdsRaw) as unknown;
-        if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
-          csCloserIds = parsed as string[];
-        }
-      } catch {
-        return json(
-          {
-            success: false,
-            error: 'Invalid closer selection',
-            succeeded: 0,
-            failed: orderIds.length,
-            results: [],
-          },
-          { status: 400 },
-        );
-      }
-    }
-    if (csCloserIds.length === 0 && csCloserIdSingle) {
-      csCloserIds = [csCloserIdSingle];
-    }
-    if (csCloserIds.length === 0) {
-      return json(
-        {
-          success: false,
-          error: 'Pick at least one closer',
-          succeeded: 0,
-          failed: orderIds.length,
-          results: [],
-        },
-        { status: 400 },
-      );
-    }
-
-    const explicitBranchId = form.get('branchId')?.toString() || undefined;
-    const body: Record<string, unknown> =
-      csCloserIds.length === 1
-        ? { orderIds, csCloserId: csCloserIds[0] }
-        : { orderIds, csCloserIds };
-    if (explicitBranchId) body.branchId = explicitBranchId;
-
-    const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
-      '/trpc/orders.bulkAssignToCS',
+    const csCloserId = form.get('csCloserId') as string;
+    const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number } } }>(
+      '/trpc/orders.bulkReassign',
       {
         method: 'POST',
         cookie,
-        body,
+        body: { orderIds, csCloserId },
         timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );
-
     if (!res.ok) {
       return json({
         success: false,
         error: extractApiErrorMessage(res.data, 'Bulk assign failed'),
         succeeded: 0,
         failed: orderIds.length,
-        results: [],
       });
     }
-
     const data = res.data?.result?.data;
-    return json({
-      success: true,
-      succeeded: data?.succeeded ?? 0,
-      failed: data?.failed ?? 0,
-      results: data?.results ?? [],
-    });
+    return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
   }
 
   if (intent === 'moveOrdersToBranch') {
-    const orderIds = JSON.parse(form.get('orderIds')?.toString() ?? '[]');
-    const targetBranchId = form.get('targetBranchId')?.toString() ?? '';
-    if (!Array.isArray(orderIds) || orderIds.length === 0 || !targetBranchId) {
-      return json({ error: 'Order IDs and target branch are required' }, { status: 400 });
+    const moveUser = await requirePermission(request, 'orders.read');
+    if (!['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HEAD_OF_CS'].includes(moveUser.role)) {
+      return json({ error: 'Not allowed' }, { status: 403 });
     }
-    const res = await apiRequest('/trpc/orders.moveOrdersToBranch', {
-      method: 'POST',
-      cookie,
-      body: { orderIds, targetBranchId },
-    });
+    const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
+    const targetBranchId = form.get('targetBranchId') as string;
+    const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number } } }>(
+      '/trpc/orders.moveOrdersToBranch',
+      { method: 'POST', cookie, body: { orderIds, targetBranchId }, timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS },
+    );
     if (!res.ok) {
-      return json({ error: extractApiErrorMessage(res.data, 'Failed to move orders') }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Move failed'), succeeded: 0, failed: orderIds.length });
     }
-    const data = (res.data as { result?: { data?: { succeeded: number; failed: number } } })?.result?.data;
+    const data = res.data?.result?.data;
     return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
   }
 
@@ -630,7 +565,7 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ success: false, error: 'Unknown intent' });
 }
 
-export default function OfflineOrdersRoute() {
+export default function DeliveredFollowUpRoute() {
   const { csOrdersShell, pageData } = useLoaderData<typeof loader>() as unknown as {
     csOrdersShell: {
       filters: OrdersListPageProps['filters'];
@@ -669,6 +604,7 @@ export default function OfflineOrdersRoute() {
         | 'branchesForMove'
         | 'enableFromCartStatusOption'
         | 'isCartAbandonmentView'
+        | 'createModalVariant'
         | 'pageTitle'
         | 'pageDescription'
       >

@@ -10,40 +10,14 @@ import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import type { ProductOption } from './CreateOfflineOrderModal';
 
-export interface ProductOption {
-  id: string;
-  name: string;
-  offers?: Array<{ label: string; price: string; qty: number }>;
-}
-
-/** Cart data to pre-fill when recovering from an abandoned cart. */
-export interface CartPrefill {
-  cartId: string;
-  customerName?: string;
-  customerPhone?: string;
-  customerAddress?: string;
-  deliveryAddress?: string;
-  deliveryState?: string;
-  deliveryNotes?: string;
-  customerGender?: string;
-  preferredDeliveryDate?: string;
-  customerEmail?: string;
-  paymentMethod?: string;
-  productId?: string;
-  offerLabel?: string;
-  quantity?: number;
-}
-
-interface CreateOfflineOrderModalProps {
+interface CreateDeliveredFollowUpModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: (orderId: string) => void;
   products: ProductOption[];
-  initialCustomerName?: string;
-  cartPrefill?: CartPrefill | null;
   branchId?: string;
-  canEditPrices?: boolean;
 }
 
 const NIGERIAN_STATES = [
@@ -54,16 +28,13 @@ const NIGERIAN_STATES = [
   'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi',
 ];
 
-export function CreateOfflineOrderModal({
+export function CreateDeliveredFollowUpModal({
   open,
   onClose,
   onSuccess,
   products,
-  initialCustomerName,
-  cartPrefill,
   branchId,
-  canEditPrices = false,
-}: CreateOfflineOrderModalProps) {
+}: CreateDeliveredFollowUpModalProps) {
   const fetcher = useFetcher();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const [customerName, setCustomerName] = useState('');
@@ -76,13 +47,10 @@ export function CreateOfflineOrderModal({
   const [preferredDeliveryDate, setPreferredDeliveryDate] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'PAY_ON_DELIVERY' | 'PAY_ONLINE'>('PAY_ON_DELIVERY');
   const [customerEmail, setCustomerEmail] = useState('');
-  const [offlineOrderCategory, setOfflineOrderCategory] = useState<'website_order' | 'referrals' | ''>('');
   const [dismissedError, setDismissedError] = useState(false);
 
-  // Extra custom fields
   const [extraFields, setExtraFields] = useState<Array<{ label: string; value: string }>>([]);
 
-  // Product + offer selection (single product per order, like the customer flow)
   const [productId, setProductId] = useState('');
   const [selectedOfferLabel, setSelectedOfferLabel] = useState('');
 
@@ -90,37 +58,12 @@ export function CreateOfflineOrderModal({
   const offers = selectedProduct?.offers ?? [];
   const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
 
-  useFetcherToast(fetcher.data, { successMessage: 'Offline order created', skipErrorToast: open });
+  useFetcherToast(fetcher.data, { successMessage: 'Delivered follow-up order created', skipErrorToast: open });
 
   const actionError = fetcherSurface.rawError;
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
-
-  useEffect(() => {
-    if (open && cartPrefill) {
-      if (cartPrefill.customerName) setCustomerName(cartPrefill.customerName);
-      if (cartPrefill.customerPhone) setCustomerPhone(cartPrefill.customerPhone);
-      if (cartPrefill.customerAddress) setCustomerAddress(cartPrefill.customerAddress);
-      if (cartPrefill.deliveryAddress) setDeliveryAddress(cartPrefill.deliveryAddress);
-      if (cartPrefill.deliveryState) setDeliveryState(cartPrefill.deliveryState);
-      if (cartPrefill.deliveryNotes) setDeliveryNotes(cartPrefill.deliveryNotes);
-      if (cartPrefill.customerGender) setCustomerGender(cartPrefill.customerGender as 'male' | 'female');
-      if (cartPrefill.preferredDeliveryDate) setPreferredDeliveryDate(cartPrefill.preferredDeliveryDate);
-      if (cartPrefill.customerEmail) setCustomerEmail(cartPrefill.customerEmail);
-      if (cartPrefill.paymentMethod === 'PAY_ONLINE') setPaymentMethod('PAY_ONLINE');
-      if (cartPrefill.productId) {
-        setProductId(cartPrefill.productId);
-        const product = products.find((p) => p.id === cartPrefill.productId);
-        const offer = cartPrefill.offerLabel
-          ? product?.offers?.find((o) => o.label === cartPrefill.offerLabel)
-          : product?.offers?.[0];
-        if (offer) setSelectedOfferLabel(offer.label);
-      }
-    } else if (open && initialCustomerName?.trim()) {
-      setCustomerName(initialCustomerName.trim());
-    }
-  }, [open, initialCustomerName, cartPrefill]);
 
   const handleCreateOrderSuccess = useCallback(
     (data: { success: true } & Record<string, unknown>) => {
@@ -147,13 +90,11 @@ export function CreateOfflineOrderModal({
     setCustomerEmail('');
     setProductId('');
     setSelectedOfferLabel('');
-    setOfflineOrderCategory('');
     setExtraFields([]);
   }
 
   function onProductChange(id: string) {
     setProductId(id);
-    // Auto-select first offer
     const product = products.find((p) => p.id === id);
     const firstOffer = product?.offers?.[0];
     setSelectedOfferLabel(firstOffer?.label ?? '');
@@ -173,13 +114,12 @@ export function CreateOfflineOrderModal({
     }];
 
     const formData = new FormData();
-    formData.set('intent', 'createOffline');
+    formData.set('intent', 'createDeliveredFollowUp');
     formData.set('customerName', customerName.trim());
     formData.set('customerPhone', customerPhone.trim());
     formData.set('paymentMethod', paymentMethod);
     formData.set('items', JSON.stringify(validItems));
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
-    if (cartPrefill?.cartId) formData.set('cartId', cartPrefill.cartId);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
     if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
     if (deliveryNotes.trim()) formData.set('deliveryNotes', deliveryNotes.trim());
@@ -187,8 +127,6 @@ export function CreateOfflineOrderModal({
     if (customerGender) formData.set('customerGender', customerGender);
     if (preferredDeliveryDate.trim()) formData.set('preferredDeliveryDate', preferredDeliveryDate.trim());
     if (paymentMethod === 'PAY_ONLINE' && customerEmail.trim()) formData.set('customerEmail', customerEmail.trim());
-    if (offlineOrderCategory) formData.set('offlineOrderCategory', offlineOrderCategory);
-    // Extra custom fields → orders.custom_fields JSONB
     const filledFields = extraFields.filter((f) => f.label.trim() && f.value.trim());
     if (filledFields.length > 0) {
       const customFields: Record<string, { label: string; value: string }> = {};
@@ -212,12 +150,12 @@ export function CreateOfflineOrderModal({
       onClose={onClose}
       maxWidth="max-w-lg"
       role="dialog"
-      aria-labelledby="create-offline-order-title"
+      aria-labelledby="create-dfu-order-title"
       contentClassName="p-0 flex flex-col overflow-hidden min-h-0 border border-app-border"
     >
         <div className="flex items-center justify-between border-b border-app-border pb-3 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-          <h2 id="create-offline-order-title" className="text-lg font-semibold text-app-fg">
-            {cartPrefill ? 'Recover from cart' : 'Create offline order'}
+          <h2 id="create-dfu-order-title" className="text-lg font-semibold text-app-fg">
+            Create delivered follow-up order
           </h2>
           <button
             type="button"
@@ -297,20 +235,9 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setPreferredDeliveryDate(e.target.value)}
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="flex gap-3">
               <FormSelect
-                id="offline-order-category"
-                label="Category"
-                value={offlineOrderCategory}
-                onChange={(e) => setOfflineOrderCategory(e.target.value as 'website_order' | 'referrals' | '')}
-                options={[
-                  { value: '', label: 'Select category' },
-                  { value: 'website_order', label: 'Website order' },
-                  { value: 'referrals', label: 'Referrals' },
-                ]}
-              />
-              <FormSelect
-                id="offline-order-gender"
+                id="dfu-order-gender"
                 label="Gender"
                 value={customerGender}
                 onChange={(e) => setCustomerGender(e.target.value as 'male' | 'female' | '')}
@@ -320,16 +247,19 @@ export function CreateOfflineOrderModal({
                   { value: 'female', label: 'Female' },
                 ]}
               />
-              <FormSelect
-                id="offline-order-payment"
-                label="Payment method"
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value as 'PAY_ON_DELIVERY' | 'PAY_ONLINE')}
-                options={[
-                  { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
-                  { value: 'PAY_ONLINE', label: 'Pay online' },
-                ]}
-              />
+              <div className="flex-1 min-w-0">
+                <FormSelect
+                  id="dfu-order-payment"
+                  label="Payment method"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value as 'PAY_ON_DELIVERY' | 'PAY_ONLINE')}
+                  options={[
+                    { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
+                    { value: 'PAY_ONLINE', label: 'Pay online' },
+                  ]}
+                  wrapperClassName="w-full"
+                />
+              </div>
             </div>
             {paymentMethod === 'PAY_ONLINE' && (
               <TextInput
@@ -345,7 +275,7 @@ export function CreateOfflineOrderModal({
             {/* ── Product + Offer Selection ───────────────── */}
             <div className="space-y-3">
               <SearchableSelect
-                id="offline-order-product"
+                id="dfu-order-product"
                 label="Product *"
                 required
                 value={productId}
@@ -356,7 +286,6 @@ export function CreateOfflineOrderModal({
                 wrapperClassName="w-full"
               />
 
-              {/* Offer cards — shown after product is selected */}
               {productId && offers.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-app-fg-muted mb-2">
@@ -390,7 +319,6 @@ export function CreateOfflineOrderModal({
                 </div>
               )}
 
-              {/* Selected offer summary */}
               {selectedOffer && (
                 <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 flex items-center justify-between">
                   <div className="text-sm text-app-fg">
@@ -479,7 +407,7 @@ export function CreateOfflineOrderModal({
               Cancel
             </Button>
             <Button type="submit" loading={isSubmitting} disabled={isSubmitting || !selectedOffer}>
-              Create offline order
+              Create order
             </Button>
           </div>
         </form>

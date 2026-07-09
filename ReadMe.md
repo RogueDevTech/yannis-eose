@@ -2,12 +2,16 @@
 
 START APP
 cd apps/api && pnpm turbo dev
-cd apps/web && pnpm turbo dev
+cd apps/web && pnpm turbo dev  z
 cd apps/edge-worker && pnpm turbo dev
 
 pnpm turbo dev
 
 docker restart yannis-eose-api-1
+
+
+
+
 
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"
  -->

@@ -228,22 +228,49 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 
       {/* ── Total Orders: bird's-eye view across all pipelines ── */}
       {(() => {
-        const tsc = orderPipeline.totalOrdersCounts;
-        // totalOrdersCounts already includes graduated follow-up (is_follow_up=true)
-        // and graduated cart orders (order_source='online') — do NOT add them again
-        // from the pipeline tables, that was double-counting delivered numbers.
-
+        // Total = Marketing Funnel + Offline + Follow-Up + Cart (summed from
+        // the same sources each strip uses so the numbers always add up).
+        const mktSc = orderPipeline.statusCounts;
+        const offSc = orderPipeline.offlineStatusCounts ?? {};
         const fuCounts = data?.followUpCounts ?? {};
         const cartCounts = data?.cartOrdersCounts ?? {};
-        const fuDelivered = (fuCounts['DELIVERED'] ?? 0) + (fuCounts['REMITTED'] ?? 0);
-        const fuTotal = Object.entries(fuCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
-        const cartDelivered = (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0);
-        const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
 
-        const offlineCount = orderPipeline.offlineCount ?? 0;
-        const tTotal = Object.entries(tsc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((sum, [, n]) => sum + (n || 0), 0);
-        const tDelivered = (tsc['DELIVERED'] ?? 0) + (tsc['REMITTED'] ?? 0);
-        const tConfirmed = (tsc['CONFIRMED'] ?? 0) + (tsc['AGENT_ASSIGNED'] ?? 0) + (tsc['DISPATCHED'] ?? 0) + (tsc['IN_TRANSIT'] ?? 0);
+        const sumExcludeDeleted = (sc: Record<string, number>) =>
+          Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
+        const sumStatus = (sc: Record<string, number>, ...keys: string[]) =>
+          keys.reduce((s, k) => s + (sc[k] ?? 0), 0);
+
+        const mktTotal = sumExcludeDeleted(mktSc);
+        const offTotal = sumExcludeDeleted(offSc);
+        const fuTotal = sumExcludeDeleted(fuCounts);
+        const cartTotal = sumExcludeDeleted(cartCounts);
+        const tTotal = mktTotal + offTotal + fuTotal + cartTotal;
+
+        const mktDelivered = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
+        const offDelivered = sumStatus(offSc, 'DELIVERED', 'REMITTED');
+        const fuDelivered = sumStatus(fuCounts, 'DELIVERED', 'REMITTED');
+        const cartDelivered = sumStatus(cartCounts, 'DELIVERED', 'REMITTED');
+        const tDelivered = mktDelivered + offDelivered + fuDelivered + cartDelivered;
+
+        const tConfirmed =
+          sumStatus(mktSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
+          sumStatus(offSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
+          sumStatus(fuCounts, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
+          sumStatus(cartCounts, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT');
+
+        const tUnprocessed =
+          sumStatus(mktSc, 'UNPROCESSED') + sumStatus(offSc, 'UNPROCESSED') +
+          sumStatus(fuCounts, 'UNPROCESSED') + sumStatus(cartCounts, 'UNPROCESSED');
+        const tCsAssigned =
+          sumStatus(mktSc, 'CS_ASSIGNED') + sumStatus(offSc, 'CS_ASSIGNED') +
+          sumStatus(fuCounts, 'CS_ASSIGNED') + sumStatus(cartCounts, 'CS_ASSIGNED');
+        const tCsEngaged =
+          sumStatus(mktSc, 'CS_ENGAGED') + sumStatus(offSc, 'CS_ENGAGED') +
+          sumStatus(fuCounts, 'CS_ENGAGED') + sumStatus(cartCounts, 'CS_ENGAGED');
+        const tDeleted =
+          sumStatus(mktSc, 'DELETED') + sumStatus(offSc, 'DELETED') +
+          sumStatus(fuCounts, 'DELETED') + sumStatus(cartCounts, 'DELETED');
+
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
         return (
@@ -256,26 +283,26 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               tileClassName="!py-2.5"
               items={[
                 { label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('total')} /></span>, value: tTotal, valueClassName: 'text-app-fg' },
-                { label: 'Unassigned', value: tsc['UNPROCESSED'] ?? 0, valueClassName: 'text-warning-600 dark:text-warning-400' },
-                { label: 'Assigned', value: tsc['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
-                { label: 'Unconfirmed', value: tsc['CS_ENGAGED'] ?? 0, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+                { label: 'Unassigned', value: tUnprocessed, valueClassName: 'text-warning-600 dark:text-warning-400' },
+                { label: 'Assigned', value: tCsAssigned, valueClassName: 'text-info-600 dark:text-info-400' },
+                { label: 'Unconfirmed', value: tCsEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
                 { label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>, value: tDelivered, valueClassName: 'text-success-600 dark:text-success-400' },
                 { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(tCR) },
                 { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(tDR) },
-                { label: 'Deleted', value: tsc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
+                { label: 'Deleted', value: tDeleted, valueClassName: 'text-danger-600 dark:text-danger-400' },
               ]}
             />
             <FunnelBreakdownModal
               open={breakdownModal === 'total'}
               onClose={() => setBreakdownModal(null)}
               title="Total Orders: Breakdown"
-              description="All orders across all pipelines. Includes form orders, offline orders, graduated follow-up, and graduated cart orders."
+              description="Sum of Marketing Funnel, Offline, Follow-Up, and Cart pipelines."
               lines={[
-                { label: 'Online form orders', value: tTotal - fuDelivered - cartDelivered - offlineCount },
-                { label: 'Offline orders', value: offlineCount },
-                { label: 'Follow-up orders delivered', value: fuDelivered, muted: true },
-                { label: 'Cart orders delivered', value: cartDelivered, muted: true },
+                { label: 'Marketing Funnel', value: mktTotal },
+                { label: 'Offline orders', value: offTotal },
+                { label: 'Follow-up orders', value: fuTotal },
+                { label: 'Cart orders', value: cartTotal },
                 { label: 'Total', value: tTotal, bold: true },
               ]}
             />
@@ -283,11 +310,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalDelivered'}
               onClose={() => setBreakdownModal(null)}
               title="Total Delivered: Breakdown"
-              description="All delivered + remitted orders across all pipelines."
+              description="Delivered + remitted orders across all pipelines."
               lines={[
-                { label: 'Form orders delivered', value: tDelivered - fuDelivered - cartDelivered },
-                { label: 'Follow-up orders delivered', value: fuDelivered, muted: true },
-                { label: 'Cart orders delivered', value: cartDelivered, muted: true },
+                { label: 'Marketing Funnel delivered', value: mktDelivered },
+                { label: 'Offline orders delivered', value: offDelivered },
+                { label: 'Follow-up orders delivered', value: fuDelivered },
+                { label: 'Cart orders delivered', value: cartDelivered },
                 { label: 'Total Delivered', value: tDelivered, bold: true },
               ]}
             />

@@ -203,6 +203,12 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'orders.retrack.request', resource: 'orders.retrack', action: 'request', description: 'Request a status retrack on a DELIVERED/REMITTED order (Finance-initiated). Requires dual approval from HoCS + HoL.' },
   { code: 'permission_requests.order_retrack.approve', resource: 'permission_requests.order_retrack', action: 'approve', description: 'Approve / reject ORDER_STATUS_RETRACK requests (dual-approval: both CS and Logistics heads must sign off)' },
 
+  // Centralized Data hub (Export + Import pages). `data.export` gates page access;
+  // each report type still checks its domain-specific export code server-side.
+  // `data.import` gates the import page (CRM migration) — Admin/SuperAdmin only.
+  { code: 'data.export', resource: 'data', action: 'export', description: 'Access the centralized Export page (report generation hub)' },
+  { code: 'data.import', resource: 'data', action: 'import', description: 'Access the centralized Import page (CRM order migration)' },
+
   // Per-domain export gates. CEO directive: download/CSV/XLSX is permission-first
   // so admins can deputize export rights to specific users (senior CS, MB, etc.)
   // without code changes. Holding the read code on a domain is the precondition
@@ -283,6 +289,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'hr.export',
     'marketing.export',
     'logistics.export',
+    'data.export',
+    'data.import',
     // Page-scoped slice of logistics.read so Branch Admin keeps Logistics
     // companies visibility after the 2026-05 split. Branch Admin never had
     // transfers.read, so partner transfers remains out of scope.
@@ -314,6 +322,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.export',
     'orders.export',
     'branches.teams.marketing',
+    'data.export',
   ],
   MEDIA_BUYER: [
     'marketing.read',
@@ -371,6 +380,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'branches.teams.cs',
     'orders.routing',
     'orders.followUp',
+    'data.export',
   ],
   CS_CLOSER: [
     'orders.read',
@@ -407,6 +417,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'finance.export',
     'orders.export',
     'audit.export',
+    'data.export',
   ],
   // Permission inbox: order line price + archive approvals from CS (`permission_requests.*`),
   // plus direct line-price edits via `orders.line_price.edit`. Org-wide scope via
@@ -452,6 +463,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'orders.export',
     'inventory.export',
     'logistics.export',
+    'data.export',
     // Page-scoped slices of logistics.read / transfers.read — preserves
     // visibility after the 2026-05 split into per-page codes.
     'logistics.providers.view',
@@ -482,6 +494,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'categories.read',
     'categories.write',
     'inventory.export',
+    'data.export',
     // Page-scoped slices of logistics.read / transfers.read — preserves
     // visibility after the 2026-05 split into per-page codes.
     'logistics.providers.view',
@@ -536,6 +549,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'permission_requests.role_change.approve',
     'permission_requests.permission_grant.approve',
     'hr.export',
+    'data.export',
     // HR can deactivate and reactivate staff accounts (CEO directive 2026-06-09).
     'users.staff.deactivate',
   ],
