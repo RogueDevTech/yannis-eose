@@ -83,7 +83,7 @@ export interface SuperAdminDashboardProps {
 
 export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const [breakdownModal, setBreakdownModal] = useState<'total' | 'totalDelivered' | 'mktTotal' | 'mktDelivered' | 'csTotal' | 'csDelivered' | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<'mktTotal' | 'mktDelivered' | 'csTotal' | 'csDelivered' | null>(null);
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -226,13 +226,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         </div>
       </div>
 
-      {/* ── Total Orders: bird's-eye view across all pipelines ── */}
+      {/* ── Total Orders: Marketing + Offline + Cart (follow-up excluded per CEO) ── */}
       {(() => {
-        // Total = Marketing Funnel + Offline + Follow-Up + Cart (summed from
-        // the same sources each strip uses so the numbers always add up).
         const mktSc = orderPipeline.statusCounts;
         const offSc = orderPipeline.offlineStatusCounts ?? {};
-        const fuCounts = data?.followUpCounts ?? {};
         const cartCounts = data?.cartOrdersCounts ?? {};
 
         const sumExcludeDeleted = (sc: Record<string, number>) =>
@@ -242,34 +239,31 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 
         const mktTotal = sumExcludeDeleted(mktSc);
         const offTotal = sumExcludeDeleted(offSc);
-        const fuTotal = sumExcludeDeleted(fuCounts);
         const cartTotal = sumExcludeDeleted(cartCounts);
-        const tTotal = mktTotal + offTotal + fuTotal + cartTotal;
+        const tTotal = mktTotal + offTotal + cartTotal;
 
         const mktDelivered = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
         const offDelivered = sumStatus(offSc, 'DELIVERED', 'REMITTED');
-        const fuDelivered = sumStatus(fuCounts, 'DELIVERED', 'REMITTED');
         const cartDelivered = sumStatus(cartCounts, 'DELIVERED', 'REMITTED');
-        const tDelivered = mktDelivered + offDelivered + fuDelivered + cartDelivered;
+        const tDelivered = mktDelivered + offDelivered + cartDelivered;
 
         const tConfirmed =
           sumStatus(mktSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
           sumStatus(offSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
-          sumStatus(fuCounts, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
           sumStatus(cartCounts, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT');
 
         const tUnprocessed =
           sumStatus(mktSc, 'UNPROCESSED') + sumStatus(offSc, 'UNPROCESSED') +
-          sumStatus(fuCounts, 'UNPROCESSED') + sumStatus(cartCounts, 'UNPROCESSED');
+          sumStatus(cartCounts, 'UNPROCESSED');
         const tCsAssigned =
           sumStatus(mktSc, 'CS_ASSIGNED') + sumStatus(offSc, 'CS_ASSIGNED') +
-          sumStatus(fuCounts, 'CS_ASSIGNED') + sumStatus(cartCounts, 'CS_ASSIGNED');
+          sumStatus(cartCounts, 'CS_ASSIGNED');
         const tCsEngaged =
           sumStatus(mktSc, 'CS_ENGAGED') + sumStatus(offSc, 'CS_ENGAGED') +
-          sumStatus(fuCounts, 'CS_ENGAGED') + sumStatus(cartCounts, 'CS_ENGAGED');
+          sumStatus(cartCounts, 'CS_ENGAGED');
         const tDeleted =
           sumStatus(mktSc, 'DELETED') + sumStatus(offSc, 'DELETED') +
-          sumStatus(fuCounts, 'DELETED') + sumStatus(cartCounts, 'DELETED');
+          sumStatus(cartCounts, 'DELETED');
 
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
@@ -282,41 +276,15 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               mobileGrid
               tileClassName="!py-2.5"
               items={[
-                { label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('total')} /></span>, value: tTotal, valueClassName: 'text-app-fg' },
+                { label: 'Total', value: tTotal, valueClassName: 'text-app-fg' },
                 { label: 'Unassigned', value: tUnprocessed, valueClassName: 'text-warning-600 dark:text-warning-400' },
                 { label: 'Assigned', value: tCsAssigned, valueClassName: 'text-info-600 dark:text-info-400' },
                 { label: 'Unconfirmed', value: tCsEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
-                { label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>, value: tDelivered, valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: 'Delivered', value: tDelivered, valueClassName: 'text-success-600 dark:text-success-400' },
                 { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(tCR) },
                 { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(tDR) },
                 { label: 'Deleted', value: tDeleted, valueClassName: 'text-danger-600 dark:text-danger-400' },
-              ]}
-            />
-            <FunnelBreakdownModal
-              open={breakdownModal === 'total'}
-              onClose={() => setBreakdownModal(null)}
-              title="Total Orders: Breakdown"
-              description="Sum of Marketing Funnel, Offline, Follow-Up, and Cart pipelines."
-              lines={[
-                { label: 'Marketing Funnel', value: mktTotal },
-                { label: 'Offline orders', value: offTotal },
-                { label: 'Follow-up orders', value: fuTotal },
-                { label: 'Cart orders', value: cartTotal },
-                { label: 'Total', value: tTotal, bold: true },
-              ]}
-            />
-            <FunnelBreakdownModal
-              open={breakdownModal === 'totalDelivered'}
-              onClose={() => setBreakdownModal(null)}
-              title="Total Delivered: Breakdown"
-              description="Delivered + remitted orders across all pipelines."
-              lines={[
-                { label: 'Marketing Funnel delivered', value: mktDelivered },
-                { label: 'Offline orders delivered', value: offDelivered },
-                { label: 'Follow-up orders delivered', value: fuDelivered },
-                { label: 'Cart orders delivered', value: cartDelivered },
-                { label: 'Total Delivered', value: tDelivered, bold: true },
               ]}
             />
           </div>
