@@ -488,7 +488,7 @@ export function MarketingOrdersPage({
                     <CsCommentIcon comment={order.lastCsComment.comment} actorName={order.lastCsComment.actorName} />
                   )}
                   {order.status === 'ABANDONED' || order.status === 'RECOVERED' ? (
-                    <CompactTableActionButton onClick={() => openCartDetail?.(order.id)}>View</CompactTableActionButton>
+                    <CompactTableActionButton onClick={() => openCartDetail(order)}>View</CompactTableActionButton>
                   ) : (
                     <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
                   )}
