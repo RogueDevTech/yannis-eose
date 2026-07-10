@@ -63,8 +63,8 @@ export function hasAiAssistantAccess(user: { role: string; permissions?: string[
   if (!user) return false;
   // SSR: never render (uses createPortal → document.body)
   if (typeof window === 'undefined') return false;
-  // Dev flag: hidden unless ENABLE_AI_ASSISTANT=true in env
-  if (!window.__ENV?.ENABLE_AI_ASSISTANT) return false;
+  // Dev-only: hidden in production
+  if (!window.__ENV?.IS_DEV) return false;
   if (['SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(user.role)) return true;
   return (user.permissions ?? []).map(canonicalPermissionCode).includes('ai.assistant.access');
 }

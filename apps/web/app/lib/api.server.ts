@@ -756,11 +756,11 @@ export async function requireOnboardingHrPagesAccess(request: Request): Promise<
  */
 /**
  * True when the Accounting (double-entry ledger) section is enabled for this
- * environment. Gated behind `ENABLE_ACCOUNTING=true` so the still-in-test ledger
- * ships dark to prod. Defaults OFF — must be explicitly turned on (dev `.env`).
+ * environment. Gated behind NODE_ENV=development so the still-in-test ledger
+ * ships dark to prod.
  */
 export function isAccountingEnabled(): boolean {
-  return process.env.ENABLE_ACCOUNTING === 'true';
+  return process.env.NODE_ENV === 'development';
 }
 
 /**
