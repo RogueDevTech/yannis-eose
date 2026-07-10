@@ -74,6 +74,11 @@ async function _ceoOverviewFetch(params: {
     deliveriesByProduct,
     stockPerProduct,
     activeStaffCount,
+    // Previously sequential (awaited after Promise.all) — now parallel
+    followUpCounts,
+    cartOrdersCounts,
+    cartAbandonmentCount,
+    totalOrdersCounts,
   ] = await Promise.all([
     isBranchScoped
       ? Promise.resolve(null)
@@ -94,6 +99,11 @@ async function _ceoOverviewFetch(params: {
     ordersService!.getDeliveriesByProduct(branchId, effectiveBranchIds).catch(logErr('deliveriesByProduct')),
     inventoryService!.getStockPerProduct(activeGroupId).catch(logErr('stockPerProduct')),
     hrService!.countActiveStaff(effectiveBranchIds).catch(logErr('activeStaffCount')),
+    // Follow-up, cart, and total orders counts (were sequential — now parallel)
+    getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+    getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
+    getCartService().countAllCarts({ branchId, effectiveBranchIds, startDate, endDate }).catch(() => 0),
+    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
   ]);
 
   let profitReport: {
@@ -240,13 +250,13 @@ async function _ceoOverviewFetch(params: {
     deliveriesByProduct: deliveriesByProduct ?? [],
     stockPerProduct: stockPerProduct ?? [],
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
-    followUpCounts: await getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
-    cartOrdersCounts: await getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
-    cartAbandonmentCount: await getCartService().countAllCarts({ branchId, effectiveBranchIds, startDate, endDate }).catch(() => 0),
+    followUpCounts: followUpCounts ?? {},
+    cartOrdersCounts: cartOrdersCounts ?? {},
+    cartAbandonmentCount: cartAbandonmentCount ?? 0,
     // Total Orders — bird's-eye view: includes graduated follow-up + cart
     // orders so the number matches logistics/remittance. Marketing and CS
     // funnels exclude graduated (they have their own strips).
-    totalOrdersCounts: await ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
+    totalOrdersCounts: (totalOrdersCounts ?? {}) as Record<string, number>,
   };
 }
 
@@ -275,7 +285,7 @@ export const dashboardRouter = router({
 
       if (cacheService) {
         const cacheKey = `cache:ceo:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate, eIds, gId: ctx.activeGroupId })}`;
-        return cacheService.getOrSet(cacheKey, 60, () => _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds, activeGroupId: ctx.activeGroupId }));
+        return cacheService.getOrSet(cacheKey, 300, () => _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds, activeGroupId: ctx.activeGroupId }));
       }
 
       return _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds, activeGroupId: ctx.activeGroupId });
@@ -326,7 +336,7 @@ export const dashboardRouter = router({
 
       if (cacheService) {
         const cacheKey = `cache:ceo:bundle:${branchId ?? 'global'}:${branchScope}:${CacheService.hashInput({ startDate, endDate, eIds, gId: ctx.activeGroupId })}`;
-        return cacheService.getOrSet(cacheKey, 60, fetchBundle);
+        return cacheService.getOrSet(cacheKey, 300, fetchBundle);
       }
 
       return fetchBundle();
@@ -464,11 +474,12 @@ export const dashboardRouter = router({
     const startIso = nigeriaDayStart(todayWat).toISOString();
     const endIso = nigeriaDayEnd(todayWat).toISOString();
 
+    const fetchQuickOverview = async () => {
     const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
       // CS funnel — excludes graduated follow-up + cart orders
-      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true, true).catch(() => ({})),
-      ordersService.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
-      financeService.countPendingApprovalRequests().catch(() => 0),
+      ordersService!.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, true, true).catch(() => ({})),
+      ordersService!.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
+      financeService!.countPendingApprovalRequests().catch(() => 0),
       getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
       getCartOrdersService().getStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
     ]);
@@ -503,5 +514,12 @@ export const dashboardRouter = router({
       followUpCounts: followUpCounts as Record<string, number>,
       cartOrdersCounts: cartOrdersCounts as Record<string, number>,
     };
+    };
+
+    if (cacheService) {
+      const cacheKey = `cache:dashboard:quick:${ctx.currentBranchId ?? 'global'}:${CacheService.hashInput({ eIds: ctx.effectiveBranchIds, gId: ctx.activeGroupId })}`;
+      return cacheService.getOrSet(cacheKey, 120, fetchQuickOverview);
+    }
+    return fetchQuickOverview();
   }),
 });
