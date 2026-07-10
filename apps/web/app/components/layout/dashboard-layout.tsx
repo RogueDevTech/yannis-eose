@@ -106,8 +106,8 @@ interface NavGroupDef {
   group: string | null;
   items: NavItemDef[];
   /**
-   * Dev-only group: hidden entirely unless `window.__ENV.ENABLE_ACCOUNTING` is
-   * true. Used to ship in-test sections (Accounting ledger) dark to prod. The
+   * Dev-only group: hidden unless `NODE_ENV=development` (`window.__ENV.IS_DEV`).
+   * Used to ship in-test sections (Accounting ledger) dark to prod. The
    * matching route loaders also 404 when the flag is off (defense in depth).
    */
   devOnly?: boolean;
@@ -383,7 +383,7 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'Accounting',
     // Dev-only until the double-entry ledger is fully tested. Hidden in prod
-    // unless ENABLE_ACCOUNTING=true; the route loaders also 404 when off.
+    // (NODE_ENV !== 'development'); the route loaders also 404 when off.
     devOnly: true,
     items: [
       {
@@ -669,7 +669,7 @@ function getNavGroupsForUser(
     // never flashes before hydration in prod.
     if (
       groupDef.devOnly &&
-      !(typeof window !== 'undefined' && window.__ENV?.ENABLE_ACCOUNTING === true)
+      !(typeof window !== 'undefined' && window.__ENV?.IS_DEV === true)
     )
       continue;
     // Head of Logistics has their own Logistics Orders page; hide Sales & CS group.
