@@ -6558,38 +6558,35 @@ export class OrdersService {
     if (endDate) deliveredFollowUpOfflineConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const deliveredFollowUpOfflineWhere = and(...deliveredFollowUpOfflineConditions);
 
-    const [offlineRows, deliveredFollowUpOfflineRows, duplicateRows, offlineDeliveredRows, deliveredFollowUpRows] = await Promise.all([
+    // Consolidated: 5 COUNT queries → 2 queries (main + follow-up-offline with different base conditions)
+    const [mainRow, followUpOfflineRow] = await Promise.all([
+      // Main query: 4 counts from base conditions (isFollowUp=false)
       this.db
-        .select({ count: count() })
+        .select({
+          offlineCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'offline')`.as('offline_count'),
+          duplicateCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != '')`.as('duplicate_count'),
+          offlineDeliveredCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'offline' AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED'))`.as('offline_delivered_count'),
+          deliveredFollowUpCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'delivered_follow_up')`.as('delivered_follow_up_count'),
+        })
         .from(schema.orders)
-        .where(and(whereClause, eq(schema.orders.orderSource, 'offline'))),
+        .where(whereClause),
+      // Separate query: delivered follow-up offline (different base: isFollowUp=true)
       this.db
         .select({ count: count() })
         .from(schema.orders)
         .where(deliveredFollowUpOfflineWhere),
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(and(whereClause, sql`${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != ''`)),
-      // Offline orders that reached DELIVERED or REMITTED (for CS Delivered breakdown)
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(and(whereClause, eq(schema.orders.orderSource, 'offline'), inArray(schema.orders.status, ['DELIVERED', 'REMITTED']))),
-      // Delivered follow-up orders count (orderSource='delivered_follow_up')
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(and(whereClause, eq(schema.orders.orderSource, 'delivered_follow_up'))),
     ]);
+
+    const main = mainRow[0];
+    const followUpOfflineCount = followUpOfflineRow[0]?.count ?? 0;
 
     return {
       // Merge delivered follow-up offline orders into the offline count so they
       // surface in the "Offline orders" stat strip tile (CEO 2026-06-09).
-      offlineCount: (offlineRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
-      offlineDeliveredCount: (offlineDeliveredRows[0]?.count ?? 0) + (deliveredFollowUpOfflineRows[0]?.count ?? 0),
-      duplicateCount: duplicateRows[0]?.count ?? 0,
-      deliveredFollowUpCount: deliveredFollowUpRows[0]?.count ?? 0,
+      offlineCount: (main?.offlineCount ?? 0) + followUpOfflineCount,
+      offlineDeliveredCount: (main?.offlineDeliveredCount ?? 0) + followUpOfflineCount,
+      duplicateCount: main?.duplicateCount ?? 0,
+      deliveredFollowUpCount: main?.deliveredFollowUpCount ?? 0,
     };
   }
 

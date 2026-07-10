@@ -27,6 +27,7 @@ export const SENSITIVE_PERMISSIONS = [
   'notifications.broadcast.manage',
   'branches.scope.global',
   'branches.admin.manage',
+  'ai.assistant.access',
 ] as const;
 
 /**
