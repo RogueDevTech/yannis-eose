@@ -34,8 +34,13 @@ export const meta: MetaFunction = () => [
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   defaultShouldRevalidate,
   formMethod,
+  currentUrl,
+  nextUrl,
 }) => {
+  // Always revalidate after mutations
   if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  // Revalidate when search params change (filters, search, pagination)
+  if (currentUrl.search !== nextUrl.search) return true;
   return false;
 };
 

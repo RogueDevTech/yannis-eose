@@ -1066,10 +1066,16 @@ export const marketingRouter = router({
       //  - An org-wide marketing viewer (HoM / admin) drilling into one buyer is
       //    org-wide (matches the team-analysis leaderboard).
       //  - Everyone else (incl. marketing team supervisors) stays branch-scoped.
+      // MBs are ownership-pinned by mediaBuyerId=me in `orders.list`, so the
+      // branch filter is redundant and hides orders whose branch_id doesn't
+      // match the MB's current header branch (e.g. after branch reassignment).
+      // Org-wide viewers drilling into one buyer are also null (matches leaderboard).
       const branchId =
-        mediaBuyerId && isOrgWideMarketingViewer(ctx.user)
+        ctx.user.role === 'MEDIA_BUYER'
           ? null
-          : ctx.currentBranchId;
+          : mediaBuyerId && isOrgWideMarketingViewer(ctx.user)
+            ? null
+            : ctx.currentBranchId;
 
       const ordersScope = await narrowOrdersAggregateFiltersForViewer(ctx, branchId, {
         mediaBuyerId,
