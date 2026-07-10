@@ -30,6 +30,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { CartOrdersModule } from './cart-orders/cart-orders.module';
 import { UserFilterPreferencesModule } from './user-filter-preferences/user-filter-preferences.module';
+import { AiAssistantModule } from './ai-assistant/ai-assistant.module';
 
 @Module({
   imports: [
@@ -48,7 +49,7 @@ import { UserFilterPreferencesModule } from './user-filter-preferences/user-filt
     LogisticsModule, MarketingModule, FinanceModule, HrModule,
     NotificationsModule, VoipModule, SettingsModule, CartModule,
     PermissionRequestsModule, PaymentsModule, OnboardingModule, CartOrdersModule,
-    UserFilterPreferencesModule,
+    UserFilterPreferencesModule, AiAssistantModule,
   ],
   controllers: [AppController],
   providers: [

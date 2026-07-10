@@ -34,6 +34,7 @@ import {
   useLoginModalGate,
 } from '~/contexts/login-modal-gate';
 import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
+import { AiChatButton } from '~/components/ai-assistant/ai-chat';
 
 interface Notification {
   id: string;
@@ -1610,6 +1611,7 @@ function DashboardLayoutInner({
           }
         />
       )}
+      <AiChatButton user={user} />
     </div>
   );
 }

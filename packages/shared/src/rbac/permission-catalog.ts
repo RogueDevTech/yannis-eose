@@ -220,6 +220,9 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'hr.export', resource: 'hr', action: 'export', description: 'Download payroll batch payout documents (sensitive — includes bank fields)' },
   { code: 'audit.export', resource: 'audit', action: 'export', description: 'Download CSV of the audit trail' },
   { code: 'logistics.export', resource: 'logistics', action: 'export', description: 'Download CSV / XLSX of logistics partner performance, stock, and remittance data' },
+
+  // AI Assistant — access the in-app AI chat. Sensitive: only SUPER_ADMIN can grant.
+  { code: 'ai.assistant.access', resource: 'ai.assistant', action: 'access', description: 'Access the AI Chat Assistant for data queries and reports' },
 ];
 
 export const CANONICAL_PERMISSIONS: PermissionCatalogEntry[] = [

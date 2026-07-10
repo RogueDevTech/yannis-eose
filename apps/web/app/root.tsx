@@ -46,6 +46,8 @@ declare global {
       VAPID_PUBLIC_KEY?: string;
       /** Dev-only: gates the Accounting (double-entry ledger) section. */
       ENABLE_ACCOUNTING?: boolean;
+      /** Dev-only: gates the AI Chat Assistant floating button. */
+      ENABLE_AI_ASSISTANT?: boolean;
     };
   }
 }
@@ -87,6 +89,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
       // Dev-only: the Accounting section is hidden unless ENABLE_ACCOUNTING=true.
       ENABLE_ACCOUNTING: process.env.ENABLE_ACCOUNTING === 'true',
+      // Dev-only: the AI Assistant floating button is hidden unless ENABLE_AI_ASSISTANT=true.
+      ENABLE_AI_ASSISTANT: process.env.ENABLE_AI_ASSISTANT === 'true',
     },
   });
 }

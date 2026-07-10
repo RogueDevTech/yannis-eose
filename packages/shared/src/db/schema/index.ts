@@ -37,3 +37,4 @@ export * from './fixed-assets';
 export * from './expense-submissions';
 export * from './wht-deductions';
 export * from './bank-reconciliation';
+export * from './ai-assistant';
