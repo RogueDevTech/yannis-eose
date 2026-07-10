@@ -100,6 +100,9 @@ import { setCartOrdersService } from './routers/cart-orders.router';
 import { UserFilterPreferencesModule } from '../user-filter-preferences/user-filter-preferences.module';
 import { UserFilterPreferencesService } from '../user-filter-preferences/user-filter-preferences.service';
 import { setUserFilterPreferencesService } from './routers/user-filter-preferences.router';
+import { AiAssistantModule } from '../ai-assistant/ai-assistant.module';
+import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
+import { setAiAssistantService, setAiAssistantToolServices } from './routers/ai-assistant.router';
 
 @Module({
   imports: [
@@ -115,6 +118,7 @@ import { setUserFilterPreferencesService } from './routers/user-filter-preferenc
     OnboardingModule,
     CartOrdersModule,
     UserFilterPreferencesModule,
+    AiAssistantModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -153,6 +157,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly onboardingService: OnboardingService,
     private readonly cartOrdersService: CartOrdersService,
     private readonly userFilterPreferencesService: UserFilterPreferencesService,
+    private readonly aiAssistantService: AiAssistantService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -218,6 +223,16 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setOnboardingService(this.onboardingService);
     setCartOrdersService(this.cartOrdersService);
     setUserFilterPreferencesService(this.userFilterPreferencesService);
+    setAiAssistantService(this.aiAssistantService);
+    setAiAssistantToolServices({
+      ordersService: this.ordersService,
+      financeService: this.financeService,
+      marketingService: this.marketingService,
+      inventoryService: this.inventoryService,
+      logisticsService: this.logisticsService,
+      usersService: this.usersService,
+      productsService: this.productsService,
+    });
   }
 
   configure(consumer: MiddlewareConsumer) {

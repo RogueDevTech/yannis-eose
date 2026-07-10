@@ -21,6 +21,7 @@
     "run-permission-backfill:standalone": "tsx scripts/backfill-permission-snapshot-standalone.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
     "@aws-sdk/client-s3": "^3.1045.0",
     "@google-cloud/storage": "^7.19.0",
     "@nestjs/common": "^11.0.1",

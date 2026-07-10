@@ -2,7 +2,7 @@
 
 START APP
 cd apps/api && pnpm turbo dev
-cd apps/web && pnpm turbo dev  
+cd apps/web && pnpm turbo dev  z
 cd apps/edge-worker && pnpm turbo dev
 
 pnpm turbo dev
