@@ -281,9 +281,12 @@ function orderListBranchIdOwnerAware(
   sessionBranchId: string | null,
   explicitMediaBuyerId?: string | null,
 ): string | null {
-  // A Media Buyer scopes by their header branch lens (see comment above):
-  // null currentBranchId = "All Branches" → no branch filter, all their orders.
-  if (user.role === 'MEDIA_BUYER') return sessionBranchId;
+  // A Media Buyer's orders are always ownership-pinned by `mediaBuyerId = me`
+  // in the caller, so the branch filter is redundant for security.  Returning
+  // `null` (no branch filter) ensures the MB sees ALL their orders regardless
+  // of which branch the form/campaign belonged to — crucial after branch
+  // reassignment where old orders keep the previous branch_id.
+  if (user.role === 'MEDIA_BUYER') return null;
   // An explicit single-media-buyer filter is itself an exact scope. For an
   // org-wide marketing viewer (HoM / admin) drilling into one buyer — e.g. the
   // "View orders" link from team analysis — keep the result org-wide so it
