@@ -413,14 +413,14 @@ export class AiAssistantService {
 
       // Check if we need to process tool calls
       const toolUseBlocks = response.content.filter(
-        (block) => block.type === 'tool_use',
+        (block: any) => block.type === 'tool_use',
       );
 
       if (toolUseBlocks.length === 0) {
         // No tool calls — extract text response
         const textParts = response.content
-          .filter((block) => block.type === 'text')
-          .map((block) => (block as any).text as string);
+          .filter((block: any) => block.type === 'text')
+          .map((block: any) => (block as any).text as string);
         return textParts.join('\n') || 'I was unable to generate a response.';
       }
 
