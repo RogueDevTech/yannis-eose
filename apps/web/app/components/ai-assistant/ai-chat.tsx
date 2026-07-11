@@ -246,13 +246,10 @@ function ChatDrawer({ user, onClose }: {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Check if any API key is configured on mount
+  // Check if API key is configured on mount (single call)
   useEffect(() => {
-    Promise.all([
-      trpcQuery<{ exists: boolean }>('personalApiKeyExists'),
-      trpcQuery<{ exists: boolean }>('orgApiKeyExists'),
-    ]).then(([personal, org]) => {
-      const connected = personal?.exists || org?.exists || false;
+    trpcQuery<{ exists: boolean }>('personalApiKeyExists').then((data) => {
+      const connected = data?.exists || false;
       setHasApiKey(connected);
       if (!connected) setView('settings');
     });
@@ -409,7 +406,7 @@ function ChatDrawer({ user, onClose }: {
             onNewChat={handleNewChat}
           />
         ) : view === 'settings' ? (
-          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} />
+          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} initialKeyExists={hasApiKey === true} />
         ) : (
           <>
             {/* Messages area */}
@@ -569,60 +566,27 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
 
 // ─── API Key Settings ────────────────────────────────────────────────
 
-function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup }: {
+function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup, initialKeyExists }: {
   user: { id: string; role: string; permissions?: string[] };
   onBack: () => void;
   onKeyConnected?: () => void;
   /** True when opened because no API key exists yet */
   isFirstSetup?: boolean;
+  /** Pre-fetched from parent to avoid duplicate API calls */
+  initialKeyExists?: boolean;
 }) {
-  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user.role);
-  const [orgKeyExists, setOrgKeyExists] = useState<boolean | null>(null);
-  const [personalKeyExists, setPersonalKeyExists] = useState<boolean | null>(null);
-  const [orgKeyInput, setOrgKeyInput] = useState('');
+  const [personalKeyExists, setPersonalKeyExists] = useState<boolean | null>(initialKeyExists ?? null);
   const [personalKeyInput, setPersonalKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Only fetch if parent didn't provide initial state
   useEffect(() => {
-    trpcQuery<{ exists: boolean }>('orgApiKeyExists').then((data) => {
-      if (data) setOrgKeyExists(data.exists);
-    });
+    if (initialKeyExists !== undefined) return;
     trpcQuery<{ exists: boolean }>('personalApiKeyExists').then((data) => {
       if (data) setPersonalKeyExists(data.exists);
     });
   }, []);
-
-  const handleSaveOrgKey = async () => {
-    if (!orgKeyInput.trim()) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await trpcMutate('saveOrgApiKey', { apiKey: orgKeyInput.trim() });
-      setOrgKeyExists(true);
-      setOrgKeyInput('');
-      setMessage({ type: 'success', text: 'Organization API key saved' });
-      onKeyConnected?.();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to save key' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteOrgKey = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      await trpcMutate('deleteOrgApiKey', {});
-      setOrgKeyExists(false);
-      setMessage({ type: 'success', text: 'Organization API key removed' });
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to remove key' });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleSavePersonalKey = async () => {
     if (!personalKeyInput.trim()) return;
