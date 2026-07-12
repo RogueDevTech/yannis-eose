@@ -1058,14 +1058,6 @@ export function UsersListPage({
               rowKey={(r) => r.id}
               emptyTitle="Loading…"
               emptyDescription=""
-              pagination={{
-                page: 1,
-                totalPages: 1,
-                onPageChange: () => undefined,
-                summary: <span className="text-app-fg-muted">Loading users…</span>,
-                wrapperClassName:
-                  'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1 opacity-60',
-              }}
             />
           ) : (
             <CompactTable<User>
@@ -1099,20 +1091,6 @@ export function UsersListPage({
                   <div className="text-xs text-app-fg-muted truncate">{user.email}</div>
                 </button>
               )}
-              pagination={{
-                page,
-                totalPages: safeTotalPages,
-                onPageChange: goToPage,
-                pageSize,
-                pageSizeOptions,
-                summary: (
-                  <span>
-                    Showing {users.length} of {total} users
-                  </span>
-                ),
-                wrapperClassName:
-                  'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
-              }}
             />
           )}
         </>

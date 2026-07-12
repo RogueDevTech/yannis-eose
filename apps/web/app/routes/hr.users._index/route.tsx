@@ -3,7 +3,7 @@ import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, parsePerPage, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { UsersListPage } from '~/features/users/UsersListPage';
@@ -154,12 +154,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const supervisorOnlyParam = url.searchParams.get('supervisorOnly') === '1';
   const branchIdRaw = url.searchParams.get('branchId')?.trim() ?? '';
   const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
-  const pageParam = Number(url.searchParams.get('page') ?? '1');
-  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
-  const { perPage, pageSizeOptions } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
   const input: Record<string, unknown> = {
-    page,
-    limit: perPage,
+    page: 1,
+    limit: 10000,
     sortBy: 'createdAt',
     sortOrder: 'desc',
     companyWideUserList: true,
@@ -255,8 +252,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       roleParam: roleParam ?? 'ALL',
       searchParam,
       branchParam: branchParam ?? 'ALL',
-      perPage,
-      pageSizeOptions,
       canExport,
       /** Branch picker only renders for admin-class actors who legitimately see every branch. */
       canPickBranch: isAdminLevel(user),
@@ -281,8 +276,6 @@ export default function UsersRoute() {
           searchParam={usersShell.searchParam}
           branchParam={usersShell.branchParam}
           canPickBranch={usersShell.canPickBranch}
-          pageSize={usersShell.perPage}
-          pageSizeOptions={usersShell.pageSizeOptions}
           canExport={usersShell.canExport}
         />
       }
@@ -297,8 +290,6 @@ export default function UsersRoute() {
           branchParam={usersShell.branchParam}
           canPickBranch={usersShell.canPickBranch}
           usersPromise={roster}
-          pageSize={usersShell.perPage}
-          pageSizeOptions={usersShell.pageSizeOptions}
           canExport={usersShell.canExport}
         />
       )}
