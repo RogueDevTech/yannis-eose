@@ -231,44 +231,42 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         </div>
       </div>
 
-      {/* ── Total Orders: Marketing + Offline + Cart (follow-up excluded per CEO) ── */}
+      {/* ── Total Orders: Marketing + Offline + graduated follow-up/cart (delivered only) ── */}
       {(() => {
         const mktSc = orderPipeline.statusCounts;
         const offSc = orderPipeline.offlineStatusCounts ?? {};
-        const cartCounts = data?.cartOrdersCounts ?? {};
+        const followUpSc = data?.followUpCounts as Record<string, number> ?? {};
+        const cartSc = data?.cartOrdersCounts as Record<string, number> ?? {};
 
         const sumExcludeDeleted = (sc: Record<string, number>) =>
           Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
         const sumStatus = (sc: Record<string, number>, ...keys: string[]) =>
           keys.reduce((s, k) => s + (sc[k] ?? 0), 0);
 
+        // Marketing + Offline base (full pipeline)
         const mktTotal = sumExcludeDeleted(mktSc);
         const offTotal = sumExcludeDeleted(offSc);
-        const cartTotal = sumExcludeDeleted(cartCounts);
-        const tTotal = mktTotal + offTotal + cartTotal;
+        // Only graduated (delivered/remitted) follow-up and cart orders count toward Total
+        const fuGraduated = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
+        const cartGraduated = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
+        const tTotal = mktTotal + offTotal + fuGraduated + cartGraduated;
 
         const mktDelivered = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
         const offDelivered = sumStatus(offSc, 'DELIVERED', 'REMITTED');
-        const cartDelivered = sumStatus(cartCounts, 'DELIVERED', 'REMITTED');
-        const tDelivered = mktDelivered + offDelivered + cartDelivered;
+        const tDelivered = mktDelivered + offDelivered + fuGraduated + cartGraduated;
 
         const tConfirmed =
           sumStatus(mktSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
-          sumStatus(offSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
-          sumStatus(cartCounts, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT');
+          sumStatus(offSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT');
 
         const tUnprocessed =
-          sumStatus(mktSc, 'UNPROCESSED') + sumStatus(offSc, 'UNPROCESSED') +
-          sumStatus(cartCounts, 'UNPROCESSED');
+          sumStatus(mktSc, 'UNPROCESSED') + sumStatus(offSc, 'UNPROCESSED');
         const tCsAssigned =
-          sumStatus(mktSc, 'CS_ASSIGNED') + sumStatus(offSc, 'CS_ASSIGNED') +
-          sumStatus(cartCounts, 'CS_ASSIGNED');
+          sumStatus(mktSc, 'CS_ASSIGNED') + sumStatus(offSc, 'CS_ASSIGNED');
         const tCsEngaged =
-          sumStatus(mktSc, 'CS_ENGAGED') + sumStatus(offSc, 'CS_ENGAGED') +
-          sumStatus(cartCounts, 'CS_ENGAGED');
+          sumStatus(mktSc, 'CS_ENGAGED') + sumStatus(offSc, 'CS_ENGAGED');
         const tDeleted =
-          sumStatus(mktSc, 'DELETED') + sumStatus(offSc, 'DELETED') +
-          sumStatus(cartCounts, 'DELETED');
+          sumStatus(mktSc, 'DELETED') + sumStatus(offSc, 'DELETED');
 
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;

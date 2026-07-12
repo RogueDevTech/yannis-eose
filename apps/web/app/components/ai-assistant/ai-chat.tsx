@@ -264,6 +264,7 @@ function ChatDrawer({ user, onClose }: {
   const [sending, setSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mounted, setMounted] = useState(false);
@@ -312,6 +313,8 @@ function ChatDrawer({ user, onClose }: {
     if (view === 'chat') inputRef.current?.focus();
   }, [view]);
 
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
+
   const handleSend = useCallback(async () => {
     const msg = input.trim();
     if (!msg || sending) return;
@@ -319,64 +322,113 @@ function ChatDrawer({ user, onClose }: {
     setInput('');
     setSending(true);
     setError(null);
+    setStreamStatus(null);
 
     // Optimistic user message
-    const tempId = `temp-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: tempId, role: 'user', content: msg, createdAt: new Date().toISOString() }]);
+    setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: msg, createdAt: new Date().toISOString() }]);
+
+    // Create a placeholder for the streaming assistant response
+    const assistantMsgId = `resp-${Date.now()}`;
+    setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '', createdAt: new Date().toISOString() }]);
 
     try {
-      const result = await trpcMutate<{
-        sessionId: string;
-        assistantMessage: string;
-        sessionTitle?: string;
-      }>('sendMessage', {
-        sessionId: activeSessionId ?? undefined,
-        message: msg,
-        model: selectedModel,
+      const base = getBrowserApiBaseUrl();
+      const res = await fetch(`${base}/api/ai-chat/stream`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: activeSessionId ?? undefined,
+          message: msg,
+          model: selectedModel,
+          currentPage: window.location.pathname,
+        }),
       });
 
-      // Set session if new
-      if (!activeSessionId) {
-        setActiveSessionId(result.sessionId);
-        setSessions((prev) => [
-          { id: result.sessionId, title: result.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-          ...prev,
-        ]);
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error?.message || json?.message || `Request failed (${res.status})`);
       }
 
-      // Add assistant response
-      setMessages((prev) => [
-        ...prev,
-        { id: `resp-${Date.now()}`, role: 'assistant', content: result.assistantMessage, createdAt: new Date().toISOString() },
-      ]);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('Streaming not supported');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const parsed = JSON.parse(data);
+
+              if (currentEvent === 'session') {
+                if (!activeSessionId && parsed.sessionId) {
+                  setActiveSessionId(parsed.sessionId);
+                  setSessions((prev) => [
+                    { id: parsed.sessionId, title: parsed.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+                    ...prev,
+                  ]);
+                }
+              } else if (currentEvent === 'text') {
+                setMessages((prev) => prev.map((m) =>
+                  m.id === assistantMsgId ? { ...m, content: m.content + parsed.text } : m,
+                ));
+              } else if (currentEvent === 'status') {
+                setStreamStatus(parsed.message);
+              } else if (currentEvent === 'error') {
+                throw new Error(parsed.message);
+              }
+            } catch (e) {
+              if (currentEvent === 'error') throw e;
+            }
+            currentEvent = '';
+          }
+        }
+      }
+
+      // Remove empty assistant message if nothing was streamed
+      setMessages((prev) => {
+        const msg = prev.find((m) => m.id === assistantMsgId);
+        if (msg && !msg.content) return prev.filter((m) => m.id !== assistantMsgId);
+        return prev;
+      });
     } catch (err: any) {
       const raw = err.message || 'Failed to send message';
       let friendly = raw;
-      if (raw.includes('CLAUDE_AUTH_ERROR') || raw.includes('authentication_error') || raw.includes('invalid x-api-key') || raw.includes('401')) {
-        friendly = 'Your API key is invalid or has been revoked. Go to Settings and reconnect with a valid key from console.anthropic.com.';
-      } else if (raw.includes('CLAUDE_MODEL_NOT_FOUND') || (raw.includes('not_found_error') && raw.includes('model'))) {
-        const label = AI_MODELS.find(m => m.id === selectedModel)?.label || selectedModel;
-        friendly = `Your API key does not have access to ${label}. This usually means your Anthropic account needs more credits. Try switching to Haiku (cheapest) in Settings, or add credits at console.anthropic.com.`;
-      } else if (raw.includes('CLAUDE_NO_CREDITS') || raw.includes('insufficient') || raw.includes('billing')) {
-        friendly = 'Your Anthropic account has run out of credits. Add more at console.anthropic.com under Billing.';
-      } else if (raw.includes('CLAUDE_RATE_LIMIT') || raw.includes('rate_limit') || raw.includes('429')) {
+      if (raw.includes('authentication_error') || raw.includes('invalid') || raw.includes('401')) {
+        friendly = 'Your API key is invalid. Go to Settings and reconnect with a valid key.';
+      } else if (raw.includes('not_found_error') || raw.includes('model')) {
+        friendly = `Model not available. Try switching to a different model in Settings, or add credits at console.anthropic.com.`;
+      } else if (raw.includes('rate_limit') || raw.includes('429')) {
         friendly = 'Too many requests. Please wait a moment and try again.';
-      } else if (raw.includes('CLAUDE_INVALID_REQUEST')) {
-        friendly = 'The request was rejected by Claude. Try shortening your message or starting a new conversation.';
-      } else if (raw.includes('Rate limit exceeded')) {
-        friendly = raw;
-      } else if (raw.includes('No Claude API key configured')) {
-        friendly = 'No API key configured. Go to Settings to connect your Anthropic API key.';
+      } else if (raw.includes('No Claude API key')) {
+        friendly = 'No API key configured. Go to Settings to connect your key.';
       }
-      // Show error as an assistant message instead of the red error banner
-      setMessages((prev) => [
-        ...prev,
-        { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
-      ]);
+      // Replace empty placeholder with error, or add error message
+      setMessages((prev) => {
+        const existing = prev.find((m) => m.id === assistantMsgId);
+        if (existing && !existing.content) {
+          return prev.map((m) => m.id === assistantMsgId ? { ...m, content: friendly } : m);
+        }
+        return [...prev.filter((m) => m.id !== assistantMsgId || m.content), { id: `err-${Date.now()}`, role: 'assistant' as const, content: friendly, createdAt: new Date().toISOString() }];
+      });
     } finally {
       setSending(false);
+      setStreamStatus(null);
     }
-  }, [input, sending, activeSessionId]);
+  }, [input, sending, activeSessionId, selectedModel]);
 
   const handleNewChat = () => {
     setActiveSessionId(null);
@@ -497,16 +549,38 @@ function ChatDrawer({ user, onClose }: {
               )}
 
               {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div key={msg.id} className={`group flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                    className={`max-w-[85%] rounded-lg px-3 py-2 relative ${
                       msg.role === 'user'
-                        ? 'bg-primary-600 text-white'
+                        ? 'bg-blue-600 text-white'
                         : 'bg-app-hover text-app-fg'
                     }`}
                   >
                     {msg.role === 'assistant' ? (
-                      renderMessageContent(msg.content)
+                      <>
+                        {renderMessageContent(msg.content)}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(msg.content);
+                            setCopiedId(msg.id);
+                            setTimeout(() => setCopiedId(null), 2000);
+                          }}
+                          className="absolute -bottom-5 right-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-app-fg-muted hover:text-app-fg"
+                          title="Copy"
+                        >
+                          {copiedId === msg.id ? (
+                            <svg className="w-3.5 h-3.5 text-success-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                            </svg>
+                          )}
+                        </button>
+                      </>
                     ) : (
                       <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     )}
@@ -514,14 +588,11 @@ function ChatDrawer({ user, onClose }: {
                 </div>
               ))}
 
-              {sending && (
+              {sending && streamStatus && (
                 <div className="flex justify-start">
-                  <div className="bg-app-hover rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
+                  <div className="bg-app-hover rounded-lg px-3 py-1.5 flex items-center gap-2">
+                    <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-xs text-app-fg-muted">{streamStatus}</p>
                   </div>
                 </div>
               )}
