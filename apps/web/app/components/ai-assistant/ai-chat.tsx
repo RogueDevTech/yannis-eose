@@ -88,8 +88,6 @@ export function hasAiAssistantAccess(user: { role: string; permissions?: string[
   if (!user) return false;
   // SSR: never render (uses createPortal → document.body)
   if (typeof window === 'undefined') return false;
-  // Dev-only: hidden in production
-  if (!window.__ENV?.IS_DEV) return false;
   if (['SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(user.role)) return true;
   return (user.permissions ?? []).map(canonicalPermissionCode).includes('ai.assistant.access');
 }
@@ -264,6 +262,7 @@ function ChatDrawer({ user, onClose }: {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -296,9 +295,11 @@ function ChatDrawer({ user, onClose }: {
       setMessages([]);
       return;
     }
+    setMessages([]);
+    setLoadingMessages(true);
     trpcQuery<ChatMessage[]>('getSessionMessages', { sessionId: activeSessionId }).then((data) => {
       if (data) setMessages(data);
-    });
+    }).finally(() => setLoadingMessages(false));
   }, [activeSessionId]);
 
   // Auto-scroll
@@ -350,22 +351,28 @@ function ChatDrawer({ user, onClose }: {
       ]);
     } catch (err: any) {
       const raw = err.message || 'Failed to send message';
-      // Translate common API errors to user-friendly messages
       let friendly = raw;
-      if (raw.includes('not_found_error') && raw.includes('model')) {
-        friendly = 'Your API key does not have access to this model. Please check that your Anthropic account has credits loaded.';
-      } else if (raw.includes('authentication_error') || raw.includes('invalid x-api-key') || raw.includes('401')) {
-        friendly = 'Invalid API key. Please check your key in Settings and try again.';
-      } else if (raw.includes('rate_limit') || raw.includes('429')) {
-        friendly = 'Rate limit reached. Please wait a moment and try again.';
-      } else if (raw.includes('insufficient') || raw.includes('billing')) {
-        friendly = 'Insufficient API credits. Please add more credits at console.anthropic.com.';
+      if (raw.includes('CLAUDE_AUTH_ERROR') || raw.includes('authentication_error') || raw.includes('invalid x-api-key') || raw.includes('401')) {
+        friendly = 'Your API key is invalid or has been revoked. Go to Settings and reconnect with a valid key from console.anthropic.com.';
+      } else if (raw.includes('CLAUDE_MODEL_NOT_FOUND') || (raw.includes('not_found_error') && raw.includes('model'))) {
+        const label = AI_MODELS.find(m => m.id === selectedModel)?.label || selectedModel;
+        friendly = `Your API key does not have access to ${label}. This usually means your Anthropic account needs more credits. Try switching to Haiku (cheapest) in Settings, or add credits at console.anthropic.com.`;
+      } else if (raw.includes('CLAUDE_NO_CREDITS') || raw.includes('insufficient') || raw.includes('billing')) {
+        friendly = 'Your Anthropic account has run out of credits. Add more at console.anthropic.com under Billing.';
+      } else if (raw.includes('CLAUDE_RATE_LIMIT') || raw.includes('rate_limit') || raw.includes('429')) {
+        friendly = 'Too many requests. Please wait a moment and try again.';
+      } else if (raw.includes('CLAUDE_INVALID_REQUEST')) {
+        friendly = 'The request was rejected by Claude. Try shortening your message or starting a new conversation.';
       } else if (raw.includes('Rate limit exceeded')) {
-        friendly = raw; // Our own rate limit message is already clear
-      } else if (raw.includes('No Claude API key configured')) {
         friendly = raw;
+      } else if (raw.includes('No Claude API key configured')) {
+        friendly = 'No API key configured. Go to Settings to connect your Anthropic API key.';
       }
-      setError(friendly);
+      // Show error as an assistant message instead of the red error banner
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
+      ]);
     } finally {
       setSending(false);
     }
@@ -404,11 +411,11 @@ function ChatDrawer({ user, onClose }: {
 
       {/* Backdrop when expanded on desktop */}
       {expanded && (
-        <div className="hidden md:block fixed inset-0 z-[85] bg-black/50" onClick={() => setExpanded(false)} />
+        <div className="hidden md:block fixed inset-0 z-[85] bg-black/90 backdrop-blur-md" onClick={() => setExpanded(false)} />
       )}
 
       {/* Drawer panel */}
-      <div className={`fixed z-[86] inset-0 bg-app-elevated border border-app-border shadow-2xl flex flex-col overflow-hidden ${expanded ? '' : 'md:inset-auto md:right-4 md:bottom-4 md:top-auto md:left-auto md:w-[420px] md:h-[600px] md:max-h-[80vh] md:rounded-xl'}`}>
+      <div className={`fixed z-[86] inset-0 bg-app-elevated flex flex-col overflow-hidden ${expanded ? 'md:inset-4 md:mx-auto md:max-w-4xl md:rounded-xl border border-app-border shadow-2xl' : 'md:inset-auto md:right-4 md:bottom-4 md:top-auto md:left-auto md:w-[420px] md:h-[600px] md:max-h-[80vh] md:rounded-xl border border-app-border shadow-2xl'}`}>
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2.5 border-b border-app-border bg-app-elevated shrink-0">
           <button type="button" onClick={() => setView('sessions')} className="p-1.5 rounded-md hover:bg-app-hover text-app-fg-muted" title="Chat history">
@@ -467,8 +474,15 @@ function ChatDrawer({ user, onClose }: {
         ) : (
           <>
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-              {messages.length === 0 && !sending && (
+            <div className={`flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
+              <div className={`space-y-3 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
+              {loadingMessages && (
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs text-app-fg-muted mt-2">Loading messages...</p>
+                </div>
+              )}
+              {messages.length === 0 && !sending && !loadingMessages && (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4">
                   <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
                     <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -519,11 +533,12 @@ function ChatDrawer({ user, onClose }: {
               )}
 
               <div ref={messagesEndRef} />
+              </div>
             </div>
 
             {/* Input area */}
-            <div className="shrink-0 border-t border-app-border px-3 py-2 bg-app-elevated">
-              <div className="flex items-end gap-2">
+            <div className={`shrink-0 border-t border-app-border px-3 py-2 bg-app-elevated ${expanded ? 'md:px-6' : ''}`}>
+              <div className={`flex items-end gap-2 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -578,6 +593,7 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
   onDelete: (sessionId: string) => void;
   onNewChat: () => void;
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const fmt = new Intl.DateTimeFormat('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return (
@@ -611,15 +627,34 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
               {fmt.format(new Date(session.updatedAt))}
             </p>
           </div>
+          {confirmDeleteId === session.id ? (
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => { onDelete(session.id); setConfirmDeleteId(null); }}
+                className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-danger-600 text-white hover:bg-danger-700"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteId(null)}
+                className="px-1.5 py-0.5 rounded text-[10px] font-medium text-app-fg-muted hover:bg-app-hover"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onDelete(session.id); }}
+            onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(session.id); }}
             className="p-1 rounded hover:bg-danger-100 dark:hover:bg-danger-900/30 text-app-fg-muted hover:text-danger-600"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
             </svg>
           </button>
+          )}
         </div>
       ))}
     </div>

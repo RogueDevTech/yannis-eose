@@ -1,6 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
-import { eq, lt, desc, asc, and } from 'drizzle-orm';
+import { eq, desc, asc, and, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { randomUUID } from 'crypto';
@@ -76,6 +75,8 @@ export class AiAssistantService {
 
   // ── Session CRUD ─────────────────────────────────────
 
+  private static MAX_SESSIONS_PER_USER = 7;
+
   async createSession(userId: string, title?: string): Promise<{ id: string }> {
     const id = randomUUID();
     await this.db.insert(schema.aiChatSessions).values({
@@ -83,6 +84,23 @@ export class AiAssistantService {
       userId,
       title: title || 'New conversation',
     });
+
+    // Enforce max sessions: delete oldest beyond the cap
+    const allSessions = await this.db
+      .select({ id: schema.aiChatSessions.id })
+      .from(schema.aiChatSessions)
+      .where(eq(schema.aiChatSessions.userId, userId))
+      .orderBy(desc(schema.aiChatSessions.updatedAt));
+
+    if (allSessions.length > AiAssistantService.MAX_SESSIONS_PER_USER) {
+      const toDelete = allSessions.slice(AiAssistantService.MAX_SESSIONS_PER_USER).map((s) => s.id);
+      if (toDelete.length > 0) {
+        await this.db
+          .delete(schema.aiChatSessions)
+          .where(inArray(schema.aiChatSessions.id, toDelete));
+      }
+    }
+
     return { id };
   }
 
@@ -360,7 +378,26 @@ export class AiAssistantService {
 
     // Call Claude with tool loop
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
-    const assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model);
+    let assistantMessage: string;
+    try {
+      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model);
+    } catch (err: any) {
+      const status = err?.status ?? err?.statusCode;
+      const errType = err?.error?.error?.type ?? err?.type ?? '';
+      const errMsg = err?.error?.error?.message ?? err?.message ?? '';
+      if (status === 401 || errType === 'authentication_error') {
+        throw new Error('CLAUDE_AUTH_ERROR');
+      } else if (status === 404 || errType === 'not_found_error') {
+        throw new Error(`CLAUDE_MODEL_NOT_FOUND:${model || 'claude-haiku-4-5-20251001'}`);
+      } else if (status === 429 || errType === 'rate_limit_error') {
+        throw new Error('CLAUDE_RATE_LIMIT');
+      } else if (errType === 'invalid_request_error' && errMsg.includes('credit')) {
+        throw new Error('CLAUDE_NO_CREDITS');
+      } else if (status === 400 || errType === 'invalid_request_error') {
+        throw new Error(`CLAUDE_INVALID_REQUEST:${errMsg}`);
+      }
+      throw err;
+    }
 
     // Persist assistant message
     await this.db.insert(schema.aiChatMessages).values({
@@ -456,20 +493,4 @@ export class AiAssistantService {
     return 'I needed more steps to answer your question. Please try rephrasing or breaking your request into smaller parts.';
   }
 
-  // ── Cron: Purge Old Chat Data ────────────────────────
-
-  @Cron('0 30 3 * * *')
-  async purgeOldChatData(): Promise<void> {
-    const RETENTION_DAYS = 7;
-    const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
-
-    const deleted = await this.db
-      .delete(schema.aiChatSessions)
-      .where(lt(schema.aiChatSessions.updatedAt, cutoff))
-      .returning({ id: schema.aiChatSessions.id });
-
-    if (deleted.length > 0) {
-      this.logger.log(`[ai-purge] Purged ${deleted.length} chat sessions older than ${RETENTION_DAYS} days`);
-    }
-  }
 }
