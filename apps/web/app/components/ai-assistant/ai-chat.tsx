@@ -23,6 +23,23 @@ type TrpcEnvelope<T> = { result?: { data?: T }; error?: { message?: string } };
 
 type DrawerView = 'chat' | 'sessions' | 'settings';
 
+const AI_MODELS = [
+  { id: 'claude-3-5-haiku-20241022', label: 'Haiku 3.5', description: 'Fastest, cheapest' },
+  { id: 'claude-3-5-sonnet-20241022', label: 'Sonnet 3.5', description: 'Balanced' },
+  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', description: 'Latest, smartest' },
+] as const;
+
+const DEFAULT_MODEL = 'claude-3-5-haiku-20241022';
+
+function getStoredModel(): string {
+  if (typeof window === 'undefined') return DEFAULT_MODEL;
+  return localStorage.getItem('yannis_ai_model') || DEFAULT_MODEL;
+}
+
+function setStoredModel(model: string) {
+  if (typeof window !== 'undefined') localStorage.setItem('yannis_ai_model', model);
+}
+
 // ─── API Helpers ─────────────────────────────────────────────────────
 
 async function trpcQuery<T>(procedure: string, input?: Record<string, unknown>): Promise<T | null> {
@@ -243,6 +260,7 @@ function ChatDrawer({ user, onClose }: {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mounted, setMounted] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
+  const [selectedModel, setSelectedModel] = useState(getStoredModel);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -304,6 +322,7 @@ function ChatDrawer({ user, onClose }: {
       }>('sendMessage', {
         sessionId: activeSessionId ?? undefined,
         message: msg,
+        model: selectedModel,
       });
 
       // Set session if new
@@ -321,7 +340,23 @@ function ChatDrawer({ user, onClose }: {
         { id: `resp-${Date.now()}`, role: 'assistant', content: result.assistantMessage, createdAt: new Date().toISOString() },
       ]);
     } catch (err: any) {
-      setError(err.message || 'Failed to send message');
+      const raw = err.message || 'Failed to send message';
+      // Translate common API errors to user-friendly messages
+      let friendly = raw;
+      if (raw.includes('not_found_error') && raw.includes('model')) {
+        friendly = 'Your API key does not have access to this model. Please check that your Anthropic account has credits loaded.';
+      } else if (raw.includes('authentication_error') || raw.includes('invalid x-api-key') || raw.includes('401')) {
+        friendly = 'Invalid API key. Please check your key in Settings and try again.';
+      } else if (raw.includes('rate_limit') || raw.includes('429')) {
+        friendly = 'Rate limit reached. Please wait a moment and try again.';
+      } else if (raw.includes('insufficient') || raw.includes('billing')) {
+        friendly = 'Insufficient API credits. Please add more credits at console.anthropic.com.';
+      } else if (raw.includes('Rate limit exceeded')) {
+        friendly = raw; // Our own rate limit message is already clear
+      } else if (raw.includes('No Claude API key configured')) {
+        friendly = raw;
+      }
+      setError(friendly);
     } finally {
       setSending(false);
     }
@@ -406,7 +441,7 @@ function ChatDrawer({ user, onClose }: {
             onNewChat={handleNewChat}
           />
         ) : view === 'settings' ? (
-          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} initialKeyExists={hasApiKey === true} />
+          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} initialKeyExists={hasApiKey === true} selectedModel={selectedModel} onModelChange={(m) => { setSelectedModel(m); setStoredModel(m); }} />
         ) : (
           <>
             {/* Messages area */}
@@ -494,9 +529,14 @@ function ChatDrawer({ user, onClose }: {
                   </svg>
                 </button>
               </div>
-              <p className="text-[10px] text-app-fg-muted mt-1 text-right">
-                {input.length}/4000
-              </p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-[10px] text-app-fg-muted">
+                  {AI_MODELS.find((m) => m.id === selectedModel)?.label || 'Haiku 3.5'}
+                </p>
+                <p className="text-[10px] text-app-fg-muted">
+                  {input.length}/4000
+                </p>
+              </div>
             </div>
           </>
         )}
@@ -566,14 +606,14 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
 
 // ─── API Key Settings ────────────────────────────────────────────────
 
-function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup, initialKeyExists }: {
+function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup, initialKeyExists, selectedModel, onModelChange }: {
   user: { id: string; role: string; permissions?: string[] };
   onBack: () => void;
   onKeyConnected?: () => void;
-  /** True when opened because no API key exists yet */
   isFirstSetup?: boolean;
-  /** Pre-fetched from parent to avoid duplicate API calls */
   initialKeyExists?: boolean;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
 }) {
   const [personalKeyExists, setPersonalKeyExists] = useState<boolean | null>(initialKeyExists ?? null);
   const [personalKeyInput, setPersonalKeyInput] = useState('');
@@ -685,6 +725,38 @@ function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup, initialKey
           </>
         )}
       </div>
+
+      {/* Model selector */}
+      {personalKeyExists && (
+        <div className="space-y-2 pt-2 border-t border-app-border">
+          <h3 className="text-sm font-medium text-app-fg">Model</h3>
+          <div className="space-y-1.5">
+            {AI_MODELS.map((m) => (
+              <label
+                key={m.id}
+                className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                  selectedModel === m.id
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-app-border hover:bg-app-hover'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="ai-model"
+                  value={m.id}
+                  checked={selectedModel === m.id}
+                  onChange={() => onModelChange(m.id)}
+                  className="accent-blue-600"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-app-fg">{m.label}</p>
+                  <p className="text-[10px] text-app-fg-muted">{m.description}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* How to get a key */}
       {!personalKeyExists && (

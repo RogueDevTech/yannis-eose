@@ -289,6 +289,7 @@ export class AiAssistantService {
     sessionId?: string;
     userId: string;
     userMessage: string;
+    model?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
@@ -299,7 +300,7 @@ export class AiAssistantService {
     assistantMessage: string;
     sessionTitle?: string;
   }> {
-    const { userId, userMessage, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
+    const { userId, userMessage, model, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
 
     // Rate limit
     if (!checkRateLimit(userId)) {
@@ -359,7 +360,7 @@ export class AiAssistantService {
 
     // Call Claude with tool loop
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
-    const assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services);
+    const assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model);
 
     // Persist assistant message
     await this.db.insert(schema.aiChatMessages).values({
@@ -394,17 +395,19 @@ export class AiAssistantService {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
     toolCtx: ToolExecutorContext,
     services: ToolExecutorServices,
+    model?: string,
   ): Promise<string> {
     // Dynamic import to avoid loading SDK when not needed
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey });
 
+    const resolvedModel = model || 'claude-3-5-haiku-20241022';
     let currentMessages: any[] = [...messages];
     const maxToolRounds = 5;
 
     for (let round = 0; round < maxToolRounds; round++) {
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: resolvedModel,
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
         tools: AI_TOOLS as any,
