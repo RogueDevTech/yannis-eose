@@ -332,106 +332,71 @@ function ChatDrawer({ user, onClose }: {
     // Optimistic user message
     setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: msg, createdAt: new Date().toISOString() }]);
 
-    const assistantMsgId = `resp-${Date.now()}`;
-    let assistantMsgCreated = false;
-
     try {
-      // Call API directly (not through Vite proxy) because http-proxy buffers SSE
-      const apiUrl = window.__ENV?.API_URL?.trim() || getBrowserApiBaseUrl();
-      const res = await fetch(`${apiUrl}/api/ai-chat/stream`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: activeSessionId ?? undefined,
-          message: msg,
-          model: selectedModel,
-          currentPage: window.location.pathname,
-        }),
+      const result = await trpcMutate<{
+        sessionId: string;
+        assistantMessage: string;
+        sessionTitle?: string;
+      }>('sendMessage', {
+        sessionId: activeSessionId ?? undefined,
+        message: msg,
+        model: selectedModel,
+        currentPage: window.location.pathname,
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        let errorMsg = `Request failed (${res.status})`;
-        try { errorMsg = JSON.parse(text)?.error?.message || JSON.parse(text)?.message || errorMsg; } catch {}
-        throw new Error(errorMsg);
+      // Set session if new
+      if (!activeSessionId) {
+        setActiveSessionId(result.sessionId);
+        setSessions((prev) => [
+          { id: result.sessionId, title: result.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          ...prev,
+        ]);
       }
 
-      if (!res.body) throw new Error('Streaming not supported by browser');
+      // Typewriter effect — reveal response progressively
+      const fullText = result.assistantMessage;
+      const assistantMsgId = `resp-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '', createdAt: new Date().toISOString() }]);
+      setSending(false);
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let currentEvent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines
-        while (buffer.includes('\n')) {
-          const newlineIdx = buffer.indexOf('\n');
-          const line = buffer.slice(0, newlineIdx);
-          buffer = buffer.slice(newlineIdx + 1);
-
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-
-              if (currentEvent === 'session') {
-                if (!activeSessionId && parsed.sessionId) {
-                  setActiveSessionId(parsed.sessionId);
-                  setSessions((prev) => [
-                    { id: parsed.sessionId, title: parsed.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                    ...prev,
-                  ]);
-                }
-              } else if (currentEvent === 'text') {
-                if (!assistantMsgCreated) {
-                  assistantMsgCreated = true;
-                  setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: parsed.text, createdAt: new Date().toISOString() }]);
-                } else {
-                  setMessages((prev) => prev.map((m) =>
-                    m.id === assistantMsgId ? { ...m, content: m.content + parsed.text } : m,
-                  ));
-                }
-              } else if (currentEvent === 'error') {
-                throw new Error(parsed.message);
-              }
-            } catch (e: any) {
-              if (e?.message && currentEvent === 'error') throw e;
-            }
-          }
+      // Reveal in chunks of ~3-5 words at a time
+      const words = fullText.split(/(\s+)/);
+      let revealed = '';
+      let i = 0;
+      const chunkSize = 6; // ~3 words + spaces
+      const revealInterval = setInterval(() => {
+        if (i >= words.length) {
+          clearInterval(revealInterval);
+          return;
         }
-      }
+        const chunk = words.slice(i, i + chunkSize).join('');
+        revealed += chunk;
+        i += chunkSize;
+        setMessages((prev) => prev.map((m) =>
+          m.id === assistantMsgId ? { ...m, content: revealed } : m,
+        ));
+      }, 30);
+
+      return; // Don't hit the finally block's setSending(false)
     } catch (err: any) {
       const raw = err.message || 'Something went wrong';
       let friendly = raw;
-      if (raw.includes('authentication_error') || raw.includes('invalid') || raw.includes('401')) {
+      if (raw.includes('CLAUDE_AUTH_ERROR') || raw.includes('authentication_error') || raw.includes('401')) {
         friendly = 'Your API key is invalid. Go to Settings and reconnect with a valid key.';
-      } else if (raw.includes('not_found_error') || raw.includes('MODEL_NOT_FOUND')) {
+      } else if (raw.includes('CLAUDE_MODEL_NOT_FOUND') || raw.includes('not_found_error')) {
         const label = AI_MODELS.find(m => m.id === selectedModel)?.label || selectedModel;
         friendly = `${label} is not available on your account. Try Haiku 4.5 or add credits at console.anthropic.com.`;
-      } else if (raw.includes('credit') || raw.includes('billing')) {
+      } else if (raw.includes('CLAUDE_NO_CREDITS') || raw.includes('billing')) {
         friendly = 'Out of API credits. Add more at console.anthropic.com.';
-      } else if (raw.includes('rate_limit') || raw.includes('429')) {
+      } else if (raw.includes('CLAUDE_RATE_LIMIT') || raw.includes('429')) {
         friendly = 'Too many requests. Wait a moment and try again.';
       } else if (raw.includes('No Claude API key')) {
         friendly = 'No API key configured. Go to Settings to connect your key.';
-      } else if (raw.includes('network') || raw.includes('fetch')) {
-        friendly = 'Network error. Check your connection and try again.';
       }
-      if (!assistantMsgCreated) {
-        setMessages((prev) => [
-          ...prev,
-          { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
-        ]);
-      }
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
+      ]);
     } finally {
       setSending(false);
     }
