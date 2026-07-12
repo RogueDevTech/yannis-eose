@@ -332,110 +332,51 @@ function ChatDrawer({ user, onClose }: {
     // Optimistic user message
     setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: msg, createdAt: new Date().toISOString() }]);
 
-    // Placeholder ID — we don't add the bubble until text arrives
-    const assistantMsgId = `resp-${Date.now()}`;
-    let assistantMsgCreated = false;
-
     try {
-      const base = getBrowserApiBaseUrl();
-      const res = await fetch(`${base}/api/ai-chat/stream`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: activeSessionId ?? undefined,
-          message: msg,
-          model: selectedModel,
-          currentPage: window.location.pathname,
-        }),
+      const result = await trpcMutate<{
+        sessionId: string;
+        assistantMessage: string;
+        sessionTitle?: string;
+      }>('sendMessage', {
+        sessionId: activeSessionId ?? undefined,
+        message: msg,
+        model: selectedModel,
+        currentPage: window.location.pathname,
       });
 
-      if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        throw new Error(json?.error?.message || json?.message || `Request failed (${res.status})`);
+      // Set session if new
+      if (!activeSessionId) {
+        setActiveSessionId(result.sessionId);
+        setSessions((prev) => [
+          { id: result.sessionId, title: result.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          ...prev,
+        ]);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        let currentEvent = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-
-              if (currentEvent === 'session') {
-                if (!activeSessionId && parsed.sessionId) {
-                  setActiveSessionId(parsed.sessionId);
-                  setSessions((prev) => [
-                    { id: parsed.sessionId, title: parsed.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                    ...prev,
-                  ]);
-                }
-              } else if (currentEvent === 'text') {
-                if (!assistantMsgCreated) {
-                  // Create the assistant message bubble on first text chunk
-                  assistantMsgCreated = true;
-                  setStreamStatus(null);
-                  setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: parsed.text, createdAt: new Date().toISOString() }]);
-                } else {
-                  setMessages((prev) => prev.map((m) =>
-                    m.id === assistantMsgId ? { ...m, content: m.content + parsed.text } : m,
-                  ));
-                }
-              } else if (currentEvent === 'status') {
-                setStreamStatus(parsed.message);
-              } else if (currentEvent === 'error') {
-                throw new Error(parsed.message);
-              }
-            } catch (e) {
-              if (currentEvent === 'error') throw e;
-            }
-            currentEvent = '';
-          }
-        }
-      }
-
-      // Remove empty assistant message if nothing was streamed
-      setMessages((prev) => {
-        const msg = prev.find((m) => m.id === assistantMsgId);
-        if (msg && !msg.content) return prev.filter((m) => m.id !== assistantMsgId);
-        return prev;
-      });
+      // Add assistant response
+      setMessages((prev) => [
+        ...prev,
+        { id: `resp-${Date.now()}`, role: 'assistant', content: result.assistantMessage, createdAt: new Date().toISOString() },
+      ]);
     } catch (err: any) {
       const raw = err.message || 'Failed to send message';
       let friendly = raw;
-      if (raw.includes('authentication_error') || raw.includes('invalid') || raw.includes('401')) {
+      if (raw.includes('CLAUDE_AUTH_ERROR') || raw.includes('authentication_error') || raw.includes('401')) {
         friendly = 'Your API key is invalid. Go to Settings and reconnect with a valid key.';
-      } else if (raw.includes('not_found_error') || raw.includes('model')) {
-        friendly = `Model not available. Try switching to a different model in Settings, or add credits at console.anthropic.com.`;
-      } else if (raw.includes('rate_limit') || raw.includes('429')) {
+      } else if (raw.includes('CLAUDE_MODEL_NOT_FOUND') || raw.includes('not_found_error')) {
+        const label = AI_MODELS.find(m => m.id === selectedModel)?.label || selectedModel;
+        friendly = `${label} is not available on your account. Try switching to Haiku 4.5 in Settings, or add credits at console.anthropic.com.`;
+      } else if (raw.includes('CLAUDE_NO_CREDITS') || raw.includes('billing')) {
+        friendly = 'Your Anthropic account has run out of credits. Add more at console.anthropic.com.';
+      } else if (raw.includes('CLAUDE_RATE_LIMIT') || raw.includes('429')) {
         friendly = 'Too many requests. Please wait a moment and try again.';
       } else if (raw.includes('No Claude API key')) {
         friendly = 'No API key configured. Go to Settings to connect your key.';
       }
-      // Replace empty placeholder with error, or add error message
-      setMessages((prev) => {
-        const existing = prev.find((m) => m.id === assistantMsgId);
-        if (existing && !existing.content) {
-          return prev.map((m) => m.id === assistantMsgId ? { ...m, content: friendly } : m);
-        }
-        return [...prev.filter((m) => m.id !== assistantMsgId || m.content), { id: `err-${Date.now()}`, role: 'assistant' as const, content: friendly, createdAt: new Date().toISOString() }];
-      });
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
+      ]);
     } finally {
       setSending(false);
       setStreamStatus(null);
