@@ -23,6 +23,31 @@ type TrpcEnvelope<T> = { result?: { data?: T }; error?: { message?: string } };
 
 type DrawerView = 'chat' | 'sessions' | 'settings';
 
+const AI_MODELS = [
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', description: 'Fastest, cheapest' },
+  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', description: 'Balanced, recommended' },
+  { id: 'claude-opus-4-20250514', label: 'Opus 4', description: 'Most capable' },
+] as const;
+
+const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+
+const VALID_MODEL_IDS = new Set(AI_MODELS.map((m) => m.id));
+
+function getStoredModel(): string {
+  if (typeof window === 'undefined') return DEFAULT_MODEL;
+  const stored = localStorage.getItem('yannis_ai_model');
+  // Reset if stored model is deprecated/invalid
+  if (stored && !VALID_MODEL_IDS.has(stored)) {
+    localStorage.removeItem('yannis_ai_model');
+    return DEFAULT_MODEL;
+  }
+  return stored || DEFAULT_MODEL;
+}
+
+function setStoredModel(model: string) {
+  if (typeof window !== 'undefined') localStorage.setItem('yannis_ai_model', model);
+}
+
 // ─── API Helpers ─────────────────────────────────────────────────────
 
 async function trpcQuery<T>(procedure: string, input?: Record<string, unknown>): Promise<T | null> {
@@ -63,8 +88,6 @@ export function hasAiAssistantAccess(user: { role: string; permissions?: string[
   if (!user) return false;
   // SSR: never render (uses createPortal → document.body)
   if (typeof window === 'undefined') return false;
-  // Dev flag: hidden unless ENABLE_AI_ASSISTANT=true in env
-  if (!window.__ENV?.ENABLE_AI_ASSISTANT) return false;
   if (['SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(user.role)) return true;
   return (user.permissions ?? []).map(canonicalPermissionCode).includes('ai.assistant.access');
 }
@@ -233,26 +256,26 @@ function ChatDrawer({ user, onClose }: {
   onClose: () => void;
 }) {
   const [view, setView] = useState<DrawerView>('chat');
+  const [expanded, setExpanded] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mounted, setMounted] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
+  const [selectedModel, setSelectedModel] = useState(getStoredModel);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Check if any API key is configured on mount
+  // Check if API key is configured on mount (single call)
   useEffect(() => {
-    Promise.all([
-      trpcQuery<{ exists: boolean }>('personalApiKeyExists'),
-      trpcQuery<{ exists: boolean }>('orgApiKeyExists'),
-    ]).then(([personal, org]) => {
-      const connected = personal?.exists || org?.exists || false;
+    trpcQuery<{ exists: boolean }>('personalApiKeyExists').then((data) => {
+      const connected = data?.exists || false;
       setHasApiKey(connected);
       if (!connected) setView('settings');
     });
@@ -272,9 +295,11 @@ function ChatDrawer({ user, onClose }: {
       setMessages([]);
       return;
     }
+    setMessages([]);
+    setLoadingMessages(true);
     trpcQuery<ChatMessage[]>('getSessionMessages', { sessionId: activeSessionId }).then((data) => {
       if (data) setMessages(data);
-    });
+    }).finally(() => setLoadingMessages(false));
   }, [activeSessionId]);
 
   // Auto-scroll
@@ -307,6 +332,7 @@ function ChatDrawer({ user, onClose }: {
       }>('sendMessage', {
         sessionId: activeSessionId ?? undefined,
         message: msg,
+        model: selectedModel,
       });
 
       // Set session if new
@@ -324,7 +350,29 @@ function ChatDrawer({ user, onClose }: {
         { id: `resp-${Date.now()}`, role: 'assistant', content: result.assistantMessage, createdAt: new Date().toISOString() },
       ]);
     } catch (err: any) {
-      setError(err.message || 'Failed to send message');
+      const raw = err.message || 'Failed to send message';
+      let friendly = raw;
+      if (raw.includes('CLAUDE_AUTH_ERROR') || raw.includes('authentication_error') || raw.includes('invalid x-api-key') || raw.includes('401')) {
+        friendly = 'Your API key is invalid or has been revoked. Go to Settings and reconnect with a valid key from console.anthropic.com.';
+      } else if (raw.includes('CLAUDE_MODEL_NOT_FOUND') || (raw.includes('not_found_error') && raw.includes('model'))) {
+        const label = AI_MODELS.find(m => m.id === selectedModel)?.label || selectedModel;
+        friendly = `Your API key does not have access to ${label}. This usually means your Anthropic account needs more credits. Try switching to Haiku (cheapest) in Settings, or add credits at console.anthropic.com.`;
+      } else if (raw.includes('CLAUDE_NO_CREDITS') || raw.includes('insufficient') || raw.includes('billing')) {
+        friendly = 'Your Anthropic account has run out of credits. Add more at console.anthropic.com under Billing.';
+      } else if (raw.includes('CLAUDE_RATE_LIMIT') || raw.includes('rate_limit') || raw.includes('429')) {
+        friendly = 'Too many requests. Please wait a moment and try again.';
+      } else if (raw.includes('CLAUDE_INVALID_REQUEST')) {
+        friendly = 'The request was rejected by Claude. Try shortening your message or starting a new conversation.';
+      } else if (raw.includes('Rate limit exceeded')) {
+        friendly = raw;
+      } else if (raw.includes('No Claude API key configured')) {
+        friendly = 'No API key configured. Go to Settings to connect your Anthropic API key.';
+      }
+      // Show error as an assistant message instead of the red error banner
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
+      ]);
     } finally {
       setSending(false);
     }
@@ -359,11 +407,15 @@ function ChatDrawer({ user, onClose }: {
 
   const drawer = (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-[85] bg-black/30 md:bg-transparent" onClick={onClose} aria-hidden />
+      {/* Backdrop — no click-to-close so the drawer stays open while navigating */}
+
+      {/* Backdrop when expanded on desktop */}
+      {expanded && (
+        <div className="hidden md:block fixed inset-0 z-[85] bg-black/90 backdrop-blur-md" onClick={() => setExpanded(false)} />
+      )}
 
       {/* Drawer panel */}
-      <div className="fixed z-[86] inset-0 md:inset-auto md:right-4 md:bottom-4 md:top-auto md:left-auto md:w-[420px] md:h-[600px] md:max-h-[80vh] md:rounded-xl bg-app-elevated border border-app-border shadow-2xl flex flex-col overflow-hidden">
+      <div className={`fixed z-[86] inset-0 bg-app-elevated flex flex-col overflow-hidden ${expanded ? 'md:inset-4 md:mx-auto md:max-w-4xl md:rounded-xl border border-app-border shadow-2xl' : 'md:inset-auto md:right-4 md:bottom-4 md:top-auto md:left-auto md:w-[420px] md:h-[600px] md:max-h-[80vh] md:rounded-xl border border-app-border shadow-2xl'}`}>
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2.5 border-b border-app-border bg-app-elevated shrink-0">
           <button type="button" onClick={() => setView('sessions')} className="p-1.5 rounded-md hover:bg-app-hover text-app-fg-muted" title="Chat history">
@@ -383,6 +435,15 @@ function ChatDrawer({ user, onClose }: {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+          <button type="button" onClick={() => setExpanded(e => !e)} className="hidden md:block p-1.5 rounded-md hover:bg-app-hover text-app-fg-muted" title={expanded ? 'Collapse' : 'Expand'}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              {expanded ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M15 9h4.5M15 9V4.5M15 9l5.25-5.25M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              )}
             </svg>
           </button>
           <button type="button" onClick={onClose} className="ml-1 p-1.5 rounded-md hover:bg-danger-100 dark:hover:bg-danger-900/30 text-app-fg-muted hover:text-danger-600" title="Close">
@@ -409,12 +470,19 @@ function ChatDrawer({ user, onClose }: {
             onNewChat={handleNewChat}
           />
         ) : view === 'settings' ? (
-          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} />
+          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} initialKeyExists={hasApiKey === true} selectedModel={selectedModel} onModelChange={(m) => { setSelectedModel(m); setStoredModel(m); }} />
         ) : (
           <>
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-              {messages.length === 0 && !sending && (
+            <div className={`flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
+              <div className={`space-y-3 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
+              {loadingMessages && (
+                <div className="flex flex-col items-center justify-center h-full">
+                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs text-app-fg-muted mt-2">Loading messages...</p>
+                </div>
+              )}
+              {messages.length === 0 && !sending && !loadingMessages && (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4">
                   <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
                     <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -465,11 +533,12 @@ function ChatDrawer({ user, onClose }: {
               )}
 
               <div ref={messagesEndRef} />
+              </div>
             </div>
 
             {/* Input area */}
-            <div className="shrink-0 border-t border-app-border px-3 py-2 bg-app-elevated">
-              <div className="flex items-end gap-2">
+            <div className={`shrink-0 border-t border-app-border px-3 py-2 bg-app-elevated ${expanded ? 'md:px-6' : ''}`}>
+              <div className={`flex items-end gap-2 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -497,9 +566,14 @@ function ChatDrawer({ user, onClose }: {
                   </svg>
                 </button>
               </div>
-              <p className="text-[10px] text-app-fg-muted mt-1 text-right">
-                {input.length}/4000
-              </p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-[10px] text-app-fg-muted">
+                  {AI_MODELS.find((m) => m.id === selectedModel)?.label || 'Haiku 3.5'}
+                </p>
+                <p className="text-[10px] text-app-fg-muted">
+                  {input.length}/4000
+                </p>
+              </div>
             </div>
           </>
         )}
@@ -519,6 +593,7 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
   onDelete: (sessionId: string) => void;
   onNewChat: () => void;
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const fmt = new Intl.DateTimeFormat('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return (
@@ -552,15 +627,34 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
               {fmt.format(new Date(session.updatedAt))}
             </p>
           </div>
+          {confirmDeleteId === session.id ? (
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => { onDelete(session.id); setConfirmDeleteId(null); }}
+                className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-danger-600 text-white hover:bg-danger-700"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteId(null)}
+                className="px-1.5 py-0.5 rounded text-[10px] font-medium text-app-fg-muted hover:bg-app-hover"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onDelete(session.id); }}
+            onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(session.id); }}
             className="p-1 rounded hover:bg-danger-100 dark:hover:bg-danger-900/30 text-app-fg-muted hover:text-danger-600"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
             </svg>
           </button>
+          )}
         </div>
       ))}
     </div>
@@ -569,60 +663,27 @@ function SessionsList({ sessions, activeSessionId, onSelect, onDelete, onNewChat
 
 // ─── API Key Settings ────────────────────────────────────────────────
 
-function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup }: {
+function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup, initialKeyExists, selectedModel, onModelChange }: {
   user: { id: string; role: string; permissions?: string[] };
   onBack: () => void;
   onKeyConnected?: () => void;
-  /** True when opened because no API key exists yet */
   isFirstSetup?: boolean;
+  initialKeyExists?: boolean;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
 }) {
-  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user.role);
-  const [orgKeyExists, setOrgKeyExists] = useState<boolean | null>(null);
-  const [personalKeyExists, setPersonalKeyExists] = useState<boolean | null>(null);
-  const [orgKeyInput, setOrgKeyInput] = useState('');
+  const [personalKeyExists, setPersonalKeyExists] = useState<boolean | null>(initialKeyExists ?? null);
   const [personalKeyInput, setPersonalKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Only fetch if parent didn't provide initial state
   useEffect(() => {
-    trpcQuery<{ exists: boolean }>('orgApiKeyExists').then((data) => {
-      if (data) setOrgKeyExists(data.exists);
-    });
+    if (initialKeyExists !== undefined) return;
     trpcQuery<{ exists: boolean }>('personalApiKeyExists').then((data) => {
       if (data) setPersonalKeyExists(data.exists);
     });
   }, []);
-
-  const handleSaveOrgKey = async () => {
-    if (!orgKeyInput.trim()) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await trpcMutate('saveOrgApiKey', { apiKey: orgKeyInput.trim() });
-      setOrgKeyExists(true);
-      setOrgKeyInput('');
-      setMessage({ type: 'success', text: 'Organization API key saved' });
-      onKeyConnected?.();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to save key' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteOrgKey = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      await trpcMutate('deleteOrgApiKey', {});
-      setOrgKeyExists(false);
-      setMessage({ type: 'success', text: 'Organization API key removed' });
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to remove key' });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleSavePersonalKey = async () => {
     if (!personalKeyInput.trim()) return;
@@ -721,6 +782,38 @@ function ApiKeySettings({ user, onBack, onKeyConnected, isFirstSetup }: {
           </>
         )}
       </div>
+
+      {/* Model selector */}
+      {personalKeyExists && (
+        <div className="space-y-2 pt-2 border-t border-app-border">
+          <h3 className="text-sm font-medium text-app-fg">Model</h3>
+          <div className="space-y-1.5">
+            {AI_MODELS.map((m) => (
+              <label
+                key={m.id}
+                className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                  selectedModel === m.id
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-app-border hover:bg-app-hover'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="ai-model"
+                  value={m.id}
+                  checked={selectedModel === m.id}
+                  onChange={() => onModelChange(m.id)}
+                  className="accent-blue-600"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-app-fg">{m.label}</p>
+                  <p className="text-[10px] text-app-fg-muted">{m.description}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* How to get a key */}
       {!personalKeyExists && (
