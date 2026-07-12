@@ -1,4 +1,4 @@
-import { Controller, Post, Req, Res, Body, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Req, Res, Body, ForbiddenException, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
 import { AiAssistantService } from './ai-assistant.service';
@@ -8,12 +8,10 @@ const ADMIN_BYPASS_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT']);
 
 @Controller('api/ai-chat')
 export class AiAssistantController {
+  private readonly logger = new Logger(AiAssistantController.name);
+
   constructor(private readonly aiAssistantService: AiAssistantService) {}
 
-  /**
-   * Streaming chat endpoint using Server-Sent Events.
-   * Bypasses tRPC because tRPC mutations don't support SSE.
-   */
   @Post('stream')
   async stream(
     @CurrentUser() user: SessionUser,
@@ -29,26 +27,37 @@ export class AiAssistantController {
       }
     }
 
-    // Validate input
     const message = body.message?.trim();
     if (!message || message.length > 4000) {
       res.status(400).json({ error: 'Message is required (max 4000 characters)' });
       return;
     }
 
-    // Set SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    // SSE headers — disable all buffering
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    res.setHeader('X-Accel-Buffering', 'no');
+    // Disable Express compression for this response
+    res.setHeader('Content-Encoding', 'identity');
     res.flushHeaders();
 
-    // Resolve branch context from session
     const branchId = user.currentBranchId ?? null;
     const effectiveBranchIds = (user as any).effectiveBranchIds ?? null;
     const activeGroupId = user.activeGroupId ?? null;
 
+    const sendSSE = (event: string, data: string) => {
+      if (req.destroyed || res.writableEnded) return;
+      res.write(`event: ${event}\ndata: ${data}\n\n`);
+      // Force flush — some Node.js setups buffer small writes
+      if (typeof (res as any).flush === 'function') {
+        (res as any).flush();
+      }
+    };
+
     try {
+      this.logger.log(`[stream] Starting for user=${user.id} model=${body.model}`);
+
       await this.aiAssistantService.sendMessageStreaming({
         sessionId: body.sessionId,
         userId: user.id,
@@ -59,28 +68,20 @@ export class AiAssistantController {
         branchId,
         effectiveBranchIds,
         activeGroupId,
-        onEvent: (event: string, data: string) => {
-          if (req.destroyed) return;
-          res.write(`event: ${event}\ndata: ${data}\n\n`);
-        },
+        onEvent: sendSSE,
       });
 
-      // Signal completion
-      if (!req.destroyed) {
-        res.write('event: done\ndata: {}\n\n');
-        res.end();
-      }
+      sendSSE('done', '{}');
+      this.logger.log(`[stream] Completed for user=${user.id}`);
     } catch (err: any) {
-      if (!req.destroyed) {
-        const errorMsg = err.message || 'An error occurred';
-        res.write(`event: error\ndata: ${JSON.stringify({ message: errorMsg })}\n\n`);
-        res.end();
-      }
+      this.logger.error(`[stream] Error: ${err.message}`);
+      sendSSE('error', JSON.stringify({ message: err.message || 'An error occurred' }));
+    } finally {
+      if (!res.writableEnded) res.end();
     }
 
-    // Client disconnect cleanup
     req.on('close', () => {
-      res.end();
+      if (!res.writableEnded) res.end();
     });
   }
 }

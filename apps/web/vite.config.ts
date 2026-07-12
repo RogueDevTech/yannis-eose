@@ -55,6 +55,15 @@ export default defineConfig({
       '/api/ai-chat': {
         target: DEV_API_TARGET,
         changeOrigin: true,
+        // Disable proxy buffering for SSE streaming
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              // Prevent http-proxy from buffering the SSE stream
+              proxyRes.headers['cache-control'] = 'no-cache';
+            }
+          });
+        },
       },
     },
   },
