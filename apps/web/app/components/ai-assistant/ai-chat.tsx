@@ -282,11 +282,16 @@ function ChatDrawer({ user, onClose }: {
     });
   }, []);
 
-  // Load sessions on mount (only if we have a key)
+  // Load sessions on mount (only if we have a key) and auto-select the most recent
   useEffect(() => {
     if (hasApiKey !== true) return;
     trpcQuery<ChatSession[]>('listSessions', { limit: 30, offset: 0 }).then((data) => {
-      if (data) setSessions(data);
+      if (data) {
+        setSessions(data);
+        if (data.length > 0 && !activeSessionId) {
+          setActiveSessionId(data[0].id);
+        }
+      }
     });
   }, [hasApiKey]);
 
