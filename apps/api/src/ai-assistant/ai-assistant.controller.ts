@@ -30,7 +30,7 @@ export class AiAssistantController {
   @Post('stream')
   async stream(
     @CurrentUser() user: SessionUser,
-    @Body() body: { sessionId?: string; message: string; model?: string; currentPage?: string },
+    @Body() body: { sessionId?: string; message: string; model?: string; currentPage?: string; currentFilters?: string },
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -85,6 +85,7 @@ export class AiAssistantController {
         userMessage: message,
         model: body.model,
         currentPage: body.currentPage,
+        currentFilters: body.currentFilters,
         user: { id: user.id, role: user.role, permissions: user.permissions },
         branchId,
         effectiveBranchIds,

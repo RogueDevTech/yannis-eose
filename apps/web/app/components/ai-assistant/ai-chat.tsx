@@ -266,7 +266,9 @@ function ChatDrawer({ user, onClose }: {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mounted, setMounted] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
@@ -309,10 +311,31 @@ function ChatDrawer({ user, onClose }: {
     }).finally(() => setLoadingMessages(false));
   }, [activeSessionId]);
 
-  // Auto-scroll
+  // Auto-scroll when new messages arrive (only if already near bottom)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
+
+  // Track scroll position to show/hide scroll-down button
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollDown(distanceFromBottom > 150);
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [view]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   // Focus input
   useEffect(() => {
@@ -342,6 +365,7 @@ function ChatDrawer({ user, onClose }: {
         message: msg,
         model: selectedModel,
         currentPage: window.location.pathname,
+        currentFilters: window.location.search || undefined,
       });
 
       // Set session if new
@@ -498,7 +522,7 @@ function ChatDrawer({ user, onClose }: {
         ) : (
           <>
             {/* Messages area */}
-            <div className={`flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
+            <div ref={messagesContainerRef} className={`relative flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
               <div className={`space-y-3 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
               {(loadingMessages || (!sessionsLoaded && hasApiKey === true)) && (
                 <div className="flex flex-col items-center justify-center h-full">
@@ -581,6 +605,20 @@ function ChatDrawer({ user, onClose }: {
 
               <div ref={messagesEndRef} />
               </div>
+
+              {/* Scroll to bottom button */}
+              {showScrollDown && (
+                <button
+                  type="button"
+                  onClick={scrollToBottom}
+                  className="sticky bottom-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full bg-app-elevated border border-app-border shadow-md flex items-center justify-center text-app-fg-muted hover:text-app-fg transition-colors z-10"
+                  title="Scroll to bottom"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" />
+                  </svg>
+                </button>
+              )}
             </div>
 
             {/* Input area */}

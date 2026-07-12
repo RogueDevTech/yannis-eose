@@ -109,6 +109,33 @@ function getPageContextFromPath(path: string): string {
   return `The user is viewing: /${segments.join('/')}`;
 }
 
+/** Parse URL search params into human-readable filter context for the AI */
+function parseFiltersForContext(search: string): string {
+  try {
+    const params = new URLSearchParams(search);
+    const filters: string[] = [];
+    // Map common param names to friendly labels
+    const labelMap: Record<string, string> = {
+      startDate: 'Start date', endDate: 'End date',
+      branchId: 'Branch', status: 'Status',
+      mediaBuyerId: 'Media buyer', closerId: 'CS closer',
+      productId: 'Product', locationId: 'Location',
+      teamId: 'Team', search: 'Search query',
+      tab: 'Active tab', page: 'Page number',
+      periodAllTime: 'Period', providerId: 'Provider',
+      shipmentId: 'Shipment', companyId: 'Company',
+    };
+    for (const [key, value] of params.entries()) {
+      if (!value || key === 'page' || key === 'perPage') continue; // skip pagination noise
+      const label = labelMap[key] || key;
+      filters.push(`${label}: ${value}`);
+    }
+    return filters.length > 0 ? filters.join(', ') : 'No active filters (default view)';
+  } catch {
+    return search;
+  }
+}
+
 // ─── Rate Limiting (in-memory, per-process) ──────────────────────────
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -384,6 +411,7 @@ export class AiAssistantService {
     userMessage: string;
     model?: string;
     currentPage?: string;
+    currentFilters?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
@@ -394,7 +422,7 @@ export class AiAssistantService {
     assistantMessage: string;
     sessionTitle?: string;
   }> {
-    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
+    const { userId, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
 
     // Rate limit
     if (!checkRateLimit(userId)) {
@@ -456,7 +484,7 @@ export class AiAssistantService {
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
     let assistantMessage: string;
     try {
-      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage);
+      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage, currentFilters);
     } catch (err: any) {
       const status = err?.status ?? err?.statusCode;
       const errType = err?.error?.error?.type ?? err?.type ?? '';
@@ -511,13 +539,14 @@ export class AiAssistantService {
     userMessage: string;
     model?: string;
     currentPage?: string;
+    currentFilters?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
     activeGroupId: string | null;
     onEvent: (event: string, data: string) => void;
   }): Promise<void> {
-    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
+    const { userId, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
 
     if (!checkRateLimit(userId)) {
       throw new Error('Rate limit exceeded. Please wait a few minutes before sending more messages.');
@@ -569,6 +598,10 @@ export class AiAssistantService {
     let systemPrompt = SYSTEM_PROMPT;
     if (currentPage) {
       systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+      if (currentFilters) {
+        systemPrompt += `\n\nActive filters/parameters on this page: ${parseFiltersForContext(currentFilters)}`;
+        systemPrompt += `\nWhen the user says "this page", "what I'm looking at", or "analyze this", use these filters to scope your tool calls to match what they see on screen.`;
+      }
     }
 
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
@@ -664,6 +697,7 @@ export class AiAssistantService {
     services: ToolExecutorServices,
     model?: string,
     currentPage?: string,
+    currentFilters?: string,
   ): Promise<string> {
     // Dynamic import to avoid loading SDK when not needed
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -677,6 +711,10 @@ export class AiAssistantService {
     let systemPrompt = SYSTEM_PROMPT;
     if (currentPage) {
       systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+      if (currentFilters) {
+        systemPrompt += `\n\nActive filters/parameters on this page: ${parseFiltersForContext(currentFilters)}`;
+        systemPrompt += `\nWhen the user says "this page", "what I'm looking at", or "analyze this", use these filters to scope your tool calls to match what they see on screen.`;
+      }
     }
 
     for (let round = 0; round < maxToolRounds; round++) {
