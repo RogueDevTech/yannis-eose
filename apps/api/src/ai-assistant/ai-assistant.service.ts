@@ -26,6 +26,22 @@ const SYSTEM_PROMPT = `You are the Yannis EOSE AI Assistant, a helpful tool buil
 UNPROCESSED > CS_ASSIGNED > CS_ENGAGED > CONFIRMED > AGENT_ASSIGNED > DISPATCHED > IN_TRANSIT > DELIVERED > REMITTED
 No state skipping. DELETED replaces the old CANCELLED status.
 
+## Key Metrics and Formulas
+When the user asks about rates, percentages, or metrics, use these exact formulas:
+
+- **CR (Confirmation Rate)** = orders at CONFIRMED or beyond (CONFIRMED + AGENT_ASSIGNED + DISPATCHED + IN_TRANSIT + DELIVERED + REMITTED) / total orders (excluding DELETED). This measures how many orders the Sales team successfully confirms.
+- **DR (Delivery Rate)** = orders at DELIVERED or REMITTED / orders at CONFIRMED or beyond. This measures how many confirmed orders actually get delivered.
+- **CPA (Cost Per Acquisition)** = total ad spend / number of delivered orders. Lower is better. This tells you how much marketing spend it costs to get one delivered order.
+- **ROAS (Return on Ad Spend)** = delivered revenue / total ad spend. Higher is better. A ROAS of 2x means every 1 spent on ads generates 2 in revenue.
+- **True Profit** = revenue - (landed cost + delivery fees + ad spend + commission + fulfillment cost + operational losses). This is the real bottom line after ALL costs.
+- **Margin** = true profit / revenue * 100. Above 20% is healthy (green), 0-20% is cautious (yellow), below 0% is a loss (red).
+
+When explaining a metric, always:
+1. Use the tool to fetch the actual current numbers
+2. Show the calculation with real values (e.g. "190 confirmed / 500 total = 38% CR")
+3. Explain what is driving the number up or down
+4. Suggest what could improve it if the user asks
+
 ## Key Roles
 - SUPER_ADMIN / ADMIN: Full access
 - SUPPORT: Read-only admin access
@@ -44,6 +60,49 @@ No state skipping. DELETED replaces the old CANCELLED status.
 - Never mention internal implementation details, tool names, or system architecture.
 - If the user asks something you can't answer with the available tools, say so and suggest what they could check manually.
 - If a tool returns an error saying the user lacks permission, explain that they don't have access to that specific data and suggest they contact their admin.`;
+
+// ─── Page Context Map ────────────────────────────────────────────────
+// Maps known routes to descriptions so the AI understands what the user is looking at.
+
+const PAGE_CONTEXT_MAP: Record<string, string> = {
+  '/admin': 'This is the Admin Dashboard showing key business metrics: order pipeline, revenue, ROAS, delivery stats, and team performance.',
+  '/admin/ceo': 'This is the CEO Executive Overview with full financial metrics, branch breakdowns, and performance charts.',
+  '/admin/marketing/overview': 'This is the Marketing Live Activities page showing real-time media buyer activity, ad spend, and campaign performance.',
+  '/admin/marketing/team': 'This is the Marketing Team Analysis page with per-media-buyer performance breakdowns.',
+  '/admin/marketing/orders': 'This is the Marketing Orders page showing orders attributed to marketing campaigns.',
+  '/admin/marketing/expenses': 'This is the Ad Spend / Expenses page where media buyers log daily advertising costs.',
+  '/admin/marketing/funding': 'This is the Marketing Funding page for managing budget requests and approvals.',
+  '/admin/marketing/forms': 'This is the Marketing Forms page for managing lead capture forms and campaigns.',
+  '/admin/sales/orders': 'This is the Sales Orders page showing the CS team order pipeline (assignment, engagement, confirmation).',
+  '/admin/sales/follow-up': 'This is the Follow-Up Orders page for managing cart recovery and re-engagement campaigns.',
+  '/admin/inventory': 'This is the Inventory page showing stock levels per product and location.',
+  '/admin/inventory/shipments': 'This is the Inbound Shipments page for receiving new stock.',
+  '/admin/inventory/transfers': 'This is the Stock Transfers page for moving inventory between locations.',
+  '/admin/logistics': 'This is the Logistics page showing delivery partners, riders, and fulfillment tracking.',
+  '/admin/finance': 'This is the Finance Overview page with revenue, costs, profit margins, and cash remittance status.',
+  '/admin/finance/disbursements': 'This is the Disbursements page for managing payouts to staff and partners.',
+  '/admin/hr': 'This is the HR page for staff management, payroll, and onboarding.',
+  '/admin/settings': 'This is the Settings page for system configuration, notifications, and user preferences.',
+};
+
+function getPageContextFromPath(path: string): string {
+  // Try to extract meaningful context from unknown paths
+  const segments = path.split('/').filter(Boolean);
+  if (segments.length <= 1) return 'The user is on the main dashboard.';
+
+  const section = segments[1] || '';
+  const subsection = segments[2] || '';
+
+  if (section === 'marketing') return `The user is in the Marketing section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'sales') return `The user is in the Sales section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'inventory') return `The user is in the Inventory section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'logistics') return `The user is in the Logistics section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'finance') return `The user is in the Finance section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'hr') return `The user is in the HR section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'orders') return `The user is viewing an order detail page.`;
+
+  return `The user is viewing: /${segments.join('/')}`;
+}
 
 // ─── Rate Limiting (in-memory, per-process) ──────────────────────────
 
@@ -68,10 +127,21 @@ function checkRateLimit(userId: string): boolean {
 @Injectable()
 export class AiAssistantService {
   private readonly logger = new Logger(AiAssistantService.name);
+  private toolServices: ToolExecutorServices | null = null;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
+
+  /** Called from trpc.module.ts to inject tool services for the streaming endpoint. */
+  setToolServices(services: ToolExecutorServices) {
+    this.toolServices = services;
+  }
+
+  private getToolServices(): ToolExecutorServices {
+    if (!this.toolServices) throw new Error('Tool services not initialized');
+    return this.toolServices;
+  }
 
   // ── Session CRUD ─────────────────────────────────────
 
@@ -308,6 +378,7 @@ export class AiAssistantService {
     userId: string;
     userMessage: string;
     model?: string;
+    currentPage?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
@@ -318,7 +389,7 @@ export class AiAssistantService {
     assistantMessage: string;
     sessionTitle?: string;
   }> {
-    const { userId, userMessage, model, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
+    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
 
     // Rate limit
     if (!checkRateLimit(userId)) {
@@ -380,7 +451,7 @@ export class AiAssistantService {
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
     let assistantMessage: string;
     try {
-      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model);
+      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage);
     } catch (err: any) {
       const status = err?.status ?? err?.statusCode;
       const errType = err?.error?.error?.type ?? err?.type ?? '';
@@ -427,12 +498,165 @@ export class AiAssistantService {
     return { sessionId, assistantMessage, sessionTitle };
   }
 
+  // ── Streaming Chat ───────────────────────────────────
+
+  async sendMessageStreaming(params: {
+    sessionId?: string;
+    userId: string;
+    userMessage: string;
+    model?: string;
+    currentPage?: string;
+    user: ToolExecutorUser;
+    branchId: string | null;
+    effectiveBranchIds: string[] | null;
+    activeGroupId: string | null;
+    onEvent: (event: string, data: string) => void;
+  }): Promise<void> {
+    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
+
+    if (!checkRateLimit(userId)) {
+      throw new Error('Rate limit exceeded. Please wait a few minutes before sending more messages.');
+    }
+
+    const apiKey = await this.resolveApiKey(userId, activeGroupId);
+    if (!apiKey) {
+      throw new Error('No Claude API key configured. Please add your API key in the AI Assistant settings.');
+    }
+
+    // Create or verify session
+    let sessionId = params.sessionId;
+    if (!sessionId) {
+      const session = await this.createSession(userId);
+      sessionId = session.id;
+    } else {
+      const [session] = await this.db
+        .select({ id: schema.aiChatSessions.id })
+        .from(schema.aiChatSessions)
+        .where(and(eq(schema.aiChatSessions.id, sessionId), eq(schema.aiChatSessions.userId, userId)))
+        .limit(1);
+      if (!session) throw new Error('Session not found');
+    }
+
+    // Send session info
+    const sessionTitle = !params.sessionId
+      ? (userMessage.length > 60 ? userMessage.slice(0, 57) + '...' : userMessage)
+      : undefined;
+    onEvent('session', JSON.stringify({ sessionId, sessionTitle }));
+
+    // Persist user message
+    await this.db.insert(schema.aiChatMessages).values({ id: randomUUID(), sessionId, role: 'user', content: userMessage });
+
+    // Load history
+    const history = await this.db
+      .select({ role: schema.aiChatMessages.role, content: schema.aiChatMessages.content })
+      .from(schema.aiChatMessages)
+      .where(eq(schema.aiChatMessages.sessionId, sessionId))
+      .orderBy(asc(schema.aiChatMessages.createdAt))
+      .limit(50);
+
+    const messages = history.map((msg) => ({ role: msg.role as 'user' | 'assistant', content: msg.content }));
+
+    // Import SDK + build prompt
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey });
+    const resolvedModel = model || 'claude-haiku-4-5-20251001';
+
+    let systemPrompt = SYSTEM_PROMPT;
+    if (currentPage) {
+      systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+    }
+
+    const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
+    let currentMessages: any[] = [...messages];
+    const maxToolRounds = 5;
+    let fullResponse = '';
+
+    for (let round = 0; round < maxToolRounds; round++) {
+      const stream = client.messages.stream({
+        model: resolvedModel,
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: AI_TOOLS as any,
+        messages: currentMessages,
+      });
+
+      let hasToolUse = false;
+      const toolUseBlocks: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }> = [];
+      let currentToolBlock: { id: string; name: string; inputJson: string } | null = null;
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          const block = (event as any).content_block;
+          if (block?.type === 'text') {
+            // Text block starting
+          } else if (block?.type === 'tool_use') {
+            hasToolUse = true;
+            currentToolBlock = { id: block.id, name: block.name, inputJson: '' };
+            onEvent('status', JSON.stringify({ message: 'Querying your data...' }));
+          }
+        } else if (event.type === 'content_block_delta') {
+          const delta = (event as any).delta;
+          if (delta?.type === 'text_delta' && delta.text) {
+            fullResponse += delta.text;
+            onEvent('text', JSON.stringify({ text: delta.text }));
+          } else if (delta?.type === 'input_json_delta' && currentToolBlock) {
+            currentToolBlock.inputJson += delta.partial_json ?? '';
+          }
+        } else if (event.type === 'content_block_stop') {
+          if (currentToolBlock) {
+            let input: Record<string, unknown> = {};
+            try { input = JSON.parse(currentToolBlock.inputJson || '{}'); } catch {}
+            toolUseBlocks.push({
+              type: 'tool_use',
+              id: currentToolBlock.id,
+              name: currentToolBlock.name,
+              input,
+            });
+            currentToolBlock = null;
+          }
+        }
+      }
+
+      if (!hasToolUse) break;
+
+      // Execute tools
+      const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = [];
+      for (const tb of toolUseBlocks) {
+        const result = await executeTool(tb.name, tb.input, toolCtx, this.getToolServices());
+        toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
+      }
+
+      // Get the full response for the assistant message (including tool_use blocks)
+      const finalMessage = await stream.finalMessage();
+      currentMessages = [
+        ...currentMessages,
+        { role: 'assistant', content: finalMessage.content },
+        { role: 'user', content: toolResults },
+      ];
+
+      onEvent('status', JSON.stringify({ message: 'Generating response...' }));
+    }
+
+    // Persist assistant message
+    if (fullResponse) {
+      await this.db.insert(schema.aiChatMessages).values({ id: randomUUID(), sessionId, role: 'assistant', content: fullResponse });
+    }
+
+    // Update session
+    if (!params.sessionId && sessionTitle) {
+      await this.db.update(schema.aiChatSessions).set({ title: sessionTitle, updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+    } else {
+      await this.db.update(schema.aiChatSessions).set({ updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+    }
+  }
+
   private async callClaude(
     apiKey: string,
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
     toolCtx: ToolExecutorContext,
     services: ToolExecutorServices,
     model?: string,
+    currentPage?: string,
   ): Promise<string> {
     // Dynamic import to avoid loading SDK when not needed
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -442,11 +666,17 @@ export class AiAssistantService {
     let currentMessages: any[] = [...messages];
     const maxToolRounds = 5;
 
+    // Build system prompt with page context
+    let systemPrompt = SYSTEM_PROMPT;
+    if (currentPage) {
+      systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+    }
+
     for (let round = 0; round < maxToolRounds; round++) {
       const response = await client.messages.create({
         model: resolvedModel,
         max_tokens: 4096,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         tools: AI_TOOLS as any,
         messages: currentMessages,
       });

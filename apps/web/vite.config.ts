@@ -52,6 +52,10 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      '/api/ai-chat': {
+        target: DEV_API_TARGET,
+        changeOrigin: true,
+      },
     },
   },
 });
