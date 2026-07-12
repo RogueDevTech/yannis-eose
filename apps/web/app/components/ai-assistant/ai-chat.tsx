@@ -327,14 +327,14 @@ function ChatDrawer({ user, onClose }: {
     setInput('');
     setSending(true);
     setError(null);
-    setStreamStatus(null);
+    setStreamStatus('Thinking...');
 
     // Optimistic user message
     setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: msg, createdAt: new Date().toISOString() }]);
 
-    // Create a placeholder for the streaming assistant response
+    // Placeholder ID — we don't add the bubble until text arrives
     const assistantMsgId = `resp-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '', createdAt: new Date().toISOString() }]);
+    let assistantMsgCreated = false;
 
     try {
       const base = getBrowserApiBaseUrl();
@@ -387,9 +387,16 @@ function ChatDrawer({ user, onClose }: {
                   ]);
                 }
               } else if (currentEvent === 'text') {
-                setMessages((prev) => prev.map((m) =>
-                  m.id === assistantMsgId ? { ...m, content: m.content + parsed.text } : m,
-                ));
+                if (!assistantMsgCreated) {
+                  // Create the assistant message bubble on first text chunk
+                  assistantMsgCreated = true;
+                  setStreamStatus(null);
+                  setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: parsed.text, createdAt: new Date().toISOString() }]);
+                } else {
+                  setMessages((prev) => prev.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: m.content + parsed.text } : m,
+                  ));
+                }
               } else if (currentEvent === 'status') {
                 setStreamStatus(parsed.message);
               } else if (currentEvent === 'error') {
