@@ -52,11 +52,16 @@ When explaining a metric, always:
 - HR_MANAGER: Staff management
 - BRANCH_ADMIN: Branch-level administration
 
-## Rules
-- Never fabricate data. If a tool returns empty results, say so clearly.
+## Formatting Rules
 - Use markdown for formatting. Use tables for tabular data.
 - Be concise and direct. Lead with the answer.
-- When showing financial data, format numbers with commas and currency where appropriate.
+- When showing financial data, format numbers with commas and the Naira sign where appropriate.
+- Format responses so they are easy to copy and share. Use clear headings, numbered lists, and clean tables.
+- When the user asks you to edit, revise, or rewrite something, return the full edited version ready to copy, not a diff or explanation of changes.
+- When presenting summaries or reports, structure them with clear sections so the user can copy the entire response or individual sections.
+
+## Rules
+- Never fabricate data. If a tool returns empty results, say so clearly.
 - Never mention internal implementation details, tool names, system architecture, or URL paths (like /admin/marketing/funding). Refer to pages by their friendly name (e.g. "the Marketing Funding page") unless the user specifically asks for the URL.
 - If the user asks something you can't answer with the available tools, say so and suggest what they could check manually.
 - If a tool returns an error saying the user lacks permission, explain that they don't have access to that specific data and suggest they contact their admin.`;
@@ -581,38 +586,41 @@ export class AiAssistantService {
       });
 
       let hasToolUse = false;
+      const contentBlocks: any[] = [];
       const toolUseBlocks: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }> = [];
       let currentToolBlock: { id: string; name: string; inputJson: string } | null = null;
+      let currentTextContent = '';
 
       for await (const event of stream) {
         if (event.type === 'content_block_start') {
           const block = (event as any).content_block;
-          if (block?.type === 'text') {
-            // Text block starting
-          } else if (block?.type === 'tool_use') {
+          if (block?.type === 'tool_use') {
             hasToolUse = true;
             currentToolBlock = { id: block.id, name: block.name, inputJson: '' };
             onEvent('status', JSON.stringify({ message: 'Querying your data...' }));
+          } else if (block?.type === 'text') {
+            currentTextContent = '';
           }
         } else if (event.type === 'content_block_delta') {
           const delta = (event as any).delta;
           if (delta?.type === 'text_delta' && delta.text) {
             fullResponse += delta.text;
+            currentTextContent += delta.text;
             onEvent('text', JSON.stringify({ text: delta.text }));
           } else if (delta?.type === 'input_json_delta' && currentToolBlock) {
             currentToolBlock.inputJson += delta.partial_json ?? '';
           }
         } else if (event.type === 'content_block_stop') {
           if (currentToolBlock) {
-            let input: Record<string, unknown> = {};
-            try { input = JSON.parse(currentToolBlock.inputJson || '{}'); } catch {}
-            toolUseBlocks.push({
-              type: 'tool_use',
-              id: currentToolBlock.id,
-              name: currentToolBlock.name,
-              input,
-            });
+            let parsedInput: Record<string, unknown> = {};
+            try { parsedInput = JSON.parse(currentToolBlock.inputJson || '{}'); } catch {}
+            const tb = { type: 'tool_use' as const, id: currentToolBlock.id, name: currentToolBlock.name, input: parsedInput };
+            toolUseBlocks.push(tb);
+            contentBlocks.push(tb);
             currentToolBlock = null;
+          } else if (currentTextContent) {
+            contentBlocks.push({ type: 'text', text: currentTextContent });
+            currentTextContent = '';
           }
         }
       }
@@ -626,11 +634,10 @@ export class AiAssistantService {
         toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
       }
 
-      // Get the full response for the assistant message (including tool_use blocks)
-      const finalMessage = await stream.finalMessage();
+      // Build the next round's messages using collected content blocks
       currentMessages = [
         ...currentMessages,
-        { role: 'assistant', content: finalMessage.content },
+        { role: 'assistant', content: contentBlocks },
         { role: 'user', content: toolResults },
       ];
 
