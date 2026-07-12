@@ -263,6 +263,7 @@ function ChatDrawer({ user, onClose }: {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -292,7 +293,7 @@ function ChatDrawer({ user, onClose }: {
           setActiveSessionId(data[0].id);
         }
       }
-    });
+    }).finally(() => setSessionsLoaded(true));
   }, [hasApiKey]);
 
   // Load messages when session changes
@@ -335,8 +336,9 @@ function ChatDrawer({ user, onClose }: {
     let assistantMsgCreated = false;
 
     try {
-      const base = getBrowserApiBaseUrl();
-      const res = await fetch(`${base}/api/ai-chat/stream`, {
+      // Call API directly (not through Vite proxy) because http-proxy buffers SSE
+      const apiUrl = window.__ENV?.API_URL?.trim() || getBrowserApiBaseUrl();
+      const res = await fetch(`${apiUrl}/api/ai-chat/stream`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -533,13 +535,13 @@ function ChatDrawer({ user, onClose }: {
             {/* Messages area */}
             <div className={`flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
               <div className={`space-y-3 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
-              {loadingMessages && (
+              {(loadingMessages || (!sessionsLoaded && hasApiKey === true)) && (
                 <div className="flex flex-col items-center justify-center h-full">
                   <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs text-app-fg-muted mt-2">Loading messages...</p>
                 </div>
               )}
-              {messages.length === 0 && !sending && !loadingMessages && (
+              {messages.length === 0 && !sending && !loadingMessages && sessionsLoaded && (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4">
                   <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
                     <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">

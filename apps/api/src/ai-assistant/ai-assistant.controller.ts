@@ -1,6 +1,7 @@
-import { Controller, Post, Req, Res, Body, ForbiddenException, Logger } from '@nestjs/common';
+import { Controller, Post, Options, Req, Res, Body, ForbiddenException, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { AiAssistantService } from './ai-assistant.service';
 import { canonicalPermissionCode } from '@yannis/shared';
 
@@ -11,6 +12,20 @@ export class AiAssistantController {
   private readonly logger = new Logger(AiAssistantController.name);
 
   constructor(private readonly aiAssistantService: AiAssistantService) {}
+
+  /** CORS preflight for the streaming endpoint */
+  @Public()
+  @Options('stream')
+  preflight(@Req() req: Request, @Res() res: Response) {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cookie');
+    }
+    res.status(204).end();
+  }
 
   @Post('stream')
   async stream(
@@ -33,12 +48,18 @@ export class AiAssistantController {
       return;
     }
 
+    // CORS — allow browser to call API directly (bypassing Vite proxy which buffers SSE)
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
     // SSE headers — disable all buffering
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    // Disable Express compression for this response
     res.setHeader('Content-Encoding', 'identity');
     res.flushHeaders();
 
