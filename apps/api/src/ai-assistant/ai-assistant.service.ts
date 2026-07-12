@@ -52,12 +52,17 @@ When explaining a metric, always:
 - HR_MANAGER: Staff management
 - BRANCH_ADMIN: Branch-level administration
 
-## Rules
-- Never fabricate data. If a tool returns empty results, say so clearly.
+## Formatting Rules
 - Use markdown for formatting. Use tables for tabular data.
 - Be concise and direct. Lead with the answer.
-- When showing financial data, format numbers with commas and currency where appropriate.
-- Never mention internal implementation details, tool names, or system architecture.
+- When showing financial data, format numbers with commas and the Naira sign where appropriate.
+- Format responses so they are easy to copy and share. Use clear headings, numbered lists, and clean tables.
+- When the user asks you to edit, revise, or rewrite something, return the full edited version ready to copy, not a diff or explanation of changes.
+- When presenting summaries or reports, structure them with clear sections so the user can copy the entire response or individual sections.
+
+## Rules
+- Never fabricate data. If a tool returns empty results, say so clearly.
+- Never mention internal implementation details, tool names, system architecture, or URL paths (like /admin/marketing/funding). Refer to pages by their friendly name (e.g. "the Marketing Funding page") unless the user specifically asks for the URL.
 - If the user asks something you can't answer with the available tools, say so and suggest what they could check manually.
 - If a tool returns an error saying the user lacks permission, explain that they don't have access to that specific data and suggest they contact their admin.`;
 
@@ -102,6 +107,33 @@ function getPageContextFromPath(path: string): string {
   if (section === 'orders') return `The user is viewing an order detail page.`;
 
   return `The user is viewing: /${segments.join('/')}`;
+}
+
+/** Parse URL search params into human-readable filter context for the AI */
+function parseFiltersForContext(search: string): string {
+  try {
+    const params = new URLSearchParams(search);
+    const filters: string[] = [];
+    // Map common param names to friendly labels
+    const labelMap: Record<string, string> = {
+      startDate: 'Start date', endDate: 'End date',
+      branchId: 'Branch', status: 'Status',
+      mediaBuyerId: 'Media buyer', closerId: 'CS closer',
+      productId: 'Product', locationId: 'Location',
+      teamId: 'Team', search: 'Search query',
+      tab: 'Active tab', page: 'Page number',
+      periodAllTime: 'Period', providerId: 'Provider',
+      shipmentId: 'Shipment', companyId: 'Company',
+    };
+    for (const [key, value] of params.entries()) {
+      if (!value || key === 'page' || key === 'perPage') continue; // skip pagination noise
+      const label = labelMap[key] || key;
+      filters.push(`${label}: ${value}`);
+    }
+    return filters.length > 0 ? filters.join(', ') : 'No active filters (default view)';
+  } catch {
+    return search;
+  }
 }
 
 // ─── Rate Limiting (in-memory, per-process) ──────────────────────────
@@ -379,6 +411,7 @@ export class AiAssistantService {
     userMessage: string;
     model?: string;
     currentPage?: string;
+    currentFilters?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
@@ -389,7 +422,7 @@ export class AiAssistantService {
     assistantMessage: string;
     sessionTitle?: string;
   }> {
-    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
+    const { userId, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
 
     // Rate limit
     if (!checkRateLimit(userId)) {
@@ -451,7 +484,7 @@ export class AiAssistantService {
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
     let assistantMessage: string;
     try {
-      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage);
+      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage, currentFilters);
     } catch (err: any) {
       const status = err?.status ?? err?.statusCode;
       const errType = err?.error?.error?.type ?? err?.type ?? '';
@@ -506,13 +539,14 @@ export class AiAssistantService {
     userMessage: string;
     model?: string;
     currentPage?: string;
+    currentFilters?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
     activeGroupId: string | null;
     onEvent: (event: string, data: string) => void;
   }): Promise<void> {
-    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
+    const { userId, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
 
     if (!checkRateLimit(userId)) {
       throw new Error('Rate limit exceeded. Please wait a few minutes before sending more messages.');
@@ -564,6 +598,10 @@ export class AiAssistantService {
     let systemPrompt = SYSTEM_PROMPT;
     if (currentPage) {
       systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+      if (currentFilters) {
+        systemPrompt += `\n\nActive filters/parameters on this page: ${parseFiltersForContext(currentFilters)}`;
+        systemPrompt += `\nWhen the user says "this page", "what I'm looking at", or "analyze this", use these filters to scope your tool calls to match what they see on screen.`;
+      }
     }
 
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
@@ -581,38 +619,41 @@ export class AiAssistantService {
       });
 
       let hasToolUse = false;
+      const contentBlocks: any[] = [];
       const toolUseBlocks: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }> = [];
       let currentToolBlock: { id: string; name: string; inputJson: string } | null = null;
+      let currentTextContent = '';
 
       for await (const event of stream) {
         if (event.type === 'content_block_start') {
           const block = (event as any).content_block;
-          if (block?.type === 'text') {
-            // Text block starting
-          } else if (block?.type === 'tool_use') {
+          if (block?.type === 'tool_use') {
             hasToolUse = true;
             currentToolBlock = { id: block.id, name: block.name, inputJson: '' };
             onEvent('status', JSON.stringify({ message: 'Querying your data...' }));
+          } else if (block?.type === 'text') {
+            currentTextContent = '';
           }
         } else if (event.type === 'content_block_delta') {
           const delta = (event as any).delta;
           if (delta?.type === 'text_delta' && delta.text) {
             fullResponse += delta.text;
+            currentTextContent += delta.text;
             onEvent('text', JSON.stringify({ text: delta.text }));
           } else if (delta?.type === 'input_json_delta' && currentToolBlock) {
             currentToolBlock.inputJson += delta.partial_json ?? '';
           }
         } else if (event.type === 'content_block_stop') {
           if (currentToolBlock) {
-            let input: Record<string, unknown> = {};
-            try { input = JSON.parse(currentToolBlock.inputJson || '{}'); } catch {}
-            toolUseBlocks.push({
-              type: 'tool_use',
-              id: currentToolBlock.id,
-              name: currentToolBlock.name,
-              input,
-            });
+            let parsedInput: Record<string, unknown> = {};
+            try { parsedInput = JSON.parse(currentToolBlock.inputJson || '{}'); } catch {}
+            const tb = { type: 'tool_use' as const, id: currentToolBlock.id, name: currentToolBlock.name, input: parsedInput };
+            toolUseBlocks.push(tb);
+            contentBlocks.push(tb);
             currentToolBlock = null;
+          } else if (currentTextContent) {
+            contentBlocks.push({ type: 'text', text: currentTextContent });
+            currentTextContent = '';
           }
         }
       }
@@ -626,11 +667,10 @@ export class AiAssistantService {
         toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
       }
 
-      // Get the full response for the assistant message (including tool_use blocks)
-      const finalMessage = await stream.finalMessage();
+      // Build the next round's messages using collected content blocks
       currentMessages = [
         ...currentMessages,
-        { role: 'assistant', content: finalMessage.content },
+        { role: 'assistant', content: contentBlocks },
         { role: 'user', content: toolResults },
       ];
 
@@ -657,6 +697,7 @@ export class AiAssistantService {
     services: ToolExecutorServices,
     model?: string,
     currentPage?: string,
+    currentFilters?: string,
   ): Promise<string> {
     // Dynamic import to avoid loading SDK when not needed
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -670,6 +711,10 @@ export class AiAssistantService {
     let systemPrompt = SYSTEM_PROMPT;
     if (currentPage) {
       systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+      if (currentFilters) {
+        systemPrompt += `\n\nActive filters/parameters on this page: ${parseFiltersForContext(currentFilters)}`;
+        systemPrompt += `\nWhen the user says "this page", "what I'm looking at", or "analyze this", use these filters to scope your tool calls to match what they see on screen.`;
+      }
     }
 
     for (let round = 0; round < maxToolRounds; round++) {

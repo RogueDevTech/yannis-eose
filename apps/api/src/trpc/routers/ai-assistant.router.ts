@@ -57,6 +57,7 @@ export const aiAssistantRouter = router({
         message: z.string().min(1).max(4000),
         model: z.string().optional(),
         currentPage: z.string().optional(),
+        currentFilters: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -66,6 +67,7 @@ export const aiAssistantRouter = router({
         userMessage: input.message,
         model: input.model,
         currentPage: input.currentPage,
+        currentFilters: input.currentFilters,
         user: {
           id: ctx.user.id,
           role: ctx.user.role,
