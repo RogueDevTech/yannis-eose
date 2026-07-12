@@ -541,11 +541,14 @@ function ChatDrawer({ user, onClose }: {
                 </div>
               ))}
 
-              {sending && streamStatus && (
+              {sending && (
                 <div className="flex justify-start">
-                  <div className="bg-app-hover rounded-lg px-3 py-1.5 flex items-center gap-2">
-                    <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-xs text-app-fg-muted">{streamStatus}</p>
+                  <div className="bg-app-hover rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
                   </div>
                 </div>
               )}
