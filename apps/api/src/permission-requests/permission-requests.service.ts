@@ -509,18 +509,20 @@ export class PermissionRequestsService {
           approver,
         );
       }
-      // Regenerate invoice after item changes — best-effort
+      // Update invoice after item changes — best-effort.
+      // Re-fetch the order so we get product names for the invoice line descriptions.
       try {
         const { getFinanceService } = await import('../trpc/routers/finance.router');
-        const order = orderType === 'cart'
-          ? await (await import('../trpc/routers/cart-orders.router')).getCartOrdersService().getById(orderId)
-          : orderType === 'followUp'
-            ? null // follow-up invoices handled via order graduation
+        if (orderType !== 'followUp') {
+          const freshOrder = orderType === 'cart'
+            ? await (await import('../trpc/routers/cart-orders.router')).getCartOrdersService().getById(orderId)
             : await this.ordersService.getById(orderId);
-        if (order) {
-          await getFinanceService().ensureInvoiceForOrder({ order: order as never, actorId: approver.id });
+          if (freshOrder) {
+            const oi = (freshOrder as { orderItems?: Array<{ quantity: number; unitPrice: string; productName: string | null }> }).orderItems ?? [];
+            await getFinanceService().updateInvoiceLineItems({ orderId, orderItems: oi, actorId: approver.id });
+          }
         }
-      } catch { /* invoice regeneration is best-effort */ }
+      } catch { /* invoice update is best-effort */ }
       // Surface the approval on the order timeline. For normal orders, the underlying
       // `update` call writes a `QUANTITY_UPDATED` event when items change, but that
       // doesn't tell the Sales rep (or auditor) that this was specifically an approval.
