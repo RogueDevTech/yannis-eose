@@ -401,7 +401,7 @@ export class AiAssistantService {
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey });
 
-    const resolvedModel = model || 'claude-3-5-haiku-20241022';
+    const resolvedModel = model || 'claude-haiku-4-5-20251001';
     let currentMessages: any[] = [...messages];
     const maxToolRounds = 5;
 
@@ -460,7 +460,7 @@ export class AiAssistantService {
 
   @Cron('0 30 3 * * *')
   async purgeOldChatData(): Promise<void> {
-    const RETENTION_DAYS = 30;
+    const RETENTION_DAYS = 7;
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
     const deleted = await this.db

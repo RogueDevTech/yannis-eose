@@ -24,16 +24,24 @@ type TrpcEnvelope<T> = { result?: { data?: T }; error?: { message?: string } };
 type DrawerView = 'chat' | 'sessions' | 'settings';
 
 const AI_MODELS = [
-  { id: 'claude-3-5-haiku-20241022', label: 'Haiku 3.5', description: 'Fastest, cheapest' },
-  { id: 'claude-3-5-sonnet-20241022', label: 'Sonnet 3.5', description: 'Balanced' },
-  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', description: 'Latest, smartest' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', description: 'Fastest, cheapest' },
+  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', description: 'Balanced, recommended' },
+  { id: 'claude-opus-4-20250514', label: 'Opus 4', description: 'Most capable' },
 ] as const;
 
-const DEFAULT_MODEL = 'claude-3-5-haiku-20241022';
+const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+
+const VALID_MODEL_IDS = new Set(AI_MODELS.map((m) => m.id));
 
 function getStoredModel(): string {
   if (typeof window === 'undefined') return DEFAULT_MODEL;
-  return localStorage.getItem('yannis_ai_model') || DEFAULT_MODEL;
+  const stored = localStorage.getItem('yannis_ai_model');
+  // Reset if stored model is deprecated/invalid
+  if (stored && !VALID_MODEL_IDS.has(stored)) {
+    localStorage.removeItem('yannis_ai_model');
+    return DEFAULT_MODEL;
+  }
+  return stored || DEFAULT_MODEL;
 }
 
 function setStoredModel(model: string) {
@@ -250,6 +258,7 @@ function ChatDrawer({ user, onClose }: {
   onClose: () => void;
 }) {
   const [view, setView] = useState<DrawerView>('chat');
+  const [expanded, setExpanded] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -391,11 +400,15 @@ function ChatDrawer({ user, onClose }: {
 
   const drawer = (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-[85] bg-black/30 md:bg-transparent" onClick={onClose} aria-hidden />
+      {/* Backdrop — no click-to-close so the drawer stays open while navigating */}
+
+      {/* Backdrop when expanded on desktop */}
+      {expanded && (
+        <div className="hidden md:block fixed inset-0 z-[85] bg-black/50" onClick={() => setExpanded(false)} />
+      )}
 
       {/* Drawer panel */}
-      <div className="fixed z-[86] inset-0 md:inset-auto md:right-4 md:bottom-4 md:top-auto md:left-auto md:w-[420px] md:h-[600px] md:max-h-[80vh] md:rounded-xl bg-app-elevated border border-app-border shadow-2xl flex flex-col overflow-hidden">
+      <div className={`fixed z-[86] inset-0 bg-app-elevated border border-app-border shadow-2xl flex flex-col overflow-hidden ${expanded ? '' : 'md:inset-auto md:right-4 md:bottom-4 md:top-auto md:left-auto md:w-[420px] md:h-[600px] md:max-h-[80vh] md:rounded-xl'}`}>
         {/* Header */}
         <div className="flex items-center gap-1 px-3 py-2.5 border-b border-app-border bg-app-elevated shrink-0">
           <button type="button" onClick={() => setView('sessions')} className="p-1.5 rounded-md hover:bg-app-hover text-app-fg-muted" title="Chat history">
@@ -415,6 +428,15 @@ function ChatDrawer({ user, onClose }: {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+          <button type="button" onClick={() => setExpanded(e => !e)} className="hidden md:block p-1.5 rounded-md hover:bg-app-hover text-app-fg-muted" title={expanded ? 'Collapse' : 'Expand'}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              {expanded ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M15 9h4.5M15 9V4.5M15 9l5.25-5.25M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              )}
             </svg>
           </button>
           <button type="button" onClick={onClose} className="ml-1 p-1.5 rounded-md hover:bg-danger-100 dark:hover:bg-danger-900/30 text-app-fg-muted hover:text-danger-600" title="Close">
