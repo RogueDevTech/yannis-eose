@@ -263,9 +263,12 @@ function ChatDrawer({ user, onClose }: {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mounted, setMounted] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
@@ -282,12 +285,17 @@ function ChatDrawer({ user, onClose }: {
     });
   }, []);
 
-  // Load sessions on mount (only if we have a key)
+  // Load sessions on mount (only if we have a key) and auto-select the most recent
   useEffect(() => {
     if (hasApiKey !== true) return;
     trpcQuery<ChatSession[]>('listSessions', { limit: 30, offset: 0 }).then((data) => {
-      if (data) setSessions(data);
-    });
+      if (data) {
+        setSessions(data);
+        if (data.length > 0 && !activeSessionId) {
+          setActiveSessionId(data[0].id);
+        }
+      }
+    }).finally(() => setSessionsLoaded(true));
   }, [hasApiKey]);
 
   // Load messages when session changes
@@ -303,10 +311,31 @@ function ChatDrawer({ user, onClose }: {
     }).finally(() => setLoadingMessages(false));
   }, [activeSessionId]);
 
-  // Auto-scroll
+  // Auto-scroll when new messages arrive (only if already near bottom)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
+
+  // Track scroll position to show/hide scroll-down button
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollDown(distanceFromBottom > 150);
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [view]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   // Focus input
   useEffect(() => {
@@ -322,111 +351,78 @@ function ChatDrawer({ user, onClose }: {
     setInput('');
     setSending(true);
     setError(null);
-    setStreamStatus(null);
 
     // Optimistic user message
     setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: msg, createdAt: new Date().toISOString() }]);
 
-    // Create a placeholder for the streaming assistant response
-    const assistantMsgId = `resp-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '', createdAt: new Date().toISOString() }]);
-
     try {
-      const base = getBrowserApiBaseUrl();
-      const res = await fetch(`${base}/api/ai-chat/stream`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: activeSessionId ?? undefined,
-          message: msg,
-          model: selectedModel,
-          currentPage: window.location.pathname,
-        }),
+      const result = await trpcMutate<{
+        sessionId: string;
+        assistantMessage: string;
+        sessionTitle?: string;
+      }>('sendMessage', {
+        sessionId: activeSessionId ?? undefined,
+        message: msg,
+        model: selectedModel,
+        currentPage: window.location.pathname,
+        currentFilters: window.location.search || undefined,
       });
 
-      if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        throw new Error(json?.error?.message || json?.message || `Request failed (${res.status})`);
+      // Set session if new
+      if (!activeSessionId) {
+        setActiveSessionId(result.sessionId);
+        setSessions((prev) => [
+          { id: result.sessionId, title: result.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+          ...prev,
+        ]);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
+      // Typewriter effect — reveal response progressively
+      const fullText = result.assistantMessage;
+      const assistantMsgId = `resp-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: assistantMsgId, role: 'assistant', content: '', createdAt: new Date().toISOString() }]);
+      setSending(false);
 
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        let currentEvent = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-
-              if (currentEvent === 'session') {
-                if (!activeSessionId && parsed.sessionId) {
-                  setActiveSessionId(parsed.sessionId);
-                  setSessions((prev) => [
-                    { id: parsed.sessionId, title: parsed.sessionTitle || msg.slice(0, 60), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-                    ...prev,
-                  ]);
-                }
-              } else if (currentEvent === 'text') {
-                setMessages((prev) => prev.map((m) =>
-                  m.id === assistantMsgId ? { ...m, content: m.content + parsed.text } : m,
-                ));
-              } else if (currentEvent === 'status') {
-                setStreamStatus(parsed.message);
-              } else if (currentEvent === 'error') {
-                throw new Error(parsed.message);
-              }
-            } catch (e) {
-              if (currentEvent === 'error') throw e;
-            }
-            currentEvent = '';
-          }
+      // Reveal in chunks of ~3-5 words at a time
+      const words = fullText.split(/(\s+)/);
+      let revealed = '';
+      let i = 0;
+      const chunkSize = 6; // ~3 words + spaces
+      const revealInterval = setInterval(() => {
+        if (i >= words.length) {
+          clearInterval(revealInterval);
+          return;
         }
-      }
+        const chunk = words.slice(i, i + chunkSize).join('');
+        revealed += chunk;
+        i += chunkSize;
+        setMessages((prev) => prev.map((m) =>
+          m.id === assistantMsgId ? { ...m, content: revealed } : m,
+        ));
+      }, 30);
 
-      // Remove empty assistant message if nothing was streamed
-      setMessages((prev) => {
-        const msg = prev.find((m) => m.id === assistantMsgId);
-        if (msg && !msg.content) return prev.filter((m) => m.id !== assistantMsgId);
-        return prev;
-      });
+      return; // Don't hit the finally block's setSending(false)
     } catch (err: any) {
-      const raw = err.message || 'Failed to send message';
+      const raw = err.message || 'Something went wrong';
       let friendly = raw;
-      if (raw.includes('authentication_error') || raw.includes('invalid') || raw.includes('401')) {
+      if (raw.includes('CLAUDE_AUTH_ERROR') || raw.includes('authentication_error') || raw.includes('401')) {
         friendly = 'Your API key is invalid. Go to Settings and reconnect with a valid key.';
-      } else if (raw.includes('not_found_error') || raw.includes('model')) {
-        friendly = `Model not available. Try switching to a different model in Settings, or add credits at console.anthropic.com.`;
-      } else if (raw.includes('rate_limit') || raw.includes('429')) {
-        friendly = 'Too many requests. Please wait a moment and try again.';
+      } else if (raw.includes('CLAUDE_MODEL_NOT_FOUND') || raw.includes('not_found_error')) {
+        const label = AI_MODELS.find(m => m.id === selectedModel)?.label || selectedModel;
+        friendly = `${label} is not available on your account. Try Haiku 4.5 or add credits at console.anthropic.com.`;
+      } else if (raw.includes('CLAUDE_NO_CREDITS') || raw.includes('billing')) {
+        friendly = 'Out of API credits. Add more at console.anthropic.com.';
+      } else if (raw.includes('CLAUDE_RATE_LIMIT') || raw.includes('429')) {
+        friendly = 'Too many requests. Wait a moment and try again.';
       } else if (raw.includes('No Claude API key')) {
         friendly = 'No API key configured. Go to Settings to connect your key.';
       }
-      // Replace empty placeholder with error, or add error message
-      setMessages((prev) => {
-        const existing = prev.find((m) => m.id === assistantMsgId);
-        if (existing && !existing.content) {
-          return prev.map((m) => m.id === assistantMsgId ? { ...m, content: friendly } : m);
-        }
-        return [...prev.filter((m) => m.id !== assistantMsgId || m.content), { id: `err-${Date.now()}`, role: 'assistant' as const, content: friendly, createdAt: new Date().toISOString() }];
-      });
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, role: 'assistant', content: friendly, createdAt: new Date().toISOString() },
+      ]);
     } finally {
       setSending(false);
-      setStreamStatus(null);
     }
   }, [input, sending, activeSessionId, selectedModel]);
 
@@ -526,15 +522,15 @@ function ChatDrawer({ user, onClose }: {
         ) : (
           <>
             {/* Messages area */}
-            <div className={`flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
+            <div ref={messagesContainerRef} className={`relative flex-1 overflow-y-auto px-3 py-3 ${expanded ? 'md:px-6' : ''}`}>
               <div className={`space-y-3 ${expanded ? 'mx-auto max-w-2xl' : ''}`}>
-              {loadingMessages && (
+              {(loadingMessages || (!sessionsLoaded && hasApiKey === true)) && (
                 <div className="flex flex-col items-center justify-center h-full">
                   <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs text-app-fg-muted mt-2">Loading messages...</p>
                 </div>
               )}
-              {messages.length === 0 && !sending && !loadingMessages && (
+              {messages.length === 0 && !sending && !loadingMessages && sessionsLoaded && (
                 <div className="flex flex-col items-center justify-center h-full text-center px-4">
                   <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
                     <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -576,7 +572,8 @@ function ChatDrawer({ user, onClose }: {
                             </svg>
                           ) : (
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
                             </svg>
                           )}
                         </button>
@@ -588,11 +585,14 @@ function ChatDrawer({ user, onClose }: {
                 </div>
               ))}
 
-              {sending && streamStatus && (
+              {sending && (
                 <div className="flex justify-start">
-                  <div className="bg-app-hover rounded-lg px-3 py-1.5 flex items-center gap-2">
-                    <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-xs text-app-fg-muted">{streamStatus}</p>
+                  <div className="bg-app-hover rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-app-fg-muted animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -605,6 +605,20 @@ function ChatDrawer({ user, onClose }: {
 
               <div ref={messagesEndRef} />
               </div>
+
+              {/* Scroll to bottom button */}
+              {showScrollDown && (
+                <button
+                  type="button"
+                  onClick={scrollToBottom}
+                  className="sticky bottom-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full bg-app-elevated border border-app-border shadow-md flex items-center justify-center text-app-fg-muted hover:text-app-fg transition-colors z-10"
+                  title="Scroll to bottom"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" />
+                  </svg>
+                </button>
+              )}
             </div>
 
             {/* Input area */}

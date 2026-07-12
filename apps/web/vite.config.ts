@@ -55,6 +55,16 @@ export default defineConfig({
       '/api/ai-chat': {
         target: DEV_API_TARGET,
         changeOrigin: true,
+        // SSE streaming: pipe response directly to prevent http-proxy buffering
+        selfHandleResponse: true,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, _req, res) => {
+            // Forward status and headers
+            res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
+            // Pipe the response stream directly — no buffering
+            proxyRes.pipe(res);
+          });
+        },
       },
     },
   },
