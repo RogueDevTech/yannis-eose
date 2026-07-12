@@ -5592,6 +5592,20 @@ export class OrdersService {
         description: `Order quantity updated from ${oldQty} to ${newQty} by ${actorName}`,
         branchId: updated.branchId ?? null,
       });
+      // Sync invoice line items + total after item adjustment
+      try {
+        const freshItems = await this.db
+          .select({ quantity: schema.orderItems.quantity, unitPrice: schema.orderItems.unitPrice, productName: schema.products.name })
+          .from(schema.orderItems)
+          .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+          .where(eq(schema.orderItems.orderId, input.orderId));
+        const { getFinanceService } = await import('../trpc/routers/finance.router');
+        await getFinanceService().updateInvoiceLineItems({
+          orderId: input.orderId,
+          orderItems: freshItems.map((it) => ({ quantity: it.quantity, unitPrice: String(it.unitPrice), productName: it.productName })),
+          actorId: actor.id,
+        });
+      } catch { /* invoice sync is best-effort */ }
     }
 
     const { customerPhone: updatedPhone, ...updatedForResponse } = updated;
