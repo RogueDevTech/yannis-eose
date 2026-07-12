@@ -70,24 +70,159 @@ When explaining a metric, always:
 // Maps known routes to descriptions so the AI understands what the user is looking at.
 
 const PAGE_CONTEXT_MAP: Record<string, string> = {
-  '/admin': 'This is the Admin Dashboard showing key business metrics: order pipeline, revenue, ROAS, delivery stats, and team performance.',
-  '/admin/ceo': 'This is the CEO Executive Overview with full financial metrics, branch breakdowns, and performance charts.',
-  '/admin/marketing/overview': 'This is the Marketing Live Activities page showing real-time media buyer activity, ad spend, and campaign performance.',
-  '/admin/marketing/team': 'This is the Marketing Team Analysis page with per-media-buyer performance breakdowns.',
-  '/admin/marketing/orders': 'This is the Marketing Orders page showing orders attributed to marketing campaigns.',
-  '/admin/marketing/expenses': 'This is the Ad Spend / Expenses page where media buyers log daily advertising costs.',
-  '/admin/marketing/funding': 'This is the Marketing Funding page for managing budget requests and approvals.',
-  '/admin/marketing/forms': 'This is the Marketing Forms page for managing lead capture forms and campaigns.',
-  '/admin/sales/orders': 'This is the Sales Orders page showing the CS team order pipeline (assignment, engagement, confirmation).',
-  '/admin/sales/follow-up': 'This is the Follow-Up Orders page for managing cart recovery and re-engagement campaigns.',
-  '/admin/inventory': 'This is the Inventory page showing stock levels per product and location.',
-  '/admin/inventory/shipments': 'This is the Inbound Shipments page for receiving new stock.',
-  '/admin/inventory/transfers': 'This is the Stock Transfers page for moving inventory between locations.',
-  '/admin/logistics': 'This is the Logistics page showing delivery partners, riders, and fulfillment tracking.',
-  '/admin/finance': 'This is the Finance Overview page with revenue, costs, profit margins, and cash remittance status.',
-  '/admin/finance/disbursements': 'This is the Disbursements page for managing payouts to staff and partners.',
-  '/admin/hr': 'This is the HR page for staff management, payroll, and onboarding.',
-  '/admin/settings': 'This is the Settings page for system configuration, notifications, and user preferences.',
+  // ── Dashboard ──
+  '/admin': `Admin Dashboard. SuperAdmin/Admin see CEO-level metrics (revenue, profit, ROAS, delivery stats, team performance). Other roles see their role-specific order funnel.`,
+
+  '/admin/ceo': `CEO Executive Overview. Revenue, True Profit (revenue minus all costs), Net Margin (trueProfit/revenue×100, >=20% green, 0-20% yellow, <0% red), Total Costs. Cost breakdown: Landed COGS, Delivery Fees, Ad Spend, Commission, Fulfillment Cost, Operational Loss. Marketing: Total Spend, CPA (adSpend/deliveredOrders), ROAS (deliveredRevenue/adSpend). CS Team: Agent Count, Pending Orders, Utilization (todayCloses/capacity×100). Payroll: Total Paid, Total Pending, Staff Count. Branch-level breakdowns.`,
+
+  // ── Marketing ──
+  '/admin/marketing/overview': `Marketing Live Activities. Metrics: Ad Spend, Total Orders, Delivered (DELIVERED+REMITTED), Confirmed (CONFIRMED+AGENT_ASSIGNED+DISPATCHED+IN_TRANSIT+DELIVERED+REMITTED), Unconfirmed (total minus confirmed), Avg CPA, DR (delivered/total×100), CR (confirmed/total×100), True ROAS (deliveredRevenue/totalSpend), Delivered Revenue, Cart Abandonment.`,
+
+  '/admin/marketing/team': `Marketing Team Analysis with per-media-buyer leaderboard. Metrics: Media Buyers (count), Total Orders, Ad Spend, CPA (adSpend/deliveredOrders), ROAS (deliveredRevenue/adSpend), Confirmed (CONFIRMED or beyond), Delivered (DELIVERED+REMITTED), CR (confirmed/totalOrders×100), DR (delivered/totalOrders×100, denominator is total orders NOT confirmed).`,
+
+  '/admin/marketing/orders': `Marketing Orders list. Status tabs across lifecycle. Same stat strip as Marketing Overview plus: Offline Count, Abandoned Cart Count, Duplicate Count. Supervisors see dual strips: Team Performance and My Performance.`,
+
+  '/admin/marketing/expenses': `Ad Spend / Expenses page. Media buyers log daily advertising costs, grouped by date and media buyer in accordion view. Columns: platform, ad URL, amount.`,
+
+  '/admin/marketing/funding': `Marketing Funding hub. Two sections: Received (incoming funds) and Distributing (outgoing). Each has transfers and requests views. Metrics: incoming/outgoing/balance summaries, status counts (SENT/COMPLETED/DISPUTED for transfers; PENDING/APPROVED/REJECTED for requests).`,
+
+  '/admin/marketing/funding/ledger': `Funding Ledger. Double-entry ledger for a selected media buyer showing all fund movements by entry type. Metrics: total credits, total debits, closing balance.`,
+
+  '/admin/marketing/funding/mb-transfers': `MB Transfers. Fund transfers between media buyers with approval workflow. Metrics: transfer status distribution, directional flow (sent/received).`,
+
+  '/admin/marketing/forms': `Marketing Forms. Lead capture form management with create/edit/builder. Shows form name, status, campaign, submissions count.`,
+
+  '/admin/marketing/cross-funnel': `Cross-Funnel Attempts. Tracks same customer+product submissions via different media buyers within 24h. Metrics: total attempts, unique customers, per-product breakdown, same-MB vs cross-funnel splits.`,
+
+  '/admin/marketing/leaderboard': `Marketing Leaderboard. Ranks media buyers by performance metrics in the selected period.`,
+
+  '/admin/marketing/offers': `Offers management. Product offers/bundles with pricing. Two tabs: Products and Offers. Metrics: total products, active count, unique categories, total offers.`,
+
+  // ── Sales / CS ──
+  '/admin/sales/queue': `Sales Live Activities (Queue). Real-time agent workload dashboard. Shows: agent workloads (todayCloses, capacity, pendingCount, lastAction), status pipeline counts, unassigned queue total, active engagements total, cart activity. Tabs: Unassigned, Active Engagements, Pending Carts, Abandoned Carts, Callbacks, Duplicates, Claim Queue, Inactive Agents. Utilization = todayCloses/capacity×100.`,
+
+  '/admin/sales/orders': `Sales Orders (main CS funnel). Status tabs: UNPROCESSED, CS_ASSIGNED, CS_ENGAGED, CONFIRMED, AGENT_ASSIGNED, DISPATCHED, IN_TRANSIT, DELIVERED, REMITTED. Schedule heat calendar (callback due, delivery on day, delivery overdue). For CS_CLOSER: personal workload (pending, today closes, capacity, utilization %).`,
+
+  '/admin/sales/team': `CS Team Analysis. Metrics: Closers (count), Total Orders (engaged in period), Offline (manually created), Backlog/Unworked (engaged minus confirmed), Confirmed (CONFIRMED or beyond), Delivered (DELIVERED+REMITTED), Confirm Rate (confirmed/engaged×100), Delivery Rate (delivered/engaged×100, denominator is total engaged NOT confirmed), Calls Made, Avg Call duration. Per-closer leaderboard with same metrics.`,
+
+  '/admin/sales/leaderboard': `Sales Leaderboard. Ranks closers by delivery rate in the selected period. Filters: this month, all-time, custom date range.`,
+
+  '/admin/sales/cart-orders': `Cart Orders. Orders recovered from abandoned carts. Status counts per lifecycle stage. Separate pipeline from main orders.`,
+
+  '/admin/sales/delivered-follow-up': `Delivered Follow-Up Orders. Re-engagement orders for previously delivered customers. Same status tabs and metrics as main Sales Orders but filtered to delivered follow-up source.`,
+
+  '/admin/sales/offline-orders': `Offline Orders. Manually created orders by CS. Same status tabs as main Sales Orders but filtered to offline source. Category filter: website_order or referrals.`,
+
+  '/admin/sales/follow-up': `Follow-Up Orders. Orders pulled by follow-up re-engagement rules. Status counts (DELETED, CS_ASSIGNED, CS_ENGAGED, CONFIRMED, AGENT_ASSIGNED, DISPATCHED, IN_TRANSIT, DELIVERED, REMITTED, ABANDONED_CART). Views: Orders list, Batches, Create follow-up.`,
+
+  '/admin/sales/message-templates': `Message Templates. WhatsApp/SMS templates used by CS closers for customer communication.`,
+
+  // ── Inventory ──
+  '/admin/inventory': `Inventory page. Metrics: Total Stock (available+reserved), Reserved (committed not delivered), Available (total minus reserved), Locations count. Low stock alerts when below threshold. Filterable by product, location.`,
+
+  '/admin/inventory/shipments': `Inbound Shipments. Receiving new stock with FIFO cost tracking. Each shipment has products, quantities, unit costs, and landed cost calculation.`,
+
+  '/admin/inventory/transfers': `Stock Transfers. Moving inventory between locations. Status: PENDING, APPROVED, RECEIVED, CANCELLED. Shows source/destination, products, quantities.`,
+
+  '/admin/inventory/warehouses': `Warehouses. Company-owned warehouse management. Metrics: active warehouse count, warehouses with stock, dispatch-locked count, total/reserved/available units, SKU count.`,
+
+  // ── Logistics ──
+  '/admin/logistics/overview': `Logistics Overview. Redirects to partners page.`,
+
+  '/admin/logistics/orders': `Logistics Orders. Confirmed and in-flight orders with allocation, dispatch, and delivery workflow. Status tabs: CONFIRMED, AGENT_ASSIGNED, DISPATCHED, IN_TRANSIT, DELIVERED, PARTIALLY_DELIVERED, RETURNED, RESTOCKED, WRITTEN_OFF, REMITTED. Overdue delivery count. Bulk allocation and dispatch actions.`,
+
+  '/admin/logistics/partners': `Logistics Partners. Third-party logistics providers and warehouse locations. Metrics: total providers, total locations, low-stock threshold. Import features for providers and locations.`,
+
+  '/admin/logistics/team': `Logistics Team. Per-provider performance analysis. Metrics: total assigned orders, delivered orders, units delivered, delivery rate, delinquency rate, returned orders, location count. Sortable by all metrics. Date and product filters.`,
+
+  '/admin/logistics/transfers': `Logistics Transfers. Stock transfers between partner locations with status tracking.`,
+
+  '/admin/logistics/remittances': `Logistics Remittances. Cash remittance verification. Metrics: Awaiting/Pending/Received/Disputed amounts and counts, Total Remitted. Status filter, location filter, sender filter.`,
+
+  // ── Finance ──
+  '/admin/finance': `Finance Overview. Revenue (DELIVERED+REMITTED), COGS (FIFO landed cost), Gross Profit, Ad Spend, Commission, Delivery Fees, Operational Loss, True Profit (revenue minus ALL costs), Margin (trueProfit/revenue×100). Also: Awaiting Cash, Pending/Disputed Remittance amounts, Payroll Pending.`,
+  '/admin/finance/overview': `Finance Overview (same as /admin/finance).`,
+
+  '/admin/finance/delivery-remittances': `Cash Remittances. Manages remittance batches. Metrics: Awaiting Amount/Count, Pending Amount/Count, Received Amount/Count, Disputed Amount/Count, Total Remitted. Location, sender, status filters.`,
+
+  '/admin/finance/profit-loss': `Profit & Loss statement. Metrics: Total Income, Total Expense, Net Profit. Income and expense line items. Consolidated vs branch view toggle.`,
+
+  '/admin/finance/balance-sheet': `Balance Sheet. Point-in-time snapshot. Metrics: Total Assets, Total Liabilities, Total Equity. Balanced check.`,
+
+  '/admin/finance/cash-flow': `Cash Flow statement. Metrics: Opening Balance, Inflow, Outflow, Closing Balance. Cash flow by account category.`,
+
+  '/admin/finance/trial-balance': `Trial Balance. All GL accounts with debit/credit balances. Metrics: Total Debits, Total Credits, Balanced flag. As-of-date filter.`,
+
+  '/admin/finance/ledger': `General Ledger. Detailed transaction log. Metrics: Total Credits, Total Debits, Opening/Closing Balance. Filterable by user, entry type, date range.`,
+
+  '/admin/finance/journal-entries': `Journal Entries. Manual accounting entries with reversal capability.`,
+
+  '/admin/finance/accounts': `Chart of Accounts. Master list of GL accounts (active only). Account codes, names, types in hierarchy.`,
+
+  '/admin/finance/profit-by-shipment': `Profit by Shipment. P&L analysis scoped to a specific shipment. Revenue, costs, profit breakdown per shipment.`,
+
+  '/admin/finance/payout': `Payroll Batches. Monthly payroll batch management for finance approval. Status: Pending Finance, Paid.`,
+
+  '/admin/finance/expenses': `Expense Submissions. Expense approval workflow with GL account assignment.`,
+
+  '/admin/finance/aging': `Aging Report. Receivables/Payables aging by date buckets. Metrics: 0-30d, 31-60d, 61-90d, 90+d, Total. Kind toggle: Receivable/Payable.`,
+
+  '/admin/finance/staff-accounts': `Staff Accounts. User roster with financial context. Status/role/branch filters.`,
+
+  '/admin/finance/disbursements': `Disbursements. Managing payouts to staff and partners.`,
+
+  '/admin/finance/assets': `Fixed Assets register. Asset tracking and depreciation.`,
+
+  '/admin/finance/bank-reconciliation': `Bank Reconciliation. Matching bank statements to GL entries.`,
+
+  '/admin/finance/budget-report': `Budget Report. Budget vs actual comparison.`,
+
+  '/admin/finance/tax-returns': `Tax Returns. Tax filing data with date range filter.`,
+
+  '/admin/finance/wht-certificates': `WHT Certificates. Withholding tax certificate management.`,
+
+  '/admin/finance/opening-balances': `Opening Balances. Initial GL account balances setup.`,
+
+  // ── Products ──
+  '/admin/products': `Products page. Product catalog management. Metrics: total products, active count, unique categories. Two tabs: Products and Offers. Create, edit, import products.`,
+
+  '/admin/categories': `Product Categories. Category management with brand contact info (name, phone, email, WhatsApp, SMS sender ID).`,
+
+  // ── HR ──
+  '/admin/hr': `HR Staff Management. Metrics: active/pending/inactive user counts, distinct roles count. Create, edit, import staff. Status/role/branch filters.`,
+
+  '/hr/users': `Staff roster (same data as HR page). Filterable by status, role, branch. Search by name/email.`,
+
+  '/hr/payroll': `Payroll Management. Monthly payroll batches with adjustments. Batch status totals, adjustment amounts. Generate and approve workflow.`,
+
+  // ── Admin Tools ──
+  '/admin/branches': `Branch Management. Company branches grouped by company. Create/edit branch name, code, status.`,
+
+  '/admin/audit': `Audit Log. System-wide audit trail of all mutations with actor, timestamp, and change details.`,
+
+  '/admin/data/export': `Data Export. Report generator for CSV/Excel exports. Scoped by closers, media buyers, products, campaigns, date range.`,
+
+  '/admin/permission-requests': `Permission Requests. Approval queue for user creation, role changes, permission grants, product archives, order edits. Status: PENDING/APPROVED/REJECTED.`,
+
+  '/admin/notifications': `Notifications hub. Tabs: In-app feed, broadcast push, automation rules, delivery log. Unread count, delivery status.`,
+
+  '/admin/settings': `System Settings. Configuration for notifications, VOIP, CS dispatch strategy, profitability targets, ad spend mode.`,
+
+  '/admin/settings/follow-up-config': `Follow-Up Config. Follow-up order distribution rules, groups, and sync logs.`,
+
+  '/admin/settings/cs-order-routing': `CS Order Routing. Sales order routing rules by branch, product, and team.`,
+
+  '/admin/settings/cart-order-routing': `Cart Order Routing. Cart order distribution rules.`,
+
+  '/admin/settings/branch-groups': `Company Groups (Branch Groups). Manage company groupings for data isolation.`,
+
+  '/admin/settings/filter-preferences': `Filter Preferences. Saved filter presets for dashboard pages.`,
+
+  '/admin/settings/role-templates': `Role Templates. Permission template management for roles.`,
+
+  '/admin/onboarding': `Staff Onboarding. Self-service form for personal, financial, and employment info.`,
+
+  '/admin/leaderboards': `Global Leaderboards. Cross-team performance rankings.`,
 };
 
 function getPageContextFromPath(path: string): string {

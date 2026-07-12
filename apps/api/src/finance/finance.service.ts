@@ -250,6 +250,41 @@ export class FinanceService {
     });
   }
 
+  /**
+   * Re-sync an existing invoice's line_items and total_amount after order items
+   * are adjusted (e.g. via an approved price/quantity change request).
+   */
+  async updateInvoiceLineItems(params: {
+    orderId: string;
+    orderItems: Array<{ quantity: number; unitPrice: string; productName: string | null }>;
+    actorId: string;
+  }) {
+    const existing = await this.getInvoiceByOrderId(params.orderId);
+    if (!existing) return; // no invoice to update
+
+    const lineItems = params.orderItems.map((it) => ({
+      description: it.productName ?? 'Product',
+      quantity: it.quantity,
+      unitPrice: String(it.unitPrice),
+    }));
+
+    // unitPrice is the offer/line total — sum directly
+    const totalAmount = params.orderItems.reduce(
+      (sum, it) => sum + Number(it.unitPrice),
+      0,
+    );
+
+    await withActor(this.db, { id: params.actorId }, async (tx) => {
+      await tx
+        .update(schema.invoices)
+        .set({
+          lineItems,
+          totalAmount: totalAmount.toFixed(2),
+        })
+        .where(eq(schema.invoices.id, existing.id));
+    });
+  }
+
   async listInvoices(input: ListInvoicesInput, effectiveBranchIds?: string[] | null) {
     const conditions: SQL[] = [];
     if (input.status) {
