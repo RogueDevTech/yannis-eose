@@ -127,10 +127,21 @@ function checkRateLimit(userId: string): boolean {
 @Injectable()
 export class AiAssistantService {
   private readonly logger = new Logger(AiAssistantService.name);
+  private toolServices: ToolExecutorServices | null = null;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
+
+  /** Called from trpc.module.ts to inject tool services for the streaming endpoint. */
+  setToolServices(services: ToolExecutorServices) {
+    this.toolServices = services;
+  }
+
+  private getToolServices(): ToolExecutorServices {
+    if (!this.toolServices) throw new Error('Tool services not initialized');
+    return this.toolServices;
+  }
 
   // ── Session CRUD ─────────────────────────────────────
 
@@ -485,6 +496,158 @@ export class AiAssistantService {
     }
 
     return { sessionId, assistantMessage, sessionTitle };
+  }
+
+  // ── Streaming Chat ───────────────────────────────────
+
+  async sendMessageStreaming(params: {
+    sessionId?: string;
+    userId: string;
+    userMessage: string;
+    model?: string;
+    currentPage?: string;
+    user: ToolExecutorUser;
+    branchId: string | null;
+    effectiveBranchIds: string[] | null;
+    activeGroupId: string | null;
+    onEvent: (event: string, data: string) => void;
+  }): Promise<void> {
+    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
+
+    if (!checkRateLimit(userId)) {
+      throw new Error('Rate limit exceeded. Please wait a few minutes before sending more messages.');
+    }
+
+    const apiKey = await this.resolveApiKey(userId, activeGroupId);
+    if (!apiKey) {
+      throw new Error('No Claude API key configured. Please add your API key in the AI Assistant settings.');
+    }
+
+    // Create or verify session
+    let sessionId = params.sessionId;
+    if (!sessionId) {
+      const session = await this.createSession(userId);
+      sessionId = session.id;
+    } else {
+      const [session] = await this.db
+        .select({ id: schema.aiChatSessions.id })
+        .from(schema.aiChatSessions)
+        .where(and(eq(schema.aiChatSessions.id, sessionId), eq(schema.aiChatSessions.userId, userId)))
+        .limit(1);
+      if (!session) throw new Error('Session not found');
+    }
+
+    // Send session info
+    const sessionTitle = !params.sessionId
+      ? (userMessage.length > 60 ? userMessage.slice(0, 57) + '...' : userMessage)
+      : undefined;
+    onEvent('session', JSON.stringify({ sessionId, sessionTitle }));
+
+    // Persist user message
+    await this.db.insert(schema.aiChatMessages).values({ id: randomUUID(), sessionId, role: 'user', content: userMessage });
+
+    // Load history
+    const history = await this.db
+      .select({ role: schema.aiChatMessages.role, content: schema.aiChatMessages.content })
+      .from(schema.aiChatMessages)
+      .where(eq(schema.aiChatMessages.sessionId, sessionId))
+      .orderBy(asc(schema.aiChatMessages.createdAt))
+      .limit(50);
+
+    const messages = history.map((msg) => ({ role: msg.role as 'user' | 'assistant', content: msg.content }));
+
+    // Import SDK + build prompt
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey });
+    const resolvedModel = model || 'claude-haiku-4-5-20251001';
+
+    let systemPrompt = SYSTEM_PROMPT;
+    if (currentPage) {
+      systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+    }
+
+    const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
+    let currentMessages: any[] = [...messages];
+    const maxToolRounds = 5;
+    let fullResponse = '';
+
+    for (let round = 0; round < maxToolRounds; round++) {
+      const stream = client.messages.stream({
+        model: resolvedModel,
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: AI_TOOLS as any,
+        messages: currentMessages,
+      });
+
+      let hasToolUse = false;
+      const toolUseBlocks: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }> = [];
+      let currentToolBlock: { id: string; name: string; inputJson: string } | null = null;
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          const block = (event as any).content_block;
+          if (block?.type === 'text') {
+            // Text block starting
+          } else if (block?.type === 'tool_use') {
+            hasToolUse = true;
+            currentToolBlock = { id: block.id, name: block.name, inputJson: '' };
+            onEvent('status', JSON.stringify({ message: 'Querying your data...' }));
+          }
+        } else if (event.type === 'content_block_delta') {
+          const delta = (event as any).delta;
+          if (delta?.type === 'text_delta' && delta.text) {
+            fullResponse += delta.text;
+            onEvent('text', JSON.stringify({ text: delta.text }));
+          } else if (delta?.type === 'input_json_delta' && currentToolBlock) {
+            currentToolBlock.inputJson += delta.partial_json ?? '';
+          }
+        } else if (event.type === 'content_block_stop') {
+          if (currentToolBlock) {
+            let input: Record<string, unknown> = {};
+            try { input = JSON.parse(currentToolBlock.inputJson || '{}'); } catch {}
+            toolUseBlocks.push({
+              type: 'tool_use',
+              id: currentToolBlock.id,
+              name: currentToolBlock.name,
+              input,
+            });
+            currentToolBlock = null;
+          }
+        }
+      }
+
+      if (!hasToolUse) break;
+
+      // Execute tools
+      const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = [];
+      for (const tb of toolUseBlocks) {
+        const result = await executeTool(tb.name, tb.input, toolCtx, this.getToolServices());
+        toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
+      }
+
+      // Get the full response for the assistant message (including tool_use blocks)
+      const finalMessage = await stream.finalMessage();
+      currentMessages = [
+        ...currentMessages,
+        { role: 'assistant', content: finalMessage.content },
+        { role: 'user', content: toolResults },
+      ];
+
+      onEvent('status', JSON.stringify({ message: 'Generating response...' }));
+    }
+
+    // Persist assistant message
+    if (fullResponse) {
+      await this.db.insert(schema.aiChatMessages).values({ id: randomUUID(), sessionId, role: 'assistant', content: fullResponse });
+    }
+
+    // Update session
+    if (!params.sessionId && sessionTitle) {
+      await this.db.update(schema.aiChatSessions).set({ title: sessionTitle, updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+    } else {
+      await this.db.update(schema.aiChatSessions).set({ updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+    }
   }
 
   private async callClaude(

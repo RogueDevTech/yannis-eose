@@ -224,7 +224,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setCartOrdersService(this.cartOrdersService);
     setUserFilterPreferencesService(this.userFilterPreferencesService);
     setAiAssistantService(this.aiAssistantService);
-    setAiAssistantToolServices({
+    const toolSvcs = {
       ordersService: this.ordersService,
       financeService: this.financeService,
       marketingService: this.marketingService,
@@ -232,7 +232,10 @@ export class TrpcModule implements NestModule, OnModuleInit {
       logisticsService: this.logisticsService,
       usersService: this.usersService,
       productsService: this.productsService,
-    });
+    };
+    setAiAssistantToolServices(toolSvcs);
+    // Also set on the service instance for the streaming REST endpoint
+    this.aiAssistantService.setToolServices(toolSvcs);
   }
 
   configure(consumer: MiddlewareConsumer) {
