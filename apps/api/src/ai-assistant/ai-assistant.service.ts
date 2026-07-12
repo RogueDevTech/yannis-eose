@@ -45,6 +45,49 @@ No state skipping. DELETED replaces the old CANCELLED status.
 - If the user asks something you can't answer with the available tools, say so and suggest what they could check manually.
 - If a tool returns an error saying the user lacks permission, explain that they don't have access to that specific data and suggest they contact their admin.`;
 
+// ─── Page Context Map ────────────────────────────────────────────────
+// Maps known routes to descriptions so the AI understands what the user is looking at.
+
+const PAGE_CONTEXT_MAP: Record<string, string> = {
+  '/admin': 'This is the Admin Dashboard showing key business metrics: order pipeline, revenue, ROAS, delivery stats, and team performance.',
+  '/admin/ceo': 'This is the CEO Executive Overview with full financial metrics, branch breakdowns, and performance charts.',
+  '/admin/marketing/overview': 'This is the Marketing Live Activities page showing real-time media buyer activity, ad spend, and campaign performance.',
+  '/admin/marketing/team': 'This is the Marketing Team Analysis page with per-media-buyer performance breakdowns.',
+  '/admin/marketing/orders': 'This is the Marketing Orders page showing orders attributed to marketing campaigns.',
+  '/admin/marketing/expenses': 'This is the Ad Spend / Expenses page where media buyers log daily advertising costs.',
+  '/admin/marketing/funding': 'This is the Marketing Funding page for managing budget requests and approvals.',
+  '/admin/marketing/forms': 'This is the Marketing Forms page for managing lead capture forms and campaigns.',
+  '/admin/sales/orders': 'This is the Sales Orders page showing the CS team order pipeline (assignment, engagement, confirmation).',
+  '/admin/sales/follow-up': 'This is the Follow-Up Orders page for managing cart recovery and re-engagement campaigns.',
+  '/admin/inventory': 'This is the Inventory page showing stock levels per product and location.',
+  '/admin/inventory/shipments': 'This is the Inbound Shipments page for receiving new stock.',
+  '/admin/inventory/transfers': 'This is the Stock Transfers page for moving inventory between locations.',
+  '/admin/logistics': 'This is the Logistics page showing delivery partners, riders, and fulfillment tracking.',
+  '/admin/finance': 'This is the Finance Overview page with revenue, costs, profit margins, and cash remittance status.',
+  '/admin/finance/disbursements': 'This is the Disbursements page for managing payouts to staff and partners.',
+  '/admin/hr': 'This is the HR page for staff management, payroll, and onboarding.',
+  '/admin/settings': 'This is the Settings page for system configuration, notifications, and user preferences.',
+};
+
+function getPageContextFromPath(path: string): string {
+  // Try to extract meaningful context from unknown paths
+  const segments = path.split('/').filter(Boolean);
+  if (segments.length <= 1) return 'The user is on the main dashboard.';
+
+  const section = segments[1] || '';
+  const subsection = segments[2] || '';
+
+  if (section === 'marketing') return `The user is in the Marketing section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'sales') return `The user is in the Sales section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'inventory') return `The user is in the Inventory section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'logistics') return `The user is in the Logistics section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'finance') return `The user is in the Finance section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'hr') return `The user is in the HR section${subsection ? `, viewing the ${subsection} page` : ''}.`;
+  if (section === 'orders') return `The user is viewing an order detail page.`;
+
+  return `The user is viewing: /${segments.join('/')}`;
+}
+
 // ─── Rate Limiting (in-memory, per-process) ──────────────────────────
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -308,6 +351,7 @@ export class AiAssistantService {
     userId: string;
     userMessage: string;
     model?: string;
+    currentPage?: string;
     user: ToolExecutorUser;
     branchId: string | null;
     effectiveBranchIds: string[] | null;
@@ -318,7 +362,7 @@ export class AiAssistantService {
     assistantMessage: string;
     sessionTitle?: string;
   }> {
-    const { userId, userMessage, model, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
+    const { userId, userMessage, model, currentPage, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
 
     // Rate limit
     if (!checkRateLimit(userId)) {
@@ -380,7 +424,7 @@ export class AiAssistantService {
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
     let assistantMessage: string;
     try {
-      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model);
+      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage);
     } catch (err: any) {
       const status = err?.status ?? err?.statusCode;
       const errType = err?.error?.error?.type ?? err?.type ?? '';
@@ -433,6 +477,7 @@ export class AiAssistantService {
     toolCtx: ToolExecutorContext,
     services: ToolExecutorServices,
     model?: string,
+    currentPage?: string,
   ): Promise<string> {
     // Dynamic import to avoid loading SDK when not needed
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -442,11 +487,17 @@ export class AiAssistantService {
     let currentMessages: any[] = [...messages];
     const maxToolRounds = 5;
 
+    // Build system prompt with page context
+    let systemPrompt = SYSTEM_PROMPT;
+    if (currentPage) {
+      systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
+    }
+
     for (let round = 0; round < maxToolRounds; round++) {
       const response = await client.messages.create({
         model: resolvedModel,
         max_tokens: 4096,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         tools: AI_TOOLS as any,
         messages: currentMessages,
       });

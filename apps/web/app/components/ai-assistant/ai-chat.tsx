@@ -333,6 +333,7 @@ function ChatDrawer({ user, onClose }: {
         sessionId: activeSessionId ?? undefined,
         message: msg,
         model: selectedModel,
+        currentPage: window.location.pathname,
       });
 
       // Set session if new
