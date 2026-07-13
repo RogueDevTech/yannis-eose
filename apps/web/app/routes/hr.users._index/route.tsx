@@ -156,7 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
   const input: Record<string, unknown> = {
     page: 1,
-    limit: 10000,
+    limit: 1000,
     sortBy: 'createdAt',
     sortOrder: 'desc',
     companyWideUserList: true,
