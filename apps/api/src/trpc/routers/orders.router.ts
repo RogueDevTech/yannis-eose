@@ -1666,6 +1666,21 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
       const eIds = ctx.effectiveBranchIds;
+
+      // Resolve effective date range so supplementary counts (offline etc.) use
+      // the same period as the leaderboard. Without this, `period: 'this_month'`
+      // with no explicit dates left the offline count unfiltered (all-time).
+      let effStart = input.startDate;
+      let effEnd = input.endDate;
+      if (!effStart && !effEnd && input.period === 'this_month') {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        effStart = `${y}-${m}-01`;
+        effEnd = `${y}-${m}-${d}`;
+      }
+
       const [team, workloads, leaderboard, inactiveAgents, supplementary] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
         getOrdersService().getCSCloserWorkloads(branchId, eIds),
@@ -1679,8 +1694,8 @@ export const ordersRouter = router({
         getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId, eIds),
         getOrdersService().getSupplementaryCounts(
           undefined,
-          input.startDate,
-          input.endDate,
+          effStart,
+          effEnd,
           undefined,
           branchId,
           undefined,
