@@ -226,7 +226,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
 
       if (!listRes.ok) {
-        return { users: [] as User[], total: 0, page, limit: 20, totalPages: 0, summary };
+        return { users: [] as User[], total: 0, page: 1, limit: 20, totalPages: 0, summary };
       }
       const trpcData = listRes.data as unknown as {
         result?: { data?: { users: User[]; pagination: { total: number; page: number; limit: number; totalPages: number } } };
@@ -236,13 +236,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return {
         users: data?.users ?? [],
         total: pagination?.total ?? 0,
-        page: pagination?.page ?? page,
+        page: pagination?.page ?? 1,
         limit: pagination?.limit ?? 20,
         totalPages: pagination?.totalPages ?? 0,
         summary,
       };
     } catch {
-      return { users: [] as User[], total: 0, page, limit: 20, totalPages: 0, summary: emptySummary };
+      return { users: [] as User[], total: 0, page: 1, limit: 20, totalPages: 0, summary: emptySummary };
     }
   })();
 
