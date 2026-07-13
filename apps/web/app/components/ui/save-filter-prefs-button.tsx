@@ -25,6 +25,7 @@ const PERSISTABLE_PARAMS = new Set([
   'startDate', 'endDate', 'period', 'status', 'mediaBuyerId', 'csCloserId',
   'productId', 'campaignId', 'fromLocationId', 'toLocationId', 'locationId',
   'branchId', 'perPage', 'fromCart', 'testOrders', 'sortBy', 'sortOrder', 'sortDir',
+  'categories',
 ]);
 
 const API_PATH = '/api/filter-preferences';

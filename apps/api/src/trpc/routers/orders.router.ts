@@ -1661,11 +1661,14 @@ export const ordersRouter = router({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         inactiveThresholdMinutes: z.number().int().min(1).optional().default(10),
+        /** Order category filter: funnel, offline, follow_up, cart, delivered_follow_up. */
+        categories: z.array(z.enum(['funnel', 'offline', 'follow_up', 'cart', 'delivered_follow_up'])).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
       const eIds = ctx.effectiveBranchIds;
+      const cats = input.categories?.length ? input.categories : undefined;
 
       // Resolve effective date range so supplementary counts (offline etc.) use
       // the same period as the leaderboard. Without this, `period: 'this_month'`
@@ -1690,6 +1693,7 @@ export const ordersRouter = router({
           input.endDate,
           branchId,
           eIds,
+          cats,
         ),
         getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId, eIds),
         getOrdersService().getSupplementaryCounts(

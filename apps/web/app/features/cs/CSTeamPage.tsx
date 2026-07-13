@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
@@ -56,6 +56,8 @@ export interface CSTeamPageProps {
   /** Date filter from URL — controls the leaderboard window for order counts. */
   dateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
   offlineCount?: number;
+  /** Active order category filters (funnel, offline, follow_up, cart, delivered_follow_up). */
+  categories?: string[];
 }
 
 const CS_ACTIVITY_OPTIONS = [
@@ -69,6 +71,94 @@ const CS_BACKLOG_OPTIONS = [
   { value: 'HAS_PENDING', label: 'Has pending' },
   { value: 'NO_PENDING', label: 'No pending' },
 ];
+
+const CS_CATEGORY_OPTIONS = [
+  { value: 'funnel', label: 'Funnel' },
+  { value: 'offline', label: 'Offline' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'cart', label: 'Cart' },
+  { value: 'delivered_follow_up', label: 'Delivered follow-up' },
+];
+
+function CategoryCheckboxFilter({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const label =
+    selected.length === 0
+      ? 'All categories'
+      : selected.length === 1
+        ? CS_CATEGORY_OPTIONS.find((o) => o.value === selected[0])?.label ?? 'Category'
+        : `${selected.length} categories`;
+
+  const toggle = (value: string) => {
+    const next = selected.includes(value)
+      ? selected.filter((v) => v !== value)
+      : [...selected, value];
+    onChange(next);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="flex h-10 md:h-9 w-full items-center justify-between gap-1.5 rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg transition-colors hover:bg-app-hover"
+      >
+        <span className="truncate">{label}</span>
+        <svg className="h-3.5 w-3.5 shrink-0 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-md border border-app-border bg-app-bg shadow-lg">
+          <div className="p-1.5">
+            {CS_CATEGORY_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className="flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2 text-sm text-app-fg hover:bg-app-hover"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt.value)}
+                  onChange={() => toggle(opt.value)}
+                  className="h-4 w-4 rounded border-app-border text-brand-600 focus:ring-brand-500"
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+          {selected.length > 0 && (
+            <div className="border-t border-app-border px-2.5 py-1.5">
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="w-full rounded px-2 py-1.5 text-left text-xs font-medium text-app-fg-muted hover:bg-app-hover"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const CS_SORT_MENU_OPTIONS: SortMenuOption[] = [
   { value: 'total', label: 'Total orders', description: 'Orders assigned to the closer.', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
@@ -263,6 +353,7 @@ export function CSTeamPage({
   sort = 'total-desc',
   dateFilters,
   offlineCount = 0,
+  categories = [],
 }: CSTeamPageProps) {
   // Parse flat sort string (e.g. "total-desc") into SortMenu value
   const sortMenuValue = useMemo((): SortMenuValue => {
@@ -288,6 +379,7 @@ export function CSTeamPage({
     backlog?: string;
     sort?: string;
     page?: number;
+    categories?: string[];
   }) => {
     setSearchParams(
       (prev) => {
@@ -312,6 +404,10 @@ export function CSTeamPage({
         if (overrides.page !== undefined) {
           if (overrides.page <= 1) params.delete('page');
           else params.set('page', String(overrides.page));
+        }
+        if (overrides.categories !== undefined) {
+          if (overrides.categories.length === 0) params.delete('categories');
+          else params.set('categories', overrides.categories.join(','));
         }
         return params;
       },
@@ -348,16 +444,19 @@ export function CSTeamPage({
     return qs ? `?${qs}` : '?';
   };
 
+  const hasCategoryFilter = categories.length > 0;
+
   const filtersBadgeCount = useMemo(() => {
     let count = 0;
     if (activityFilter !== 'ALL') count += 1;
     if (backlogFilter !== 'ALL') count += 1;
     if (sort !== 'total-desc') count += 1;
+    if (hasCategoryFilter) count += 1;
     return count;
-  }, [activityFilter, backlogFilter, sort]);
+  }, [activityFilter, backlogFilter, sort, hasCategoryFilter]);
 
   const showFilteredEmpty = unfilteredCount > 0 && totalCount === 0;
-  const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL';
+  const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL' || hasCategoryFilter;
 
   const teamColumns = useMemo<CompactTableColumn<CSTeamMemberOverview>[]>(
     () => [
@@ -534,6 +633,12 @@ export function CSTeamPage({
               filters={
                 <>
                   <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <CategoryCheckboxFilter
+                      selected={categories}
+                      onChange={(next) => mergeListParams({ categories: next, page: 1 })}
+                    />
+                  </div>
+                  <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                     <FormSelect
                       value={activityFilter}
                       onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
@@ -642,14 +747,21 @@ export function CSTeamPage({
               label: 'Total orders',
               value: summary.engagedTotal.toString(),
               valueClassName: 'text-brand-600 dark:text-brand-400',
-              title: 'Total orders assigned to the team in this period',
+              title: hasCategoryFilter
+                ? `Orders matching selected categories in this period`
+                : 'Total orders assigned to the team in this period',
             },
-            {
-              label: 'Offline',
-              value: offlineCount.toString(),
-              valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
-              title: 'Orders created manually via offline order',
-            },
+            // Show offline count only when not filtering by category (all categories shown)
+            ...(!hasCategoryFilter
+              ? [
+                  {
+                    label: 'Offline',
+                    value: offlineCount.toString(),
+                    valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+                    title: 'Orders created manually via offline order',
+                  },
+                ]
+              : []),
             {
               label: 'Backlog (unworked)',
               value: summary.totalPending.toString(),
@@ -720,6 +832,15 @@ export function CSTeamPage({
           desktopInlineFilters={
             <>
               <div className="relative">
+                {hasCategoryFilter && (
+                  <FilterDismiss onClear={() => mergeListParams({ categories: [], page: 1 })} />
+                )}
+                <CategoryCheckboxFilter
+                  selected={categories}
+                  onChange={(next) => mergeListParams({ categories: next, page: 1 })}
+                />
+              </div>
+              <div className="relative">
                 {activityFilter !== 'ALL' && (
                   <FilterDismiss onClear={() => mergeListParams({ activity: 'ALL', page: 1 })} />
                 )}
@@ -756,6 +877,18 @@ export function CSTeamPage({
           }
           sheetFilterBody={
             <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Category</span>
+                <div className="relative">
+                  {hasCategoryFilter && (
+                    <FilterDismiss onClear={() => mergeListParams({ categories: [], page: 1 })} />
+                  )}
+                  <CategoryCheckboxFilter
+                    selected={categories}
+                    onChange={(next) => mergeListParams({ categories: next, page: 1 })}
+                  />
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Activity</span>
                 <div className="relative">
@@ -806,6 +939,7 @@ export function CSTeamPage({
           <p className="mb-3 text-xs text-app-fg-muted" aria-live="polite">
             {totalCount} closer{totalCount === 1 ? '' : 's'}
             {q ? ` matching "${q}"` : ''}
+            {hasCategoryFilter ? ` · ${categories.map((c) => CS_CATEGORY_OPTIONS.find((o) => o.value === c)?.label).filter(Boolean).join(', ')}` : ''}
             {activityFilter !== 'ALL' ? ` · ${CS_ACTIVITY_OPTIONS.find((option) => option.value === activityFilter)?.label}` : ''}
             {backlogFilter !== 'ALL' ? ` · ${CS_BACKLOG_OPTIONS.find((option) => option.value === backlogFilter)?.label}` : ''}
           </p>

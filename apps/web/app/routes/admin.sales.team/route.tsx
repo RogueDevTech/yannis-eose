@@ -49,6 +49,7 @@ function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): A
 
 const CS_ACTIVITY_FILTERS = new Set(['ALL', 'ACTIVE', 'IDLE']);
 const CS_BACKLOG_FILTERS = new Set(['ALL', 'HAS_PENDING', 'NO_PENDING']);
+const VALID_CATEGORIES = new Set(['funnel', 'offline', 'follow_up', 'cart', 'delivered_follow_up']);
 const CS_SORT_OPTIONS = new Set([
   'name', 'total-desc', 'total-asc', 'confirmed-desc', 'delivered-desc',
   'cancelled-desc', 'calls-desc', 'conf-rate-desc', 'conf-rate-asc',
@@ -74,6 +75,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const backlogFilterSync = CS_BACKLOG_FILTERS.has(backlogRaw) ? backlogRaw : 'ALL';
   const sortRaw = url.searchParams.get('sort') ?? 'total-desc';
   const sortSync = CS_SORT_OPTIONS.has(sortRaw) ? sortRaw : 'total-desc';
+  const categoriesRaw = url.searchParams.get('categories') ?? '';
+  const categoriesSync = categoriesRaw
+    .split(',')
+    .map((c) => c.trim())
+    .filter((c) => VALID_CATEGORIES.has(c));
 
   const teamShell = {
     dateFilters: filters,
@@ -81,6 +87,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     activityFilter: activityFilterSync,
     backlogFilter: backlogFilterSync,
     sort: sortSync,
+    categories: categoriesSync,
   };
 
   const pageData = (async () => {
@@ -88,7 +95,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // csWorkloads + csLeaderboard + inactiveAgents). The four service calls
     // still run in parallel server-side.
     const bundleInput = encodeURIComponent(
-      JSON.stringify({ ...leaderboardInput, inactiveThresholdMinutes: 10 }),
+      JSON.stringify({
+        ...leaderboardInput,
+        inactiveThresholdMinutes: 10,
+        ...(categoriesSync.length > 0 && { categories: categoriesSync }),
+      }),
     );
     const bundleRes = await apiRequest<unknown>(
       `/trpc/orders.csTeamPageBundle?input=${bundleInput}`,
@@ -248,6 +259,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       sort: sortKey,
       dateFilters: filters,
       offlineCount: bundle?.offlineCount ?? 0,
+      categories: categoriesSync,
     };
   })();
 
@@ -278,6 +290,7 @@ export default function CSTeamRoute() {
             sort={data.sort}
             dateFilters={data.dateFilters}
             offlineCount={data.offlineCount}
+            categories={data.categories}
           />
         )}
     </CachedAwait>

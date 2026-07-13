@@ -7341,6 +7341,8 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    /** Filter leaderboard to specific order categories. Empty/undefined = all. */
+    categories?: string[] | null,
   ) {
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
@@ -7412,6 +7414,25 @@ export class OrdersService {
         : gte(schema.callLogs.startedAt, periodStart)
       : undefined;
 
+    // Category filter: scope leaderboard to specific order pipelines.
+    // Each category maps to DB conditions on orderSource / isFollowUp.
+    const categoryConditions: ReturnType<typeof sql>[] = [];
+    if (categories?.length) {
+      const clauses: ReturnType<typeof sql>[] = [];
+      for (const cat of categories) {
+        if (cat === 'funnel') clauses.push(sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form'))`);
+        if (cat === 'offline') clauses.push(sql`(${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} = 'offline')`);
+        if (cat === 'follow_up') clauses.push(sql`(${schema.orders.isFollowUp} = true)`);
+        if (cat === 'cart') clauses.push(sql`(${schema.orders.orderSource} = 'online')`);
+        if (cat === 'delivered_follow_up') clauses.push(sql`(${schema.orders.orderSource} = 'delivered_follow_up')`);
+      }
+      if (clauses.length === 1) {
+        categoryConditions.push(clauses[0]!);
+      } else if (clauses.length > 1) {
+        categoryConditions.push(sql`(${sql.join(clauses, sql` OR `)})`);
+      }
+    }
+
     // Include all orders (normal + follow-up) in agent metrics so that
     // delivered follow-up orders count toward CS delivery performance and
     // the engaged denominator stays consistent (CEO 2026-06-09).
@@ -7419,12 +7440,14 @@ export class OrdersService {
       inArray(schema.orders.assignedCsId, agentIds),
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
+      ...categoryConditions,
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
       deliveredOrRemitted,
       ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
+      ...categoryConditions,
     );
 
     const [orderRows, deliveredRows, callRows] = await Promise.all([
@@ -7449,12 +7472,14 @@ export class OrdersService {
         .from(schema.orders)
         .where(deliveredWhere)
         .groupBy(schema.orders.assignedCsId),
-      branchId
+      // When categories are active, call logs must join orders to scope by orderSource.
+      // When no categories, branchId still requires the join; only the no-branch+no-category
+      // path can skip the join for efficiency.
+      branchId || categoryConditions.length
         ? this.db
             .select({
               agentId: schema.callLogs.agentId,
               callsMade: sql<number>`COUNT(*)::int`,
-              // AVG over only COMPLETED calls (matches the prior callLogsAvgWhere semantics).
               avgDuration: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds}) FILTER (WHERE ${callCompleted}), 0)::numeric`,
             })
             .from(schema.callLogs)
@@ -7462,8 +7487,9 @@ export class OrdersService {
             .where(
               and(
                 inArray(schema.callLogs.agentId, agentIds),
-                eq(schema.orders.servicingBranchId, branchId),
+                ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
                 ...(callLogsDateFilter ? [callLogsDateFilter] : []),
+                ...categoryConditions,
               ),
             )
             .groupBy(schema.callLogs.agentId)
@@ -7471,7 +7497,6 @@ export class OrdersService {
             .select({
               agentId: schema.callLogs.agentId,
               callsMade: sql<number>`COUNT(*)::int`,
-              // AVG over only COMPLETED calls (matches the prior callLogsAvgWhere semantics).
               avgDuration: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds}) FILTER (WHERE ${callCompleted}), 0)::numeric`,
             })
             .from(schema.callLogs)
