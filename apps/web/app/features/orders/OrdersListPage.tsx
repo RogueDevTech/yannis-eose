@@ -1200,6 +1200,7 @@ function OrdersListPageImpl({
         key: 'orderId',
         header: 'Order ID',
         nowrap: true,
+        hideable: false,
         render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />,
       },
       {
@@ -1300,6 +1301,17 @@ function OrdersListPageImpl({
         ),
       });
     }
+    if (categoryFilter !== undefined) {
+      cols.push({
+        key: 'category',
+        header: 'Category',
+        render: (order) => {
+          const cat = order.offlineOrderCategory;
+          const label = cat === 'website_order' ? 'Website order' : cat === 'referrals' ? 'Referrals' : '—';
+          return <span className={`text-sm ${cat ? 'text-app-fg' : 'text-app-fg-muted'}`}>{label}</span>;
+        },
+      });
+    }
     cols.push(
       {
         key: 'status',
@@ -1349,6 +1361,7 @@ function OrdersListPageImpl({
         headerClassName: 'text-right',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         // Abandoned-cart rows (cart-abandonment view) get "View cart" — the quick
         // cart-detail modal. Real orders get the plain "View" → order detail.
         render: (order) =>
@@ -2860,6 +2873,7 @@ function OrdersListPageImpl({
         <div className="list-panel">
           <CompactTable<Order>
             withCard={false}
+            columnVisibilityKey="admin.orders"
             columns={ordersListColumns}
             rows={filteredOrders}
             rowKey={(o) => o.id}

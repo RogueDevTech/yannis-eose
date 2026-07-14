@@ -10,7 +10,7 @@ pnpm turbo dev
 docker restart yannis-eose-api-1
 
 
-
+8100373262 - opay
 
 gcloud artifacts repositories list --project=project-26c432ec- b4f1-4e21-a6a --location=europe-west2
 

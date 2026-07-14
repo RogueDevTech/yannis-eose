@@ -1361,6 +1361,7 @@ export function AuditPage({
         {/* Desktop table */}
         <div className="hidden md:block">
           <CompactTable<AuditEntry>
+            columnVisibilityKey="admin.audit"
             withCard={false}
             rows={rows}
             rowKey={(entry, idx) => `${entry.recordId}-${entry.validFrom}-${idx}`}
@@ -1371,6 +1372,7 @@ export function AuditPage({
               {
                 key: 'timestamp',
                 header: 'Timestamp',
+                hideable: false,
                 nowrap: true,
                 cellClassName: 'text-xs text-app-fg-muted',
                 render: (entry) => formatDate(entry.validFrom),
@@ -1437,6 +1439,7 @@ export function AuditPage({
                 header: 'Details',
                 align: 'right',
                 tight: true,
+                hideable: false,
                 render: (entry) => (
                   <CompactTableActionButton onClick={() => setSelectedEntry(entry)}>
                     View

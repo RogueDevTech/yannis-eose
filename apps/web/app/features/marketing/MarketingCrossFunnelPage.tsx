@@ -183,6 +183,7 @@ export function MarketingCrossFunnelPage({
     {
       key: 'orderId',
       header: 'Order ID',
+      hideable: false,
       render: (row) =>
         row.originalOrderId && row.originalOrderNumber ? (
           <OrderIdBadge
@@ -267,6 +268,7 @@ export function MarketingCrossFunnelPage({
       align: 'right',
       tight: true,
       mobileShowLabel: false,
+      hideable: false,
       render: (row) => (
         <TableRowActionsSheet
           ariaLabel={`Actions for ${row.customerName}`}
@@ -606,6 +608,7 @@ export function MarketingCrossFunnelPage({
 
       {/* Table */}
       <CompactTable<CrossFunnelAttemptRow>
+        columnVisibilityKey="admin.marketing.cross-funnel"
         columns={columns}
         rows={list.rows}
         rowKey={(r) => r.id}

@@ -64,6 +64,7 @@ export const aiAssistantRouter = router({
       const result = await getAiAssistantService().sendMessage({
         sessionId: input.sessionId,
         userId: ctx.user.id,
+        userName: ctx.user.name,
         userMessage: input.message,
         model: input.model,
         currentPage: input.currentPage,

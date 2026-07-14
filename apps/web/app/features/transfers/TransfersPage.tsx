@@ -1039,6 +1039,7 @@ export function TransfersPage({
               {
                 key: 'product',
                 header: 'Product',
+                hideable: false,
                 render: (t) => {
                   const midFlight =
                     isOptimisticId(t.id) ||
@@ -1094,6 +1095,7 @@ export function TransfersPage({
                 mobileShowLabel: false,
                 align: 'right',
                 tight: true,
+                hideable: false,
                 render: (t) => {
                   const isMidFlight =
                     isOptimisticId(t.id) ||
@@ -1158,6 +1160,7 @@ export function TransfersPage({
 
             return (
               <CompactTable<Transfer>
+                columnVisibilityKey="admin.transfers"
                 caption={pageTitle}
                 columns={columns}
                 rows={pagedTransfers}

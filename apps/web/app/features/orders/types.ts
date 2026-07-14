@@ -38,6 +38,8 @@ export interface Order {
   frozenForFollowUp?: boolean;
   /** Last CS comment left on the order — shown as an icon + tooltip on the list. */
   lastCsComment?: { comment: string; actorName: string | null; at: string } | null;
+  /** Offline order category — 'website_order' | 'referrals' | null */
+  offlineOrderCategory?: string | null;
 }
 
 export interface CallLogEntry {

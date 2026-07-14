@@ -434,6 +434,7 @@ function LogisticsOrdersPageImpl({
       {
         key: 'orderId',
         header: 'Order ID',
+        hideable: false,
         render: (order) => (
           <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />
         ),
@@ -472,6 +473,7 @@ function LogisticsOrdersPageImpl({
         align: 'right',
         tight: true,
         nowrap: true,
+        hideable: false,
         minWidth: allocationOnDetailOnly ? 'min-w-[4.5rem]' : 'min-w-[220px]',
         mobileShowLabel: false,
         headerClassName: 'text-right',
@@ -1036,6 +1038,7 @@ function LogisticsOrdersPageImpl({
             and waste horizontal space. */}
         <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
           <CompactTable<LogisticsOrderRow>
+            columnVisibilityKey="admin.logistics.orders"
             withCard={false}
             columns={logisticsOrderColumns}
             rows={displayOrders}

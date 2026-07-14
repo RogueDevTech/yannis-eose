@@ -264,6 +264,7 @@ export function FollowUpOrdersPage({
           {/* Desktop table */}
           <div className="hidden sm:block">
             <CompactTable<FollowUpOrder>
+              columnVisibilityKey="admin.cs.follow-up-orders"
               rowKey={(o) => o.id}
               columns={[
                 ...(!isCloser
@@ -284,6 +285,7 @@ export function FollowUpOrdersPage({
                 {
                   key: 'orderNumber',
                   header: 'Order',
+                  hideable: false,
                   render: (o) => (
                     <Link to={detailLink(o)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline font-mono">
                       {formatOrderId(o.orderNumber)}

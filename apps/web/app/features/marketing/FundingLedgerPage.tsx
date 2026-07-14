@@ -75,6 +75,7 @@ export function FundingLedgerPage({
         key: 'txnId',
         header: 'Transaction ID',
         nowrap: true,
+        hideable: false,
         render: (e) => {
           if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
           const shortId = `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
@@ -221,6 +222,7 @@ export function FundingLedgerPage({
         header: '',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (e) => (e.id === '__opening_balance__' || e.id === '__closing_balance__') ? null : (
           <TableActionButton onClick={() => setDetailEntry(e)}>View</TableActionButton>
         ),
@@ -476,6 +478,7 @@ export function FundingLedgerPage({
             />
           ) : (
             <CompactTable<FundingLedgerEntry>
+              columnVisibilityKey="admin.marketing.funding-ledger"
               columns={columns}
               rows={(() => {
                 if (page !== 1 || !selectedUserId) return entries;

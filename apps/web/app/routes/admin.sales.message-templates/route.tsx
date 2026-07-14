@@ -388,6 +388,7 @@ function MessageTemplatesPage({
       {
         key: 'name',
         header: 'Name',
+        hideable: false,
         render: (tpl) => <span className="font-medium text-app-fg">{tpl.name}</span>,
       },
       {
@@ -425,6 +426,7 @@ function MessageTemplatesPage({
         align: 'right',
         tight: true,
         nowrap: true,
+        hideable: false,
         minWidth: 'min-w-[9.5rem]',
         render: (tpl) => (
           <div className="inline-flex flex-nowrap items-center justify-end gap-1.5 shrink-0">
@@ -526,6 +528,7 @@ function MessageTemplatesPage({
       />
 
       <CompactTable<MessageTemplate>
+        columnVisibilityKey="admin.sales.message-templates"
         columns={templateColumns}
         rows={filtered}
         rowKey={(tpl) => tpl.id}

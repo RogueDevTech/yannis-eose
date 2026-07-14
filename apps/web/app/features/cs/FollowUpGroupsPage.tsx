@@ -94,6 +94,7 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
       {
         key: 'name',
         header: 'Group',
+        hideable: false,
         render: (g) => (
           <button type="button" onClick={() => setPeekGroup(g)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
             {g.name}
@@ -138,6 +139,7 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
         align: 'right',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         render: (g) => (
           <TableRowActionsSheet
             ariaLabel={`Actions for ${g.name}`}
@@ -162,6 +164,7 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
         />
       ) : (
         <CompactTable<FollowUpGroupItem>
+          columnVisibilityKey="admin.cs.follow-up-groups"
           columns={columns}
           rows={groups}
           rowKey={(g) => g.id}

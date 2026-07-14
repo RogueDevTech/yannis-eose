@@ -41,6 +41,7 @@ export function ShipmentsTab({
       {
         key: 'reference',
         header: 'Reference',
+        hideable: false,
         render: (s) => (
           <span className="font-mono text-sm font-medium text-app-fg truncate block">
             {s.referenceLabel}
@@ -105,6 +106,7 @@ export function ShipmentsTab({
         header: '',
         align: 'right',
         tight: true,
+        hideable: false,
         mobileShowLabel: false,
         render: (s) =>
           isOptimisticId(s.id) ? (
@@ -151,6 +153,7 @@ export function ShipmentsTab({
         />
       ) : (
         <CompactTable<ShipmentRow>
+          columnVisibilityKey="admin.inventory.shipments"
           columns={columns}
           rows={display}
           rowKey={(r) => r.id}
