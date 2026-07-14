@@ -352,10 +352,7 @@ export function UsersListPage({
         key: 'name',
         header: 'Name',
         render: (user) => (
-          <div className="flex items-center gap-2.5 min-w-0">
-            <CompactUserAvatar name={user.name} />
-            <span className="font-medium text-app-fg truncate">{user.name}</span>
-          </div>
+          <span className="font-medium text-app-fg truncate">{user.name}</span>
         ),
       },
       {
@@ -447,11 +444,9 @@ export function UsersListPage({
       {
         key: 'name',
         header: 'Name',
+        hideable: false,
         render: (user) => (
-          <div className="flex items-center gap-2.5">
-            <CompactUserAvatar name={user.name} />
-            <span className="font-medium text-app-fg">{user.name}</span>
-          </div>
+          <span className="font-medium text-app-fg">{user.name}</span>
         ),
       },
       {
@@ -501,6 +496,7 @@ export function UsersListPage({
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (user) => (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
             {user.status === 'PENDING' ? (
@@ -1067,6 +1063,7 @@ export function UsersListPage({
               rowKey={(u) => u.id}
               loading={isFilterLoading}
               loadingVariant="overlay"
+              columnVisibilityKey="hr.users"
               emptyTitle={users.length === 0 ? 'No users yet' : 'No matching users found'}
               emptyDescription={
                 users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'

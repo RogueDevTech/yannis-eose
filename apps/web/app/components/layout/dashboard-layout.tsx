@@ -192,13 +192,6 @@ const navStructure: NavGroupDef[] = [
         permission: 'cs.teamOverview',
       },
       {
-        label: 'Team Analysis',
-        href: '/admin/sales/team',
-        icon: SidebarIcons.cs,
-        permission: 'cs.teamOverview',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
-      },
-      {
         label: 'Funnel Orders',
         href: '/admin/sales/orders',
         icon: SidebarIcons.orders,
@@ -228,6 +221,13 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.orders,
         permission: 'orders.followUp',
         roles: ['CS_CLOSER'],
+      },
+      {
+        label: 'Team Analysis',
+        href: '/admin/sales/team',
+        icon: SidebarIcons.cs,
+        permission: 'cs.teamOverview',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
         label: 'Leaderboard',

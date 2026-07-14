@@ -114,6 +114,7 @@ export function DeliveryRemittanceDetailPage({
       {
         key: 'customer',
         header: 'Customer',
+        hideable: false,
         render: (o) => (
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-medium text-app-fg truncate max-w-[12rem]" title={o.customerName}>
@@ -214,6 +215,7 @@ export function DeliveryRemittanceDetailPage({
         header: '',
         align: 'right',
         tight: true,
+        hideable: false,
         mobileShowLabel: false,
         render: (o) => (
           <TableRowActionsSheet
@@ -485,6 +487,7 @@ export function DeliveryRemittanceDetailPage({
           <p className="text-sm text-app-fg-muted mt-0.5">{detail.orders.length} linked order(s)</p>
         </div>
         <CompactTable<RemittanceOrderRow>
+          columnVisibilityKey="admin.finance.remittance-detail"
           caption="Orders linked to this cash remittance"
           columns={orderColumns}
           rows={detail.orders}

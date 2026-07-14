@@ -85,6 +85,7 @@ export function GeneralLedgerPage({
       {
         key: 'txnId',
         header: 'Transaction ID',
+        hideable: false,
         nowrap: true,
         render: (e) => {
           const shortId = `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
@@ -185,6 +186,7 @@ export function GeneralLedgerPage({
         header: '',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (e) =>
           <TableActionButton onClick={() => setDetailEntry(e)}>View</TableActionButton>,
       },
@@ -361,6 +363,7 @@ export function GeneralLedgerPage({
         />
       ) : (
         <CompactTable<GeneralLedgerEntry>
+          columnVisibilityKey="admin.finance.general-ledger"
           columns={columns}
           rows={entries}
           rowKey={(e) => `${e.entryType}-${e.id}`}

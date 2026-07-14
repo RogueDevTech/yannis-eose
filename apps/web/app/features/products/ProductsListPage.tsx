@@ -195,6 +195,7 @@ export function ProductsListPage({
       {
         key: 'product',
         header: 'Product',
+        hideable: false,
         minWidth: 'min-w-[200px]',
         nowrap: true,
         render: (product) => (
@@ -272,6 +273,7 @@ export function ProductsListPage({
         align: 'right',
         mobileShowLabel: false,
         tight: true,
+        hideable: false,
         render: (product) => (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
             <CompactTableActionButton onClick={() => setViewProduct(product)}>View</CompactTableActionButton>
@@ -376,6 +378,7 @@ export function ProductsListPage({
       {productsLoadError && <RouteFetchErrorBanner messages={[productsLoadError]} variant="danger" />}
 
       <CompactTable<Product>
+        columnVisibilityKey="admin.catalog.products"
         columns={productColumns}
         rows={filteredProducts}
         rowKey={(p) => p.id}

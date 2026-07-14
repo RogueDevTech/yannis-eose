@@ -166,6 +166,7 @@ export function RemitPage({
       {
         key: 'product',
         header: 'Product',
+        hideable: false,
         render: (r) => <span className="text-app-fg">{r.productName}</span>,
       },
       {
@@ -204,6 +205,7 @@ export function RemitPage({
         header: 'Receipt',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (r) => (
           <CompactTableActionButton onClick={() => setRemittanceReceiptModal(r)}>View</CompactTableActionButton>
         ),
@@ -498,6 +500,7 @@ export function RemitPage({
       <div>
         <h2 className="text-lg font-semibold text-app-fg mb-3">Your remittances</h2>
         <CompactTable<RemittanceRecord>
+          columnVisibilityKey="admin.finance.remit"
           columns={remittanceColumns}
           rows={remittances}
           rowKey={(r) => r.id}

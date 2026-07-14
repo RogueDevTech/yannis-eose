@@ -101,6 +101,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
       {
         key: 'product',
         header: 'Product',
+        hideable: false,
         render: (l) =>
           l.productId ? (
             <Link to={`/admin/products/${l.productId}`} className="text-brand-500 hover:text-brand-600">
@@ -303,6 +304,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
           />
 
           <CompactTable<ProfitByShipmentLine>
+            columnVisibilityKey="admin.finance.profit-by-shipment"
             columns={lineColumns}
             rows={profit.lines}
             rowKey={(l) => l.lineId}

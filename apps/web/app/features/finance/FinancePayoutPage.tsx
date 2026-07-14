@@ -89,6 +89,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
       {
         key: 'month',
         header: 'Month',
+        hideable: false,
         render: (batch) => <span className="text-app-fg-muted">{formatBatchMonth(batch.periodMonth)}</span>,
       },
       {
@@ -119,6 +120,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (batch) => (
           <TableActionButton to={`?status=${encodeURIComponent(status)}&batchId=${batch.id}`} variant="primary">
             Review
@@ -248,6 +250,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
           />
         </div>
         <CompactTable<PayrollBatch>
+          columnVisibilityKey="admin.finance.payout"
           columns={batchColumns}
           rows={pagedBatches}
           rowKey={(b) => b.id}

@@ -374,6 +374,7 @@ export function DeliveryRemittancesPage({
       {
         key: 'sn',
         header: 'S/N',
+        hideable: false,
         render: (_r, i) => (
           <span className="text-xs font-mono text-app-fg-muted">
             {(page - 1) * pageSize + i + 1}
@@ -479,6 +480,7 @@ export function DeliveryRemittancesPage({
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (r) => (
           <div className="flex items-center gap-1">
             <CompactTableActionButton
@@ -1537,6 +1539,7 @@ export function DeliveryRemittancesPage({
             />
           ) : (
           <CompactTable<DeliveryRemittanceListItem>
+            columnVisibilityKey="admin.finance.delivery-remittances"
             columns={remittanceColumns}
             rows={remittances}
             rowKey={(r) => r.id}

@@ -1684,9 +1684,9 @@ export const ordersRouter = router({
         effEnd = `${y}-${m}-${d}`;
       }
 
-      const [team, workloads, leaderboard, inactiveAgents, supplementary] = await Promise.all([
+      const [team, workloads, leaderboard, inactiveAgents, supplementary, categoryCounts] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
-        getOrdersService().getCSCloserWorkloads(branchId, eIds),
+        getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats),
         getOrdersService().getCSCloserLeaderboard(
           input.period,
           input.startDate,
@@ -1706,8 +1706,16 @@ export const ordersRouter = router({
           'servicing',
           ctx.effectiveBranchIds,
         ),
+        getOrdersService().getCategoryBreakdown(effStart, effEnd, branchId, ctx.effectiveBranchIds),
       ]);
-      return { team, workloads, leaderboard, inactiveAgents, offlineCount: supplementary.offlineCount };
+      return {
+        team,
+        workloads,
+        leaderboard,
+        inactiveAgents,
+        offlineCount: supplementary.offlineCount,
+        categoryCounts,
+      };
     }),
 
   /**

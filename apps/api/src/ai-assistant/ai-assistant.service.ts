@@ -61,10 +61,12 @@ When explaining a metric, always:
 - When presenting summaries or reports, structure them with clear sections so the user can copy the entire response or individual sections.
 
 ## Rules
+- ALWAYS call a tool before answering any data question. Never guess, estimate, or say "no data" without running the actual query first. If you are unsure which tool to use, try the most relevant one. Only answer without a tool call if the question is purely about how the app works (not about actual data).
 - Never fabricate data. If a tool returns empty results, say so clearly.
 - Never mention internal implementation details, tool names, system architecture, or URL paths (like /admin/marketing/funding). Refer to pages by their friendly name (e.g. "the Marketing Funding page") unless the user specifically asks for the URL.
 - If the user asks something you can't answer with the available tools, say so and suggest what they could check manually.
-- If a tool returns an error saying the user lacks permission, explain that they don't have access to that specific data and suggest they contact their admin.`;
+- If a tool returns an error saying the user lacks permission, explain that they don't have access to that specific data and suggest they contact their admin.
+- Never ask the user for information you already have (their name, role, branch, today's date). Use the context provided in the system prompt.`;
 
 // ─── Page Context Map ────────────────────────────────────────────────
 // Maps known routes to descriptions so the AI understands what the user is looking at.
@@ -310,6 +312,35 @@ export class AiAssistantService {
     return this.toolServices;
   }
 
+  /** Resolve branch name and company name from IDs for system prompt context. */
+  private async resolveLocationNames(
+    branchId: string | null,
+    activeGroupId: string | null,
+  ): Promise<{ branchName: string | null; companyName: string | null }> {
+    let branchName: string | null = null;
+    let companyName: string | null = null;
+
+    if (branchId) {
+      const [row] = await this.db
+        .select({ name: schema.branches.name })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      branchName = row?.name ?? null;
+    }
+
+    if (activeGroupId) {
+      const [row] = await this.db
+        .select({ name: schema.branchGroups.name })
+        .from(schema.branchGroups)
+        .where(eq(schema.branchGroups.id, activeGroupId))
+        .limit(1);
+      companyName = row?.name ?? null;
+    }
+
+    return { branchName, companyName };
+  }
+
   // ── Session CRUD ─────────────────────────────────────
 
   private static MAX_SESSIONS_PER_USER = 7;
@@ -543,6 +574,7 @@ export class AiAssistantService {
   async sendMessage(params: {
     sessionId?: string;
     userId: string;
+    userName: string;
     userMessage: string;
     model?: string;
     currentPage?: string;
@@ -557,7 +589,7 @@ export class AiAssistantService {
     assistantMessage: string;
     sessionTitle?: string;
   }> {
-    const { userId, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
+    const { userId, userName, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, services } = params;
 
     // Rate limit
     if (!checkRateLimit(userId)) {
@@ -615,11 +647,14 @@ export class AiAssistantService {
       content: msg.content,
     }));
 
+    // Resolve branch/company names for system prompt context
+    const { branchName, companyName } = await this.resolveLocationNames(branchId, activeGroupId);
+
     // Call Claude with tool loop
     const toolCtx: ToolExecutorContext = { user, branchId, effectiveBranchIds, activeGroupId };
     let assistantMessage: string;
     try {
-      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage, currentFilters);
+      assistantMessage = await this.callClaude(apiKey, messages, toolCtx, services, model, currentPage, currentFilters, { userName, branchName, companyName });
     } catch (err: any) {
       const status = err?.status ?? err?.statusCode;
       const errType = err?.error?.error?.type ?? err?.type ?? '';
@@ -671,6 +706,7 @@ export class AiAssistantService {
   async sendMessageStreaming(params: {
     sessionId?: string;
     userId: string;
+    userName: string;
     userMessage: string;
     model?: string;
     currentPage?: string;
@@ -681,7 +717,7 @@ export class AiAssistantService {
     activeGroupId: string | null;
     onEvent: (event: string, data: string) => void;
   }): Promise<void> {
-    const { userId, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
+    const { userId, userName, userMessage, model, currentPage, currentFilters, user, branchId, effectiveBranchIds, activeGroupId, onEvent } = params;
 
     if (!checkRateLimit(userId)) {
       throw new Error('Rate limit exceeded. Please wait a few minutes before sending more messages.');
@@ -725,12 +761,25 @@ export class AiAssistantService {
 
     const messages = history.map((msg) => ({ role: msg.role as 'user' | 'assistant', content: msg.content }));
 
+    // Resolve branch/company names for system prompt context
+    const { branchName, companyName } = await this.resolveLocationNames(branchId, activeGroupId);
+
     // Import SDK + build prompt
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey });
     const resolvedModel = model || 'claude-haiku-4-5-20251001';
 
+    const todayStream = new Date().toISOString().split('T')[0];
     let systemPrompt = SYSTEM_PROMPT;
+
+    // User identity
+    const identityParts = [`The user's name is ${userName}`, `role: ${user.role}`];
+    if (branchName) identityParts.push(`branch: ${branchName}`);
+    if (companyName) identityParts.push(`company: ${companyName}`);
+    systemPrompt += `\n\n## User Identity\n${identityParts.join('. ')}.`;
+
+    systemPrompt += `\n\n## Current Date\nToday is ${todayStream}. Use this when the user asks about "today", "this week", "this month", etc.`;
+
     if (currentPage) {
       systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
       if (currentFilters) {
@@ -833,6 +882,7 @@ export class AiAssistantService {
     model?: string,
     currentPage?: string,
     currentFilters?: string,
+    userContext?: { userName: string; branchName: string | null; companyName: string | null },
   ): Promise<string> {
     // Dynamic import to avoid loading SDK when not needed
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -842,8 +892,18 @@ export class AiAssistantService {
     let currentMessages: any[] = [...messages];
     const maxToolRounds = 5;
 
-    // Build system prompt with page context
+    // Build system prompt with user identity, date, and page context
+    const today = new Date().toISOString().split('T')[0];
     let systemPrompt = SYSTEM_PROMPT;
+
+    // User identity — so the AI knows who it's talking to
+    const identityParts = [`The user's name is ${userContext?.userName ?? 'Unknown'}`, `role: ${toolCtx.user.role}`];
+    if (userContext?.branchName) identityParts.push(`branch: ${userContext.branchName}`);
+    if (userContext?.companyName) identityParts.push(`company: ${userContext.companyName}`);
+    systemPrompt += `\n\n## User Identity\n${identityParts.join('. ')}.`;
+
+    systemPrompt += `\n\n## Current Date\nToday is ${today}. Use this when the user asks about "today", "this week", "this month", etc.`;
+
     if (currentPage) {
       systemPrompt += `\n\n## Current Context\nThe user is currently viewing: ${currentPage}\n${PAGE_CONTEXT_MAP[currentPage] || getPageContextFromPath(currentPage)}`;
       if (currentFilters) {

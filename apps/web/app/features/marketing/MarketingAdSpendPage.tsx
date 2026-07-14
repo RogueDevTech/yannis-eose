@@ -815,6 +815,7 @@ export function MarketingAdSpendPage({
     const cols: CompactTableColumn<AdSpendRecord>[] = [
       {
         key: 'date',
+        hideable: false,
         header: canApproveAdSpend && selectableIds.length > 0 ? (
           <span className="inline-flex items-center gap-2">
             <input
@@ -937,6 +938,7 @@ export function MarketingAdSpendPage({
         tight: true,
         nowrap: true,
         mobileShowLabel: false,
+        hideable: false,
         render: (s) => {
           const isPending = (s.status ?? 'PENDING') === 'PENDING';
           const canEdit = adSpendRowCanEdit(s);
@@ -1638,6 +1640,7 @@ export function MarketingAdSpendPage({
           </div>
         )}
         <CompactTable
+          columnVisibilityKey="admin.marketing.ad-spend"
           withCard={false}
           columns={legacyAdSpendColumns}
           rows={patchedAdSpend}

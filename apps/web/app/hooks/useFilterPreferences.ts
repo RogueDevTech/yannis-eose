@@ -194,6 +194,15 @@ export function useFilterPreferences(pageKey: string) {
     }
     if (Object.keys(filters).length === 0) return;
 
+    // Preserve non-URL prefs (e.g. _columns) so filter saves don't clobber
+    // column visibility preferences stored in the same JSONB blob.
+    const existing = prefs[pageKey];
+    if (existing) {
+      for (const [k, v] of Object.entries(existing)) {
+        if (k.startsWith('_') && v) filters[k] = v;
+      }
+    }
+
     setIsSaving(true);
     fetch(API_PATH, {
       method: 'POST',
@@ -208,7 +217,7 @@ export function useFilterPreferences(pageKey: string) {
       })
       .catch(() => {}) // fail silently
       .finally(() => setIsSaving(false));
-  }, [searchParams, pageKey, setPagePrefs]);
+  }, [searchParams, pageKey, setPagePrefs, prefs]);
 
   // ── Clear saved defaults ──────────────────────────────────────────
   const clearSavedFilters = useCallback(() => {

@@ -77,6 +77,7 @@ export function FollowUpBatchesPage({
       {
         key: 'branch',
         header: 'Branch',
+        hideable: false,
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[8rem]" />
           : (b) => (
@@ -148,6 +149,7 @@ export function FollowUpBatchesPage({
         key: 'actions',
         header: '',
         align: 'right',
+        hideable: false,
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[3rem]" />
           : (b) => (
@@ -215,6 +217,7 @@ export function FollowUpBatchesPage({
         />
       ) : (
         <CompactTable<FollowUpBranchRow>
+          columnVisibilityKey="admin.cs.follow-up-batches"
           columns={columns}
           rows={showSkeleton ? Array.from({ length: 3 }, (_, i) => ({ branchId: `sk-${i}`, branchName: null, totalOrders: 0, unprocessed: 0, assigned: 0, confirmed: 0, delivered: 0, deliveredRevenue: '0', confirmationRate: 0, deliveryRate: 0 })) : branches}
           rowKey={(b) => b.branchId ?? '__unassigned'}

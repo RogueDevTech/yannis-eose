@@ -177,6 +177,7 @@ function movementColumns(
     {
       key: 'when',
       header: 'When',
+      hideable: false,
       nowrap: true,
       cellClassName: 'text-app-fg-muted',
       render: (m) => formatDateTime(m.createdAt),
@@ -264,6 +265,7 @@ function movementColumns(
       header: 'Action',
       align: 'right',
       tight: true,
+      hideable: false,
       render: (m) => (
         <CompactTableActionButton onClick={() => onView(m)}>View</CompactTableActionButton>
       ),
@@ -833,6 +835,7 @@ export function LogisticsProviderDetailPage({
           </div>
 
           <CompactTable<MovementWithProduct>
+            columnVisibilityKey="admin.logistics.provider-detail"
             rows={filteredMovements}
             rowKey={(m) => m.id}
             emptyTitle={movementsData.total === 0 ? 'No stock activity in this range' : 'No matching movements'}

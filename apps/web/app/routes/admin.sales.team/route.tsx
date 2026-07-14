@@ -108,12 +108,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     redirectIfUnauthorized(bundleRes, new URL(request.url).pathname);
 
     type TeamRow = ReturnType<typeof parseCSTeamList>[number];
+    type CategoryCounts = {
+      funnel: number;
+      offline: number;
+      followUp: number;
+      cart: number;
+      deliveredFollowUp: number;
+    };
     type BundleData = {
       team: TeamRow[];
       workloads: AgentWorkload[];
       leaderboard: CSLeaderboardEntry[];
       inactiveAgents: InactiveAgent[];
       offlineCount: number;
+      categoryCounts: CategoryCounts;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -260,6 +268,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       dateFilters: filters,
       offlineCount: bundle?.offlineCount ?? 0,
       categories: categoriesSync,
+      categoryCounts: bundle?.categoryCounts ?? { funnel: 0, offline: 0, followUp: 0, cart: 0, deliveredFollowUp: 0 },
     };
   })();
 
@@ -291,6 +300,7 @@ export default function CSTeamRoute() {
             dateFilters={data.dateFilters}
             offlineCount={data.offlineCount}
             categories={data.categories}
+            categoryCounts={data.categoryCounts}
           />
         )}
     </CachedAwait>

@@ -492,6 +492,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {
         key: 'name',
         header: 'Name',
+        hideable: false,
         render: (p) => (
           <>
             <span className="font-medium text-app-fg">{p.name}</span>
@@ -539,6 +540,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         mobileShowLabel: false,
         tight: true,
         nowrap: true,
+        hideable: false,
         render: (p) => {
           const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
           if (isOptimistic) return null;
@@ -562,6 +564,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {
         key: 'name',
         header: 'Location',
+        hideable: false,
         render: (l) => (
           <>
             <span className="font-medium text-app-fg">{l.name}</span>
@@ -659,6 +662,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         mobileShowLabel: false,
         tight: true,
         nowrap: true,
+        hideable: false,
         render: (l) => {
           const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
           if (isOptimistic) return null;
@@ -1556,6 +1560,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {activeTab === 'providers' && (
         <>
           <CompactTable<Provider>
+            columnVisibilityKey="admin.logistics.providers"
             columns={providerTableColumns}
             rows={pagedProviders}
             rowKey={(p) => p.id}
@@ -1620,6 +1625,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {activeTab === 'locations' && (
         <>
           <CompactTable<Location>
+            columnVisibilityKey="admin.logistics.locations"
             columns={locationTableColumns}
             rows={pagedLocations}
             rowKey={(l) => l.id}
