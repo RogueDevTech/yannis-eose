@@ -22,8 +22,9 @@ import { ThrottlerGuard } from '@nestjs/throttler';
  *     that was the original design intent.
  *
  * Bucket-size note: the per-bucket limit (`limit` in `ThrottlerModule.forRoot`)
- * is now per-user, not per-IP. 100/60s was tight when shared; 200/60s per user
- * is comfortable for normal browsing while still capping abuse / runaway loops.
+ * is now per-user, not per-IP. 100/60s was tight when shared; 400/60s per user
+ * gives headroom for ERP power users (CEO dashboard alone fires 15+ parallel
+ * queries) while still capping abuse / runaway loops.
  *
  * Tracker key prefix (`user:` vs `ip:`) keeps the two namespaces from colliding
  * if Redis ever gets used as the throttler store and we want to inspect or
