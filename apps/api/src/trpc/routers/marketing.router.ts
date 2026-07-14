@@ -309,6 +309,7 @@ export const marketingRouter = router({
         requesterRole,
         ctx.currentBranchId,
         ctx.user.id,
+        ctx.user.branchIds ?? [],
       );
     }),
 

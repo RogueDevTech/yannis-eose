@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { isOrgWideDepartmentHead } from '../common/authz';
+import { canViewAllBranches } from '../common/authz';
 
 /**
  * tRPC context — created for every request.
@@ -19,52 +19,35 @@ export interface TrpcContext {
    */
   currentBranchId: string | null;
   /**
-   * The set of branch IDs the user belongs to (from `user_branches`).
-   * NULL for truly global users (SuperAdmin/Admin with scopeGlobal).
-   * When `currentBranchId` is null AND this is non-null, services must
-   * scope to IN(effectiveBranchIds) instead of showing all data.
+   * The concrete set of branch IDs this user is allowed to see when
+   * `currentBranchId` is null ("All branches" view).
+   *
+   * - Global users (SuperAdmin, Admin, org-wide heads, etc.): `null` → truly
+   *   unfiltered, they can see every branch in the org.
+   * - Branch-scoped users (MB, CS_CLOSER, branch HoM, etc.): the user's
+   *   `branchIds` array — "All branches" means "all MY branches", not every
+   *   branch in the org.
+   * - When `currentBranchId` is set (user picked a specific branch): `null` —
+   *   use `currentBranchId` directly instead.
+   *
+   * Services should check: if `currentBranchId` → filter by that single branch;
+   * else if `effectiveBranchIds` → filter by `IN (…)` union; else → no filter.
    */
   effectiveBranchIds: string[] | null;
-  /**
-   * The active branch group ("company") for this request, resolved from
-   * the user's currentBranchId → branch.group_id lookup.
-   * NULL = global view (SuperAdmin with no branch selected).
-   * Used to scope products, system settings, commission plans, etc.
-   * CEO directive 2026-06-10.
-   */
-  activeGroupId: string | null;
 }
 
 export function createContext(req: Request, res: Response): TrpcContext {
   const user = (req as Request & { user?: SessionUser }).user ?? null;
   const sessionToken = (req as Request & { sessionToken?: string }).sessionToken ?? null;
   const currentBranchId = user?.currentBranchId ?? null;
-  // Multi-branch selection: when a global user picks a subset of branches
-  // via the header checkbox switcher, scope queries to that subset instead
-  // of showing everything. CEO directive 2026-06-10.
-  const selectedSubset = user?.selectedBranchIds?.length ? user.selectedBranchIds : null;
-  const activeGroupId = user?.activeGroupId ?? null;
-  // Global users (scopeGlobal) see everything — no branch guard needed,
-  // UNLESS they have an active multi-branch selection OR an active company
-  // group. When a company group is active, even org-wide roles (Finance,
-  // HR, etc.) must be scoped to that group's branches — they are
-  // "company-wide", not "all-companies-wide".
-  const effectiveBranchIds =
-    // Explicit multi-branch selection (header checkbox switcher)
-    selectedSubset
-      ? selectedSubset
-    // A specific branch is selected → scope to that single branch so that
-    // services using only effectiveBranchIds (aggregates, counts) don't
-    // leak data from the user's other assigned branches.
-      : currentBranchId
-        ? [currentBranchId]
-    // No specific branch → fall back to user's assigned branches / global.
-    // Org-wide department heads (HEAD_OF_CS, HEAD_OF_LOGISTICS, etc.) have
-    // scopeOrgWideHead=true — they must see all branches just like scopeGlobal
-    // users, otherwise their aggregates miss orders in branches they aren't
-    // personally assigned to.
-      : (user?.scopeGlobal || (user && isOrgWideDepartmentHead(user)))
-        ? (activeGroupId && user?.branchIds?.length ? user.branchIds : null)
-        : (user?.branchIds?.length ? user.branchIds : null);
-  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };
+
+  // Resolve effectiveBranchIds: when currentBranchId is null AND the user is
+  // NOT a global viewer, narrow "All branches" to their assigned branches only.
+  let effectiveBranchIds: string[] | null = null;
+  if (user && currentBranchId === null && !canViewAllBranches(user)) {
+    const ids = user.branchIds ?? [];
+    if (ids.length > 0) effectiveBranchIds = ids;
+  }
+
+  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds };
 }

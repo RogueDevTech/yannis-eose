@@ -67,7 +67,7 @@ export interface CEODashboardData {
   invoiceSummary: Record<string, unknown>;
 
   // CEO-requested widgets (2026-05-18)
-  revenueByPeriod: { today: number; thisWeek: number; thisMonth: number };
+  revenueByPeriod: { today: number; thisWeek: number; thisMonth: number; deliveredThisMonth: number };
   deliveriesByProduct: Array<{
     productId: string;
     productName: string;

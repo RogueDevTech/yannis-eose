@@ -250,7 +250,7 @@ async function _ceoOverviewFetch(params: {
     },
     invoiceSummary: invoiceSummary ?? {},
     // CEO-requested widgets (2026-05-18)
-    revenueByPeriod: revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 },
+    revenueByPeriod: revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0, deliveredThisMonth: 0 },
     deliveriesByProduct: deliveriesByProduct ?? [],
     stockPerProduct: stockPerProduct ?? [],
     activeStaffCount: (activeStaffCount as number | undefined) ?? 0,

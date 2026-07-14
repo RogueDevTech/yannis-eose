@@ -1987,6 +1987,12 @@ export class MarketingService {
      * legacy "HoM is the default" behavior when no supervisor exists.
      */
     requesterId?: string,
+    /**
+     * All branch IDs the requester is assigned to. When `branchId` is null
+     * ("All branches" view), we still scope HoM candidates to branches the
+     * requester actually belongs to — not every HoM in the org.
+     */
+    requesterBranchIds?: string[],
   ): Promise<
     Array<{
       id: string;
@@ -2022,12 +2028,26 @@ export class MarketingService {
       for (const id of ids) supervisorIdsSet.add(id);
     }
 
-    // Resolve the set of user-ids that belong to the requester's branch via
-    // both `user_branches` (multi-branch assignments) AND `primaryBranchId`.
-    // This ensures a HoM assigned to Lagos + Remote appears for Remote MBs
-    // even when their primary branch is Lagos.
-    const branchUserIds = branchId ? await this.getBranchUserIds(branchId) : null;
-    const branchUserIdSet = branchUserIds ? new Set(branchUserIds) : null;
+    // Resolve the set of user-ids that belong to the requester's branch(es)
+    // via both `user_branches` (multi-branch assignments) AND `primaryBranchId`.
+    // When branchId is set → scope to that single branch.
+    // When branchId is null ("All branches") → union across ALL branches the
+    // requester is assigned to. "All branches" means "all MY branches", not
+    // every branch in the org.
+    let branchUserIdSet: Set<string> | null = null;
+    if (branchId) {
+      const ids = await this.getBranchUserIds(branchId);
+      branchUserIdSet = ids ? new Set(ids) : null;
+    } else if (requesterBranchIds && requesterBranchIds.length > 0) {
+      const allIds = await Promise.all(
+        requesterBranchIds.map((bid) => this.getBranchUserIds(bid)),
+      );
+      const merged = new Set<string>();
+      for (const ids of allIds) {
+        if (ids) for (const id of ids) merged.add(id);
+      }
+      if (merged.size > 0) branchUserIdSet = merged;
+    }
 
     const rows = await this.db
       .select({
