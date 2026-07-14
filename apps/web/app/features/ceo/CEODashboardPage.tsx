@@ -267,7 +267,7 @@ export function CEODashboardPage({
   // CEO-requested widgets (2026-05-18). Deliveries-per-Brand and
   // Stock-Available-per-Product were removed from this view on 2026-05-19;
   // backend still returns them but the dashboard no longer renders them.
-  const revenueByPeriod = data?.revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 };
+  const revenueByPeriod = data?.revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0, deliveredThisMonth: 0 };
   const activeStaffCount = data?.activeStaffCount ?? 0;
 
   return (

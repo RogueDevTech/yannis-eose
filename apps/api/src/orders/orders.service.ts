@@ -7073,6 +7073,7 @@ export class OrdersService {
     today: number;
     thisWeek: number;
     thisMonth: number;
+    deliveredThisMonth: number;
   }> {
     const { todayStartUtc, weekStartUtc, monthStartUtc } = OrdersService.lagosPeriodBoundaries();
     // See note in getDeliveriesByProduct — Date interpolation into raw `sql\`\``
@@ -7093,6 +7094,7 @@ export class OrdersService {
         today: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${todayIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
         thisWeek: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${weekIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
         thisMonth: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric)), 0)`,
+        deliveredThisMonth: sql<string>`COUNT(*)`,
       })
       .from(schema.orders)
       .where(and(...conditions));
@@ -7101,6 +7103,7 @@ export class OrdersService {
       today: Number(row?.today ?? 0),
       thisWeek: Number(row?.thisWeek ?? 0),
       thisMonth: Number(row?.thisMonth ?? 0),
+      deliveredThisMonth: Number(row?.deliveredThisMonth ?? 0),
     };
   }
 

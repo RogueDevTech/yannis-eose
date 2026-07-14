@@ -1,8 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, inArray } from 'drizzle-orm';
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import {
   listFundingSchema,
@@ -11,14 +8,11 @@ import {
   listOrdersSchema,
 } from '@yannis/shared';
 import type { ExportReportInput, ExportDateRange, ListOrdersInput } from '@yannis/shared';
-import { DRIZZLE } from '../database/database.module';
 import { OrdersService } from '../orders/orders.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
 import { UsersService } from '../users/users.service';
-import { LogisticsService } from '../logistics/logistics.service';
-import { BranchTeamsService } from '../branches/branch-teams.service';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -28,11 +22,6 @@ const EXPORT_MAX_PAGES = 50;
 function escapeField(value: unknown): string {
   if (value === null || value === undefined) return '';
   const str = String(value);
-  // Force text format for long digit strings (phone numbers) so Excel
-  // doesn't mangle them into scientific notation like 2.34707E+12.
-  if (/^\+?\d{7,}$/.test(str.trim())) {
-    return `="${str.trim()}"`;
-  }
   if (str.includes(',') || str.includes('"') || str.includes('\n')) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -98,59 +87,30 @@ function resolveOrderListDates(
 @Injectable()
 export class ReportsService {
   constructor(
-    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly ordersService: OrdersService,
     private readonly marketingService: MarketingService,
     private readonly inventoryService: InventoryService,
     private readonly financeService: FinanceService,
     private readonly usersService: UsersService,
-    private readonly logisticsService: LogisticsService,
-    private readonly branchTeamsService: BranchTeamsService,
   ) {}
 
-  /** Batch-resolve product IDs → names. */
-  private async resolveProductNames(ids: string[]): Promise<Map<string, string>> {
-    if (ids.length === 0) return new Map();
-    const rows = await this.db
-      .select({ id: schema.products.id, name: schema.products.name })
-      .from(schema.products)
-      .where(inArray(schema.products.id, ids));
-    return new Map(rows.map((r) => [r.id, r.name]));
-  }
-
-  /** Batch-resolve location IDs → names. */
-  private async resolveLocationNames(ids: string[]): Promise<Map<string, string>> {
-    if (ids.length === 0) return new Map();
-    const rows = await this.db
-      .select({ id: schema.logisticsLocations.id, name: schema.logisticsLocations.name })
-      .from(schema.logisticsLocations)
-      .where(inArray(schema.logisticsLocations.id, ids));
-    return new Map(rows.map((r) => [r.id, r.name]));
-  }
-
-  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null, activeGroupId?: string | null): Promise<{ filename: string; csvContent: string }> {
+  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null): Promise<{ filename: string; csvContent: string }> {
     const date = todayISODate();
     switch (input.reportKey) {
       case 'cs_orders':
-        return this.exportCsOrders(input as Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user, currentBranchId, date, effectiveBranchIds);
+        return this.exportCsOrders(input as Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user, currentBranchId, date);
       case 'cs_team':
-        return this.exportCsTeam(input as Extract<ExportReportInput, { reportKey: 'cs_team' }>, user, currentBranchId, date, effectiveBranchIds);
+        return this.exportCsTeam(input as Extract<ExportReportInput, { reportKey: 'cs_team' }>, user, currentBranchId, date);
       case 'marketing_orders':
-        return this.exportMarketingOrders(input as Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user, currentBranchId, date, effectiveBranchIds);
+        return this.exportMarketingOrders(input as Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user, currentBranchId, date);
       case 'marketing_team':
-        return this.exportMarketingTeam(input as Extract<ExportReportInput, { reportKey: 'marketing_team' }>, user, currentBranchId, date, effectiveBranchIds);
-      case 'cross_funnel':
-        return this.exportCrossFunnel(input as Extract<ExportReportInput, { reportKey: 'cross_funnel' }>, user, currentBranchId, date, effectiveBranchIds);
+        return this.exportMarketingTeam(input as Extract<ExportReportInput, { reportKey: 'marketing_team' }>, user, currentBranchId, date);
       case 'disbursements':
         return this.exportDisbursements(input as Extract<ExportReportInput, { reportKey: 'disbursements' }>, user, currentBranchId, date);
       case 'inventory':
         return this.exportInventory(input as Extract<ExportReportInput, { reportKey: 'inventory' }>, user, date);
       case 'finance_invoices':
-        return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date, effectiveBranchIds);
-      case 'logistics_locations':
-        return this.exportLogisticsLocations(input as Extract<ExportReportInput, { reportKey: 'logistics_locations' }>, user, currentBranchId, date, effectiveBranchIds, activeGroupId);
-      case 'logistics_partners':
-        return this.exportLogisticsPartners(input as Extract<ExportReportInput, { reportKey: 'logistics_partners' }>, user, currentBranchId, date, effectiveBranchIds, activeGroupId);
+        return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date);
       default:
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unsupported report key' });
     }
@@ -179,7 +139,6 @@ export class ReportsService {
   private async collectOrdersPages(
     base: Omit<ListOrdersInput, 'page' | 'limit'>,
     branchId: string | null,
-    effectiveBranchIds?: string[] | null,
   ): Promise<Awaited<ReturnType<OrdersService['list']>>['orders']> {
     const all: Awaited<ReturnType<OrdersService['list']>>['orders'] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
@@ -190,7 +149,7 @@ export class ReportsService {
         sortBy: base.sortBy ?? 'createdAt',
         sortOrder: base.sortOrder ?? 'desc',
       });
-      const result = await this.ordersService.list(listInput, branchId, { effectiveBranchIds });
+      const result = await this.ordersService.list(listInput, branchId);
       const batch = result.orders ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) return all;
@@ -201,7 +160,7 @@ export class ReportsService {
     });
   }
 
-  private async exportCsOrders(input: Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user: SessionUser, currentBranchId: string | null, date: string, effectiveBranchIds?: string[] | null) {
+  private async exportCsOrders(input: Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user: SessionUser, currentBranchId: string | null, date: string) {
     this.ensureExportPermission(user, 'orders.read', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
     const orders = await this.collectOrdersPages(
@@ -215,7 +174,6 @@ export class ReportsService {
         ...(endDate ? { endDate } : {}),
       },
       currentBranchId,
-      effectiveBranchIds,
     );
     const rows = orders.map((o) => ({
       id: o.id,
@@ -224,9 +182,6 @@ export class ReportsService {
       phone: o.customerPhoneDisplay ?? '',
       status: o.status,
       amount: o.totalAmount ?? '',
-      product: o.productLines || o.primaryProductName || '—',
-      quantity: o.itemCount ?? 0,
-      address: o.deliveryAddress ?? '—',
       created: new Date(o.createdAt).toLocaleDateString(),
     }));
     const filteredRows = rows.filter((row) => {
@@ -240,9 +195,6 @@ export class ReportsService {
       { key: 'phone', label: 'Phone' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
-      { key: 'product', label: 'Product' },
-      { key: 'quantity', label: 'Quantity' },
-      { key: 'address', label: 'Delivery Address' },
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
@@ -253,7 +205,6 @@ export class ReportsService {
     user: SessionUser,
     currentBranchId: string | null,
     date: string,
-    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'cs.teamOverview', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -263,10 +214,10 @@ export class ReportsService {
         : 'this_month';
 
     const [team, workloads, leaderboard, inactive] = await Promise.all([
-      this.usersService.listCSTeam(currentBranchId, effectiveBranchIds),
-      this.ordersService.getCSCloserWorkloads(currentBranchId, effectiveBranchIds),
-      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate, currentBranchId, effectiveBranchIds),
-      this.ordersService.getInactiveAgents(10, currentBranchId, effectiveBranchIds),
+      this.usersService.listCSTeam(currentBranchId),
+      this.ordersService.getCSCloserWorkloads(currentBranchId),
+      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate, currentBranchId),
+      this.ordersService.getInactiveAgents(10, currentBranchId),
     ]);
 
     const workloadById = new Map(workloads.map((w) => [w.agentId, w]));
@@ -333,7 +284,6 @@ export class ReportsService {
     user: SessionUser,
     currentBranchId: string | null,
     date: string,
-    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'marketing.teamOverview', 'marketing.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -342,23 +292,9 @@ export class ReportsService {
         ? 'all_time'
         : 'this_month';
 
-    // Supervisors export only their team members, not all branch MBs.
-    let restrictToUserIds: string[] | undefined;
-    if (
-      user.role === 'MEDIA_BUYER' &&
-      (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true &&
-      currentBranchId
-    ) {
-      const scope = await this.branchTeamsService.listSupervisorScopeIds(user.id, currentBranchId);
-      if (scope.marketingUserIds.length > 0) {
-        restrictToUserIds = scope.marketingUserIds;
-        if (!restrictToUserIds.includes(user.id)) restrictToUserIds.push(user.id);
-      }
-    }
-
     const [balances, leaderboard] = await Promise.all([
-      this.marketingService.listFundingBalances(user, currentBranchId, { restrictToUserIds }, effectiveBranchIds),
-      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId, restrictToUserIds, effectiveBranchIds),
+      this.marketingService.listFundingBalances(user, currentBranchId),
+      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId),
     ]);
 
     // Leaderboard only includes Media Buyers — Heads of Marketing won't have a row.
@@ -420,7 +356,6 @@ export class ReportsService {
     user: SessionUser,
     currentBranchId: string | null,
     date: string,
-    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'marketing.orders', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -438,7 +373,6 @@ export class ReportsService {
         ...(endDate ? { endDate } : {}),
       },
       currentBranchId,
-      effectiveBranchIds,
     );
 
     const ids = orders.map((o) => o.id);
@@ -478,106 +412,11 @@ export class ReportsService {
     return { filename: `marketing-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
-  private async exportCrossFunnel(
-    input: Extract<ExportReportInput, { reportKey: 'cross_funnel' }>,
-    user: SessionUser,
-    currentBranchId: string | null,
-    date: string,
-    effectiveBranchIds?: string[] | null,
-  ) {
-    this.ensureExportPermission(user, 'marketing.read', 'marketing.export');
-    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
-
-    const allRows: Array<{
-      customerName: string;
-      duplicateType: string;
-      mediaBuyer: string;
-      originalMediaBuyer: string;
-      product: string;
-      campaign: string;
-      originalCampaign: string;
-      originalOrderId: string;
-      originalOrderStatus: string;
-      originalOrderAmount: string;
-      attemptedAt: string;
-      originalOrderCreatedAt: string;
-    }> = [];
-
-    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
-      const result = await this.marketingService.listMyCrossFunnelAttempts(
-        user,
-        {
-          page,
-          limit: EXPORT_PAGE_LIMIT,
-          ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate } : {}),
-          ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
-          ...(input.filters?.campaignId ? { campaignId: input.filters.campaignId } : {}),
-          ...(input.filters?.mediaBuyerId ? { mediaBuyerId: input.filters.mediaBuyerId } : {}),
-          ...(input.filters?.search ? { search: input.filters.search } : {}),
-          ...(input.filters?.duplicateType ? { duplicateType: input.filters.duplicateType } : {}),
-        },
-        currentBranchId,
-        effectiveBranchIds,
-      );
-      const batch = result.rows ?? [];
-
-      for (const r of batch) {
-        // Determine duplicate type using same logic as the frontend
-        let duplicateType = 'Cross-funnel';
-        if (r.campaignId && r.originalCampaignId && r.campaignId === r.originalCampaignId) {
-          duplicateType = 'Resubmission';
-        } else if (r.originalMediaBuyerId && r.mediaBuyerId === r.originalMediaBuyerId) {
-          duplicateType = 'Same MB';
-        }
-
-        allRows.push({
-          customerName: r.customerName ?? '',
-          duplicateType,
-          mediaBuyer: r.mediaBuyerName ?? '—',
-          originalMediaBuyer: r.originalMediaBuyerName ?? '—',
-          product: r.productName ?? '—',
-          campaign: r.campaignName ?? '—',
-          originalCampaign: r.originalCampaignName ?? '—',
-          originalOrderId: r.originalOrderId ?? '—',
-          originalOrderStatus: r.originalOrderStatus ?? '—',
-          originalOrderAmount: r.originalOrderAmount ? String(r.originalOrderAmount) : '—',
-          attemptedAt: r.attemptedAt ? new Date(r.attemptedAt).toLocaleString() : '—',
-          originalOrderCreatedAt: r.originalOrderCreatedAt ? new Date(r.originalOrderCreatedAt).toLocaleString() : '—',
-        });
-      }
-
-      if (batch.length < EXPORT_PAGE_LIMIT) break;
-      if (page === EXPORT_MAX_PAGES) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Export is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} rows. Narrow your filters and try again.`,
-        });
-      }
-    }
-
-    const columns = [
-      { key: 'customerName', label: 'Customer' },
-      { key: 'duplicateType', label: 'Duplicate Type' },
-      { key: 'mediaBuyer', label: 'Media Buyer (attempt)' },
-      { key: 'originalMediaBuyer', label: 'Media Buyer (original)' },
-      { key: 'product', label: 'Product' },
-      { key: 'campaign', label: 'Form (attempt)' },
-      { key: 'originalCampaign', label: 'Form (original)' },
-      { key: 'originalOrderId', label: 'Original Order ID' },
-      { key: 'originalOrderStatus', label: 'Original Status' },
-      { key: 'originalOrderAmount', label: 'Original Amount' },
-      { key: 'attemptedAt', label: 'Attempted At' },
-      { key: 'originalOrderCreatedAt', label: 'Original Order Date' },
-    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-
-    return { filename: `cross-funnel-duplicates-${date}.csv`, csvContent: toCsv(allRows, columns) };
-  }
-
   private async exportDisbursements(input: Extract<ExportReportInput, { reportKey: 'disbursements' }>, user: SessionUser, currentBranchId: string | null, date: string) {
     this.ensureExportPermission(user, 'finance.disburse', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const all: Array<Awaited<ReturnType<MarketingService['listFunding']>>['records'][number]> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all: any[] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
       const fundingInput = listFundingSchema.parse({
         page,
@@ -654,15 +493,9 @@ export class ReportsService {
         });
       }
     }
-    const productIds = [...new Set(all.map((inv) => inv.productId))];
-    const locationIds = [...new Set(all.map((inv) => inv.locationId))];
-    const [productNames, locationNames] = await Promise.all([
-      this.resolveProductNames(productIds),
-      this.resolveLocationNames(locationIds),
-    ]);
     const rows = all.map((inv) => ({
-      product: productNames.get(inv.productId) ?? inv.productId,
-      location: locationNames.get(inv.locationId) ?? inv.locationId,
+      product: inv.productId,
+      location: inv.locationId,
       stock: inv.stockCount,
       reserved: inv.reservedCount,
       available: Number(inv.stockCount) - Number(inv.reservedCount),
@@ -686,7 +519,7 @@ export class ReportsService {
     return { filename: `inventory-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
-  private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string, effectiveBranchIds?: string[] | null) {
+  private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string) {
     this.ensureExportPermission(user, 'finance.read', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
     const all: Awaited<ReturnType<FinanceService['listInvoices']>>['invoices'] = [];
@@ -698,7 +531,7 @@ export class ReportsService {
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
       });
-      const list = await this.financeService.listInvoices(invoicesInput, effectiveBranchIds);
+      const list = await this.financeService.listInvoices(invoicesInput);
       const batch = list.invoices ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -729,208 +562,5 @@ export class ReportsService {
       { key: 'dueDate', label: 'Due Date' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `invoices-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
-  }
-
-  private async exportLogisticsLocations(
-    input: Extract<ExportReportInput, { reportKey: 'logistics_locations' }>,
-    user: SessionUser,
-    currentBranchId: string | null,
-    date: string,
-    effectiveBranchIds?: string[] | null,
-    activeGroupId?: string | null,
-  ) {
-    this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
-    const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const effectiveStart = startDate ?? '2020-01-01';
-
-    // Per-location performance (orders, stock, remittance) — branch- and
-    // group-scoped so the export matches the on-screen team page.
-    const performance = await this.logisticsService.getLogisticsLocationPerformance(
-      effectiveStart,
-      endDate,
-      currentBranchId,
-      effectiveBranchIds,
-      undefined,
-      activeGroupId,
-    );
-
-    // Enrich with location detail (address, whatsapp) and provider contact info
-    const locationDetails = await this.db
-      .select({
-        id: schema.logisticsLocations.id,
-        address: schema.logisticsLocations.address,
-        whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
-        contactInfo: schema.logisticsProviders.contactInfo,
-        coverageArea: schema.logisticsProviders.coverageArea,
-      })
-      .from(schema.logisticsLocations)
-      .innerJoin(schema.logisticsProviders, eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId));
-    const detailMap = new Map(locationDetails.map((d) => [d.id, d]));
-
-    let data = performance;
-    if (input.filters?.providerId) {
-      data = data.filter((l) => l.providerId === input.filters!.providerId);
-    }
-    if (input.filters?.status) {
-      data = data.filter((l) => l.status === input.filters!.status);
-    }
-
-    const rows = data.map((l) => {
-      const detail = detailMap.get(l.locationId);
-      return {
-        locationName: l.locationName,
-        providerName: l.providerName ?? '',
-        contactInfo: detail?.contactInfo ?? '',
-        address: detail?.address ?? '',
-        whatsappGroupLink: detail?.whatsappGroupLink ?? '',
-        coverageArea: detail?.coverageArea ?? '',
-        status: l.status,
-        totalAssigned: l.totalAssigned,
-        delivered: l.delivered,
-        inTransit: l.inTransit,
-        dispatched: l.dispatched,
-        returned: l.returned,
-        deliveryRate: `${l.deliveryRate.toFixed(2)}%`,
-        delinquencyRate: `${l.delinquencyRate.toFixed(2)}%`,
-        remittedAmount: l.remittedAmount,
-        pendingRemittanceAmount: l.pendingRemittanceAmount,
-        unitsDelivered: l.unitsDelivered,
-        availableStock: l.availableStock,
-        reservedStock: l.reservedStock,
-        stockReceived: l.stockReceived,
-        stockSold: l.stockSold,
-        stockTransferredOut: l.stockTransferredOut,
-        stockAdjusted: l.stockAdjusted,
-      };
-    });
-
-    const columns = [
-      { key: 'locationName', label: 'Location' },
-      { key: 'providerName', label: 'Company' },
-      { key: 'contactInfo', label: 'Phone / Contact' },
-      { key: 'address', label: 'Address' },
-      { key: 'whatsappGroupLink', label: 'WhatsApp Group' },
-      { key: 'coverageArea', label: 'Coverage Area' },
-      { key: 'status', label: 'Status' },
-      { key: 'totalAssigned', label: 'Orders Assigned' },
-      { key: 'delivered', label: 'Delivered' },
-      { key: 'inTransit', label: 'In Transit' },
-      { key: 'dispatched', label: 'Dispatched' },
-      { key: 'returned', label: 'Returned' },
-      { key: 'deliveryRate', label: 'Delivery %' },
-      { key: 'delinquencyRate', label: 'Delinquency %' },
-      { key: 'remittedAmount', label: 'Cash Remitted (₦)' },
-      { key: 'pendingRemittanceAmount', label: 'Pending Remittance (₦)' },
-      { key: 'unitsDelivered', label: 'Units Delivered' },
-      { key: 'availableStock', label: 'Available Stock' },
-      { key: 'reservedStock', label: 'Reserved Stock' },
-      { key: 'stockReceived', label: 'Stock Received' },
-      { key: 'stockSold', label: 'Stock Sold' },
-      { key: 'stockTransferredOut', label: 'Transferred Out' },
-      { key: 'stockAdjusted', label: 'Reconciled' },
-    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-
-    return { filename: `logistics-locations-${date}.csv`, csvContent: toCsv(rows, columns) };
-  }
-
-  private async exportLogisticsPartners(
-    input: Extract<ExportReportInput, { reportKey: 'logistics_partners' }>,
-    user: SessionUser,
-    currentBranchId: string | null,
-    date: string,
-    effectiveBranchIds?: string[] | null,
-    activeGroupId?: string | null,
-  ) {
-    this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
-    const { startDate, endDate } = resolveDateRange(input.dateRange);
-    // "All time" resolves to no dates, but the performance method defaults to
-    // month-to-date when no range is given. Pass an epoch start to override.
-    const effectiveStart = startDate ?? '2020-01-01';
-    const performance = await this.logisticsService.getLogisticsProviderPerformance(
-      effectiveStart,
-      endDate,
-      currentBranchId,
-      effectiveBranchIds,
-      input.filters?.productId,
-      true, // includeInactive — export should list all providers
-      activeGroupId,
-    );
-
-    let data = performance;
-    if (input.filters?.providerId) {
-      data = data.filter((p) => p.providerId === input.filters!.providerId);
-    }
-    if (input.filters?.status) {
-      data = data.filter((p) => p.status === input.filters!.status);
-    }
-
-    // Fetch location names per provider for the "Locations" column
-    const providerIds = data.map((p) => p.providerId);
-    const locationRows = providerIds.length > 0
-      ? await this.db
-          .select({
-            providerId: schema.logisticsLocations.providerId,
-            name: schema.logisticsLocations.name,
-          })
-          .from(schema.logisticsLocations)
-          .where(inArray(schema.logisticsLocations.providerId, providerIds))
-      : [];
-    const locationNamesByProvider = new Map<string, string[]>();
-    for (const row of locationRows) {
-      if (!row.providerId) continue;
-      const list = locationNamesByProvider.get(row.providerId) ?? [];
-      list.push(row.name);
-      locationNamesByProvider.set(row.providerId, list);
-    }
-
-    const rows = data.map((p) => ({
-      providerName: p.providerName,
-      contactInfo: p.contactInfo,
-      coverageArea: p.coverageArea,
-      status: p.status,
-      locations: (locationNamesByProvider.get(p.providerId) ?? []).join(', '),
-      totalAssigned: p.totalAssigned,
-      delivered: p.delivered,
-      inTransit: p.inTransit,
-      dispatched: p.dispatched,
-      returned: p.returned,
-      deliveryRate: `${p.deliveryRate.toFixed(2)}%`,
-      delinquencyRate: `${p.delinquencyRate.toFixed(2)}%`,
-      remittedAmount: p.remittedAmount,
-      pendingRemittanceAmount: p.pendingRemittanceAmount,
-      unitsDelivered: p.unitsDelivered,
-      availableStock: p.availableStock,
-      reservedStock: p.reservedStock,
-      stockReceived: p.stockReceived,
-      stockSold: p.stockSold,
-      stockTransferredOut: p.stockTransferredOut,
-      stockAdjusted: p.stockAdjusted,
-    }));
-
-    const columns = [
-      { key: 'providerName', label: 'Company' },
-      { key: 'contactInfo', label: 'Phone / Contact' },
-      { key: 'coverageArea', label: 'Coverage Area' },
-      { key: 'status', label: 'Status' },
-      { key: 'locations', label: 'Locations' },
-      { key: 'totalAssigned', label: 'Orders Assigned' },
-      { key: 'delivered', label: 'Delivered' },
-      { key: 'inTransit', label: 'In Transit' },
-      { key: 'dispatched', label: 'Dispatched' },
-      { key: 'returned', label: 'Returned' },
-      { key: 'deliveryRate', label: 'Delivery %' },
-      { key: 'delinquencyRate', label: 'Delinquency %' },
-      { key: 'remittedAmount', label: 'Cash Remitted (₦)' },
-      { key: 'pendingRemittanceAmount', label: 'Pending Remittance (₦)' },
-      { key: 'unitsDelivered', label: 'Units Delivered' },
-      { key: 'availableStock', label: 'Available Stock' },
-      { key: 'reservedStock', label: 'Reserved Stock' },
-      { key: 'stockReceived', label: 'Stock Received' },
-      { key: 'stockSold', label: 'Stock Sold' },
-      { key: 'stockTransferredOut', label: 'Transferred Out' },
-      { key: 'stockAdjusted', label: 'Reconciled' },
-    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-
-    return { filename: `logistics-partners-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 }
