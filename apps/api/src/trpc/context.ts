@@ -34,12 +34,15 @@ export interface TrpcContext {
    * else if `effectiveBranchIds` → filter by `IN (…)` union; else → no filter.
    */
   effectiveBranchIds: string[] | null;
+  /** The active branch-group (company) ID from the session. */
+  activeGroupId: string | null;
 }
 
 export function createContext(req: Request, res: Response): TrpcContext {
   const user = (req as Request & { user?: SessionUser }).user ?? null;
   const sessionToken = (req as Request & { sessionToken?: string }).sessionToken ?? null;
   const currentBranchId = user?.currentBranchId ?? null;
+  const activeGroupId = user?.activeGroupId ?? null;
 
   // Resolve effectiveBranchIds: when currentBranchId is null AND the user is
   // NOT a global viewer, narrow "All branches" to their assigned branches only.
@@ -49,5 +52,5 @@ export function createContext(req: Request, res: Response): TrpcContext {
     if (ids.length > 0) effectiveBranchIds = ids;
   }
 
-  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds };
+  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };
 }
