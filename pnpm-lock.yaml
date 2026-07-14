@@ -21,8 +21,8 @@ importers:
   apps/api:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.111.0
-        version: 0.111.0(zod@3.25.76)
+        specifier: ^0.110.0
+        version: 0.110.0(zod@3.25.76)
       '@aws-sdk/client-s3':
         specifier: ^3.1045.0
         version: 3.1045.0
@@ -392,8 +392,8 @@ packages:
     resolution: {integrity: sha512-J4Jarr0SohdrHcb40gTL4wGPCQ952IMWF1G/MSAQfBAPvA9ZKApYhpxcY7PmehVePve+ujpus1dGsJ7dPxz8Kg==}
     engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0, npm: ^6.11.0 || ^7.5.6 || >=8.0.0, yarn: '>= 1.13.0'}
 
-  '@anthropic-ai/sdk@0.111.0':
-    resolution: {integrity: sha512-1hUqKi+uJQoS5X90+InwHbFAXMvgq0DnsC5hVLEeSRaODiU5WvmqDAcVCmGS2wC0pN9Z8jtWCbWw7JLzeDdm/Q==}
+  '@anthropic-ai/sdk@0.110.0':
+    resolution: {integrity: sha512-hOP4bNYXDFHDxxiEgzlILXrxZIYCDnhe8sry0RDRKD/QnsEpvZcQpablCdm9X/WuD/YgOiSIkkqsL1mLLlTqJw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -7112,7 +7112,7 @@ snapshots:
     transitivePeerDependencies:
       - chokidar
 
-  '@anthropic-ai/sdk@0.111.0(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.110.0(zod@3.25.76)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0

@@ -2936,15 +2936,10 @@ function OrdersListPageImpl({
       )}
 
       {/* Pagination — table view only; the chart view doesn't paginate. */}
-      {!showChartView && (
+      {!showChartView && total > 0 && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-sm text-app-fg-muted">
-            {(() => {
-              const noun = 'orders';
-              return total > 0
-                ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} ${noun}`
-                : `No ${noun}`;
-            })()}
+            Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} orders
           </p>
           <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
         </div>
