@@ -259,19 +259,26 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
 
-        // Per-category totals for breakdown
-        const catFunnel = sumExcludeDeleted(mktSc);
-        const catOffline = sumExcludeDeleted(offSc);
-        const catFollowUp = sumExcludeDeleted(followUpSc);
-        const catCart = sumExcludeDeleted(cartSc);
-        const catDfu = sumExcludeDeleted(dfuSc);
+        // Per-category totals for breakdown.
+        // Non-funnel categories use delivered-only counts (matching the Total
+        // query's onlyGraduateNonMarketing logic). Funnel is derived as the
+        // remainder so lines always sum to tTotal exactly.
+        const catOfflineDel = sumStatus(offSc, 'DELIVERED', 'REMITTED');
+        const catFollowUpDel = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
+        const catCartDel = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
+        const catDfuDel = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
+        const catFunnel = tTotal - catOfflineDel - catFollowUpDel - catCartDel - catDfuDel;
 
-        // Per-category delivered for breakdown
-        const delFunnel = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
+        // Per-category delivered for breakdown.
+        // Offline/follow-up/cart/dfu use their own dedicated queries (servicing scope).
+        // Funnel is derived as the remainder so the lines always sum to tDelivered
+        // (the Total query uses servicing scope, but mktSc uses marketing scope —
+        // deriving avoids a 1-order branch-attribution mismatch).
         const delOffline = sumStatus(offSc, 'DELIVERED', 'REMITTED');
         const delFollowUp = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
         const delCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
         const delDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
+        const delFunnel = tDelivered - delOffline - delFollowUp - delCart - delDfu;
 
         return (
           <div>
