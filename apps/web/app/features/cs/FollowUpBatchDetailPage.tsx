@@ -193,6 +193,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
       {
         key: 'customer',
         header: 'Customer',
+        hideable: false,
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[9rem]" />
           : (item) => (
@@ -261,6 +262,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         align: 'right',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         render: showSkeleton
           ? () => null
           : (item) => (
@@ -466,6 +468,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         />
       ) : (
         <CompactTable<ItemRow>
+          columnVisibilityKey="admin.cs.follow-up-batch-detail"
           columns={columns}
           rows={showSkeleton ? Array.from({ length: 5 }, (_, i) => ({ itemId: `sk-${i}`, orderId: '', originalStatus: '', assignedCsId: null, assignedCsName: null, addedAt: '', orderStatus: '', orderNumber: 0, customerName: '', totalAmount: null, orderCreatedAt: '', followUpSourceOrderId: null })) : paginatedItems}
           rowKey={(r) => r.itemId}

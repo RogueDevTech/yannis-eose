@@ -30,7 +30,7 @@
  *   />
  */
 
-import { Fragment, useCallback, type ReactNode } from 'react';
+import { Fragment, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from '@remix-run/react';
 import type { LinkProps } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
@@ -39,6 +39,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { FilterPrefsContext } from '~/hooks/useFilterPreferences';
 
 export type CompactTableAlign = 'left' | 'right' | 'center';
 
@@ -78,6 +79,10 @@ export interface CompactTableColumn<T> {
   minWidth?: string;
   /** Optional tooltip on the cell (e.g. full text for truncated content) */
   cellTitle?: (row: T) => string | undefined;
+  /** When false, pins this column so it cannot be toggled off. Default true (all columns hideable). */
+  hideable?: boolean;
+  /** Whether this column is visible by default. Default true. */
+  defaultVisible?: boolean;
 }
 
 export interface CompactTablePagination {
@@ -159,6 +164,13 @@ export interface CompactTableProps<T> {
    * checkboxes, selects) are ignored — they keep their own behaviour.
    */
   rowHref?: (row: T, index: number) => string | undefined | null;
+  /**
+   * Enable per-user column visibility. Pass a stable page key (e.g. 'hr.users')
+   * and the table self-manages column toggling with persistence via filter
+   * preferences. All columns are hideable by default; pin a column with
+   * `hideable: false`. Desktop-only — mobile cards always show all columns.
+   */
+  columnVisibilityKey?: string;
 }
 
 const ALIGN_CLASS: Record<CompactTableAlign, string> = {
@@ -235,6 +247,112 @@ function resolveSelectionRowId<T>(
   getRowId: CompactTableSelection<T>['getRowId'],
 ): string {
   return getRowId?.(row) ?? String(rowKey(row, index));
+}
+
+// ── Column Visibility Popover ────────────────────────────────────────────────
+
+function ColumnsIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16M15 4v16M3 8h18M3 16h18" />
+    </svg>
+  );
+}
+
+function ColumnVisibilityPopover<T>({
+  columns,
+  visibleKeys,
+  onChange,
+}: {
+  columns: CompactTableColumn<T>[];
+  visibleKeys: string[];
+  onChange: (nextKeys: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  // All columns that have a meaningful label (skip empty-header action cols without mobileLabel)
+  const listableColumns = columns.filter((c) => {
+    if (typeof c.header === 'string' && c.header.trim()) return true;
+    if (typeof c.mobileLabel === 'string' && c.mobileLabel.trim()) return true;
+    return false;
+  });
+  const hideableColumns = listableColumns.filter((c) => c.hideable !== false);
+  if (hideableColumns.length === 0) return null;
+
+  const visibleSet = new Set(visibleKeys);
+  const visibleCount = hideableColumns.filter((c) => visibleSet.has(c.key)).length;
+
+  const toggle = (key: string) => {
+    const next = visibleSet.has(key)
+      ? visibleKeys.filter((k) => k !== key)
+      : [...visibleKeys, key];
+    onChange(next);
+  };
+
+  const columnLabel = (col: CompactTableColumn<T>): string => {
+    if (typeof col.header === 'string' && col.header.trim()) return col.header;
+    if (typeof col.mobileLabel === 'string' && col.mobileLabel.trim()) return col.mobileLabel;
+    return humanizeColumnKey(col.key);
+  };
+
+  return (
+    <div ref={ref} className="relative inline-flex" data-no-row-click>
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="inline-flex h-7 items-center gap-1.5 rounded px-2 text-xs text-app-fg-muted transition-colors hover:bg-app-hover hover:text-app-fg"
+        title="Displayed columns"
+        aria-label="Displayed columns"
+      >
+        <ColumnsIcon className="h-3.5 w-3.5" />
+        <span>Columns</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-[100] mt-1 w-56 rounded-md border border-app-border bg-app-elevated shadow-lg">
+          <div className="border-b border-app-border px-3 py-2">
+            <p className="text-xs font-semibold text-app-fg">Displayed columns</p>
+            <p className="text-[11px] text-app-fg-muted">
+              {visibleCount} of {hideableColumns.length} selected
+            </p>
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1.5">
+            {listableColumns.map((col) => {
+              const pinned = col.hideable === false;
+              const checked = pinned || visibleSet.has(col.key);
+              return (
+                <label
+                  key={col.key}
+                  className={[
+                    'flex items-center gap-2.5 rounded px-2.5 py-1.5 text-sm',
+                    pinned
+                      ? 'text-app-fg-muted cursor-default'
+                      : 'text-app-fg cursor-pointer hover:bg-app-hover',
+                  ].join(' ')}
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={pinned}
+                    onChange={() => { if (!pinned) toggle(col.key); }}
+                  />
+                  {columnLabel(col)}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -315,11 +433,67 @@ export function CompactTable<T>({
   footer,
   renderRowDetail,
   rowHref,
+  columnVisibilityKey,
 }: CompactTableProps<T>) {
   const navigate = useNavigate();
   const hasRows = rows.length > 0;
   const showOverlay = loading && loadingVariant === 'overlay';
-  const colCount = columns.length + (selection ? 1 : 0);
+
+  // ── Column Visibility (self-managed) ─────────────────────────────
+  // When `columnVisibilityKey` is provided, the table reads/writes column
+  // preferences via the filter-preferences context. All columns default to
+  // hideable unless explicitly pinned with `hideable: false`.
+  const { prefs: colPrefs, setPagePrefs: setColPagePrefs } = useContext(FilterPrefsContext);
+  const hideableColumns = columnVisibilityKey
+    ? columns.filter((c) => c.hideable !== false)
+    : [];
+  const hasColumnToggler = hideableColumns.length > 0;
+
+  // Derive default visible keys from column definitions
+  const defaultVisibleKeys = hideableColumns
+    .filter((c) => c.defaultVisible !== false)
+    .map((c) => c.key);
+
+  // Read saved column prefs from context
+  const savedColumnStr = columnVisibilityKey
+    ? (colPrefs[columnVisibilityKey]?.['_columns'] ?? null)
+    : null;
+  const colSavedRef = useRef(false);
+  const [visibleKeys, setVisibleKeysState] = useState<string[]>(() => {
+    if (savedColumnStr) return savedColumnStr.split(',').filter(Boolean);
+    return defaultVisibleKeys;
+  });
+
+  // Sync when context hydrates
+  useEffect(() => {
+    if (colSavedRef.current || !columnVisibilityKey) return;
+    const saved = colPrefs[columnVisibilityKey]?.['_columns'];
+    if (saved) setVisibleKeysState(saved.split(',').filter(Boolean));
+  }, [colPrefs, columnVisibilityKey]);
+
+  const handleColumnVisibilityChange = useCallback(
+    (nextKeys: string[]) => {
+      if (!columnVisibilityKey) return;
+      colSavedRef.current = true;
+      setVisibleKeysState(nextKeys);
+      const existing = colPrefs[columnVisibilityKey] ?? {};
+      const merged = { ...existing, _columns: nextKeys.join(',') };
+      setColPagePrefs(columnVisibilityKey, merged);
+      fetch('/api/filter-preferences', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent: 'upsert', pageKey: columnVisibilityKey, filters: merged }),
+      }).catch(() => {});
+    },
+    [columnVisibilityKey, colPrefs, setColPagePrefs],
+  );
+
+  const visibleKeySet = hasColumnToggler ? new Set(visibleKeys) : null;
+  const desktopColumns = visibleKeySet
+    ? columns.filter((c) => c.hideable === false || visibleKeySet.has(c.key))
+    : columns;
+  const colCount = desktopColumns.length + (selection ? 1 : 0);
 
   const showPaginationFooter =
     pagination &&
@@ -537,13 +711,23 @@ export function CompactTable<T>({
   );
 
   const desktopTable = (
-    <div className="hidden overflow-x-auto md:block">
+    <div className="hidden md:block">
+      {hasColumnToggler && (
+        <div className="relative flex justify-end border-b border-app-border bg-app-elevated px-2 py-1">
+          <ColumnVisibilityPopover
+            columns={columns}
+            visibleKeys={visibleKeys}
+            onChange={handleColumnVisibilityChange}
+          />
+        </div>
+      )}
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead className="border-b border-app-border bg-app-elevated">
           <tr>
             {renderHeaderSelection()}
-            {columns.map((col) => {
+            {desktopColumns.map((col) => {
               const alignClass = ALIGN_CLASS[col.align ?? 'left'];
               return (
                 <th
@@ -606,7 +790,7 @@ export function CompactTable<T>({
                   {selection ? (
                     <td className="px-2 py-[5px] align-middle">{renderSelectionCell(row, i)}</td>
                   ) : null}
-                  {columns.map((col) => {
+                  {desktopColumns.map((col) => {
                     const alignClass = ALIGN_CLASS[col.align ?? 'left'];
                     const cellExtra =
                       typeof col.cellClassName === 'function'
@@ -658,6 +842,7 @@ export function CompactTable<T>({
           </tfoot>
         ) : null}
       </table>
+      </div>
     </div>
   );
 

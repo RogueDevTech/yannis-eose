@@ -356,6 +356,7 @@ export function MarketingOrdersPage({
       {
         key: 'id',
         header: 'Order ID',
+        hideable: false,
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
           : (order) =>
@@ -472,6 +473,7 @@ export function MarketingOrdersPage({
         align: 'center',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         render: showSkeletonRows
           ? () => <CompactTableActionButton disabled>View</CompactTableActionButton>
           : (order) =>
@@ -1120,6 +1122,7 @@ export function MarketingOrdersPage({
       <div className="list-panel scroll-mt-4">
         <CompactTable<Order>
           withCard={false}
+          columnVisibilityKey="admin.marketing.orders"
           columns={marketingOrderColumns}
           rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}

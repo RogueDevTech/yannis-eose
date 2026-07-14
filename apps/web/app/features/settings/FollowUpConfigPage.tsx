@@ -379,9 +379,10 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
               {/* Desktop table */}
               <div className="hidden sm:block">
                 <CompactTable
+                  columnVisibilityKey="admin.settings.follow-up-config"
                   rowKey={(r: Rule) => r.id}
                   columns={[
-                    { key: 'name', header: 'Name', render: (r: Rule) => r.name },
+                    { key: 'name', header: 'Name', hideable: false, render: (r: Rule) => r.name },
                     { key: 'sourceStatus', header: 'Status', render: (r: Rule) => r.sourceStatus === 'CART_ABANDONMENT' ? (
                         <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">Cart</span>
                       ) : (
@@ -401,7 +402,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                     ) },
                     { key: 'enabled', header: '', render: (r: Rule) => <StatusBadge status={r.enabled ? 'ACTIVE' : 'INACTIVE'} /> },
                     {
-                      key: 'actions', header: '',
+                      key: 'actions', header: '', hideable: false,
                       render: (r: Rule) => (
                         <div className="flex gap-1">
                           <TableActionButton onClick={() => setViewRule(r)}>View</TableActionButton>

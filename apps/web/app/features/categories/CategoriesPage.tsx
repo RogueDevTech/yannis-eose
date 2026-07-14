@@ -329,6 +329,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       {
         key: 'name',
         header: 'Category name',
+        hideable: false,
         render: (cat) => <span className="font-medium text-app-fg">{cat.name}</span>,
         minWidth: 'min-w-[120px]',
       },
@@ -365,6 +366,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (cat) => (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
             <CompactTableActionButton onClick={() => setViewCategory(cat)}>View</CompactTableActionButton>
@@ -466,6 +468,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
           elevated card, so an outer card would double the chrome and waste width. */}
       <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
         <CompactTable<Category>
+          columnVisibilityKey="admin.catalog.categories"
           caption="Product categories"
           columns={columns}
           rows={categories}

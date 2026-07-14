@@ -210,6 +210,7 @@ export function PermissionRequestsPage({
       {
         key: 'requester',
         header: 'Requester',
+        hideable: false,
         minWidth: 'min-w-[10rem]',
         render: (req) => (
           <div className="text-sm max-w-[10rem]">
@@ -253,6 +254,7 @@ export function PermissionRequestsPage({
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (req) => {
           if (req.status !== 'PENDING') {
             return <CompactTableActionButton onClick={() => setViewing(req)}>View</CompactTableActionButton>;
@@ -331,6 +333,7 @@ export function PermissionRequestsPage({
 
       <div className="list-panel">
         <CompactTable<PermissionRequest>
+          columnVisibilityKey="admin.permission-requests"
           withCard={false}
           className="min-h-0 min-w-0"
           columns={requestColumns}

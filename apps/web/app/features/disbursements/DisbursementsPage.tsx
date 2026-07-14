@@ -557,6 +557,7 @@ export function DisbursementsPage({
       {
         key: 'reference',
         header: 'Reference',
+        hideable: false,
         render: (f) => (
           <div>
             <span className="text-xs font-mono font-medium text-app-fg">DSB-{f.id.slice(0, 8).toUpperCase()}</span>
@@ -631,6 +632,7 @@ export function DisbursementsPage({
         header: '',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (f) => (
           <TableActionButton onClick={() => setFundingFlowRecord(f)}>View</TableActionButton>
         ),
@@ -643,6 +645,7 @@ export function DisbursementsPage({
       {
         key: 'requester',
         header: 'Requester',
+        hideable: false,
         render: (r) => (
           <Link
             to={`/admin/finance/staff-accounts/${r.requesterId}`}
@@ -713,6 +716,7 @@ export function DisbursementsPage({
         align: 'right',
         headerClassName: 'text-right',
         mobileShowLabel: false,
+        hideable: false,
         render: (r) =>
           r.status === 'PENDING' ? (
             <CompactTableActions className="inline-flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
@@ -1170,6 +1174,7 @@ export function DisbursementsPage({
 
             <TableLoadingOverlay show={isFilterLoading}>
               <CompactTable<DisbursementRecord>
+                columnVisibilityKey="admin.finance.disbursements"
                 withCard={false}
                 columns={fundingLedgerColumns}
                 rows={funding}
@@ -1233,6 +1238,7 @@ export function DisbursementsPage({
                     </p>
                   </div>
                   <CompactTable<FundingRequestRecord>
+                    columnVisibilityKey="admin.finance.funding-requests"
                     withCard={false}
                     columns={fundingRequestColumns}
                     rows={fundingRequests}

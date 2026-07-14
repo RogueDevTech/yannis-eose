@@ -774,6 +774,7 @@ function CSDashboardPageLoaded({
     {
       key: 'order',
       header: 'Order',
+      hideable: false,
       render: (order) => (
         <OrderIdBadge
           id={order.id}
@@ -826,6 +827,7 @@ function CSDashboardPageLoaded({
       tight: true,
       nowrap: true,
       mobileShowLabel: false,
+      hideable: false,
       render: (order) => {
         const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
         return (
@@ -2457,6 +2459,7 @@ function CSDashboardPageLoaded({
 
                 <CompactTable<CSOrder>
                   caption="Claim queue"
+                  columnVisibilityKey="admin.cs.dashboard"
                   columns={claimQueueColumns}
                   rows={orders}
                   rowKey={(order) => order.id}

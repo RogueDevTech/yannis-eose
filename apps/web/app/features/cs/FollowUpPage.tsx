@@ -336,6 +336,7 @@ export function FollowUpPage({
       {
         key: 'orderId',
         header: 'Order',
+        hideable: false,
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
           : (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={`/admin/orders/${order.id}`} />,
@@ -411,6 +412,7 @@ export function FollowUpPage({
         align: 'right',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         render: showSkeletonRows
           ? () => null
           : (order) => (
@@ -944,6 +946,7 @@ export function FollowUpPage({
         />
       ) : (
         <CompactTable
+          columnVisibilityKey="admin.cs.follow-up"
           columns={orderColumns}
           rows={showSkeletonRows ? Array.from({ length: 10 }, (_, i) => ({ id: `sk-${i}`, status: '', customerName: '', totalAmount: null, createdAt: '', branchName: null, branchId: null })) as FollowUpPageData['orders'] : orders}
           rowKey={(row) => row.id}

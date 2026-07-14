@@ -166,6 +166,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
       {
         key: 'planName',
         header: 'Plan Name',
+        hideable: false,
         render: (plan) => {
           const isOptimistic = isOptimisticId(plan.id);
           return (
@@ -239,6 +240,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
+        hideable: false,
         render: (plan) => {
           const editable = canManage(plan.role);
           const isOptimistic = isOptimisticId(plan.id);
@@ -364,6 +366,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         />
       ) : (
         <CompactTable<CommissionPlan>
+          columnVisibilityKey="hr.commission-plans"
           columns={planColumns}
           rows={filteredPlans}
           rowKey={(p) => p.id}

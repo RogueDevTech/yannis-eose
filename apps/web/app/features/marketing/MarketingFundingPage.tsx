@@ -1867,6 +1867,7 @@ function RecipientBalancesPanel({
     {
       key: 'name',
       header: 'Recipient',
+      hideable: false,
       render: (b) => <span className="font-medium text-sm text-app-fg">{b.name}</span>,
     },
     {
@@ -1904,6 +1905,7 @@ function RecipientBalancesPanel({
       key: 'actions' as const,
       header: '',
       align: 'right' as const,
+      hideable: false,
       render: (b) => (
         <div className="inline-flex items-center gap-1.5">
           <CompactTableActionButton
@@ -1955,7 +1957,7 @@ function RecipientBalancesPanel({
       </div>
       {/* Desktop */}
       <div className="hidden md:block">
-        <CompactTable rows={filtered} columns={columns} rowKey={(b) => b.userId} emptyTitle="No recipient balances found." />
+        <CompactTable rows={filtered} columns={columns} rowKey={(b) => b.userId} columnVisibilityKey="admin.marketing.funding" emptyTitle="No recipient balances found." />
       </div>
       {/* Mobile */}
       <div className="md:hidden">

@@ -389,6 +389,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
       {
         key: 'product',
         header: 'Product',
+        hideable: false,
         render: (r) => <span className="text-app-fg">{r.productName}</span>,
       },
       {
@@ -450,6 +451,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
         align: 'right',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         minWidth: 'min-w-[200px]',
         render: (r) => {
           const isBusy = markingId === r.id || fetcher.state === 'submitting';
@@ -774,6 +776,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
         <EmptyState title="No transfers found" description={emptyDescription} variant="inline" />
       ) : (
         <CompactTable<TransferConfirmationRecord>
+          columnVisibilityKey="admin.finance.remittances"
           columns={unifiedColumnsWithActions}
           rows={pagedRemittances}
           rowKey={(r) => r.id}

@@ -1200,6 +1200,7 @@ function OrdersListPageImpl({
         key: 'orderId',
         header: 'Order ID',
         nowrap: true,
+        hideable: false,
         render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />,
       },
       {
@@ -1349,6 +1350,7 @@ function OrdersListPageImpl({
         headerClassName: 'text-right',
         tight: true,
         mobileShowLabel: false,
+        hideable: false,
         // Abandoned-cart rows (cart-abandonment view) get "View cart" — the quick
         // cart-detail modal. Real orders get the plain "View" → order detail.
         render: (order) =>
@@ -2860,6 +2862,7 @@ function OrdersListPageImpl({
         <div className="list-panel">
           <CompactTable<Order>
             withCard={false}
+            columnVisibilityKey="admin.orders"
             columns={ordersListColumns}
             rows={filteredOrders}
             rowKey={(o) => o.id}

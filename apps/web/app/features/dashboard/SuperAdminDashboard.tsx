@@ -83,7 +83,7 @@ export interface SuperAdminDashboardProps {
 
 export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const [breakdownModal, setBreakdownModal] = useState<'mktTotal' | 'mktDelivered' | 'csTotal' | 'csDelivered' | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<'csTotal' | 'csDelivered' | null>(null);
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -231,45 +231,41 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         </div>
       </div>
 
-      {/* ── Total Orders: Marketing + Offline + graduated follow-up/cart (delivered only) ── */}
+      {/* ── Total Orders: all categories combined ── */}
       {(() => {
+        const tSc = orderPipeline.totalOrdersCounts ?? {};
         const mktSc = orderPipeline.statusCounts;
         const offSc = orderPipeline.offlineStatusCounts ?? {};
         const followUpSc = data?.followUpCounts as Record<string, number> ?? {};
         const cartSc = data?.cartOrdersCounts as Record<string, number> ?? {};
+        const dfuSc = (data as unknown as Record<string, unknown>)?.deliveredFollowUpCounts as Record<string, number> ?? {};
 
         const sumExcludeDeleted = (sc: Record<string, number>) =>
           Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
         const sumStatus = (sc: Record<string, number>, ...keys: string[]) =>
           keys.reduce((s, k) => s + (sc[k] ?? 0), 0);
 
-        // Marketing + Offline base (full pipeline)
-        const mktTotal = sumExcludeDeleted(mktSc);
-        const offTotal = sumExcludeDeleted(offSc);
-        // Only graduated (delivered/remitted) follow-up and cart orders count toward Total
-        const fuGraduated = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
-        const cartGraduated = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
-        const tTotal = mktTotal + offTotal + fuGraduated + cartGraduated;
-
-        const mktDelivered = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
-        const offDelivered = sumStatus(offSc, 'DELIVERED', 'REMITTED');
-        const tDelivered = mktDelivered + offDelivered + fuGraduated + cartGraduated;
-
+        const tTotal = sumExcludeDeleted(tSc);
+        const tUnprocessed = tSc['UNPROCESSED'] ?? 0;
+        const tCsAssigned = tSc['CS_ASSIGNED'] ?? 0;
+        const tCsEngaged = tSc['CS_ENGAGED'] ?? 0;
         const tConfirmed =
-          sumStatus(mktSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT') +
-          sumStatus(offSc, 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT');
-
-        const tUnprocessed =
-          sumStatus(mktSc, 'UNPROCESSED') + sumStatus(offSc, 'UNPROCESSED');
-        const tCsAssigned =
-          sumStatus(mktSc, 'CS_ASSIGNED') + sumStatus(offSc, 'CS_ASSIGNED');
-        const tCsEngaged =
-          sumStatus(mktSc, 'CS_ENGAGED') + sumStatus(offSc, 'CS_ENGAGED');
-        const tDeleted =
-          sumStatus(mktSc, 'DELETED') + sumStatus(offSc, 'DELETED');
-
+          (tSc['CONFIRMED'] ?? 0) +
+          (tSc['AGENT_ASSIGNED'] ?? 0) +
+          (tSc['DISPATCHED'] ?? 0) +
+          (tSc['IN_TRANSIT'] ?? 0);
+        const tDelivered = (tSc['DELIVERED'] ?? 0) + (tSc['REMITTED'] ?? 0);
+        const tDeleted = tSc['DELETED'] ?? 0;
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
+
+        // Per-category totals for breakdown
+        const catFunnel = sumExcludeDeleted(mktSc);
+        const catOffline = sumExcludeDeleted(offSc);
+        const catFollowUp = sumExcludeDeleted(followUpSc);
+        const catCart = sumExcludeDeleted(cartSc);
+        const catDfu = sumExcludeDeleted(dfuSc);
+
         return (
           <div>
             <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
@@ -288,6 +284,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(tCR) },
                 { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(tDR) },
                 { label: 'Deleted', value: tDeleted, valueClassName: 'text-danger-600 dark:text-danger-400' },
+                { label: 'Funnel', value: catFunnel, valueClassName: 'text-brand-600 dark:text-brand-400', title: 'Marketing form orders' },
+                { label: 'Offline', value: catOffline, valueClassName: 'text-purple-600 dark:text-purple-400', title: 'Manually created orders' },
+                { label: 'Follow-up', value: catFollowUp, valueClassName: 'text-teal-600 dark:text-teal-400', title: 'Follow-up pipeline orders' },
+                { label: 'Cart', value: catCart, valueClassName: 'text-orange-600 dark:text-orange-400', title: 'Cart-recovered orders' },
+                { label: 'Delivered follow-up', value: catDfu, valueClassName: 'text-indigo-600 dark:text-indigo-400', title: 'Delivered follow-up orders' },
               ]}
             />
           </div>
@@ -298,8 +299,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
       {(() => {
         const sc = orderPipeline.statusCounts;
         const offlineCount = orderPipeline.offlineCount ?? 0;
-        const cartCounts = data?.cartOrdersCounts ?? {};
-        const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
         const ordersTotal = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
         const unassigned = sc['UNPROCESSED'] ?? 0;
         const assigned = sc['CS_ASSIGNED'] ?? 0;
@@ -311,10 +310,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           (sc['IN_TRANSIT'] ?? 0);
         const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
         const deleted = sc['DELETED'] ?? 0;
-        // CR = confirmed-or-beyond / total (excludes DELETED from denominator)
         const confirmedAndBeyond = confirmed + delivered;
         const confirmationRate = ordersTotal > 0 ? (confirmedAndBeyond / ordersTotal) * 100 : 0;
-        // DR = delivered / total
         const deliveryRate = ordersTotal > 0 ? (delivered / ordersTotal) * 100 : 0;
         return (
           <div className="space-y-4">
@@ -327,7 +324,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 tileClassName="!py-2.5"
                 items={[
                   {
-                    label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('mktTotal')} /></span>,
+                    label: 'Total',
                     value: ordersTotal,
                     valueClassName: 'text-app-fg',
                     to: marketingLink(),
@@ -357,7 +354,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     to: marketingLink({ status: 'CONFIRMED' }),
                   },
                   {
-                    label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('mktDelivered')} /></span>,
+                    label: 'Delivered',
                     value: delivered,
                     valueClassName: 'text-success-600 dark:text-success-400',
                     to: marketingLink({ status: 'DELIVERED' }),
@@ -380,37 +377,49 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     valueClassName: 'text-danger-600 dark:text-danger-400',
                     to: marketingLink({ status: 'DELETED' }),
                   },
-                  {
-                    label: 'Cart Abandonment',
-                    value: cartTotal,
-                    valueClassName: 'text-orange-600 dark:text-orange-400',
-                    to: cartOrdersLink(),
-                  },
-                ]}
-              />
-              <FunnelBreakdownModal
-                open={breakdownModal === 'mktTotal'}
-                onClose={() => setBreakdownModal(null)}
-                title="Marketing Total: Breakdown"
-                description="Form orders + cart-graduated orders. Excludes offline and follow-up graduated orders."
-                lines={[
-                  { label: 'Form orders (edge-form)', value: ordersTotal - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
-                  { label: 'Cart orders delivered', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
-                  { label: 'Marketing Total', value: ordersTotal, bold: true },
-                ]}
-              />
-              <FunnelBreakdownModal
-                open={breakdownModal === 'mktDelivered'}
-                onClose={() => setBreakdownModal(null)}
-                title="Marketing Delivered: Breakdown"
-                description="Form orders delivered + cart-graduated orders delivered. Cart orders are real MB-attributable sales."
-                lines={[
-                  { label: 'Form orders delivered', value: delivered - (cartCounts['DELIVERED'] ?? 0) - (cartCounts['REMITTED'] ?? 0) },
-                  { label: 'Cart orders delivered', value: (cartCounts['DELIVERED'] ?? 0) + (cartCounts['REMITTED'] ?? 0), muted: true },
-                  { label: 'Marketing Delivered', value: delivered, bold: true },
                 ]}
               />
             </div>
+
+            {/* ── Cart Orders (immediately after Marketing) ── */}
+            {(() => {
+              const cartSc = data?.cartOrdersCounts ?? {};
+              const cartUnassigned = cartSc['UNPROCESSED'] ?? 0;
+              const cartAssigned = cartSc['CS_ASSIGNED'] ?? 0;
+              const cartEngaged = cartSc['CS_ENGAGED'] ?? 0;
+              const cartConfirmed =
+                (cartSc['CONFIRMED'] ?? 0) +
+                (cartSc['AGENT_ASSIGNED'] ?? 0) +
+                (cartSc['DISPATCHED'] ?? 0) +
+                (cartSc['IN_TRANSIT'] ?? 0);
+              const cartDelivered = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
+              const cartTotal = Object.entries(cartSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+              const cartCR = cartTotal > 0 ? ((cartConfirmed + cartDelivered) / cartTotal) * 100 : 0;
+              const cartDR = cartTotal > 0 ? (cartDelivered / cartTotal) * 100 : 0;
+              return (
+                <div>
+                  <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+                    Cart Orders
+                  </h2>
+                  <OverviewStatStrip
+                    mobileGrid
+                    tileClassName="!py-2.5"
+                    items={[
+                      { label: 'Total', value: cartTotal, valueClassName: 'text-app-fg', to: cartOrdersLink() },
+                      { label: 'Unassigned', value: cartUnassigned, valueClassName: 'text-warning-600 dark:text-warning-400', to: cartOrdersLink({ status: 'UNPROCESSED' }) },
+                      { label: 'Assigned', value: cartAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: cartOrdersLink({ status: 'CS_ASSIGNED' }) },
+                      { label: 'Unconfirmed', value: cartEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: cartOrdersLink({ status: 'CS_ENGAGED' }) },
+                      { label: 'Confirmed', value: cartConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: cartOrdersLink({ status: 'CONFIRMED' }) },
+                      { label: 'Delivered', value: cartDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: cartOrdersLink({ status: 'DELIVERED' }) },
+                      { label: 'CR', value: pct(cartCR), valueClassName: confirmationRateColorClass(cartCR) },
+                      { label: 'DR', value: pct(cartDR), valueClassName: deliveryRateColorClass(cartDR) },
+                      { label: 'Deleted', value: cartSc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: cartOrdersLink({ status: 'DELETED' }) },
+                    ]}
+                  />
+                </div>
+              );
+            })()}
+
             {(() => {
               const csSc = orderPipeline.csStatusCounts;
               const csRawTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
@@ -681,80 +690,40 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         );
       })()}
 
-      {/* ── Cart Orders ── */}
+      {/* ── Delivered Follow-Up Orders ── */}
       {(() => {
-        const sc = data?.cartOrdersCounts ?? {};
-        const unassigned = sc['UNPROCESSED'] ?? 0;
-        const assigned = sc['CS_ASSIGNED'] ?? 0;
-        const engaged = sc['CS_ENGAGED'] ?? 0;
-        const confirmed =
+        const sc = (data as unknown as Record<string, unknown>)?.deliveredFollowUpCounts as Record<string, number> ?? {};
+        const dfuTotal = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        const dfuUnassigned = sc['UNPROCESSED'] ?? 0;
+        const dfuAssigned = sc['CS_ASSIGNED'] ?? 0;
+        const dfuEngaged = sc['CS_ENGAGED'] ?? 0;
+        const dfuConfirmed =
           (sc['CONFIRMED'] ?? 0) +
           (sc['AGENT_ASSIGNED'] ?? 0) +
           (sc['DISPATCHED'] ?? 0) +
           (sc['IN_TRANSIT'] ?? 0);
-        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
-        const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        const dfuDelivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const dfuCR = dfuTotal > 0 ? ((dfuConfirmed + dfuDelivered) / dfuTotal) * 100 : 0;
+        const dfuDR = dfuTotal > 0 ? (dfuDelivered / dfuTotal) * 100 : 0;
+        const dfuLink = (params?: Record<string, string>) => buildLink('/admin/sales/delivered-follow-up', params);
         return (
           <div>
             <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-              Cart Orders
+              Delivered Follow-Up
             </h2>
             <OverviewStatStrip
               mobileGrid
               tileClassName="!py-2.5"
               items={[
-                {
-                  label: 'Total',
-                  value: total,
-                  valueClassName: 'text-app-fg',
-                  to: cartOrdersLink(),
-                },
-                {
-                  label: 'Unassigned',
-                  value: unassigned,
-                  valueClassName: 'text-warning-600 dark:text-warning-400',
-                  to: cartOrdersLink({ status: 'UNPROCESSED' }),
-                },
-                {
-                  label: 'Assigned',
-                  value: assigned,
-                  valueClassName: 'text-info-600 dark:text-info-400',
-                  to: cartOrdersLink({ status: 'CS_ASSIGNED' }),
-                },
-                {
-                  label: 'Unconfirmed',
-                  value: engaged,
-                  valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                  to: cartOrdersLink({ status: 'CS_ENGAGED' }),
-                },
-                {
-                  label: 'Confirmed',
-                  value: confirmed,
-                  valueClassName: 'text-brand-600 dark:text-brand-400',
-                  to: cartOrdersLink({ status: 'CONFIRMED' }),
-                },
-                {
-                  label: 'Delivered',
-                  value: delivered,
-                  valueClassName: 'text-success-600 dark:text-success-400',
-                  to: cartOrdersLink({ status: 'DELIVERED' }),
-                },
-                {
-                  label: 'CR',
-                  value: pct(total > 0 ? (confirmed + delivered) / total * 100 : 0),
-                  valueClassName: confirmationRateColorClass(total > 0 ? (confirmed + delivered) / total * 100 : 0),
-                },
-                {
-                  label: 'DR',
-                  value: pct(total > 0 ? delivered / total * 100 : 0),
-                  valueClassName: deliveryRateColorClass(total > 0 ? delivered / total * 100 : 0),
-                },
-                {
-                  label: 'Deleted',
-                  value: sc['DELETED'] ?? 0,
-                  valueClassName: 'text-danger-600 dark:text-danger-400',
-                  to: cartOrdersLink({ status: 'DELETED' }),
-                },
+                { label: 'Total', value: dfuTotal, valueClassName: 'text-app-fg', to: dfuLink() },
+                { label: 'Unassigned', value: dfuUnassigned, valueClassName: 'text-warning-600 dark:text-warning-400', to: dfuLink({ status: 'UNPROCESSED' }) },
+                { label: 'Assigned', value: dfuAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: dfuLink({ status: 'CS_ASSIGNED' }) },
+                { label: 'Unconfirmed', value: dfuEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: dfuLink({ status: 'CS_ENGAGED' }) },
+                { label: 'Confirmed', value: dfuConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: dfuLink({ status: 'CONFIRMED' }) },
+                { label: 'Delivered', value: dfuDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: dfuLink({ status: 'DELIVERED' }) },
+                { label: 'CR', value: pct(dfuCR), valueClassName: confirmationRateColorClass(dfuCR) },
+                { label: 'DR', value: pct(dfuDR), valueClassName: deliveryRateColorClass(dfuDR) },
+                { label: 'Deleted', value: sc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: dfuLink({ status: 'DELETED' }) },
               ]}
             />
           </div>

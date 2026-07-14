@@ -51,7 +51,7 @@ export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsPro
   // localHasSaved mirrors the prop; mutations flip it locally for instant feedback.
   const [localHasSaved, setLocalHasSaved] = useState(hasSavedPrefsProp);
   const { toast } = useToast();
-  const { setPagePrefs } = useContext(FilterPrefsContext);
+  const { prefs, setPagePrefs } = useContext(FilterPrefsContext);
 
   // Keep in sync when the prop changes (e.g. after context hydrates or a save
   // in a sibling hook updates the context).
@@ -72,6 +72,15 @@ export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsPro
     }
     if (Object.keys(filters).length === 0) return;
 
+    // Preserve non-URL prefs (e.g. _columns from column visibility) so filter
+    // saves don't clobber column preferences stored in the same JSONB blob.
+    const existing = prefs[pageKey];
+    if (existing) {
+      for (const [k, v] of Object.entries(existing)) {
+        if (k.startsWith('_') && v) filters[k] = v;
+      }
+    }
+
     setSaving(true);
     fetch(API_PATH, {
       method: 'POST',
@@ -82,7 +91,7 @@ export function SaveFilterPrefsButton({ pageKey, hasSavedPrefs: hasSavedPrefsPro
       .then(() => { setLocalHasSaved(true); setPagePrefs(pageKey, filters); toast.success('Filter defaults saved'); setShowModal(false); })
       .catch(() => toast.error('Failed to save'))
       .finally(() => setSaving(false));
-  }, [searchParams, pageKey, toast, setPagePrefs]);
+  }, [searchParams, pageKey, toast, setPagePrefs, prefs]);
 
   const doClear = useCallback(() => {
     setSaving(true);

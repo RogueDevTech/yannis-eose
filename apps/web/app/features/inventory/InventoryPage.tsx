@@ -476,6 +476,7 @@ export function InventoryPage(props: InventoryStreamData) {
     {
       key: 'product',
       header: 'Product',
+      hideable: false,
       render: (level) => {
         const isOptimistic = isOptimisticId(level.id);
         const isEmpty = isEmptyLocationRow(level.id);
@@ -606,6 +607,7 @@ export function InventoryPage(props: InventoryStreamData) {
       header: '',
       align: 'right',
       tight: true,
+      hideable: false,
       render: (level) => {
         if (isEmptyLocationRow(level.id)) return null;
         const isOptimistic = isOptimisticId(level.id);
@@ -1585,6 +1587,7 @@ export function InventoryPage(props: InventoryStreamData) {
           );
         })()}
         <CompactTable<InventoryLevel>
+          columnVisibilityKey="admin.inventory.levels"
           columns={levelColumns}
           rows={levels}
           rowKey={(r) => r.id}
@@ -1724,6 +1727,7 @@ function TransfersTab({
     {
       key: 'product',
       header: 'Product',
+      hideable: false,
       render: (t) => <span className="font-medium text-app-fg">{productName(t.productId)}</span>,
       minWidth: 'min-w-[160px]',
     },
@@ -1778,6 +1782,7 @@ function TransfersTab({
   return (
     <div className="card p-4 sm:p-6">
       <CompactTable<Transfer>
+        columnVisibilityKey="admin.inventory.transfers"
         caption="Stock transfers"
         columns={columns}
         rows={transfers}
@@ -1825,6 +1830,7 @@ function ReturnsTab({
     {
       key: 'orderId',
       header: 'Order ID',
+      hideable: false,
       render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="font-mono text-sm text-app-fg-muted" />,
       minWidth: 'min-w-[120px]',
     },
@@ -1865,6 +1871,7 @@ function ReturnsTab({
       align: 'right',
       tight: true,
       nowrap: true,
+      hideable: false,
       minWidth: 'min-w-[11rem]',
       mobileShowLabel: false,
       render: (order) => (
@@ -1941,6 +1948,7 @@ function ReturnsTab({
       {/* Returns table */}
       <div className="list-panel">
         <CompactTable<ReturnedOrder>
+          columnVisibilityKey="admin.inventory.returns"
           caption="Returned orders"
           columns={returnsColumns}
           rows={returnedOrders}

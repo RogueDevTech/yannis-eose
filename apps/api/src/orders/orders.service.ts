@@ -6605,6 +6605,45 @@ export class OrdersService {
   }
 
   /**
+   * Per-category order counts for the Team Analysis stat strip.
+   * One query with FILTER clauses — mirrors the category definitions used in
+   * getCSCloserLeaderboard so the numbers are consistent.
+   */
+  async getCategoryBreakdown(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{ funnel: number; offline: number; followUp: number; cart: number; deliveredFollowUp: number }> {
+    const conditions: Parameters<typeof and>[0][] = [
+      sql`${schema.orders.status} <> 'DELETED'`,
+    ];
+    const bCond = this.orderBranchScopeCondition(branchId, 'servicing', effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+
+    const [row] = await this.db
+      .select({
+        funnel: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form'))::int`,
+        offline: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} = 'offline')::int`,
+        followUp: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isFollowUp} = true)::int`,
+        cart: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'online')::int`,
+        deliveredFollowUp: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'delivered_follow_up')::int`,
+      })
+      .from(schema.orders)
+      .where(and(...conditions));
+
+    return {
+      funnel: row?.funnel ?? 0,
+      offline: row?.offline ?? 0,
+      followUp: row?.followUp ?? 0,
+      cart: row?.cart ?? 0,
+      deliveredFollowUp: row?.deliveredFollowUp ?? 0,
+    };
+  }
+
+  /**
    * Get order pipeline chart data — Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel chart. Same date filter as getStatusCounts (created_at).
    */
@@ -6693,6 +6732,8 @@ export class OrdersService {
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
     opts?: { pendingCountsAcrossAllBranches?: boolean },
+    /** Filter pending counts to specific order categories. Empty/undefined = all. */
+    categories?: string[] | null,
   ) {
     const pendingCountsAcrossAllBranches = opts?.pendingCountsAcrossAllBranches === true;
 
@@ -6735,6 +6776,21 @@ export class OrdersService {
 
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
 
+    // Build category conditions for pending count (same logic as getCSCloserLeaderboard).
+    const catConditions: ReturnType<typeof sql>[] = [];
+    if (categories?.length) {
+      const clauses: ReturnType<typeof sql>[] = [];
+      for (const cat of categories) {
+        if (cat === 'funnel') clauses.push(sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form'))`);
+        if (cat === 'offline') clauses.push(sql`(${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} = 'offline')`);
+        if (cat === 'follow_up') clauses.push(sql`(${schema.orders.isFollowUp} = true)`);
+        if (cat === 'cart') clauses.push(sql`(${schema.orders.orderSource} = 'online')`);
+        if (cat === 'delivered_follow_up') clauses.push(sql`(${schema.orders.orderSource} = 'delivered_follow_up')`);
+      }
+      if (clauses.length === 1) catConditions.push(clauses[0]!);
+      else if (clauses.length > 1) catConditions.push(sql`(${sql.join(clauses, sql` OR `)})`);
+    }
+
     const [agents, pendingByAgent, closesTodayMap] = await Promise.all([
       agentsPromise,
       this.db
@@ -6748,6 +6804,7 @@ export class OrdersService {
             isNull(schema.orders.deletedAt),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
             ...(!pendingCountsAcrossAllBranches && bCond ? [bCond] : []),
+            ...catConditions,
           ),
         )
         .groupBy(schema.orders.assignedCsId),

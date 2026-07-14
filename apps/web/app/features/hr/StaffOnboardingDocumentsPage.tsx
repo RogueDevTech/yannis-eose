@@ -109,6 +109,7 @@ export function StaffOnboardingDocumentsPage({
     {
       key: 'name',
       header: 'Staff',
+      hideable: false,
       render: (row) => (
         <div className="min-w-0">
           <Link
@@ -149,6 +150,7 @@ export function StaffOnboardingDocumentsPage({
       header: '',
       align: 'right',
       tight: true,
+      hideable: false,
       render: (row) => (
         <TableActionButton to={`/hr/users/${row.userId}/onboarding`} variant="primary">
           Open
@@ -273,6 +275,7 @@ export function StaffOnboardingDocumentsPage({
       </div>
 
       <CompactTable<StaffOnboardingDocumentRow>
+        columnVisibilityKey="hr.staff-onboarding"
         columns={columns}
         rows={rows}
         rowKey={(r) => r.userId}

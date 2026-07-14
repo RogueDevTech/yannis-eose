@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from '@remix-run/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link, useNavigation, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -22,6 +23,7 @@ import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 import { SortMenu, type SortMenuOption, type SortMenuValue } from '~/components/ui/sort-menu';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
@@ -58,6 +60,14 @@ export interface CSTeamPageProps {
   offlineCount?: number;
   /** Active order category filters (funnel, offline, follow_up, cart, delivered_follow_up). */
   categories?: string[];
+  /** Per-category order counts for the stat strip breakdown. */
+  categoryCounts?: {
+    funnel: number;
+    offline: number;
+    followUp: number;
+    cart: number;
+    deliveredFollowUp: number;
+  };
 }
 
 const CS_ACTIVITY_OPTIONS = [
@@ -80,81 +90,159 @@ const CS_CATEGORY_OPTIONS = [
   { value: 'delivered_follow_up', label: 'Delivered follow-up' },
 ];
 
+const ALL_CATEGORY_VALUES = CS_CATEGORY_OPTIONS.map((o) => o.value);
+
 function CategoryCheckboxFilter({
   selected,
   onChange,
 }: {
+  /** Empty = all selected (no filter). */
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
+  // Local state for instant checkbox feedback. Synced from prop on external changes.
+  const [localSelected, setLocalSelected] = useState(selected);
+  const commitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync local state when prop changes (e.g. after navigation completes).
+  useEffect(() => {
+    setLocalSelected(selected);
+  }, [selected]);
+
+  const effectiveChecked = localSelected.length === 0 ? ALL_CATEGORY_VALUES : localSelected;
+
+  const commitChange = useCallback((next: string[]) => {
+    setLocalSelected(next);
+    // Debounce the URL update so rapid clicks don't trigger multiple navigations.
+    if (commitRef.current) clearTimeout(commitRef.current);
+    commitRef.current = setTimeout(() => onChange(next), 300);
+  }, [onChange]);
+
+  // Clean up timeout on unmount
+  useEffect(() => () => { if (commitRef.current) clearTimeout(commitRef.current); }, []);
+
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, minWidth: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        popoverRef.current && !popoverRef.current.contains(target)
+      ) setOpen(false);
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  const label =
-    selected.length === 0
-      ? 'All categories'
-      : selected.length === 1
-        ? CS_CATEGORY_OPTIONS.find((o) => o.value === selected[0])?.label ?? 'Category'
-        : `${selected.length} categories`;
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPos({ top: rect.bottom + 4, left: rect.left, minWidth: Math.floor(rect.width) });
+  }, [open]);
+
+  const isAllSelected = localSelected.length === 0;
+  const label = isAllSelected
+    ? 'All categories'
+    : localSelected.length === 1
+      ? CS_CATEGORY_OPTIONS.find((o) => o.value === localSelected[0])?.label ?? 'Category'
+      : `${localSelected.length} categories`;
 
   const toggle = (value: string) => {
-    const next = selected.includes(value)
-      ? selected.filter((v) => v !== value)
-      : [...selected, value];
-    onChange(next);
+    const isChecked = effectiveChecked.includes(value);
+    if (isChecked) {
+      const next = effectiveChecked.filter((v) => v !== value);
+      if (next.length === 0) return;
+      commitChange(next);
+    } else {
+      const next = [...effectiveChecked, value];
+      if (next.length === ALL_CATEGORY_VALUES.length) commitChange([]);
+      else commitChange(next);
+    }
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((p) => !p)}
-        className="flex h-10 md:h-9 w-full items-center justify-between gap-1.5 rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg transition-colors hover:bg-app-hover"
+        className={[
+          'w-full appearance-none rounded-lg border transition-colors text-left',
+          'bg-app-canvas text-app-fg',
+          'border-app-border focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none',
+          'cursor-pointer',
+          `${CONTROL_HEIGHT_CLASS} px-3 pr-8 text-sm`,
+        ].join(' ')}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        <span className="truncate">{label}</span>
-        <svg className="h-3.5 w-3.5 shrink-0 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <span className="block min-w-0 truncate text-app-fg">{label}</span>
       </button>
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-md border border-app-border bg-app-bg shadow-lg">
-          <div className="p-1.5">
-            {CS_CATEGORY_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className="flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2 text-sm text-app-fg hover:bg-app-hover"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.includes(opt.value)}
-                  onChange={() => toggle(opt.value)}
-                  className="h-4 w-4 rounded border-app-border text-brand-600 focus:ring-brand-500"
-                />
-                {opt.label}
-              </label>
-            ))}
+      <span
+        className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 w-3.5 h-3.5 text-app-fg-muted"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" className="h-full w-full">
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </span>
+
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={popoverRef}
+          className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated p-2 shadow-lg"
+          style={{ top: pos.top, left: pos.left, minWidth: pos.minWidth, width: 'auto' }}
+        >
+          <div className="min-w-0 overflow-y-auto overscroll-y-contain">
+            {CS_CATEGORY_OPTIONS.map((opt) => {
+              const checked = effectiveChecked.includes(opt.value);
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={checked}
+                  className={[
+                    'flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
+                    checked ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
+                  ].join(' ')}
+                  onClick={() => toggle(opt.value)}
+                >
+                  <span className={[
+                    'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
+                    checked
+                      ? 'border-brand-500 bg-brand-500 text-white'
+                      : 'border-app-border bg-app-canvas',
+                  ].join(' ')}>
+                    {checked && (
+                      <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M2.5 6l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </span>
+                  <span className="truncate text-sm text-app-fg">{opt.label}</span>
+                </button>
+              );
+            })}
           </div>
-          {selected.length > 0 && (
-            <div className="border-t border-app-border px-2.5 py-1.5">
+          {!isAllSelected && (
+            <div className="mt-1 border-t border-app-border pt-1">
               <button
                 type="button"
-                onClick={() => onChange([])}
-                className="w-full rounded px-2 py-1.5 text-left text-xs font-medium text-app-fg-muted hover:bg-app-hover"
+                onClick={() => commitChange([])}
+                className="w-full rounded-md px-2 py-1.5 text-left text-xs font-medium text-app-fg-muted hover:bg-app-hover"
               >
-                Clear selection
+                Select all
               </button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -354,6 +442,7 @@ export function CSTeamPage({
   dateFilters,
   offlineCount = 0,
   categories = [],
+  categoryCounts = { funnel: 0, offline: 0, followUp: 0, cart: 0, deliveredFollowUp: 0 },
 }: CSTeamPageProps) {
   // Parse flat sort string (e.g. "total-desc") into SortMenu value
   const sortMenuValue = useMemo((): SortMenuValue => {
@@ -368,6 +457,8 @@ export function CSTeamPage({
   const [peekMember, setPeekMember] = useState<CSTeamMemberOverview | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
+  const navigation = useNavigation();
+  const isNavigating = navigation.state === 'loading';
 
   useEffect(() => {
     setSearchQuery(q);
@@ -464,10 +555,7 @@ export function CSTeamPage({
         key: 'member',
         header: 'Member',
         render: (member) => (
-          <div className="flex items-center gap-2.5 min-w-0">
-            <CompactUserAvatar name={member.name} />
-            <span className="font-medium text-app-fg truncate">{member.name}</span>
-          </div>
+          <span className="font-medium text-app-fg truncate">{member.name}</span>
         ),
       },
       {
@@ -734,78 +822,108 @@ export function CSTeamPage({
         }
       />
 
+      <div className={`relative transition-opacity duration-200 ${isNavigating ? 'opacity-50 pointer-events-none' : ''}`}>
+
       {unfilteredCount > 0 && (
-        <OverviewStatStrip
-          mobileGrid
-          items={[
-            {
-              label: 'Closers',
-              value: summary.agentCount.toString(),
-              valueClassName: 'text-app-fg',
-            },
-            {
-              label: 'Total orders',
-              value: summary.engagedTotal.toString(),
-              valueClassName: 'text-brand-600 dark:text-brand-400',
-              title: hasCategoryFilter
-                ? `Orders matching selected categories in this period`
-                : 'Total orders assigned to the team in this period',
-            },
-            // Show offline count only when not filtering by category (all categories shown)
-            ...(!hasCategoryFilter
-              ? [
-                  {
-                    label: 'Offline',
-                    value: offlineCount.toString(),
-                    valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
-                    title: 'Orders created manually via offline order',
-                  },
-                ]
-              : []),
-            {
-              label: 'Backlog (unworked)',
-              value: summary.totalPending.toString(),
-              valueClassName: summary.totalPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-              title: 'Orders assigned to closers but not yet engaged or confirmed',
-            },
-            {
-              label: 'Confirmed',
-              value: summary.confirmedTotal.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'Total orders the team confirmed in this period',
-            },
-            {
-              label: 'Delivered',
-              value: summary.deliveredTotal.toString(),
-              valueClassName: 'text-success-600 dark:text-success-400',
-              title: 'Total orders attributed to the team that were delivered',
-            },
-            {
-              label: 'Confirm rate',
-              value: formatRate(summary.confirmationRate),
-              valueClassName: confirmationRateColorClass(summary.confirmationRate),
-              title: 'Confirmed ÷ Engaged across the whole team in this period',
-            },
-            {
-              label: 'Delivery rate',
-              value: formatRate(summary.deliveryRate),
-              valueClassName: deliveryRateColorClass(summary.deliveryRate),
-              title: 'Delivered ÷ Engaged across the whole team in this period',
-            },
-            {
-              label: 'Calls made',
-              value: summary.callsMadeTotal.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'Total calls made by the team in this period',
-            },
-            {
-              label: 'Avg call',
-              value: formatCallDuration(summary.avgCallDuration),
-              valueClassName: 'text-app-fg',
-              title: 'Average call duration across the team',
-            },
-          ]}
-        />
+        <div className="space-y-2">
+          {/* Row 1: Category breakdown */}
+          <OverviewStatStrip
+            mobileGrid
+            items={[
+              {
+                label: 'Closers',
+                value: summary.agentCount.toString(),
+                valueClassName: 'text-app-fg',
+              },
+              {
+                label: 'Total orders',
+                value: summary.engagedTotal.toString(),
+                valueClassName: 'text-brand-600 dark:text-brand-400',
+                title: hasCategoryFilter
+                  ? 'Orders matching selected categories in this period'
+                  : 'Total orders assigned to the team in this period',
+              },
+              {
+                label: 'Funnel',
+                value: categoryCounts.funnel.toString(),
+                valueClassName: categoryCounts.funnel > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg',
+                title: 'Orders from marketing forms',
+              },
+              {
+                label: 'Offline',
+                value: categoryCounts.offline.toString(),
+                valueClassName: categoryCounts.offline > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
+                title: 'Orders created manually',
+              },
+              {
+                label: 'Follow-up',
+                value: categoryCounts.followUp.toString(),
+                valueClassName: categoryCounts.followUp > 0 ? 'text-teal-600 dark:text-teal-400' : 'text-app-fg',
+                title: 'Follow-up orders',
+              },
+              {
+                label: 'Cart',
+                value: categoryCounts.cart.toString(),
+                valueClassName: categoryCounts.cart > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
+                title: 'Cart-recovered orders',
+              },
+              {
+                label: 'Delivered follow-up',
+                value: categoryCounts.deliveredFollowUp.toString(),
+                valueClassName: categoryCounts.deliveredFollowUp > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-app-fg',
+                title: 'Delivered follow-up orders',
+              },
+            ]}
+          />
+          {/* Row 2: Performance stats */}
+          <OverviewStatStrip
+            mobileGrid
+            items={[
+              {
+                label: 'Backlog (unworked)',
+                value: summary.totalPending.toString(),
+                valueClassName: summary.totalPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                title: 'Orders assigned to closers but not yet engaged or confirmed',
+              },
+              {
+                label: 'Confirmed',
+                value: summary.confirmedTotal.toString(),
+                valueClassName: 'text-app-fg',
+                title: 'Total orders the team confirmed in this period',
+              },
+              {
+                label: 'Delivered',
+                value: summary.deliveredTotal.toString(),
+                valueClassName: 'text-success-600 dark:text-success-400',
+                title: 'Total orders attributed to the team that were delivered',
+              },
+              {
+                label: 'Confirm rate',
+                value: formatRate(summary.confirmationRate),
+                valueClassName: confirmationRateColorClass(summary.confirmationRate),
+                title: 'Confirmed ÷ Engaged across the whole team in this period',
+              },
+              {
+                label: 'Delivery rate',
+                value: formatRate(summary.deliveryRate),
+                valueClassName: deliveryRateColorClass(summary.deliveryRate),
+                title: 'Delivered ÷ Engaged across the whole team in this period',
+              },
+              {
+                label: 'Calls made',
+                value: summary.callsMadeTotal.toString(),
+                valueClassName: 'text-app-fg',
+                title: 'Total calls made by the team in this period',
+              },
+              {
+                label: 'Avg call',
+                value: formatCallDuration(summary.avgCallDuration),
+                valueClassName: 'text-app-fg',
+                title: 'Average call duration across the team',
+              },
+            ]}
+          />
+        </div>
       )}
 
       <div>
@@ -1024,6 +1142,8 @@ export function CSTeamPage({
           {' — '}dashboard with workloads, unassigned orders, and leaderboard.
         </p>
       </div>
+
+      </div>{/* end loading wrapper */}
 
       {/* Mobile peek modal — full closer detail + actions */}
       <Modal

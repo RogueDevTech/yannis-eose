@@ -383,9 +383,8 @@ export function MarketingTeamPage({
           <Link
             to={`/hr/users/${m.userId}`}
             prefetch="intent"
-            className="inline-flex items-center gap-2.5 min-w-0 font-medium text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
+            className="inline-flex items-center gap-1.5 min-w-0 font-medium text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
           >
-            <CompactUserAvatar name={m.name} />
             <span className="truncate">{m.name}</span>
             {m.role === 'HEAD_OF_MARKETING' && (
               <span className="shrink-0 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-micro font-semibold text-purple-700 dark:text-purple-300">HoM</span>

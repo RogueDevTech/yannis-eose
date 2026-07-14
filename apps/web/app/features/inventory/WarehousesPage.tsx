@@ -201,6 +201,7 @@ export function WarehousesPage({
     {
       key: 'name',
       header: 'Site',
+      hideable: false,
       render: (w) => (
         <div className="flex flex-col min-w-0">
           <span className="font-medium text-app-fg truncate">{w.name}</span>
@@ -256,6 +257,7 @@ export function WarehousesPage({
       header: '',
       align: 'right',
       tight: true,
+      hideable: false,
       render: (w) =>
         isOptimisticId(w.id) ? (
           <div className="inline-flex items-center justify-end gap-1.5">
@@ -505,6 +507,7 @@ export function WarehousesPage({
               </div>
             ) : (
               <CompactTable<WarehouseRow>
+                columnVisibilityKey="admin.inventory.warehouses"
                 columns={columns}
                 rows={display}
                 rowKey={(r) => r.id}

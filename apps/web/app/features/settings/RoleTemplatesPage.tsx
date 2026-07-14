@@ -189,6 +189,7 @@ export function RoleTemplatesPage({
     {
       key: 'name',
       header: 'Name',
+      hideable: false,
       render: (r) =>
         isOptimisticId(r.id) ? (
           <span>
@@ -208,6 +209,7 @@ export function RoleTemplatesPage({
       mobileLabel: 'Actions',
       align: 'right',
       tight: true,
+      hideable: false,
       render: (r) => {
         const isOptimistic = isOptimisticId(r.id);
         return (
@@ -323,6 +325,7 @@ export function RoleTemplatesPage({
         <Card>
           <CardBody className="p-0">
             <CompactTable<TemplateTableRow>
+              columnVisibilityKey="admin.settings.role-templates"
               columns={templateColumns}
               rows={rows}
               rowKey={(r) => r.id}
