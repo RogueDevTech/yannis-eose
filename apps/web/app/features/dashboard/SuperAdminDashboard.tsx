@@ -305,13 +305,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalBreakdown'}
               onClose={() => setBreakdownModal(null)}
               title="Total Orders: Breakdown"
-              description="Funnel and Offline show full pipeline. Follow-up, Cart, and Delivered follow-up only count delivered orders toward the total."
+              description="Funnel shows the full pipeline. All other categories only count delivered orders toward the total."
               lines={[
                 { label: 'Funnel (marketing forms)', value: catFunnel },
-                { label: 'Offline (manually created)', value: catOffline },
-                { label: 'Follow-up (delivered only)', value: sumStatus(followUpSc, 'DELIVERED', 'REMITTED'), muted: true },
-                { label: 'Cart (delivered only)', value: sumStatus(cartSc, 'DELIVERED', 'REMITTED'), muted: true },
-                { label: 'Delivered follow-up (delivered only)', value: sumStatus(dfuSc, 'DELIVERED', 'REMITTED'), muted: true },
+                { label: 'Offline (delivered only)', value: delOffline, muted: true },
+                { label: 'Follow-up (delivered only)', value: delFollowUp, muted: true },
+                { label: 'Cart (delivered only)', value: delCart, muted: true },
+                { label: 'Delivered follow-up (delivered only)', value: delDfu, muted: true },
                 { label: 'Total', value: tTotal, bold: true },
               ]}
             />
