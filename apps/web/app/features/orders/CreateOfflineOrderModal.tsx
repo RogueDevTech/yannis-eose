@@ -163,7 +163,7 @@ export function CreateOfflineOrderModal({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!productId || !selectedOffer) return;
+    if (!productId || !selectedOffer || !offlineOrderCategory) return;
 
     const validItems = [{
       productId,
@@ -300,7 +300,7 @@ export function CreateOfflineOrderModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <FormSelect
                 id="offline-order-category"
-                label="Category"
+                label="Category *"
                 value={offlineOrderCategory}
                 onChange={(e) => setOfflineOrderCategory(e.target.value as 'website_order' | 'referrals' | '')}
                 options={[
@@ -308,6 +308,7 @@ export function CreateOfflineOrderModal({
                   { value: 'website_order', label: 'Website order' },
                   { value: 'referrals', label: 'Referrals' },
                 ]}
+                required
               />
               <FormSelect
                 id="offline-order-gender"

@@ -82,6 +82,7 @@ export class AiAssistantController {
       await this.aiAssistantService.sendMessageStreaming({
         sessionId: body.sessionId,
         userId: user.id,
+        userName: user.name,
         userMessage: message,
         model: body.model,
         currentPage: body.currentPage,

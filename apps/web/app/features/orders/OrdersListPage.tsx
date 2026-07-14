@@ -1301,6 +1301,17 @@ function OrdersListPageImpl({
         ),
       });
     }
+    if (categoryFilter !== undefined) {
+      cols.push({
+        key: 'category',
+        header: 'Category',
+        render: (order) => {
+          const cat = order.offlineOrderCategory;
+          const label = cat === 'website_order' ? 'Website order' : cat === 'referrals' ? 'Referrals' : '—';
+          return <span className={`text-sm ${cat ? 'text-app-fg' : 'text-app-fg-muted'}`}>{label}</span>;
+        },
+      });
+    }
     cols.push(
       {
         key: 'status',

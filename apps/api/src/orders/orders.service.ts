@@ -4475,6 +4475,8 @@ export class OrdersService {
       frozenForFollowUp: schema.orders.frozenForFollowUp,
       // Delivery address — used in exports.
       deliveryAddress: schema.orders.deliveryAddress,
+      // Offline order category — shown on the Offline Orders list table.
+      offlineOrderCategory: schema.orders.offlineOrderCategory,
     } as const;
 
     const [orders, totalRows] = await Promise.all([
