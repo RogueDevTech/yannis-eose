@@ -4939,7 +4939,11 @@ export class MarketingService {
       sql`${schema.adSpendLogs.category} != 'AD_SPEND'`,
     ];
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
-    if (branchCampaignIds && branchCampaignIds.length === 0) {
+    // A branch with zero campaigns has zero spend, but may still service
+    // orders (CS branches receive orders routed via servicing_branch_id).
+    // Only short-circuit when scoped by marketing branch — servicing-scoped
+    // callers (HoCS dashboard) still need order counts computed.
+    if (branchCampaignIds && branchCampaignIds.length === 0 && orderBranchScope !== 'servicing') {
       return {
         totalSpend: 0,
         pendingSpend: 0,
@@ -4962,7 +4966,7 @@ export class MarketingService {
       otherExpenseConditions.push(cond);
     };
     if (mediaBuyerId) pushSpendScope(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
-    if (branchCampaignIds) {
+    if (branchCampaignIds && branchCampaignIds.length > 0) {
       // Daily-flow spend rows (campaignId IS NULL) lack a branch FK, so they
       // must be scoped by the media buyer's branch membership.  Without this,
       // an HoM viewing their branch inadvertently aggregates daily spend from
