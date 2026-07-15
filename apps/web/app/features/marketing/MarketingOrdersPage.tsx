@@ -324,6 +324,24 @@ export function MarketingOrdersPage({
     });
   };
 
+  // When the search input is cleared (X button), immediately remove `search`
+  // from the URL so the list refreshes. Without this, clearing only empties the
+  // local state but the URL param (and therefore the server filter) stays.
+  const handleSearchChange = useCallback(
+    (val: string) => {
+      setSearchQuery(val);
+      if (val === '' && searchParams.has('search')) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('search');
+          next.set('page', '1');
+          return next;
+        });
+      }
+    },
+    [searchParams, setSearchParams],
+  );
+
   // Status dropdown options shown before streamed counts hydrate — with the
   // "Cart abandonment" pseudo-option appended when the viewer may use it.
   const statusOptionsBase = useMemo(
@@ -968,7 +986,7 @@ export function MarketingOrdersPage({
                       <SearchInput
                         placeholder="Search by name, order number, or ID..."
                         value={searchQuery}
-                        onChange={(val) => setSearchQuery(val)}
+                        onChange={handleSearchChange}
                         withSubmitButton
                         wrapperClassName="min-w-0 flex-1"
                       />
