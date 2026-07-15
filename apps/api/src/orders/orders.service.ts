@@ -2023,6 +2023,12 @@ export class OrdersService {
       const winner = await this.findExistingOrderForDedup(
         orderInput.customerPhoneHash,
         productIds,
+        // Skip cart_orders as a dedup winner for edge-form submissions.
+        // A real form submit must always win over a cart order created by the
+        // 2-min abandonment cron — otherwise the cron "steals" the submission
+        // and the customer ends up in the cart pipeline instead of orders.
+        // After the order is created we supersede any matching cart order below.
+        { skipCartOrders: true },
       );
       this.logger.log(
         { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', productIds, winnerFound: !!winner, winnerId: winner?.id },
@@ -2293,6 +2299,48 @@ export class OrdersService {
           actorId ?? undefined,
         )
         .catch(() => {});
+    }
+
+    // Supersede any cart_orders created by the abandonment cron for the same
+    // phone+product. The real form submission won the race — the cart order is
+    // now a duplicate. Soft-delete it so it doesn't appear in CS queues.
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
+      const primaryProductId = orderInput.items?.[0]?.productId;
+      if (primaryProductId) {
+        try {
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          const matchingCartOrders = await this.db
+            .select({ id: schema.cartOrders.id })
+            .from(schema.cartOrders)
+            .innerJoin(schema.cartOrderItems, eq(schema.cartOrderItems.cartOrderId, schema.cartOrders.id))
+            .where(
+              and(
+                eq(schema.cartOrders.customerPhoneHash, orderInput.customerPhoneHash),
+                inArray(schema.cartOrderItems.productId, orderInput.items.map((i) => i.productId)),
+                gte(schema.cartOrders.createdAt, sevenDaysAgo),
+                notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
+                isNull(schema.cartOrders.deletedAt),
+              ),
+            )
+            .limit(5);
+          if (matchingCartOrders.length > 0) {
+            const cartOrderIds = matchingCartOrders.map((c) => c.id);
+            await this.db
+              .update(schema.cartOrders)
+              .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
+              .where(inArray(schema.cartOrders.id, cartOrderIds));
+            this.logger.log(
+              { orderId: order.id, supersededCartOrderIds: cartOrderIds },
+              'edge-form order superseded matching cart orders',
+            );
+          }
+        } catch (err) {
+          this.logger.warn(
+            { err: err instanceof Error ? err.message : String(err), orderId: order.id },
+            'failed to supersede cart orders after edge-form order creation — non-fatal',
+          );
+        }
+      }
     }
 
     let authorizationUrl: string | undefined;
@@ -9230,6 +9278,7 @@ export class OrdersService {
   private async findExistingOrderForDedup(
     phoneHash: string,
     productIds: string[],
+    opts?: { skipCartOrders?: boolean },
   ): Promise<{ id: string; mediaBuyerId: string | null; status: string; createdAt: Date } | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
@@ -9257,24 +9306,26 @@ export class OrdersService {
         )
         .orderBy(desc(schema.orders.createdAt))
         .limit(20),
-      this.db
-        .select({
-          id: schema.cartOrders.id,
-          mediaBuyerId: schema.cartOrders.mediaBuyerId,
-          status: schema.cartOrders.status,
-          createdAt: schema.cartOrders.createdAt,
-        })
-        .from(schema.cartOrders)
-        .where(
-          and(
-            eq(schema.cartOrders.customerPhoneHash, phoneHash),
-            gte(schema.cartOrders.createdAt, sevenDaysAgo),
-            notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
-            isNull(schema.cartOrders.deletedAt),
-          ),
-        )
-        .orderBy(desc(schema.cartOrders.createdAt))
-        .limit(20),
+      opts?.skipCartOrders
+        ? Promise.resolve([])
+        : this.db
+            .select({
+              id: schema.cartOrders.id,
+              mediaBuyerId: schema.cartOrders.mediaBuyerId,
+              status: schema.cartOrders.status,
+              createdAt: schema.cartOrders.createdAt,
+            })
+            .from(schema.cartOrders)
+            .where(
+              and(
+                eq(schema.cartOrders.customerPhoneHash, phoneHash),
+                gte(schema.cartOrders.createdAt, sevenDaysAgo),
+                notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
+                isNull(schema.cartOrders.deletedAt),
+              ),
+            )
+            .orderBy(desc(schema.cartOrders.createdAt))
+            .limit(20),
       this.db
         .select({
           id: schema.followUpOrders.id,

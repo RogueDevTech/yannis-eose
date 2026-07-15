@@ -735,6 +735,9 @@ export function MarketingOverviewPage({
                           <div className="flex items-baseline justify-between gap-2 mb-1">
                             <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
                               {order.customerName}
+                              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                                <span className="ml-1 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1 py-px text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+                              )}
                             </p>
                             <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
                               {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}

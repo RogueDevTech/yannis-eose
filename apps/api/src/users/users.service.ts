@@ -1524,20 +1524,34 @@ export class UsersService {
       roleInBranch: string | null;
     }>;
   }>> {
-    const csRoleCondition = and(
-      eq(schema.users.status, 'ACTIVE'),
-      or(
-        eq(schema.users.role, 'CS_CLOSER'),
-        eq(schema.users.role, 'HEAD_OF_CS'),
-        sql<boolean>`EXISTS (
-          SELECT 1
-          FROM branch_team_members btm
-          INNER JOIN branch_teams bt ON bt.id = btm.team_id
-          WHERE btm.user_id = ${schema.users.id}
-            AND bt.department = 'CS'
-        )`,
-      ),
-    );
+    // Build a branch-aware CS role condition. The EXISTS subquery must scope
+    // to CS teams *in the queried branch(es)* — without this, a user on a CS
+    // team in branch B who also has a user_branches membership in branch A
+    // would leak into branch A's team list.
+    const csRoleCondition = (branchFilter?: SQL) =>
+      and(
+        eq(schema.users.status, 'ACTIVE'),
+        or(
+          eq(schema.users.role, 'CS_CLOSER'),
+          eq(schema.users.role, 'HEAD_OF_CS'),
+          branchFilter
+            ? sql<boolean>`EXISTS (
+                SELECT 1
+                FROM branch_team_members btm
+                INNER JOIN branch_teams bt ON bt.id = btm.team_id
+                WHERE btm.user_id = ${schema.users.id}
+                  AND bt.department = 'CS'
+                  AND ${branchFilter}
+              )`
+            : sql<boolean>`EXISTS (
+                SELECT 1
+                FROM branch_team_members btm
+                INNER JOIN branch_teams bt ON bt.id = btm.team_id
+                WHERE btm.user_id = ${schema.users.id}
+                  AND bt.department = 'CS'
+              )`,
+        ),
+      );
     let rows: Array<{ id: string; name: string; role: string }>;
     if (branchId) {
       rows = await this.db
@@ -1554,7 +1568,7 @@ export class UsersService {
             eq(schema.userBranches.branchId, branchId),
           ),
         )
-        .where(csRoleCondition)
+        .where(csRoleCondition(sql`bt.branch_id = ${branchId}`))
         .orderBy(asc(schema.users.name));
     } else if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       rows = await this.db
@@ -1571,7 +1585,7 @@ export class UsersService {
             inArray(schema.userBranches.branchId, effectiveBranchIds),
           ),
         )
-        .where(csRoleCondition)
+        .where(csRoleCondition(sql`bt.branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`))
         .orderBy(asc(schema.users.name));
       // Deduplicate users who may appear in multiple branches
       const seen = new Set<string>();
@@ -1588,7 +1602,7 @@ export class UsersService {
           role: schema.users.role,
         })
         .from(schema.users)
-        .where(csRoleCondition)
+        .where(csRoleCondition())
         .orderBy(asc(schema.users.name));
     }
 
