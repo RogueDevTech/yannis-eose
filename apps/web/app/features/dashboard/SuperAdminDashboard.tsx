@@ -469,9 +469,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 
             {(() => {
               const csSc = orderPipeline.csStatusCounts;
-              const csRawTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
-              // Exclude offline orders from the CS funnel — they have their own strip below.
-              const csTotal = csRawTotal - offlineCount;
+              // CS funnel query already excludes offline, follow-up, and cart orders.
+              const csTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
               const csUnassigned = csSc['UNPROCESSED'] ?? 0;
               const csAssigned = csSc['CS_ASSIGNED'] ?? 0;
               const csUnconfirmed = csSc['CS_ENGAGED'] ?? 0;

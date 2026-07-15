@@ -58,8 +58,7 @@ export function isOrgWideDepartmentHead(user: {
   role: string;
   scopeOrgWideHead?: boolean;
 }): boolean {
-  if (user.scopeOrgWideHead === true) return true;
-  return ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(user.role);
+  return user.scopeOrgWideHead === true;
 }
 
 /**

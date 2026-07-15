@@ -25,6 +25,7 @@ function buildCtx(overrides?: Partial<TrpcContext>): TrpcContext {
       currentBranchId: null,
       mirroredBy: null,
       mirrorSessionId: null,
+      scopeOrgWideHead: true,
     },
     req: {} as TrpcContext['req'],
     res: {} as TrpcContext['res'],

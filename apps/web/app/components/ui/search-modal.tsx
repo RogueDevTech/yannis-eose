@@ -66,26 +66,23 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
 
     try {
       const apiUrl = getBrowserApiBaseUrl();
-      const searchParam = encodeURIComponent(JSON.stringify({ search: q, limit: 5 }));
-
-      const fetchOpts = { credentials: 'include' as const, signal: controller.signal };
-      const [ordersRes, followUpRes, cartRes, productsRes, usersRes] = await Promise.all([
-        fetch(`${apiUrl}/trpc/orders.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
-        fetch(`${apiUrl}/trpc/orders.followUpOrdersList?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
-        fetch(`${apiUrl}/trpc/cartOrders.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
-        fetch(`${apiUrl}/trpc/products.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
-        fetch(`${apiUrl}/trpc/users.list?input=${searchParam}`, fetchOpts).then((r) => r.json()).catch(() => null),
-      ]);
+      const searchParam = encodeURIComponent(JSON.stringify({ search: q }));
+      const res = await fetch(`${apiUrl}/trpc/orders.globalSearch?input=${searchParam}`, {
+        credentials: 'include',
+        signal: controller.signal,
+      }).then((r) => r.json());
 
       if (controller.signal.aborted) return;
+
+      const data = res?.result?.data;
+      if (!data) { setResults([]); return; }
 
       const combined: SearchResult[] = [];
       const seenIds = new Set<string>();
 
-      // Parse main orders
-      const orders = ordersRes?.result?.data?.orders;
-      if (Array.isArray(orders)) {
-        for (const o of orders.slice(0, 5)) {
+      // Main orders
+      if (Array.isArray(data.orders)) {
+        for (const o of data.orders.slice(0, 5)) {
           if (seenIds.has(o.id)) continue;
           seenIds.add(o.id);
           combined.push({
@@ -98,10 +95,9 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         }
       }
 
-      // Parse follow-up orders
-      const fuOrders = followUpRes?.result?.data?.orders;
-      if (Array.isArray(fuOrders)) {
-        for (const o of fuOrders.slice(0, 5)) {
+      // Follow-up orders
+      if (Array.isArray(data.followUpOrders)) {
+        for (const o of data.followUpOrders.slice(0, 5)) {
           if (seenIds.has(o.id)) continue;
           seenIds.add(o.id);
           combined.push({
@@ -114,10 +110,9 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         }
       }
 
-      // Parse cart orders
-      const cartOrders = cartRes?.result?.data?.orders;
-      if (Array.isArray(cartOrders)) {
-        for (const o of cartOrders.slice(0, 5)) {
+      // Cart orders
+      if (Array.isArray(data.cartOrders)) {
+        for (const o of data.cartOrders.slice(0, 5)) {
           if (seenIds.has(o.id)) continue;
           seenIds.add(o.id);
           combined.push({
@@ -130,10 +125,9 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         }
       }
 
-      // Parse products
-      const products = productsRes?.result?.data?.products;
-      if (Array.isArray(products)) {
-        for (const p of products.slice(0, 3)) {
+      // Products
+      if (Array.isArray(data.products)) {
+        for (const p of data.products.slice(0, 3)) {
           combined.push({
             id: p.id,
             type: 'product',
@@ -144,10 +138,9 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         }
       }
 
-      // Parse users
-      const users = usersRes?.result?.data?.users;
-      if (Array.isArray(users)) {
-        for (const u of users.slice(0, 3)) {
+      // Users
+      if (Array.isArray(data.users)) {
+        for (const u of data.users.slice(0, 3)) {
           const role = u.role?.split('_').map((w: string) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') ?? '';
           combined.push({
             id: u.id,

@@ -9,19 +9,14 @@ pnpm turbo dev
 
 docker restart yannis-eose-api-1
 
-
 8100373262 - opay
 
-gcloud artifacts repositories list --project=project-26c432ec- b4f1-4e21-a6a --location=europe-west2
-
-gcloud artifacts repositories list --project=project-26c432ec-b4f1-4e21-a6a --location=europe-west2
+journalctl -u yannis-api --since "2026-07-13 00:00" --until "2026-07-14 00:00" | grep -i "8036762291" | tail -20
 
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"
  -->
 
-docker exec yannis-eose-api-1 grep -c "Step A: starting INSERT" /app/dist/cart-orders/cart-orders.service.js 2>/dev/null || echo "not found"
-
-docker compose pull && docker compose up -d --force-recreate
+docker logs yannis-eose-api-1 --since "2026-07-13T00:00:00" --until "2026-07-14T00:00:00" 2>&1 | grep "8036762291"
 
 cd /opt/yannis-eose && docker compose pull api && docker compose up -d api
 

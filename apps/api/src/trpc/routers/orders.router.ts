@@ -44,6 +44,7 @@ import { getUsersService } from './users.router';
 import { getProductsService } from './products.router';
 import { getLogisticsService } from './logistics.router';
 import { getCartService } from './cart.router';
+import { getCartOrdersService } from './cart-orders.router';
 import { getInventoryService } from './inventory.router';
 import { getFinanceService } from './finance.router';
 import {
@@ -2809,5 +2810,58 @@ export const ordersRouter = router({
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       return getFollowUpConfigService().recordManualCall(input.orderId, ctx.user);
+    }),
+
+  /**
+   * Global search — cross-table order/product/user lookup WITHOUT branch scoping.
+   * Used by the Cmd+K search modal so results are not filtered by the currently
+   * selected header branch. Calls each service's `list()` with null branchId
+   * and null effectiveBranchIds so `branchScopeCondition` returns null (no filter).
+   */
+  globalSearch: authedProcedure
+    .input(z.object({ search: z.string().min(2).max(200) }))
+    .query(async ({ input, ctx }) => {
+      const search = input.search.trim();
+      if (!search) return { orders: [], followUpOrders: [], cartOrders: [], products: [], users: [] };
+
+      const listInput = { search, limit: 5 };
+
+      const [ordersRes, fuRes, cartRes, productsRes, usersRes] = await Promise.all([
+        getOrdersService()
+          .list(
+            { ...listInput, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
+            null, // branchId — null bypasses branch scoping
+            { effectiveBranchIds: null },
+          )
+          .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
+        getFollowUpConfigService()
+          .listFollowUpOrders(
+            { search, limit: 5, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
+            null,
+            null,
+          )
+          .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
+        getCartOrdersService()
+          .list(
+            { search, limit: 5, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
+            null,
+            null,
+          )
+          .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
+        getProductsService()
+          .list({ search, limit: 3, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const }, ctx.user.id, ctx.user.role, null)
+          .catch(() => ({ products: [], pagination: { page: 1, limit: 3, total: 0, totalPages: 0 } })),
+        getUsersService()
+          .list({ search, limit: 3, page: 1, status: 'ACTIVE' as const, sortBy: 'name' as const, sortOrder: 'asc' as const }, ctx.user, null, null)
+          .catch(() => ({ users: [], total: 0, totalPages: 0 })),
+      ]);
+
+      return {
+        orders: ordersRes.orders,
+        followUpOrders: fuRes.orders,
+        cartOrders: cartRes.orders,
+        products: productsRes.products,
+        users: usersRes.users,
+      };
     }),
 });
