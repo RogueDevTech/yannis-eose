@@ -1831,7 +1831,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     .map((token) => {
       if (token === 'fixed.fullName') {
         return `<label for="customerName">Full Name</label>
-      <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">`;
+      <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name" autocomplete="one-time-code">`;
       }
       if (token === 'fixed.phoneNumber') {
         return `<label for="customerPhone">Phone Number</label>
@@ -2114,7 +2114,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
     <div id="yannisMsg" class="msg hidden"></div>
     <form id="yannisOrderForm">
       <label for="customerName">Full Name</label>
-      <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
+      <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name" autocomplete="one-time-code">
       <label for="customerPhone">Phone Number</label>
       <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       <label for="deliveryAddress">Delivery Address</label>
