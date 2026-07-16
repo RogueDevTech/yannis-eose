@@ -153,13 +153,13 @@ export const importOrderSchema = z.object({
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
   /** Target status for imported orders: maps CRM labels to system lifecycle states */
-  targetStatus: z.enum(['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'RETURNED', 'CANCELLED', 'REMITTED', 'DELETED']),
+  targetStatus: z.enum(['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'RETURNED', 'CANCELLED', 'REMITTED', 'DELETED']),
   /** Override createdAt to preserve original CRM date (ISO string) */
   createdAtOverride: z.string().optional(),
   /** Media buyer to attribute the order to */
   mediaBuyerId: z.string().uuid().optional(),
-  /** CS agent to assign the order to */
-  assignedCsId: z.string().uuid(),
+  /** CS agent to assign the order to. When omitted, order imports as UNPROCESSED. */
+  assignedCsId: z.string().uuid().optional(),
   /** Branch for the order */
   branchId: z.string().uuid(),
   /** Ad-hoc fields from the CRM export (whatsappNumber, unit, deliveryTime, importMediaBuyer, importCS, etc.) */

@@ -2627,7 +2627,7 @@ export class OrdersService {
           mediaBuyerId: input.mediaBuyerId ?? null,
           branchId: input.branchId,
           servicingBranchId: input.branchId,
-          assignedCsId: input.assignedCsId,
+          assignedCsId: input.assignedCsId ?? null,
           customerName: input.customerName,
           customerPhoneHash,
           customerPhone: input.customerPhone,

@@ -82,7 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const customerPhone = form.get('customerPhone')?.toString()?.trim() ?? '';
   const branchId = form.get('branchId')?.toString()?.trim() ?? '';
   const assignedCsId = form.get('assignedCsId')?.toString()?.trim() ?? '';
-  const targetStatus = form.get('targetStatus')?.toString()?.trim() ?? 'CS_ASSIGNED';
+  const targetStatus = form.get('targetStatus')?.toString()?.trim() || (assignedCsId ? 'CS_ASSIGNED' : 'UNPROCESSED');
 
   if (!customerName || customerName.length < 2) {
     return json({ error: 'Customer name is required (min 2 characters)', rowIndex }, { status: 400 });
