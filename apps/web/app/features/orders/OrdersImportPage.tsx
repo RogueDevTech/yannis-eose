@@ -324,6 +324,7 @@ export function OrdersImportPage({
         description="Upload a CRM export spreadsheet to import historical orders."
         backHref={backHref ?? '/admin/data/import'}
         backLabel={backHref ? '← Back to orders' : '← Back to import'}
+        doneHref="/admin/sales/orders"
         resourceLabel="order"
         actionPath={actionPath}
         disableImport={!globalReady}
