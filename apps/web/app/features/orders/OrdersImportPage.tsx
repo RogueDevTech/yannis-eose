@@ -326,6 +326,7 @@ export function OrdersImportPage({
         backLabel={backHref ? '← Back to orders' : '← Back to import'}
         resourceLabel="order"
         actionPath={actionPath}
+        disableImport={!globalReady}
         actionIntent="importOrder"
         maxRows={1000}
         columns={columns}

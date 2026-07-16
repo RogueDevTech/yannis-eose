@@ -133,6 +133,9 @@ export interface ImportBulkDataProps<
    *  A summary toast fires first so the operator sees the result; the
    *  redirect runs ~1.2s later to give them time to read it. */
   redirectOnComplete?: boolean;
+  /** When true, the Import button is disabled even if rows are valid.
+   *  Use to block submission until required global selectors are filled. */
+  disableImport?: boolean;
 }
 
 export function ImportBulkData<
@@ -159,6 +162,7 @@ export function ImportBulkData<
   parseSuccessMeta,
   onComplete,
   redirectOnComplete = false,
+  disableImport = false,
 }: ImportBulkDataProps<TParsed, TResolved>) {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -756,7 +760,7 @@ export function ImportBulkData<
                 onClick={runImport}
                 loading={isImporting}
                 loadingText="Importing…"
-                disabled={validCount === 0 || isImporting || importDone}
+                disabled={validCount === 0 || isImporting || importDone || disableImport}
               >
                 Import {validCount} {resourceLabel}
                 {validCount === 1 ? '' : 's'}
