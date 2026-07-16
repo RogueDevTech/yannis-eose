@@ -244,8 +244,15 @@ export function ImportBulkData<
     setStatuses([]);
   }
 
+  const lastRowRef = useRef<HTMLTableRowElement | null>(null);
+  const lastCardRef = useRef<HTMLDivElement | null>(null);
+
   function addBlankRow() {
     setParsed((prev) => [...prev, makeEmptyRow(prev.length + 2)]);
+    // After React renders the new row, scroll it into view.
+    requestAnimationFrame(() => {
+      (lastRowRef.current ?? lastCardRef.current)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   }
 
   async function runImport() {
@@ -563,6 +570,7 @@ export function ImportBulkData<
                   return (
                     <tr
                       key={`${row.rowIndex}-${idx}`}
+                      ref={idx === resolved.length - 1 ? lastRowRef : undefined}
                       className={`border-b border-app-border align-top ${rowTint}`}
                     >
                       <td className="px-2 py-1.5 text-app-fg-muted tabular-nums pt-2.5">
@@ -644,6 +652,7 @@ export function ImportBulkData<
               return (
                 <div
                   key={`m-${row.rowIndex}-${idx}`}
+                  ref={idx === resolved.length - 1 ? lastCardRef : undefined}
                   className={`rounded-xl border ${cardBorder} ${cardBg} shadow-sm overflow-hidden`}
                 >
                   {/* Card header */}

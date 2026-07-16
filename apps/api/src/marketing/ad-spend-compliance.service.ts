@@ -24,7 +24,8 @@ export class AdSpendComplianceService {
   ) {}
 
   // Every 10 minutes from 7 PM to midnight WAT (UTC+1 = 6 PM to 11 PM UTC)
-  @Cron('*/10 * 18-22 * * *')
+  // Nest cron uses 6 fields: sec min hour dom mon dow
+  @Cron('0 */10 18-22 * * *')
   async handleHourlyReminder(): Promise<void> {
     try {
       await this.sendAdSpendReminders();

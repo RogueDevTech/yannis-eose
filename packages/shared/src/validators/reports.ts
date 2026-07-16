@@ -11,6 +11,15 @@ export const exportReportKeySchema = z.enum([
   'finance_invoices',
   'logistics_locations',
   'logistics_partners',
+  'cart_orders',
+  'follow_up_orders',
+  'delivery_remittances',
+  'payroll',
+  'funding_requests',
+  'users',
+  'expenses',
+  'products',
+  'shipments',
 ]);
 export type ExportReportKey = z.infer<typeof exportReportKeySchema>;
 
@@ -135,6 +144,111 @@ export const reportColumnsByKey = {
     'stockTransferredOut',
     'stockAdjusted',
   ] as const,
+  cart_orders: [
+    'id',
+    'orderNumber',
+    'customer',
+    'phone',
+    'status',
+    'amount',
+    'product',
+    'assignedCs',
+    'mediaBuyer',
+    'campaign',
+    'created',
+  ] as const,
+  follow_up_orders: [
+    'id',
+    'orderNumber',
+    'customer',
+    'status',
+    'amount',
+    'product',
+    'assignedCs',
+    'mediaBuyer',
+    'campaign',
+    'source',
+    'created',
+    'deliveredAt',
+  ] as const,
+  delivery_remittances: [
+    'id',
+    'locationName',
+    'providerName',
+    'status',
+    'orderCount',
+    'orderAmount',
+    'sentBy',
+    'sentAt',
+    'created',
+  ] as const,
+  payroll: [
+    'staffName',
+    'role',
+    'periodStart',
+    'periodEnd',
+    'baseSalary',
+    'performanceBonus',
+    'addOns',
+    'deductions',
+    'totalPayout',
+    'status',
+    'created',
+  ] as const,
+  funding_requests: [
+    'id',
+    'requester',
+    'targetUser',
+    'amount',
+    'reason',
+    'status',
+    'balanceAtRequest',
+    'created',
+    'resolvedAt',
+  ] as const,
+  users: [
+    'name',
+    'email',
+    'role',
+    'status',
+    'branches',
+    'capacity',
+    'isSupervisor',
+    'created',
+  ] as const,
+  expenses: [
+    'id',
+    'description',
+    'amount',
+    'status',
+    'submittedBy',
+    'submittedAt',
+    'approvedBy',
+    'approvedAt',
+    'created',
+  ] as const,
+  products: [
+    'name',
+    'category',
+    'baseSalePrice',
+    'costPrice',
+    'totalStock',
+    'status',
+    'created',
+  ] as const,
+  shipments: [
+    'reference',
+    'label',
+    'status',
+    'destination',
+    'supplier',
+    'lineCount',
+    'totalExpected',
+    'totalReceived',
+    'landingCost',
+    'expectedArrival',
+    'created',
+  ] as const,
 } as const;
 
 const reportColumnsSchema = z.object({
@@ -148,6 +262,15 @@ const reportColumnsSchema = z.object({
   finance_invoices: z.array(z.enum(reportColumnsByKey.finance_invoices)).min(1),
   logistics_locations: z.array(z.enum(reportColumnsByKey.logistics_locations)).min(1),
   logistics_partners: z.array(z.enum(reportColumnsByKey.logistics_partners)).min(1),
+  cart_orders: z.array(z.enum(reportColumnsByKey.cart_orders)).min(1),
+  follow_up_orders: z.array(z.enum(reportColumnsByKey.follow_up_orders)).min(1),
+  delivery_remittances: z.array(z.enum(reportColumnsByKey.delivery_remittances)).min(1),
+  payroll: z.array(z.enum(reportColumnsByKey.payroll)).min(1),
+  funding_requests: z.array(z.enum(reportColumnsByKey.funding_requests)).min(1),
+  users: z.array(z.enum(reportColumnsByKey.users)).min(1),
+  expenses: z.array(z.enum(reportColumnsByKey.expenses)).min(1),
+  products: z.array(z.enum(reportColumnsByKey.products)).min(1),
+  shipments: z.array(z.enum(reportColumnsByKey.shipments)).min(1),
 });
 
 export const exportReportSchema = z.discriminatedUnion('reportKey', [
@@ -294,6 +417,123 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         providerId: z.string().uuid().optional(),
         status: z.string().optional(),
         productId: z.string().uuid().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('cart_orders'),
+    columns: reportColumnsSchema.shape.cart_orders,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        search: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('follow_up_orders'),
+    columns: reportColumnsSchema.shape.follow_up_orders,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        search: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('delivery_remittances'),
+    columns: reportColumnsSchema.shape.delivery_remittances,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('payroll'),
+    columns: reportColumnsSchema.shape.payroll,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('funding_requests'),
+    columns: reportColumnsSchema.shape.funding_requests,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('users'),
+    columns: reportColumnsSchema.shape.users,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        role: z.string().optional(),
+        status: z.string().optional(),
+        search: z.string().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('expenses'),
+    columns: reportColumnsSchema.shape.expenses,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('products'),
+    columns: reportColumnsSchema.shape.products,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        search: z.string().optional(),
+        categoryId: z.string().uuid().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('shipments'),
+    columns: reportColumnsSchema.shape.shipments,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        status: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
       })
       .optional(),
   }),

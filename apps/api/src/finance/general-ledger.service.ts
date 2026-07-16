@@ -98,15 +98,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     if (process.env.GL_AUTOSEED === 'false') return;
-    try {
-      await this.seedAllGroups();
-    } catch (err) {
-      // Non-fatal: never block API boot on seeding. Admin can re-run via the
-      // seedChartOfAccounts mutation.
-      this.logger.warn(
-        `Chart of Accounts auto-seed skipped: ${err instanceof Error ? err.message : err}`,
-      );
-    }
+    // Fire-and-forget so the GL seed never blocks API boot / listen().
+    setTimeout(() => {
+      this.seedAllGroups().catch((err) => {
+        this.logger.warn(
+          `Chart of Accounts auto-seed skipped: ${err instanceof Error ? err.message : err}`,
+        );
+      });
+    }, 10_000);
   }
 
   private async seedAllGroups(): Promise<void> {

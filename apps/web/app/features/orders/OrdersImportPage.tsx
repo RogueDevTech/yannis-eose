@@ -12,10 +12,12 @@ import {
 } from '~/components/ui/import-bulk-data';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import {
   type ProductInfo,
   type ParsedRow,
   type ResolvedRow,
+  IMPORT_STATUS_OPTIONS,
   makeEmptyParsedRow,
   pickHeaderValue,
   resolveRow,
@@ -28,35 +30,29 @@ interface UserOption {
   role: string;
 }
 
-interface BranchOption {
-  id: string;
-  name: string;
-}
-
 export interface OrdersImportPageProps {
   products: ProductInfo[];
   mediaBuyers: UserOption[];
   csAgents: UserOption[];
-  branches: BranchOption[];
 }
 
 export function OrdersImportPage({
   products,
   mediaBuyers,
   csAgents,
-  branches,
 }: OrdersImportPageProps) {
+  const branches = useBranchesCatalog();
   const [selectedBranchId, setSelectedBranchId] = useState(
-    branches.length === 1 ? branches[0].id : '',
+    branches.length === 1 ? branches[0]!.id : '',
   );
-  const [selectedMbId, setSelectedMbId] = useState('');
-  const [selectedCsId, setSelectedCsId] = useState('');
+  const [selectedMbId, setSelectedMbId] = useState('__system__');
+  const [selectedCsId, setSelectedCsId] = useState('__system__');
   const [selectedProductId, setSelectedProductId] = useState(
-    products.length === 1 ? products[0].id : '',
+    products.length === 1 ? products[0]!.id : '',
   );
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
-  const globalReady = selectedBranchId && selectedCsId && selectedProductId;
+  const globalReady = selectedBranchId && selectedProductId;
 
   const columns: ImportColumn<ResolvedRow>[] = useMemo(
     () => [
@@ -153,14 +149,19 @@ export function OrdersImportPage({
         errorLabel: 'Status',
         getDisplayValue: (row) => row.statusInput,
         renderCell: ({ row, disabled, errored, patch }) => (
-          <input
-            type="text"
+          <select
             value={row.statusInput}
             onChange={(e) => patch({ statusInput: e.target.value } as Partial<ResolvedRow>)}
             disabled={disabled}
-            placeholder="Pending"
             className={importCellInputClass(errored)}
-          />
+          >
+            <option value="">Select status...</option>
+            {IMPORT_STATUS_OPTIONS.map((opt) => (
+              <option key={`${opt.value}-${opt.label}`} value={opt.label}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         ),
       },
       {
@@ -232,10 +233,10 @@ export function OrdersImportPage({
         ),
       },
       {
-        header: 'Details',
+        header: 'Comments',
         headerClassName: 'min-w-[10rem]',
         errorTokens: [],
-        errorLabel: 'More details',
+        errorLabel: 'Comments',
         hideErrorInfo: true,
         getDisplayValue: (row) => row.moreDetailsInput,
         renderCell: ({ row, disabled, patch }) => (
@@ -263,6 +264,7 @@ export function OrdersImportPage({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <SearchableSelect
             label="Product"
+            labelInfo="The product sold in all imported orders."
             value={selectedProductId}
             onChange={setSelectedProductId}
             options={products.map((p) => ({ value: p.id, label: p.name }))}
@@ -272,6 +274,7 @@ export function OrdersImportPage({
           />
           <SearchableSelect
             label="Branch"
+            labelInfo="The branch these orders belong to."
             value={selectedBranchId}
             onChange={setSelectedBranchId}
             options={branches.map((b) => ({ value: b.id, label: b.name }))}
@@ -281,27 +284,33 @@ export function OrdersImportPage({
           />
           <SearchableSelect
             label="Media Buyer"
+            labelInfo="The media buyer who generated these leads. Use 'System' for backdated imports with no specific buyer."
             value={selectedMbId}
             onChange={setSelectedMbId}
-            options={mediaBuyers.map((u) => ({ value: u.id, label: u.name }))}
+            options={[
+              { value: '__system__', label: 'System' },
+              ...mediaBuyers.map((u) => ({ value: u.id, label: u.name })),
+            ]}
             placeholder="— Optional —"
             searchPlaceholder="Search media buyers..."
             clearable
           />
           <SearchableSelect
             label="CS Agent"
+            labelInfo="The CS agent assigned to handle these orders."
             value={selectedCsId}
             onChange={setSelectedCsId}
-            options={csAgents.map((u) => ({ value: u.id, label: u.name }))}
+            options={[
+              { value: '__system__', label: 'System' },
+              ...csAgents.map((u) => ({ value: u.id, label: u.name })),
+            ]}
             placeholder="Select CS agent..."
             searchPlaceholder="Search CS agents..."
             required
           />
         </div>
         {!globalReady && (
-          <InlineNotification variant="warning">
-            Select a product, branch, and CS agent before importing.
-          </InlineNotification>
+          <InlineNotification variant="warning" message="Select a product and branch before importing." />
         )}
       </div>
 
@@ -346,8 +355,8 @@ export function OrdersImportPage({
           fd.set('customerName', row.name);
           fd.set('customerPhone', row.phoneInput);
           fd.set('branchId', selectedBranchId);
-          fd.set('assignedCsId', selectedCsId);
-          if (selectedMbId) fd.set('mediaBuyerId', selectedMbId);
+          if (selectedCsId && selectedCsId !== '__system__') fd.set('assignedCsId', selectedCsId);
+          if (selectedMbId && selectedMbId !== '__system__') fd.set('mediaBuyerId', selectedMbId);
           if (row.targetStatus) fd.set('targetStatus', row.targetStatus);
           if (row.createdAtIso) fd.set('createdAtOverride', row.createdAtIso);
           if (row.addressInput) {

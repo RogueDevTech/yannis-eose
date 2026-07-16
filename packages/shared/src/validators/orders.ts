@@ -152,8 +152,8 @@ export const importOrderSchema = z.object({
   customerEmail: z.string().email().max(255).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
-  /** Target status: CS_ASSIGNED for pending, REMITTED for delivered+remitted */
-  targetStatus: z.enum(['CS_ASSIGNED', 'REMITTED']),
+  /** Target status for imported orders: maps CRM labels to system lifecycle states */
+  targetStatus: z.enum(['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'RETURNED', 'CANCELLED', 'REMITTED', 'DELETED']),
   /** Override createdAt to preserve original CRM date (ISO string) */
   createdAtOverride: z.string().optional(),
   /** Media buyer to attribute the order to */

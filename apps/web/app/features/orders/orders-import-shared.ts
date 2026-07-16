@@ -41,8 +41,8 @@ export interface ResolvedRow extends ParsedRow {
   productName: string | null;
   quantity: number;
   cost: number | null;
-  /** Mapped system status: CS_ASSIGNED or REMITTED */
-  targetStatus: 'CS_ASSIGNED' | 'REMITTED' | null;
+  /** Mapped system status */
+  targetStatus: ImportTargetStatus | null;
   /** Parsed ISO date string from Excel date column */
   createdAtIso: string | null;
   errors: string[];
@@ -115,12 +115,43 @@ export function parseExcelDate(raw: string): string | null {
 // Status mapping
 // ---------------------------------------------------------------------------
 
-export function parseStatus(raw: string): 'CS_ASSIGNED' | 'REMITTED' | null {
+export type ImportTargetStatus =
+  | 'CS_ASSIGNED'
+  | 'CS_ENGAGED'
+  | 'CONFIRMED'
+  | 'DELIVERED'
+  | 'RETURNED'
+  | 'CANCELLED'
+  | 'REMITTED'
+  | 'DELETED';
+
+/** CRM-friendly labels → system status. Used both for parsing sheet text and for the dropdown. */
+export const IMPORT_STATUS_OPTIONS: { value: ImportTargetStatus; label: string }[] = [
+  { value: 'CS_ASSIGNED', label: 'Pending' },
+  { value: 'CS_ENGAGED', label: 'No Response' },
+  { value: 'CS_ENGAGED', label: 'Rescheduled' },
+  { value: 'CONFIRMED', label: 'Confirmed' },
+  { value: 'DELIVERED', label: 'Delivered' },
+  { value: 'RETURNED', label: 'Returned' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'REMITTED', label: 'Delivered and Cash Remitted' },
+  { value: 'DELETED', label: 'Deleted' },
+];
+
+export function parseStatus(raw: string): ImportTargetStatus | null {
   const lower = raw.toLowerCase().trim();
+  if (!lower) return null;
+  // Exact/substring matches against CRM labels
+  if (lower.includes('delivered') && (lower.includes('remitted') || lower.includes('cash'))) return 'REMITTED';
   if (lower.includes('pending')) return 'CS_ASSIGNED';
-  if (lower.includes('delivered') && lower.includes('remitted')) return 'REMITTED';
-  if (lower.includes('delivered') && lower.includes('cash')) return 'REMITTED';
+  if (lower.includes('no response') || lower.includes('no_response')) return 'CS_ENGAGED';
+  if (lower.includes('rescheduled')) return 'CS_ENGAGED';
+  if (lower.includes('confirmed')) return 'CONFIRMED';
+  if (lower.includes('delivered')) return 'DELIVERED';
+  if (lower.includes('returned')) return 'RETURNED';
+  if (lower.includes('cancelled') || lower.includes('canceled')) return 'CANCELLED';
   if (lower.includes('remitted')) return 'REMITTED';
+  if (lower.includes('deleted')) return 'DELETED';
   return null;
 }
 
@@ -187,7 +218,7 @@ export function resolveRow(parsed: ParsedRow): ResolvedRow {
   if (!parsed.statusInput.trim()) {
     errors.push('Status is required.');
   } else if (!targetStatus) {
-    errors.push(`Unknown status "${parsed.statusInput}". Expected "Pending" or "Delivered and Cash Remitted".`);
+    errors.push(`Unknown status "${parsed.statusInput}". Select a valid status from the dropdown.`);
   }
 
   // Date (optional but preferred)
