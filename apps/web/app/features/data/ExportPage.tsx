@@ -100,6 +100,78 @@ const REPORT_TYPES: ReportTypeDef[] = [
     requiredPermissions: ['logistics.providers.view', 'logistics.export'],
     picklists: ['products'],
   },
+  {
+    key: 'cart_orders',
+    label: 'Cart Orders',
+    description: 'Cart recovery orders with customer, status, amount, and closer.',
+    icon: <CartIcon />,
+    requiredPermissions: ['orders.read', 'orders.export'],
+    picklists: [],
+  },
+  {
+    key: 'follow_up_orders',
+    label: 'Follow-Up Orders',
+    description: 'Follow-up orders with source, closer, and delivery status.',
+    icon: <OrdersIcon />,
+    requiredPermissions: ['orders.read', 'orders.export'],
+    picklists: [],
+  },
+  {
+    key: 'delivery_remittances',
+    label: 'Delivery Remittances',
+    description: 'Cash remittance batches with location, order count, and amount.',
+    icon: <FinanceIcon />,
+    requiredPermissions: ['logistics.providers.view', 'logistics.export'],
+    picklists: [],
+  },
+  {
+    key: 'payroll',
+    label: 'Payroll',
+    description: 'Payout records with salary, bonuses, deductions, and status.',
+    icon: <PayrollIcon />,
+    requiredPermissions: ['hr.payroll', 'hr.export'],
+    picklists: [],
+  },
+  {
+    key: 'funding_requests',
+    label: 'Funding Requests',
+    description: 'Funding requests with requester, amount, status, and balance.',
+    icon: <FinanceIcon />,
+    requiredPermissions: ['marketing.read', 'marketing.export'],
+    picklists: [],
+  },
+  {
+    key: 'users',
+    label: 'Users',
+    description: 'Staff roster with role, branches, capacity, and status.',
+    icon: <TeamIcon />,
+    requiredPermissions: ['hr.users', 'hr.export'],
+    picklists: [],
+  },
+  {
+    key: 'expenses',
+    label: 'Expenses',
+    description: 'Expense submissions with amount, status, and approval details.',
+    icon: <FinanceIcon />,
+    requiredPermissions: ['finance.read', 'finance.export'],
+    picklists: [],
+  },
+  {
+    key: 'products',
+    label: 'Products',
+    description: 'Product catalog with pricing, stock totals, and categories.',
+    icon: <InventoryIcon />,
+    requiredPermissions: ['inventory.read', 'inventory.export'],
+    picklists: [],
+  },
+  {
+    key: 'shipments',
+    label: 'Shipments',
+    description: 'Stock shipments with origin, destination, expected and received units.',
+    icon: <LogisticsIcon />,
+    requiredPermissions: ['inventory.read', 'inventory.export'],
+    picklists: [],
+  },
 ];
 
 /* ── Icons ───────────────────────────────────────────────────── */
@@ -148,6 +220,22 @@ function LogisticsIcon() {
   return (
     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
+    </svg>
+  );
+}
+
+function CartIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+    </svg>
+  );
+}
+
+function PayrollIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   );
 }

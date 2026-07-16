@@ -2604,13 +2604,20 @@ export class OrdersService {
       if (!isNaN(parsed.getTime())) createdAtDate = parsed;
     }
 
-    // Build timestamp overrides for terminal statuses
+    // Build timestamp overrides based on how far along the target status is
     const statusTimestamps: Record<string, Date | undefined> = {};
-    if (input.targetStatus === 'REMITTED' && createdAtDate) {
-      statusTimestamps.confirmedAt = createdAtDate;
-      statusTimestamps.allocatedAt = createdAtDate;
-      statusTimestamps.dispatchedAt = createdAtDate;
-      statusTimestamps.deliveredAt = createdAtDate;
+    if (createdAtDate) {
+      const ts = input.targetStatus;
+      // CONFIRMED and beyond get confirmedAt
+      if (['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
+        statusTimestamps.confirmedAt = createdAtDate;
+      }
+      // DELIVERED and beyond get dispatch + delivery timestamps
+      if (['DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
+        statusTimestamps.allocatedAt = createdAtDate;
+        statusTimestamps.dispatchedAt = createdAtDate;
+        statusTimestamps.deliveredAt = createdAtDate;
+      }
     }
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
@@ -2634,7 +2641,7 @@ export class OrdersService {
           items: input.items,
           totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
           status: input.targetStatus,
-          orderSource: 'offline',
+          orderSource: 'import',
           customFields: input.customFields ?? null,
           ...(createdAtDate ? { createdAt: createdAtDate } : {}),
           ...statusTimestamps,
@@ -9641,6 +9648,7 @@ export class OrdersService {
     orderIds: string[],
     csCloserIds: string[],
     actor: SessionUser,
+    options?: { reason?: string },
   ) {
     const agents = [...new Set(csCloserIds)].filter(Boolean);
     if (agents.length === 0) {
@@ -9656,7 +9664,7 @@ export class OrdersService {
     for (const orderId of orderIds) {
       try {
         const idx = Math.floor(Math.random() * agents.length);
-        await this.assignToCS(orderId, agents[idx]!, actor);
+        await this.assignToCS(orderId, agents[idx]!, actor, { reason: options?.reason });
         results.push({ orderId, success: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';

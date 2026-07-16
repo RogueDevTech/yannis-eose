@@ -42,6 +42,12 @@ interface AssignCloserModalProps {
   mode?: 'assign' | 'reassign';
   /** Empty-state message when no closers are available. */
   emptyMessage?: string;
+  /** When true, a reason field is shown and required (late-stage transfers). */
+  requiresReason?: boolean;
+  /** Controlled reason value. */
+  reason?: string;
+  /** Reason change handler. */
+  onReasonChange?: (value: string) => void;
 }
 
 const PAGE_SIZE = 20;
@@ -58,6 +64,9 @@ export function AssignCloserModal({
   errorMessage,
   mode = 'assign',
   emptyMessage = 'No closers available.',
+  requiresReason = false,
+  reason = '',
+  onReasonChange,
 }: AssignCloserModalProps) {
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -182,6 +191,22 @@ export function AssignCloserModal({
         )}
       </div>
 
+      {/* Reason — required for late-stage reassignment (CONFIRMED+) */}
+      {requiresReason && (
+        <div className="shrink-0 px-4 pt-2 pb-1">
+          <label className="block text-xs font-medium text-app-fg-muted mb-1">
+            Reason for reassignment <span className="text-danger-500">*</span>
+          </label>
+          <textarea
+            className="w-full rounded-md border border-app-border bg-app-elevated px-3 py-2 text-sm text-app-fg placeholder:text-app-fg-muted focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+            rows={2}
+            placeholder="Why are these orders being reassigned?"
+            value={reason}
+            onChange={(e) => onReasonChange?.(e.target.value)}
+          />
+        </div>
+      )}
+
       {/* Footer */}
       <div className="shrink-0 flex items-center justify-end gap-2 border-t border-app-border px-4 py-3">
         <Button
@@ -197,7 +222,13 @@ export function AssignCloserModal({
           type="button"
           variant="primary"
           size="sm"
-          disabled={selectedCount === 0 || selectedIds.size === 0 || options.length === 0 || isSubmitting}
+          disabled={
+            selectedCount === 0 ||
+            selectedIds.size === 0 ||
+            options.length === 0 ||
+            isSubmitting ||
+            (requiresReason && !reason.trim())
+          }
           loading={isSubmitting}
           loadingText={loadingText}
           onClick={onSubmit}

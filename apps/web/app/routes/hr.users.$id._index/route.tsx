@@ -61,7 +61,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const bundleInput = encodeURIComponent(JSON.stringify({ userId }));
     const bundleRes = await apiRequest<unknown>(
       `/trpc/hr.userDetailPageBundle?input=${bundleInput}`,
-      { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+      { method: 'GET', cookie, timeoutMs: 60_000 },
     );
 
     if (!bundleRes.ok) {

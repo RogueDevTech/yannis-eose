@@ -154,9 +154,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const supervisorOnlyParam = url.searchParams.get('supervisorOnly') === '1';
   const branchIdRaw = url.searchParams.get('branchId')?.trim() ?? '';
   const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
+  const pageRaw = parseInt(url.searchParams.get('page') || '1', 10);
+  const pageNum = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
   const input: Record<string, unknown> = {
-    page: 1,
-    limit: 1000,
+    page: pageNum,
+    limit: 50,
     sortBy: 'createdAt',
     sortOrder: 'desc',
     companyWideUserList: true,
@@ -207,9 +209,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const [listRes, summaryRes] = await Promise.all([
         apiRequest<{ users: User[]; pagination: { total: number; page: number; limit: number; totalPages: number } }>(
           `/trpc/users.list?input=${inputEnc}`,
-          { method: 'GET', cookie },
+          { method: 'GET', cookie, timeoutMs: 60_000 },
         ),
-        apiRequest<unknown>(`/trpc/users.rosterSummary?input=${summaryEnc}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(`/trpc/users.rosterSummary?input=${summaryEnc}`, { method: 'GET', cookie, timeoutMs: 60_000 }),
       ]);
 
       let summary: RosterSummary = emptySummary;

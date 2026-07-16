@@ -17,6 +17,8 @@ export interface SearchableSelectOption {
 interface SearchableSelectProps {
   id?: string;
   label?: string;
+  /** Tooltip text shown via an info icon next to the label. */
+  labelInfo?: string;
   hint?: string;
   error?: string;
   value: string;
@@ -60,6 +62,7 @@ function defaultFilter(option: SearchableSelectOption, query: string): boolean {
 export function SearchableSelect({
   id,
   label,
+  labelInfo,
   hint,
   error,
   value,
@@ -343,9 +346,19 @@ export function SearchableSelect({
   return (
     <div className={['flex flex-col gap-1', wrapperClassName].filter(Boolean).join(' ')}>
       {label && (
-        <label htmlFor={inputId} className="text-xs font-medium text-app-fg-muted">
+        <label htmlFor={inputId} className="text-xs font-medium text-app-fg-muted flex items-center gap-1">
           {label}
-          {required && <span className="ml-0.5 text-danger-500">*</span>}
+          {required && <span className="text-danger-500">*</span>}
+          {labelInfo && (
+            <span className="group relative inline-flex">
+              <svg className="w-3.5 h-3.5 text-app-fg-muted/60 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-52 rounded-md bg-gray-900 dark:bg-gray-700 px-2.5 py-1.5 text-[11px] leading-snug font-normal text-white whitespace-normal opacity-0 transition-opacity group-hover:opacity-100 z-50 text-center">
+                {labelInfo}
+              </span>
+            </span>
+          )}
         </label>
       )}
       <div className="relative">
