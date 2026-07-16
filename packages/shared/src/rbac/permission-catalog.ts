@@ -526,6 +526,22 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'rider.dashboard',
     'logistics.deliveryConfirmation.submit',
   ],
+  // AUDITOR = read-only finance-scoped role for external/internal auditors.
+  // Sees GL, journal entries, trial balance, financial reports, audit trail,
+  // and cost/margin data. No write permissions. Unlike SUPPORT, the AUDITOR
+  // does NOT bypass permissionProcedure — access is permission-snapshot only.
+  AUDITOR: [
+    'finance.read',
+    'finance.costView',
+    'finance.ledger.read',
+    'finance.ledger.export',
+    'finance.audit.read',
+    'finance.export',
+    'orders.read',
+    'audit.read',
+    'audit.export',
+    'data.export',
+  ],
   HR_MANAGER: [
     'hr.read',
     'hr.write',

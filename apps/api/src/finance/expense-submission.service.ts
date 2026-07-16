@@ -4,6 +4,7 @@ import { eq, and, desc, sql, isNull, type SQL, type AnyColumn } from 'drizzle-or
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
+  ACCT,
   type SubmitExpenseInput,
   type ApproveExpenseInput,
   type RejectExpenseInput,
@@ -78,7 +79,7 @@ export class ExpenseSubmissionService {
       const groupId = expense.groupId ?? null;
 
       // Resolve the Creditors / Payable account for the credit side.
-      const creditorsAcct = await this.resolveAccountByType(tx, groupId, 'PAYABLE');
+      const creditorsAcct = await this.resolveAccountByCode(tx, groupId, ACCT.AP_SUPPLIERS);
       if (!creditorsAcct) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
@@ -235,11 +236,11 @@ export class ExpenseSubmissionService {
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
-  /** Resolve a postable leaf account by its semantic type tag. */
-  private async resolveAccountByType(
+  /** Resolve a postable leaf account by exact code. */
+  private async resolveAccountByCode(
     tx: Tx,
     groupId: string | null,
-    accountType: string,
+    code: string,
   ): Promise<{ id: string } | null> {
     const [row] = await tx
       .select({ id: schema.accounts.id })
@@ -247,9 +248,8 @@ export class ExpenseSubmissionService {
       .where(
         and(
           this.groupEqOn(schema.accounts.groupId, groupId),
-          eq(schema.accounts.accountType, accountType as never),
+          eq(schema.accounts.code, code),
           eq(schema.accounts.isGroup, false),
-          eq(schema.accounts.isActive, true),
         ),
       )
       .limit(1);

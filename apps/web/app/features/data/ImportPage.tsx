@@ -16,7 +16,7 @@ interface ImportTypeDef {
 const IMPORT_TYPES: ImportTypeDef[] = [
   {
     key: 'orders',
-    label: 'Sales Orders',
+    label: 'Orders',
     description: 'Import funnel or offline orders from a CRM export spreadsheet.',
     icon: <OrdersIcon />,
   },

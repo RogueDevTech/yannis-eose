@@ -33,6 +33,8 @@ const ALL_ROLES: RoleOption[] = [
   { value: 'TPL_RIDER', label: '3PL Rider' },
   { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
+  { value: 'SUPPORT', label: 'Support' },
+  { value: 'AUDITOR', label: 'Auditor' },
 ];
 
 const ROLE_LABELS: Record<string, string> = Object.fromEntries(ALL_ROLES.map((r) => [r.value, r.label]));

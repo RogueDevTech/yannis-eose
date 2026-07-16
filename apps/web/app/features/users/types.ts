@@ -43,6 +43,7 @@ export const ROLE_COLORS: Record<string, string> = {
   TPL_RIDER: 'badge-warning',
   HR_MANAGER: 'badge-brand',
   SUPPORT: 'badge-info',
+  AUDITOR: 'badge-success',
 };
 
 export const USER_STATUS_COLORS: Record<string, string> = {
@@ -69,6 +70,7 @@ export const ROLE_OPTIONS = [
   'TPL_RIDER',
   'HR_MANAGER',
   'SUPPORT',
+  'AUDITOR',
 ];
 
 export function formatRole(role: string): string {

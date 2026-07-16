@@ -4,6 +4,7 @@ import { eq, and, desc, sql, ilike, isNull, type SQL, type AnyColumn } from 'dri
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
+  ACCT,
   type CreateAssetInput,
   type ListAssetsInput,
   type GetAssetInput,
@@ -170,8 +171,8 @@ export class AssetRegisterService {
 
       // Post the GL entry for disposal.
       const groupId = asset.groupId ?? null;
-      const bankAcct = await this.resolveAccountByType(tx, groupId, 'BANK');
-      const accDepAcct = await this.resolveAccountByCode(tx, groupId, 'Accumulated Depreciation');
+      const bankAcct = await this.resolveAccountByCode(tx, groupId, ACCT.BANK_PRIMARY);
+      const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEP_VEHICLES);
       // The cost side: debit the fixed asset cost account. Pick the first
       // FIXED_ASSET leaf for the company (the specific sub-account doesn't
       // matter for the total — all roll up to Fixed Assets on the balance sheet).
@@ -200,7 +201,7 @@ export class AssetRegisterService {
       if (gainLoss !== 0) {
         // Use the Depreciation expense account for disposal loss, or Indirect Income for gain.
         // Simple approach: use the Depreciation account for both (loss on disposal).
-        const gainLossAcct = await this.resolveAccountByCode(tx, groupId, 'Depreciation');
+        const gainLossAcct = await this.resolveAccountByCode(tx, groupId, ACCT.DISPOSAL_GAIN_LOSS);
         if (gainLossAcct) {
           if (gainLoss < 0) {
             // Loss: Dr Depreciation (expense)
@@ -325,8 +326,8 @@ export class AssetRegisterService {
         let glVoucherId: string | null = null;
 
         // Resolve GL accounts.
-        const depExpenseAcct = await this.resolveAccountByCode(tx, groupId, 'Depreciation');
-        const accDepAcct = await this.resolveAccountByCode(tx, groupId, 'Accumulated Depreciation');
+        const depExpenseAcct = await this.resolveAccountByCode(tx, groupId, ACCT.DEPRECIATION_FIXED);
+        const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEP_VEHICLES);
 
         if (depExpenseAcct && accDepAcct) {
           // Create a journal entry header.

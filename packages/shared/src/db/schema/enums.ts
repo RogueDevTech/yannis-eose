@@ -40,6 +40,10 @@ export const userRoleEnum = pgEnum('user_role', [
   // SUPPORT = read-only tech support role with full SUPER_ADMIN visibility.
   // All tRPC mutations blocked at middleware layer. Can mirror any user.
   'SUPPORT',
+  // AUDITOR = read-only finance-scoped role for external/internal auditors.
+  // Sees GL, journal entries, trial balance, financial reports, and audit trail.
+  // Cannot mutate any data (no write permissions granted).
+  'AUDITOR',
 ]);
 
 export const orderStatusEnum = pgEnum('order_status', [

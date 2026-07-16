@@ -49,6 +49,7 @@ const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
   'TPL_RIDER',
   'LOGISTICS_MANAGER',
   'HR_MANAGER',
+  'AUDITOR',
 ]);
 
 export function isOrgWideDepartmentHead(user: {
@@ -86,6 +87,7 @@ export function hasFinanceAccess(user: {
   if (!user) return false;
   if (user.role === 'SUPER_ADMIN') return true;
   if (user.role === 'SUPPORT') return true;
+  if (user.role === 'AUDITOR') return true;
   if ((user.permissions ?? []).map((p) => canonicalPermissionCode(p)).includes('finance.costs.view')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
   return false;

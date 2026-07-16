@@ -126,6 +126,11 @@ const ROLES = [
     label: 'Support',
     description: 'Read-only tech support — full visibility, no mutations. For the dev/ops team.',
   },
+  {
+    value: 'AUDITOR',
+    label: 'Auditor',
+    description: 'Read-only finance-scoped role. Sees GL, journal entries, trial balance, reports, and audit trail.',
+  },
 ];
 
 // ─── Component ──────────────────────────────────────────

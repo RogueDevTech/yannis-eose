@@ -5,10 +5,11 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, sql, inArray, gte, lte, isNull, ilike, type SQL, type AnyColumn } from 'drizzle-orm';
+import { eq, and, desc, gt, sql, inArray, gte, lte, isNull, ilike, type SQL, type AnyColumn } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
+  ACCT,
   DEFAULT_CHART_OF_ACCOUNTS,
   type CreateJournalEntryInput,
   type PostOpeningBalancesInput,
@@ -22,6 +23,7 @@ import {
   type CloseFiscalYearInput,
   type ReopenFiscalYearInput,
   type ApproveJournalEntryInput,
+  type RejectJournalEntryInput,
   type TrialBalanceInput,
   type ProfitAndLossInput,
   type BalanceSheetInput,
@@ -265,7 +267,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       }
     }
 
-    // Period lock: find the OPEN fiscal year containing postingDate.
+    // Period lock: find the fiscal year containing postingDate.
+    // FOR UPDATE prevents a concurrent closeFiscalYear from flipping the
+    // status while we're mid-posting — either the close or the post wins,
+    // never a partial interleave.
     const fyRows = await tx
       .select({
         id: schema.fiscalYears.id,
@@ -279,6 +284,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           gte(schema.fiscalYears.endDate, input.postingDate),
         ),
       )
+      .for('update')
       .limit(1);
     const fy = fyRows[0];
     if (!fy) {
@@ -461,8 +467,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (revenue <= 0) return { posted: false, reason: 'zero-revenue' };
 
       // Resolve posting accounts.
-      const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', 'Debtors');
-      const sale = await this.resolveAccountByCode(tx, groupId, 'Sale');
+      const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', ACCT.AR_CUSTOMERS);
+      const sale = await this.resolveAccountByCode(tx, groupId, ACCT.PRODUCT_SALES);
       if (!debtors || !sale) {
         return { posted: false, reason: 'missing-ar-or-sale-account' };
       }
@@ -478,7 +484,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // VAT output — 7.5% Nigerian VAT on top of revenue. Only posts if the
       // VAT account exists in the CoA (graceful degradation for companies that
       // haven't seeded it or are VAT-exempt).
-      const vatAccount = await this.resolveAccountByCode(tx, groupId, 'VAT');
+      const vatAccount = await this.resolveAccountByCode(tx, groupId, ACCT.VAT_OUTPUT);
       if (vatAccount) {
         const vatAmount = Math.round(revenue * 0.075 * 100) / 100; // 7.5%
         if (vatAmount > 0) {
@@ -490,7 +496,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // COGS pair — only when a FIFO cost is available.
       if (cogs > 0) {
         const cogsAcct = await this.resolveAccountByType(tx, groupId, 'COST_OF_GOODS_SOLD');
-        const stock = await this.resolveAccountByType(tx, groupId, 'STOCK', 'Stock In Hand');
+        const stock = await this.resolveAccountByType(tx, groupId, 'STOCK', ACCT.STOCK_FINISHED_GOODS);
         if (cogsAcct && stock) {
           lines.push({ accountId: cogsAcct.id, debit: cogs, credit: 0 });
           lines.push({ accountId: stock.id, debit: 0, credit: cogs });
@@ -588,15 +594,15 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // Resolve accounts. Remittances carry no bank field, so cash lands in the
       // company's primary bank — prefer "First Bank", else the first BANK account.
       // (Deterministic default; revisit if per-remittance bank selection is added.)
-      const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', 'Debtors');
-      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', 'First Bank');
+      const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', ACCT.AR_CUSTOMERS);
+      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
       if (!debtors || !bank) return { posted: false, reason: 'missing-debtors-or-bank-account' };
       const deliveryFeeAcct =
         totalDeliveryFee > 0
-          ? await this.resolveAccountByCode(tx, groupId, 'Delivery Fees')
+          ? await this.resolveAccountByCode(tx, groupId, ACCT.OUTBOUND_DELIVERY)
           : null;
       const discountAcct =
-        otherFees > 0 ? await this.resolveAccountByCode(tx, groupId, 'Discount Fees') : null;
+        otherFees > 0 ? await this.resolveAccountByCode(tx, groupId, ACCT.BANK_CHARGES) : null;
 
       // Fees we can't route to a resolved account fall back into the cash figure
       // so the entry still balances (never silently drop money).
@@ -688,28 +694,48 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // Resolve company via destination location → branch → group. location.branch_id
       // is TEXT and branches.id is uuid, so cast for the join.
       const groupId = await this.resolveGroupIdForLocation(tx, ship.destinationLocationId);
-      const stock = await this.resolveAccountByType(tx, groupId, 'STOCK', 'Stock In Hand');
-      const creditors = await this.resolveAccountByType(tx, groupId, 'PAYABLE', 'Creditors');
+      const stock = await this.resolveAccountByType(tx, groupId, 'STOCK', ACCT.STOCK_FINISHED_GOODS);
+      const creditors = await this.resolveAccountByType(tx, groupId, 'PAYABLE', ACCT.AP_SUPPLIERS);
+      const vatInput = await this.resolveAccountByCode(tx, groupId, ACCT.VAT_INPUT_CREDIT);
       if (!stock || !creditors) {
         return { posted: false, reason: 'missing-stock-or-creditors-account' };
       }
 
+      // VAT input credit: 7.5% on the landed value (VAT-exclusive prices).
+      // If the VAT Input Credit account exists, split the creditor amount into
+      // net creditor + VAT input so the journal stays balanced.
+      const vatAmount = vatInput ? Math.round(landedValue * 0.075 * 100) / 100 : 0;
+      const creditorsAmount = landedValue + vatAmount; // total owed to supplier includes VAT
+
       const postingDate = (ship.verifiedAt ?? new Date()).toISOString().slice(0, 10);
+
+      const voucherLines: PostVoucherLine[] = [
+        { accountId: stock.id, debit: landedValue, credit: 0 },
+        {
+          accountId: creditors.id,
+          debit: 0,
+          credit: creditorsAmount,
+          partyType: 'SUPPLIER',
+          remarks: ship.supplierName ?? undefined,
+        },
+      ];
+
+      // DR 1151 VAT Input Credit for the VAT portion.
+      if (vatInput && vatAmount > 0) {
+        voucherLines.push({
+          accountId: vatInput.id,
+          debit: vatAmount,
+          credit: 0,
+          remarks: 'VAT input credit 7.5%',
+        });
+      }
+
       await this.postVoucher(tx, {
         groupId,
         postingDate,
         voucherType: 'PURCHASE_RECEIPT',
         voucherId: shipmentId,
-        lines: [
-          { accountId: stock.id, debit: landedValue, credit: 0 },
-          {
-            accountId: creditors.id,
-            debit: 0,
-            credit: landedValue,
-            partyType: 'SUPPLIER',
-            remarks: ship.supplierName ?? undefined,
-          },
-        ],
+        lines: voucherLines,
       });
 
       return { posted: true };
@@ -762,8 +788,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         groupId = branch?.groupId ?? null;
       }
 
-      const salary = await this.resolveAccountByCode(tx, groupId, 'Salary');
-      const payrollPayable = await this.resolveAccountByCode(tx, groupId, 'Payroll Payable');
+      const salary = await this.resolveAccountByCode(tx, groupId, ACCT.STAFF_SALARIES);
+      const payrollPayable = await this.resolveAccountByCode(tx, groupId, ACCT.ACCRUED_SALARIES);
       if (!salary || !payrollPayable) {
         return { posted: false, reason: 'missing-salary-or-payroll-payable-account' };
       }
@@ -821,7 +847,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         groupId = branch?.groupId ?? null;
       }
 
-      const marketing = await this.resolveAccountByCode(tx, groupId, 'Marketing Expenses');
+      const marketing = await this.resolveAccountByCode(tx, groupId, ACCT.AD_SPEND_DIGITAL);
       const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
       if (!marketing || !bank) {
         return { posted: false, reason: 'missing-marketing-or-bank-account' };
@@ -840,6 +866,326 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         ],
       });
 
+      return { posted: true };
+    });
+  }
+
+  // ─── Supplier Payment (DR AP / CR Bank) ─────────────────────────────────────
+
+  /**
+   * Post when a supplier invoice/liability is paid.
+   * DR 2111 Accounts Payable — Suppliers (clears liability)
+   * CR 1112 Cash at Bank (cash out)
+   */
+  async postSupplierPayment(
+    paymentId: string,
+    supplierName: string,
+    amount: number,
+    groupId: string | null,
+    actor: Actor,
+    opts?: { whtRate?: number; vendorId?: string },
+  ): Promise<{ posted: boolean; reason?: string; whtDeductionId?: string }> {
+    if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'PAYMENT', paymentId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      const ap = await this.resolveAccountByCode(tx, groupId, ACCT.AP_SUPPLIERS);
+      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      if (!ap || !bank) return { posted: false, reason: 'missing-accounts' };
+
+      const whtRate = opts?.whtRate ?? 0;
+      const grossMinor = Math.round(amount * 100);
+      let whtDeductionId: string | undefined;
+
+      if (whtRate > 0) {
+        // WHT auto-deduction: DR AP full, CR Bank net, CR WHT Payable withheld
+        const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
+        if (!whtPayable) return { posted: false, reason: 'missing-accounts' };
+
+        const whtMinor = Math.round(grossMinor * (whtRate / 100));
+        const netMinor = grossMinor - whtMinor;
+
+        await this.postVoucher(tx, {
+          groupId,
+          postingDate: new Date().toISOString().slice(0, 10),
+          voucherType: 'PAYMENT',
+          voucherId: paymentId,
+          lines: [
+            { accountId: ap.id, debit: grossMinor, credit: 0, partyType: 'SUPPLIER', remarks: `Payment to ${supplierName}` },
+            { accountId: bank.id, debit: 0, credit: netMinor, remarks: `Supplier payment net of WHT: ${supplierName}` },
+            { accountId: whtPayable.id, debit: 0, credit: whtMinor, remarks: `WHT ${whtRate}% withheld: ${supplierName}` },
+          ],
+        });
+
+        // Record in wht_deductions for certificate generation
+        const whtAmount = Math.round(amount * (whtRate / 100) * 100) / 100;
+        const netAmount = Math.round((amount - whtAmount) * 100) / 100;
+        const [whtRow] = await tx
+          .insert(schema.whtDeductions)
+          .values({
+            groupId,
+            vendorName: supplierName,
+            vendorId: opts?.vendorId ?? null,
+            paymentDate: new Date().toISOString().slice(0, 10),
+            grossAmount: sql`${amount}::numeric`,
+            whtRate: sql`${whtRate}::numeric`,
+            whtAmount: sql`${whtAmount}::numeric`,
+            netAmount: sql`${netAmount}::numeric`,
+            description: `Auto WHT on supplier payment ${paymentId}`,
+            glVoucherId: paymentId,
+            createdBy: actor.id,
+          })
+          .returning({ id: schema.whtDeductions.id });
+        whtDeductionId = whtRow?.id;
+      } else {
+        // No WHT: simple full-amount payment
+        await this.postVoucher(tx, {
+          groupId,
+          postingDate: new Date().toISOString().slice(0, 10),
+          voucherType: 'PAYMENT',
+          voucherId: paymentId,
+          lines: [
+            { accountId: ap.id, debit: grossMinor, credit: 0, partyType: 'SUPPLIER', remarks: `Payment to ${supplierName}` },
+            { accountId: bank.id, debit: 0, credit: grossMinor, remarks: `Supplier payment: ${supplierName}` },
+          ],
+        });
+      }
+      return { posted: true, whtDeductionId };
+    });
+  }
+
+  // ─── Agent Commission (DR Commission Expense / CR AP Agents) ────────────────
+
+  /**
+   * Post when agent delivery commission becomes due (on order delivery).
+   * DR 5220 Agent Delivery Commission (expense)
+   * CR 2112 Accounts Payable — Agent Commissions (liability)
+   */
+  async postAgentCommissionDue(
+    orderId: string,
+    agentName: string,
+    commissionAmount: number,
+    groupId: string | null,
+    actor: Actor,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    if (commissionAmount <= 0) return { posted: false, reason: 'zero-commission' };
+    return withActor(this.db, actor, async (tx) => {
+      const voucherId = `agent-comm-due-${orderId}`;
+      if (await this.alreadyPosted(tx, 'EXPENSE', voucherId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      const commExp = await this.resolveAccountByCode(tx, groupId, ACCT.AGENT_DELIVERY_COMM);
+      const apAgent = await this.resolveAccountByCode(tx, groupId, ACCT.AP_AGENT_COMMISSIONS);
+      if (!commExp || !apAgent) return { posted: false, reason: 'missing-accounts' };
+
+      const minorAmount = Math.round(commissionAmount * 100);
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate: new Date().toISOString().slice(0, 10),
+        voucherType: 'EXPENSE',
+        voucherId,
+        lines: [
+          { accountId: commExp.id, debit: minorAmount, credit: 0, remarks: `Delivery commission — ${agentName}` },
+          { accountId: apAgent.id, debit: 0, credit: minorAmount, partyType: 'AGENT', remarks: agentName },
+        ],
+      });
+      return { posted: true };
+    });
+  }
+
+  /**
+   * Post when agent commission is actually paid out.
+   * DR 2112 Accounts Payable — Agent Commissions (clears liability)
+   * CR 1112 Cash at Bank (cash out)
+   */
+  async postAgentCommissionPaid(
+    paymentId: string,
+    agentName: string,
+    amount: number,
+    groupId: string | null,
+    actor: Actor,
+    opts?: { whtRate?: number },
+  ): Promise<{ posted: boolean; reason?: string; whtDeductionId?: string }> {
+    if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'PAYMENT', paymentId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      const apAgent = await this.resolveAccountByCode(tx, groupId, ACCT.AP_AGENT_COMMISSIONS);
+      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      if (!apAgent || !bank) return { posted: false, reason: 'missing-accounts' };
+
+      const whtRate = opts?.whtRate ?? 0;
+      const grossMinor = Math.round(amount * 100);
+      let whtDeductionId: string | undefined;
+
+      if (whtRate > 0) {
+        const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
+        if (!whtPayable) return { posted: false, reason: 'missing-accounts' };
+
+        const whtMinor = Math.round(grossMinor * (whtRate / 100));
+        const netMinor = grossMinor - whtMinor;
+
+        await this.postVoucher(tx, {
+          groupId,
+          postingDate: new Date().toISOString().slice(0, 10),
+          voucherType: 'PAYMENT',
+          voucherId: paymentId,
+          lines: [
+            { accountId: apAgent.id, debit: grossMinor, credit: 0, partyType: 'AGENT', remarks: `Commission paid: ${agentName}` },
+            { accountId: bank.id, debit: 0, credit: netMinor, remarks: `Agent commission net of WHT: ${agentName}` },
+            { accountId: whtPayable.id, debit: 0, credit: whtMinor, remarks: `WHT ${whtRate}% withheld: ${agentName}` },
+          ],
+        });
+
+        const whtAmount = Math.round(amount * (whtRate / 100) * 100) / 100;
+        const netAmount = Math.round((amount - whtAmount) * 100) / 100;
+        const [whtRow] = await tx
+          .insert(schema.whtDeductions)
+          .values({
+            groupId,
+            vendorName: agentName,
+            paymentDate: new Date().toISOString().slice(0, 10),
+            grossAmount: sql`${amount}::numeric`,
+            whtRate: sql`${whtRate}::numeric`,
+            whtAmount: sql`${whtAmount}::numeric`,
+            netAmount: sql`${netAmount}::numeric`,
+            description: `Auto WHT on agent commission payment ${paymentId}`,
+            glVoucherId: paymentId,
+            createdBy: actor.id,
+          })
+          .returning({ id: schema.whtDeductions.id });
+        whtDeductionId = whtRow?.id;
+      } else {
+        await this.postVoucher(tx, {
+          groupId,
+          postingDate: new Date().toISOString().slice(0, 10),
+          voucherType: 'PAYMENT',
+          voucherId: paymentId,
+          lines: [
+            { accountId: apAgent.id, debit: grossMinor, credit: 0, partyType: 'AGENT', remarks: `Commission paid: ${agentName}` },
+            { accountId: bank.id, debit: 0, credit: grossMinor, remarks: `Agent commission payment: ${agentName}` },
+          ],
+        });
+      }
+      return { posted: true, whtDeductionId };
+    });
+  }
+
+  // ─── Fixed Asset Acquisition (DR PPE / CR Bank or AP) ───────────────────────
+
+  /**
+   * Post when a fixed asset is purchased/registered.
+   * DR 1211-1215 PPE account (capitalise the asset)
+   * CR 1112 Cash at Bank (if paid) or CR 2111 AP (if on credit)
+   */
+  async postFixedAssetAcquisition(
+    assetId: string,
+    assetName: string,
+    cost: number,
+    assetAccountId: string,
+    groupId: string | null,
+    actor: Actor,
+    paidByBank = true,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    if (cost <= 0) return { posted: false, reason: 'zero-cost' };
+    return withActor(this.db, actor, async (tx) => {
+      const voucherId = `asset-acq-${assetId}`;
+      if (await this.alreadyPosted(tx, 'JOURNAL_ENTRY', voucherId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      const creditAcct = paidByBank
+        ? await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY)
+        : await this.resolveAccountByCode(tx, groupId, ACCT.AP_SUPPLIERS);
+      if (!creditAcct) return { posted: false, reason: 'missing-credit-account' };
+
+      const minorCost = Math.round(cost * 100);
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate: new Date().toISOString().slice(0, 10),
+        voucherType: 'JOURNAL_ENTRY',
+        voucherId,
+        lines: [
+          { accountId: assetAccountId, debit: minorCost, credit: 0, remarks: `Asset acquired: ${assetName}` },
+          { accountId: creditAcct.id, debit: 0, credit: minorCost, remarks: `Payment for asset: ${assetName}` },
+        ],
+      });
+      return { posted: true };
+    });
+  }
+
+  // ─── Customer Deposit (DR Bank / CR Customer Deposits) ──────────────────────
+
+  /**
+   * Post when a customer advance/deposit is received (deferred revenue per IFRS 15).
+   * DR 1112 Cash at Bank
+   * CR 2150 Customer Deposits & Advance Payments
+   */
+  async postCustomerDeposit(
+    depositId: string,
+    customerName: string,
+    amount: number,
+    groupId: string | null,
+    actor: Actor,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'PAYMENT', depositId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      const deposits = await this.resolveAccountByCode(tx, groupId, ACCT.CUSTOMER_DEPOSITS);
+      if (!bank || !deposits) return { posted: false, reason: 'missing-accounts' };
+
+      const minorAmount = Math.round(amount * 100);
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate: new Date().toISOString().slice(0, 10),
+        voucherType: 'PAYMENT',
+        voucherId: depositId,
+        lines: [
+          { accountId: bank.id, debit: minorAmount, credit: 0, remarks: `Deposit from ${customerName}` },
+          { accountId: deposits.id, debit: 0, credit: minorAmount, partyType: 'CUSTOMER', remarks: customerName },
+        ],
+      });
+      return { posted: true };
+    });
+  }
+
+  /**
+   * Post when a customer deposit is recognised as revenue on delivery (IFRS 15).
+   * DR 2150 Customer Deposits (clears deferred revenue)
+   * CR 4110 Product Sales Revenue (revenue recognised)
+   */
+  async postDepositRecognition(
+    orderId: string,
+    customerName: string,
+    amount: number,
+    groupId: string | null,
+    actor: Actor,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+    return withActor(this.db, actor, async (tx) => {
+      const voucherId = `deposit-recog-${orderId}`;
+      if (await this.alreadyPosted(tx, 'SALES_INVOICE', voucherId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      const deposits = await this.resolveAccountByCode(tx, groupId, ACCT.CUSTOMER_DEPOSITS);
+      const revenue = await this.resolveAccountByCode(tx, groupId, ACCT.PRODUCT_SALES);
+      if (!deposits || !revenue) return { posted: false, reason: 'missing-accounts' };
+
+      const minorAmount = Math.round(amount * 100);
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate: new Date().toISOString().slice(0, 10),
+        voucherType: 'SALES_INVOICE',
+        voucherId,
+        lines: [
+          { accountId: deposits.id, debit: minorAmount, credit: 0, remarks: `Deposit recognised on delivery — ${customerName}` },
+          { accountId: revenue.id, debit: 0, credit: minorAmount, remarks: `Revenue from deposit — ${customerName}` },
+        ],
+      });
       return { posted: true };
     });
   }
@@ -1081,6 +1427,47 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
   }
 
   /**
+   * Reject a DRAFT journal entry: validates it's in DRAFT status, flips to
+   * CANCELLED, and stores the rejection reason. No GL lines are posted.
+   */
+  async rejectJournalEntry(input: RejectJournalEntryInput, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [header] = await tx
+        .select()
+        .from(schema.journalEntries)
+        .where(eq(schema.journalEntries.id, input.journalEntryId))
+        .limit(1);
+      if (!header) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
+      }
+      if (header.status !== 'DRAFT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot reject a journal entry with status "${header.status}". Only DRAFT entries can be rejected.`,
+        });
+      }
+
+      const [updated] = await tx
+        .update(schema.journalEntries)
+        .set({
+          status: 'CANCELLED',
+          // Store rejection metadata as JSON in idempotencyKey (reusing
+          // nullable text column; draft lines are no longer relevant).
+          idempotencyKey: JSON.stringify({
+            rejectedBy: actor.id,
+            rejectedAt: new Date().toISOString(),
+            reason: input.reason,
+          }),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.journalEntries.id, header.id))
+        .returning();
+
+      return updated!;
+    });
+  }
+
+  /**
    * Phase 6 — post opening balances at cutover. The caller supplies each
    * account's opening debit/credit; this posts them as a single JOURNAL_ENTRY
    * and auto-adds a balancing line to "Opening Balance Equity" for any residual,
@@ -1104,7 +1491,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // Balancing line to Opening Balance Equity for any residual.
       const residualMinor = totalDebitMinor - totalCreditMinor;
       if (residualMinor !== 0) {
-        const equity = await this.resolveAccountByCode(tx, groupId, 'Opening Balance Equity');
+        const equity = await this.resolveAccountByCode(tx, groupId, ACCT.OPENING_BALANCE_EQUITY);
         if (!equity) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -1389,34 +1776,75 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
   async closeFiscalYear(input: CloseFiscalYearInput, actor: Actor) {
     return withActor(this.db, actor, async (tx) => {
+      // Lock the row FOR UPDATE to prevent concurrent postings while closing.
+      const [existing] = await tx
+        .select({
+          id: schema.fiscalYears.id,
+          status: schema.fiscalYears.status,
+        })
+        .from(schema.fiscalYears)
+        .where(eq(schema.fiscalYears.id, input.fiscalYearId))
+        .for('update')
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
+      }
+      if (existing.status === 'CLOSED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Fiscal year is already closed.' });
+      }
+
       const [row] = await tx
         .update(schema.fiscalYears)
         .set({ status: 'CLOSED', updatedAt: new Date() })
         .where(eq(schema.fiscalYears.id, input.fiscalYearId))
         .returning();
-      if (!row) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
-      }
-      return row;
+      return row!;
     });
   }
 
   /**
    * Reopen a closed fiscal year (SuperAdmin only — enforced in router).
    * Allows postings to resume in the period.
+   * Rejects if any later fiscal year (same group) is already CLOSED,
+   * because reopening an earlier period while a later one is locked
+   * would break the sequential close invariant.
    */
   async reopenFiscalYear(input: ReopenFiscalYearInput, actor: Actor) {
     return withActor(this.db, actor, async (tx) => {
       const [existing] = await tx
-        .select({ status: schema.fiscalYears.status })
+        .select({
+          status: schema.fiscalYears.status,
+          endDate: schema.fiscalYears.endDate,
+          groupId: schema.fiscalYears.groupId,
+        })
         .from(schema.fiscalYears)
         .where(eq(schema.fiscalYears.id, input.fiscalYearId))
+        .for('update')
         .limit(1);
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
       }
       if (existing.status === 'OPEN') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Fiscal year is already open.' });
+      }
+
+      // Guard: reject if a later fiscal year (same company) is also closed.
+      const laterClosed = await tx
+        .select({ id: schema.fiscalYears.id, name: schema.fiscalYears.name })
+        .from(schema.fiscalYears)
+        .where(
+          and(
+            this.groupEqOn(schema.fiscalYears.groupId, existing.groupId),
+            gt(schema.fiscalYears.startDate, existing.endDate),
+            eq(schema.fiscalYears.status, 'CLOSED'),
+          ),
+        )
+        .limit(1);
+      if (laterClosed.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot reopen: a later fiscal year ("${laterClosed[0]!.name}") is still closed. Close periods sequentially.`,
+        });
       }
 
       const [row] = await tx
@@ -1544,6 +1972,44 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
     const totalIncome = income.reduce((s, r) => s + r.amount, 0);
     const totalExpense = expense.reduce((s, r) => s + r.amount, 0);
+
+    // Comparative period (optional)
+    let comparative:
+      | {
+          comparativeIncome: typeof income;
+          comparativeExpense: typeof expense;
+          comparativeTotalIncome: number;
+          comparativeTotalExpense: number;
+          comparativeNetProfit: number;
+          comparativePeriod: { startDate: string | null; endDate: string | null };
+        }
+      | undefined;
+    if (input.comparativeStartDate || input.comparativeEndDate) {
+      const compRows = await this.accountNetsByRoot(groupId, ['INCOME', 'EXPENSE'], {
+        startDate: input.comparativeStartDate,
+        endDate: input.comparativeEndDate,
+      });
+      const comparativeIncome = compRows
+        .filter((r) => r.rootType === 'INCOME')
+        .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+      const comparativeExpense = compRows
+        .filter((r) => r.rootType === 'EXPENSE')
+        .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
+      const comparativeTotalIncome = comparativeIncome.reduce((s, r) => s + r.amount, 0);
+      const comparativeTotalExpense = comparativeExpense.reduce((s, r) => s + r.amount, 0);
+      comparative = {
+        comparativeIncome,
+        comparativeExpense,
+        comparativeTotalIncome,
+        comparativeTotalExpense,
+        comparativeNetProfit: comparativeTotalIncome - comparativeTotalExpense,
+        comparativePeriod: {
+          startDate: input.comparativeStartDate ?? null,
+          endDate: input.comparativeEndDate ?? null,
+        },
+      };
+    }
+
     return {
       income,
       expense,
@@ -1551,6 +2017,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       totalExpense,
       netProfit: totalIncome - totalExpense,
       period: { startDate: input.startDate ?? null, endDate: input.endDate ?? null },
+      ...comparative,
     };
   }
 
@@ -1583,6 +2050,63 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     const retainedEarnings = income - expense;
     const totalEquity = bookEquity + retainedEarnings;
 
+    // Comparative period (optional)
+    let comparative:
+      | {
+          comparativeAssets: typeof assets;
+          comparativeLiabilities: typeof liabilities;
+          comparativeEquity: typeof equity;
+          comparativeRetainedEarnings: number;
+          comparativeTotalAssets: number;
+          comparativeTotalLiabilities: number;
+          comparativeTotalEquity: number;
+          comparativeBalanced: boolean;
+          comparativePeriod: { startDate: string | null; endDate: string | null };
+        }
+      | undefined;
+    if (input.comparativeStartDate || input.comparativeEndDate) {
+      // For a balance sheet comparative, the endDate acts as the "as of" date
+      const compAsOfDate = input.comparativeEndDate;
+      const compOpts = { endDate: compAsOfDate };
+      const compBsRows = await this.accountNetsByRoot(groupId, ['ASSET', 'LIABILITY', 'EQUITY'], compOpts);
+      const compPlRows = await this.accountNetsByRoot(groupId, ['INCOME', 'EXPENSE'], compOpts);
+
+      const comparativeAssets = compBsRows
+        .filter((r) => r.rootType === 'ASSET')
+        .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
+      const comparativeLiabilities = compBsRows
+        .filter((r) => r.rootType === 'LIABILITY')
+        .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+      const comparativeEquity = compBsRows
+        .filter((r) => r.rootType === 'EQUITY')
+        .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+
+      const comparativeTotalAssets = comparativeAssets.reduce((s, r) => s + r.amount, 0);
+      const comparativeTotalLiabilities = comparativeLiabilities.reduce((s, r) => s + r.amount, 0);
+      const compBookEquity = comparativeEquity.reduce((s, r) => s + r.amount, 0);
+      const compIncome = compPlRows.filter((r) => r.rootType === 'INCOME').reduce((s, r) => s - r.net, 0);
+      const compExpense = compPlRows.filter((r) => r.rootType === 'EXPENSE').reduce((s, r) => s + r.net, 0);
+      const comparativeRetainedEarnings = compIncome - compExpense;
+      const comparativeTotalEquity = compBookEquity + comparativeRetainedEarnings;
+
+      comparative = {
+        comparativeAssets,
+        comparativeLiabilities,
+        comparativeEquity,
+        comparativeRetainedEarnings,
+        comparativeTotalAssets,
+        comparativeTotalLiabilities,
+        comparativeTotalEquity,
+        comparativeBalanced:
+          Math.round(comparativeTotalAssets * 100) ===
+          Math.round((comparativeTotalLiabilities + comparativeTotalEquity) * 100),
+        comparativePeriod: {
+          startDate: input.comparativeStartDate ?? null,
+          endDate: input.comparativeEndDate ?? null,
+        },
+      };
+    }
+
     return {
       assets,
       liabilities,
@@ -1594,6 +2118,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       balanced:
         Math.round(totalAssets * 100) === Math.round((totalLiabilities + totalEquity) * 100),
       asOfDate: input.asOfDate ?? null,
+      ...comparative,
     };
   }
 
@@ -1672,10 +2197,82 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       { opening: 0, inflow: 0, outflow: 0, closing: 0 },
     );
 
+    // Comparative period (optional)
+    let comparative:
+      | {
+          comparativeAccounts: typeof accountsOut;
+          comparativeTotals: typeof totals;
+          comparativePeriod: { startDate: string | null; endDate: string | null };
+        }
+      | undefined;
+    if (input.comparativeStartDate || input.comparativeEndDate) {
+      const compAccountsOut: typeof accountsOut = [];
+
+      for (const acc of cashAccounts) {
+        const openingConds: SQL[] = [eq(schema.glEntries.accountId, acc.id)];
+        if (input.comparativeStartDate)
+          openingConds.push(sql`${schema.glEntries.postingDate} < ${input.comparativeStartDate}`);
+        const [openingRow] = input.comparativeStartDate
+          ? await this.db
+              .select({
+                net: sql<string>`COALESCE(SUM(${schema.glEntries.debit} - ${schema.glEntries.credit}), 0)`,
+              })
+              .from(schema.glEntries)
+              .where(and(...openingConds))
+          : [{ net: '0' }];
+
+        const periodConds: SQL[] = [eq(schema.glEntries.accountId, acc.id)];
+        if (input.comparativeStartDate)
+          periodConds.push(gte(schema.glEntries.postingDate, input.comparativeStartDate));
+        if (input.comparativeEndDate)
+          periodConds.push(lte(schema.glEntries.postingDate, input.comparativeEndDate));
+        const [periodRow] = await this.db
+          .select({
+            inflow: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
+            outflow: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
+          })
+          .from(schema.glEntries)
+          .where(and(...periodConds));
+
+        const opening = Number(openingRow?.net ?? 0);
+        const inflow = Number(periodRow?.inflow ?? 0);
+        const outflow = Number(periodRow?.outflow ?? 0);
+        compAccountsOut.push({
+          code: acc.code,
+          name: acc.name,
+          opening,
+          inflow,
+          outflow,
+          closing: opening + inflow - outflow,
+        });
+      }
+
+      const compTotals = compAccountsOut.reduce(
+        (acc, a) => {
+          acc.opening += a.opening;
+          acc.inflow += a.inflow;
+          acc.outflow += a.outflow;
+          acc.closing += a.closing;
+          return acc;
+        },
+        { opening: 0, inflow: 0, outflow: 0, closing: 0 },
+      );
+
+      comparative = {
+        comparativeAccounts: compAccountsOut,
+        comparativeTotals: compTotals,
+        comparativePeriod: {
+          startDate: input.comparativeStartDate ?? null,
+          endDate: input.comparativeEndDate ?? null,
+        },
+      };
+    }
+
     return {
       accounts: accountsOut,
       totals,
       period: { startDate: input.startDate ?? null, endDate: input.endDate ?? null },
+      ...comparative,
     };
   }
 
@@ -2026,10 +2623,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       // Attempt GL posting (non-fatal — missing accounts should not block recording).
       try {
-        const expense = await this.resolveAccountByCode(tx, groupId, 'Marketing Expenses');
+        const expense = await this.resolveAccountByCode(tx, groupId, ACCT.AD_SPEND_DIGITAL);
         const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
-        // WHT Payable — look for an account with code 'WHT Payable'; fall back to any PAYABLE.
-        const whtPayable = await this.resolveAccountByCode(tx, groupId, 'WHT Payable');
+        // WHT Payable — look for an account with code matching ACCT.WHT_PAYABLE; fall back to any PAYABLE.
+        const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
 
         if (expense && bank && whtPayable) {
           await this.postVoucher(tx, {
@@ -2131,14 +2728,15 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     startDate: string,
     endDate: string,
   ): Promise<VatReturnSummary> {
-    // Find the VAT account by code.
-    const vatAccount = await this.resolveAccountByCode(
-      this.db as unknown as Tx,
-      groupId,
-      'VAT',
-    );
+    const txDb = this.db as unknown as Tx;
 
-    if (!vatAccount) {
+    // Resolve both VAT accounts: output (2141) and input credit (1151).
+    const [vatOutputAccount, vatInputAccount] = await Promise.all([
+      this.resolveAccountByCode(txDb, groupId, ACCT.VAT_OUTPUT),
+      this.resolveAccountByCode(txDb, groupId, ACCT.VAT_INPUT_CREDIT),
+    ]);
+
+    if (!vatOutputAccount && !vatInputAccount) {
       return {
         outputVat: 0,
         inputVat: 0,
@@ -2150,13 +2748,13 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       };
     }
 
-    const conds: SQL[] = [
-      eq(schema.glEntries.accountId, vatAccount.id),
+    const dateConds: SQL[] = [
       gte(schema.glEntries.postingDate, startDate),
       lte(schema.glEntries.postingDate, endDate),
     ];
 
-    const [summaryRows, transactionRows] = await Promise.all([
+    // Build queries for each account that exists.
+    const summaryQuery = (accountId: string) =>
       this.db
         .select({
           totalDebit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
@@ -2164,7 +2762,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           txCount: sql<number>`count(*)::int`,
         })
         .from(schema.glEntries)
-        .where(and(...conds)),
+        .where(and(eq(schema.glEntries.accountId, accountId), ...dateConds));
+
+    const txQuery = (accountId: string) =>
       this.db
         .select({
           id: schema.glEntries.id,
@@ -2176,20 +2776,33 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           remarks: schema.glEntries.remarks,
         })
         .from(schema.glEntries)
-        .where(and(...conds))
-        .orderBy(desc(schema.glEntries.postingDate)),
+        .where(and(eq(schema.glEntries.accountId, accountId), ...dateConds))
+        .orderBy(desc(schema.glEntries.postingDate));
+
+    // Run all queries in parallel.
+    const [outputSummary, inputSummary, outputTxRows, inputTxRows] = await Promise.all([
+      vatOutputAccount ? summaryQuery(vatOutputAccount.id) : Promise.resolve([]),
+      vatInputAccount ? summaryQuery(vatInputAccount.id) : Promise.resolve([]),
+      vatOutputAccount ? txQuery(vatOutputAccount.id) : Promise.resolve([]),
+      vatInputAccount ? txQuery(vatInputAccount.id) : Promise.resolve([]),
     ]);
 
-    const totalDebit = Number(summaryRows[0]?.totalDebit ?? 0);
-    const totalCredit = Number(summaryRows[0]?.totalCredit ?? 0);
-
-    // Output VAT = credits to VAT account (collected from sales).
-    // Input VAT = debits to VAT account (paid on purchases).
-    const outputVat = totalCredit;
-    const inputVat = totalDebit;
+    // Output VAT = credits to VAT Output account (collected from sales).
+    const outputVat = Number((outputSummary[0] as any)?.totalCredit ?? 0);
+    // Input VAT = debits to VAT Input Credit account (paid on purchases).
+    const inputVat = Number((inputSummary[0] as any)?.totalDebit ?? 0);
+    // Net VAT payable = output collected minus input recoverable.
     const netVatPayable = outputVat - inputVat;
 
-    const transactions: VatTransaction[] = transactionRows.map((r) => ({
+    const outputTxCount = (outputSummary[0] as any)?.txCount ?? 0;
+    const inputTxCount = (inputSummary[0] as any)?.txCount ?? 0;
+
+    // Merge both transaction lists, sorted by posting date descending.
+    const allTxRows = [...outputTxRows, ...inputTxRows].sort(
+      (a, b) => (b.postingDate > a.postingDate ? 1 : b.postingDate < a.postingDate ? -1 : 0),
+    );
+
+    const transactions: VatTransaction[] = allTxRows.map((r) => ({
       id: r.id,
       postingDate: r.postingDate,
       voucherType: r.voucherType,
@@ -2205,7 +2818,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       netVatPayable,
       periodStart: startDate,
       periodEnd: endDate,
-      transactionCount: summaryRows[0]?.txCount ?? 0,
+      transactionCount: outputTxCount + inputTxCount,
       transactions,
     };
   }

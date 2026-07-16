@@ -52,6 +52,14 @@ export const shipments = pgTable('shipments', {
   totalLandingCost: numeric('total_landing_cost', { precision: 14, scale: 2 })
     .default('0')
     .notNull(),
+  /** Total purchase price for the batch (factory invoice total). */
+  purchasePriceTotal: numeric('purchase_price_total', { precision: 20, scale: 4 }).default('0'),
+  /** Freight / shipping cost to get goods to the warehouse. */
+  inboundLogisticsCost: numeric('inbound_logistics_cost', { precision: 20, scale: 4 }).default('0'),
+  /** Offloading and handling cost at destination. */
+  offloadingCost: numeric('offloading_cost', { precision: 20, scale: 4 }).default('0'),
+  /** Customs / import duties. */
+  importDuties: numeric('import_duties', { precision: 20, scale: 4 }).default('0'),
   cancelledReason: text('cancelled_reason'),
   verifiedBy: uuid('verified_by').references(() => users.id),
   closedBy: uuid('closed_by').references(() => users.id),
