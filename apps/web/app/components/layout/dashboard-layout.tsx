@@ -834,6 +834,12 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
   ],
   STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/shipments', '/admin/transfers'],
   HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
+  AUDITOR: [
+    '/admin',
+    '/admin/finance/overview',
+    '/admin/finance/ledger',
+    '/admin/analytics/audit',
+  ],
 };
 
 const FLAT_NAV_ITEMS = navStructure.flatMap((g) => g.items);

@@ -32,6 +32,8 @@ export const ALL_BRANCHES_ROLES = new Set([
   'TPL_MANAGER',
   // Footprint-scoped, see note above
   'MEDIA_BUYER',
+  // Finance-scoped read-only auditor
+  'AUDITOR',
 ]);
 
 export function canRoleSeeAllBranchesInHeader(userRole: string): boolean {

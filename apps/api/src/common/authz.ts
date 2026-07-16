@@ -52,6 +52,7 @@ const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
   'TPL_RIDER',
   'LOGISTICS_MANAGER',
   'HR_MANAGER',
+  'AUDITOR',
 ]);
 
 export function isOrgWideDepartmentHead(user: {

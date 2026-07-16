@@ -75,6 +75,8 @@ const ROLE_LABELS: Record<string, string> = {
   TPL_MANAGER: '3PL Manager',
   TPL_RIDER: '3PL Rider',
   HR_MANAGER: 'HR Manager',
+  SUPPORT: 'Support',
+  AUDITOR: 'Auditor',
 };
 
 export interface ActivityEntryLike {

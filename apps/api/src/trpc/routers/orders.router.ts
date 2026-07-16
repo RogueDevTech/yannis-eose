@@ -285,12 +285,9 @@ function orderListBranchIdOwnerAware(
   // A Media Buyer scopes by their header branch lens (see comment above):
   // null currentBranchId = "All Branches" → no branch filter, all their orders.
   if (user.role === 'MEDIA_BUYER') return sessionBranchId;
-  // An explicit single-media-buyer filter is itself an exact scope. For an
-  // org-wide marketing viewer (HoM / admin) drilling into one buyer — e.g. the
-  // "View orders" link from team analysis — keep the result org-wide so it
-  // matches the org-wide leaderboard counts instead of hiding the buyer's
-  // cross-branch orders behind the viewer's currently-selected branch.
-  if (explicitMediaBuyerId && isOrgWideMarketingViewer(user)) return null;
+  // Always respect the viewer's branch selection. When HoM selects a specific
+  // branch, filtering by a media buyer must still scope to that branch.
+  // Only go org-wide when the viewer is on "All Branches" (sessionBranchId = null).
   return sessionBranchId;
 }
 

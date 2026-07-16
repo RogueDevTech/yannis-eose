@@ -149,6 +149,12 @@ export const approveJournalEntrySchema = z.object({
 });
 export type ApproveJournalEntryInput = z.infer<typeof approveJournalEntrySchema>;
 
+export const rejectJournalEntrySchema = z.object({
+  journalEntryId: z.string().uuid(),
+  reason: z.string().min(1).max(500),
+});
+export type RejectJournalEntryInput = z.infer<typeof rejectJournalEntrySchema>;
+
 // ─── Trial Balance + Seeding ────────────────────────────────────────────────────
 
 export const trialBalanceSchema = z.object({
@@ -168,12 +174,16 @@ export const profitAndLossSchema = z.object({
   groupId: z.string().uuid().nullish(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  comparativeStartDate: z.string().date().optional(),
+  comparativeEndDate: z.string().date().optional(),
 });
 export type ProfitAndLossInput = z.infer<typeof profitAndLossSchema>;
 
 export const balanceSheetSchema = z.object({
   groupId: z.string().uuid().nullish(),
   asOfDate: z.string().date().optional(),
+  comparativeStartDate: z.string().date().optional(),
+  comparativeEndDate: z.string().date().optional(),
 });
 export type BalanceSheetInput = z.infer<typeof balanceSheetSchema>;
 
@@ -181,6 +191,8 @@ export const cashFlowSchema = z.object({
   groupId: z.string().uuid().nullish(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  comparativeStartDate: z.string().date().optional(),
+  comparativeEndDate: z.string().date().optional(),
 });
 export type CashFlowInput = z.infer<typeof cashFlowSchema>;
 

@@ -46,6 +46,7 @@ export function hasFinanceAccess(user: { role: string; permissions?: string[] })
   // here without the permissions populated, so keep the explicit role bypass.
   if (user.role === 'SUPER_ADMIN') return true;
   if (user.role === 'SUPPORT') return true;
+  if (user.role === 'AUDITOR') return true;
   if (user.permissions?.includes('finance.costView')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
   return false;

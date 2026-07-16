@@ -183,6 +183,8 @@ export default function OrdersImportRoute() {
       products={products}
       mediaBuyers={mediaBuyers}
       csAgents={csAgents}
+      actionPath="/admin/sales/orders/import"
+      backHref="/admin/sales/orders"
     />
   );
 }

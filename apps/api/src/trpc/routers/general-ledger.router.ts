@@ -4,6 +4,7 @@ import {
   getJournalEntrySchema,
   reverseJournalEntrySchema,
   approveJournalEntrySchema,
+  rejectJournalEntrySchema,
   listAccountsSchema,
   createAccountSchema,
   listFiscalYearsSchema,
@@ -139,7 +140,27 @@ export const generalLedgerRouter = router({
   approveJournalEntry: permissionProcedure('finance.ledger.write')
     .input(approveJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
+      // Only admin-level roles or FINANCE_OFFICER can approve journal entries.
+      if (!isAdminLevel(ctx.user) && ctx.user.role !== 'FINANCE_OFFICER') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only administrators or finance officers can approve journal entries.',
+        });
+      }
       return getGeneralLedgerService().approveJournalEntry(input, { id: ctx.user.id });
+    }),
+
+  rejectJournalEntry: permissionProcedure('finance.ledger.write')
+    .input(rejectJournalEntrySchema)
+    .mutation(async ({ input, ctx }) => {
+      // Only admin-level roles or FINANCE_OFFICER can reject journal entries.
+      if (!isAdminLevel(ctx.user) && ctx.user.role !== 'FINANCE_OFFICER') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only administrators or finance officers can reject journal entries.',
+        });
+      }
+      return getGeneralLedgerService().rejectJournalEntry(input, { id: ctx.user.id });
     }),
 
   reverseJournalEntry: permissionProcedure('finance.ledger.write')
@@ -211,12 +232,8 @@ export const generalLedgerRouter = router({
   reopenFiscalYear: permissionProcedure('finance.ledger.write')
     .input(reopenFiscalYearSchema)
     .mutation(async ({ input, ctx }) => {
-      // Only SuperAdmin / SUPPORT / ADMIN can reopen a closed year.
-      if (
-        ctx.user.role !== 'SUPER_ADMIN' &&
-        ctx.user.role !== 'SUPPORT' &&
-        ctx.user.role !== 'ADMIN'
-      ) {
+      // Only admin-level roles can reopen a closed year.
+      if (!isAdminLevel(ctx.user)) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Only administrators can reopen a closed fiscal year.',

@@ -34,12 +34,18 @@ export interface OrdersImportPageProps {
   products: ProductInfo[];
   mediaBuyers: UserOption[];
   csAgents: UserOption[];
+  /** Where the import form submits to. Defaults to the global import route. */
+  actionPath?: string;
+  /** Back link destination. When omitted, no back link is shown. */
+  backHref?: string;
 }
 
 export function OrdersImportPage({
   products,
   mediaBuyers,
   csAgents,
+  actionPath = '/admin/data/import',
+  backHref,
 }: OrdersImportPageProps) {
   const branches = useBranchesCatalog();
   const [selectedBranchId, setSelectedBranchId] = useState(
@@ -306,7 +312,6 @@ export function OrdersImportPage({
             ]}
             placeholder="Select CS agent..."
             searchPlaceholder="Search CS agents..."
-            required
           />
         </div>
         {!globalReady && (
@@ -317,10 +322,10 @@ export function OrdersImportPage({
       <ImportBulkData<ParsedRow, ResolvedRow>
         title="Import orders"
         description="Upload a CRM export spreadsheet to import historical orders."
-        backHref="/admin/sales/orders"
-        backLabel="← Back to orders"
+        backHref={backHref ?? '/admin/data/import'}
+        backLabel={backHref ? '← Back to orders' : '← Back to import'}
         resourceLabel="order"
-        actionPath="/admin/sales/orders/import"
+        actionPath={actionPath}
         actionIntent="importOrder"
         maxRows={1000}
         columns={columns}
