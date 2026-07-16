@@ -280,7 +280,6 @@ export function isOrgWideMarketingViewer(user: { role: string }): boolean {
 function orderListBranchIdOwnerAware(
   user: { role: string },
   sessionBranchId: string | null,
-  explicitMediaBuyerId?: string | null,
 ): string | null {
   // A Media Buyer scopes by their header branch lens (see comment above):
   // null currentBranchId = "All Branches" → no branch filter, all their orders.
@@ -693,7 +692,6 @@ export const ordersRouter = router({
       const branchId = orderListBranchIdOwnerAware(
         ctx.user,
         ctx.currentBranchId,
-        input.mediaBuyerId,
       );
 
       // Resolve scoping (authz + effective filters) BEFORE the cache so a cache
