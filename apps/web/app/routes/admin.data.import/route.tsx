@@ -19,7 +19,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'data.import');
   const cookie = getSessionCookie(request);
 
-  const [productsRes, mbRes, csRes, branchesRes] = await Promise.all([
+  const [productsRes, mbRes, csRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 500, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' }))}`,
       { method: 'GET', cookie },
@@ -30,10 +30,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     apiRequest<unknown>(
       `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ role: 'CS_CLOSER', status: 'ACTIVE', limit: 500, sortBy: 'name', sortOrder: 'asc', includeBranchMemberships: false, companyWideUserList: true }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/branches.listAll`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -62,18 +58,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     csAgents = data?.result?.data?.users ?? [];
   }
 
-  type BranchRow = { id: string; name: string; status?: string };
-  let branches: BranchRow[] = [];
-  if (branchesRes.ok) {
-    const data = branchesRes.data as { result?: { data?: BranchRow[] } };
-    branches = (data?.result?.data ?? []).filter((b) => b.status === 'ACTIVE');
-  }
-
   return json({
     products,
     mediaBuyers: mediaBuyers.map((u) => ({ id: u.id, name: u.name, role: u.role })),
     csAgents: csAgents.map((u) => ({ id: u.id, name: u.name, role: u.role })),
-    branches: branches.map((b) => ({ id: b.id, name: b.name })),
   });
 }
 
@@ -105,9 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!branchId) {
     return json({ error: 'Branch is required', rowIndex }, { status: 400 });
   }
-  if (!assignedCsId) {
-    return json({ error: 'CS agent is required', rowIndex }, { status: 400 });
-  }
+  // assignedCsId is optional — when omitted, orders import as UNPROCESSED.
 
   const itemsRaw = form.get('items')?.toString() ?? '[]';
   let items: Array<{ productId: string; quantity: number; unitPrice: number }>;
@@ -124,10 +110,10 @@ export async function action({ request }: ActionFunctionArgs) {
     customerName,
     customerPhone,
     branchId,
-    assignedCsId,
     targetStatus,
     items,
   };
+  if (assignedCsId) body.assignedCsId = assignedCsId;
 
   const createdAtOverride = form.get('createdAtOverride')?.toString()?.trim();
   if (createdAtOverride) body.createdAtOverride = createdAtOverride;
@@ -185,13 +171,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function ImportRoute() {
-  const { products, mediaBuyers, csAgents, branches } = useLoaderData<typeof loader>();
+  const { products, mediaBuyers, csAgents } = useLoaderData<typeof loader>();
   return (
     <ImportPage
       products={products}
       mediaBuyers={mediaBuyers}
       csAgents={csAgents}
-      branches={branches}
     />
   );
 }

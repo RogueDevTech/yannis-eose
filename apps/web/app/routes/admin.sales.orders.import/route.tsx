@@ -20,7 +20,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   // Fetch products, media buyers, CS agents, and branches in parallel
-  const [productsRes, mbRes, csRes, branchesRes] = await Promise.all([
+  const [productsRes, mbRes, csRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 500, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' }))}`,
       { method: 'GET', cookie },
@@ -31,10 +31,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     apiRequest<unknown>(
       `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ role: 'CS_CLOSER', status: 'ACTIVE', limit: 500, sortBy: 'name', sortOrder: 'asc', includeBranchMemberships: false, companyWideUserList: true }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/branches.listAll`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -66,19 +62,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     csAgents = data?.result?.data?.users ?? [];
   }
 
-  // Branches
-  type BranchRow = { id: string; name: string; status?: string };
-  let branches: BranchRow[] = [];
-  if (branchesRes.ok) {
-    const data = branchesRes.data as { result?: { data?: BranchRow[] } };
-    branches = (data?.result?.data ?? []).filter((b) => b.status === 'ACTIVE');
-  }
-
   return json({
     products,
     mediaBuyers: mediaBuyers.map((u) => ({ id: u.id, name: u.name, role: u.role })),
     csAgents: csAgents.map((u) => ({ id: u.id, name: u.name, role: u.role })),
-    branches: branches.map((b) => ({ id: b.id, name: b.name })),
   });
 }
 
@@ -190,13 +177,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function OrdersImportRoute() {
-  const { products, mediaBuyers, csAgents, branches } = useLoaderData<typeof loader>();
+  const { products, mediaBuyers, csAgents } = useLoaderData<typeof loader>();
   return (
     <OrdersImportPage
       products={products}
       mediaBuyers={mediaBuyers}
       csAgents={csAgents}
-      branches={branches}
     />
   );
 }

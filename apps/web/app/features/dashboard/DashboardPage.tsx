@@ -425,6 +425,8 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
+      <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} />
+
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
         {(metrics) => {
           const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);

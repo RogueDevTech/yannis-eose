@@ -2201,6 +2201,7 @@ export const ordersRouter = router({
           csCloserId: z.string().uuid().optional(),
           csCloserIds: z.array(z.string().uuid()).min(1).max(50).optional(),
           branchId: z.string().uuid().optional(),
+          reason: z.string().max(500).optional(),
         })
         .superRefine((val, ctx) => {
           const fromMulti = val.csCloserIds && val.csCloserIds.length > 0;
@@ -2228,7 +2229,7 @@ export const ordersRouter = router({
           : input.csCloserId
             ? [input.csCloserId]
             : [];
-      const res = await getOrdersService().bulkAssignToCS(input.orderIds, csCloserIds, ctx.user);
+      const res = await getOrdersService().bulkAssignToCS(input.orderIds, csCloserIds, ctx.user, { reason: input.reason });
       await Promise.all([
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCacheMany(input.orderIds),

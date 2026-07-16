@@ -546,6 +546,7 @@ function OrdersListPageImpl({
   /** Initial assign (unprocessed) vs moving work between closers */
   const [assignModalKind, setAssignModalKind] = useState<'assign' | 'reassign'>('assign');
   const [assignAgentIds, setAssignAgentIds] = useState<Set<string>>(() => new Set());
+  const [assignReason, setAssignReason] = useState('');
   const assignFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
   const assignSurface = useFetcherActionSurface(assignFetcher);
   const isAssigning = assignFetcher.state !== 'idle';
@@ -555,6 +556,7 @@ function OrdersListPageImpl({
   useCloseOnFetcherSuccess(assignFetcher, () => {
     setAssignModalOpen(false);
     setAssignAgentIds(new Set());
+    setAssignReason('');
     setSelectedIds(new Set());
   });
 
@@ -1023,15 +1025,18 @@ function OrdersListPageImpl({
     selectedOrders.every((o) => o.status === 'UNPROCESSED');
 
   // Eligibility: Hot-swap style reassignment — orders already with a closer (same bulk API + random split).
+  // Includes CONFIRMED for late-stage transfer (requires orders.cs.transfer_any_status + reason).
+  const REASSIGN_ELIGIBLE = new Set(['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED']);
   const canBulkReassignToCS =
     selectedOrders.length > 0 &&
     (csClosersForFilter?.length ?? 0) > 0 &&
-    selectedOrders.every((o) => o.status === 'CS_ASSIGNED' || o.status === 'CS_ENGAGED');
+    selectedOrders.every((o) => REASSIGN_ELIGIBLE.has(o.status));
+  const hasLateStageInSelection = selectedOrders.some((o) => o.status === 'CONFIRMED');
 
   /** Unassigned + already-assigned mixed selection — cannot use Assign and Reassign in one batch. */
   const bulkCloserSelectionMixed =
     selectedOrders.some((o) => o.status === 'UNPROCESSED') &&
-    selectedOrders.some((o) => o.status === 'CS_ASSIGNED' || o.status === 'CS_ENGAGED');
+    selectedOrders.some((o) => REASSIGN_ELIGIBLE.has(o.status));
 
   // Eligibility: every selected order in CONFIRMED AND we have at least one location.
   const canBulkAllocateTo3PL =
@@ -1089,16 +1094,17 @@ function OrdersListPageImpl({
     setBulkResult(null);
 
     const isCartAssign = selectedOrders.every((o) => o.status === 'CART');
-    const doSubmit = (branchId: string) =>
-      assignFetcher.submit(
-        {
-          intent: isCartAssign ? 'bulkAssignCarts' : 'bulkAssign',
-          orderIds: JSON.stringify([...selectedIds]),
-          csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
-          branchId,
-        },
-        { method: 'post' },
-      );
+    const payload: Record<string, string> = {
+      intent: isCartAssign ? 'bulkAssignCarts' : 'bulkAssign',
+      orderIds: JSON.stringify([...selectedIds]),
+      csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
+    };
+    if (assignReason.trim()) payload.reason = assignReason.trim();
+
+    const doSubmit = (branchId: string) => {
+      payload.branchId = branchId;
+      assignFetcher.submit(payload, { method: 'post' });
+    };
 
     if (derivedBranchFromSelection) {
       doSubmit(derivedBranchFromSelection);
@@ -3039,6 +3045,7 @@ function OrdersListPageImpl({
           onClose={() => {
             setAssignModalOpen(false);
             setAssignAgentIds(new Set());
+            setAssignReason('');
           }}
           selectedCount={selectedIds.size}
           options={assignCloserOptions}
@@ -3056,6 +3063,9 @@ function OrdersListPageImpl({
           errorMessage={assignSurface.errorMatchingIntent('bulkAssign') || assignSurface.errorMatchingIntent('bulkAssignCarts')}
           mode={assignModalKind}
           emptyMessage="No closers available in your scope."
+          requiresReason={assignModalKind === 'reassign' && hasLateStageInSelection}
+          reason={assignReason}
+          onReasonChange={setAssignReason}
         />
       )}
 
