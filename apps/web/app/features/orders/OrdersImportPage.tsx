@@ -171,6 +171,67 @@ export function OrdersImportPage({
         ),
       },
       {
+        header: 'Media Buyer',
+        headerClassName: 'min-w-[10rem]',
+        errorTokens: [],
+        errorLabel: 'Media Buyer',
+        hideErrorInfo: true,
+        getDisplayValue: (row) => {
+          if (!row.rowMbId) {
+            // Show what the batch default resolves to
+            if (selectedMbId === '__system__') return 'System';
+            if (selectedMbId) return mediaBuyers.find((u) => u.id === selectedMbId)?.name ?? '(default)';
+            return '(default)';
+          }
+          if (row.rowMbId === '__system__') return 'System';
+          return mediaBuyers.find((u) => u.id === row.rowMbId)?.name ?? row.rowMbId;
+        },
+        renderCell: ({ row, disabled, patch }) => (
+          <select
+            value={row.rowMbId}
+            onChange={(e) => patch({ rowMbId: e.target.value } as Partial<ResolvedRow>)}
+            disabled={disabled}
+            className={importCellInputClass(false)}
+          >
+            <option value="">(default)</option>
+            <option value="__system__">System</option>
+            {mediaBuyers.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+        ),
+      },
+      {
+        header: 'CS Agent',
+        headerClassName: 'min-w-[10rem]',
+        errorTokens: [],
+        errorLabel: 'CS Agent',
+        hideErrorInfo: true,
+        getDisplayValue: (row) => {
+          if (!row.rowCsId) {
+            if (selectedCsId === '__system__') return 'System';
+            if (selectedCsId) return csAgents.find((u) => u.id === selectedCsId)?.name ?? '(default)';
+            return '(default)';
+          }
+          if (row.rowCsId === '__system__') return 'System';
+          return csAgents.find((u) => u.id === row.rowCsId)?.name ?? row.rowCsId;
+        },
+        renderCell: ({ row, disabled, patch }) => (
+          <select
+            value={row.rowCsId}
+            onChange={(e) => patch({ rowCsId: e.target.value } as Partial<ResolvedRow>)}
+            disabled={disabled}
+            className={importCellInputClass(false)}
+          >
+            <option value="">(default)</option>
+            <option value="__system__">System</option>
+            {csAgents.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+        ),
+      },
+      {
         header: 'Address',
         headerClassName: 'min-w-[12rem]',
         errorTokens: [],
@@ -256,7 +317,7 @@ export function OrdersImportPage({
         ),
       },
     ],
-    [products],
+    [products, mediaBuyers, csAgents],
   );
 
   return (
@@ -354,6 +415,8 @@ export function OrdersImportPage({
           comment1Input: pickHeaderValue(row, 'comment_1'),
           comment2Input: pickHeaderValue(row, 'comment_2'),
           comment3Input: pickHeaderValue(row, 'comment_3'),
+          rowMbId: '',
+          rowCsId: '',
         })}
         resolveRow={(parsed) => resolveRow(parsed)}
         makeEmptyRow={(sheetRowIndex) => makeEmptyParsedRow(sheetRowIndex)}
@@ -362,8 +425,11 @@ export function OrdersImportPage({
           fd.set('customerName', row.name);
           fd.set('customerPhone', row.phoneInput);
           fd.set('branchId', selectedBranchId);
-          if (selectedCsId && selectedCsId !== '__system__') fd.set('assignedCsId', selectedCsId);
-          if (selectedMbId && selectedMbId !== '__system__') fd.set('mediaBuyerId', selectedMbId);
+          // Per-row overrides take priority over global defaults
+          const effectiveCsId = row.rowCsId || selectedCsId;
+          const effectiveMbId = row.rowMbId || selectedMbId;
+          if (effectiveCsId && effectiveCsId !== '__system__') fd.set('assignedCsId', effectiveCsId);
+          if (effectiveMbId && effectiveMbId !== '__system__') fd.set('mediaBuyerId', effectiveMbId);
           if (row.targetStatus) fd.set('targetStatus', row.targetStatus);
           if (row.createdAtIso) fd.set('createdAtOverride', row.createdAtIso);
           if (row.addressInput) {

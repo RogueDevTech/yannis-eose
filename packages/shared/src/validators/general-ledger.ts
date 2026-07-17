@@ -113,6 +113,17 @@ export const createAccountSchema = z.object({
 });
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 
+export const updateAccountSchema = z.object({
+  accountId: z.string().uuid(),
+  name: z.string().trim().min(1).max(200),
+});
+export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
+
+export const deactivateAccountSchema = z.object({
+  accountId: z.string().uuid(),
+});
+export type DeactivateAccountInput = z.infer<typeof deactivateAccountSchema>;
+
 // ─── Fiscal Years ──────────────────────────────────────────────────────────────
 
 export const listFiscalYearsSchema = z.object({

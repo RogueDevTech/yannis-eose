@@ -1546,7 +1546,7 @@ export class InventoryService {
     });
   }
 
-  async listLevels(input: ListInventoryInput, groupId?: string | null) {
+  async listLevels(input: ListInventoryInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const conditions = [];
 
     if (input.productId) {
@@ -1572,6 +1572,20 @@ export class InventoryService {
           WHERE lp.group_id = ${groupId}
         )`,
       );
+    }
+    // Branch-scope isolation via effectiveBranchIds
+    if (effectiveBranchIds) {
+      if (effectiveBranchIds.length === 0) {
+        conditions.push(sql`false`);
+      } else {
+        const inClause = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
+        conditions.push(
+          sql`${schema.inventoryLevels.locationId} IN (
+            SELECT ll.id FROM logistics_locations ll
+            WHERE ll.branch_id IS NULL OR ll.branch_id IN (${inClause})
+          )`,
+        );
+      }
     }
     if (input.shipmentId) {
       // Fully-qualify the outer-table refs with `inventory_levels.…` — both
@@ -3005,7 +3019,7 @@ export class InventoryService {
    * Note: no early-return when the global threshold is 0/disabled — a location
    * with an explicit override should still surface (COALESCE handles it).
    */
-  async getLowStockAlerts(groupId?: string | null) {
+  async getLowStockAlerts(groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const globalThreshold = await this.getGlobalLowStockThreshold();
     const hasLocCol = await this.locationThresholdColExists();
 
@@ -3018,6 +3032,18 @@ export class InventoryService {
     const groupFilter = groupId && /^[0-9a-f-]{36}$/i.test(groupId)
       ? `AND ll.provider_id IN (SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = '${groupId}')`
       : '';
+    // Branch-scope isolation via effectiveBranchIds
+    let branchFilter = '';
+    if (effectiveBranchIds) {
+      if (effectiveBranchIds.length === 0) {
+        branchFilter = 'AND false';
+      } else {
+        const safeIds = effectiveBranchIds.filter(id => /^[0-9a-f-]{36}$/i.test(id));
+        if (safeIds.length > 0) {
+          branchFilter = `AND (ll.branch_id IS NULL OR ll.branch_id IN (${safeIds.map(id => `'${id}'`).join(', ')}))`;
+        }
+      }
+    }
 
     const rows = await this.db.execute<{
       level_id: string | null;
@@ -3043,6 +3069,7 @@ export class InventoryService {
       LEFT JOIN products p ON p.id = il.product_id
       WHERE ll.status = 'ACTIVE'
         ${groupFilter}
+        ${branchFilter}
         AND (
           (il.id IS NOT NULL AND (il.stock_count - il.reserved_count) < COALESCE(${thresholdSql}, ${globalThreshold}))
           OR
@@ -3164,10 +3191,18 @@ export class InventoryService {
   /**
    * List orders in RETURNED status at a specific location (or all).
    */
-  async listReturnedOrders(locationId?: string) {
+  async listReturnedOrders(locationId?: string, effectiveBranchIds?: string[] | null) {
     const conditions = [eq(schema.orders.status, 'RETURNED')];
     if (locationId) {
       conditions.push(eq(schema.orders.logisticsLocationId, locationId));
+    }
+    // Branch-scope isolation via effectiveBranchIds
+    if (effectiveBranchIds) {
+      if (effectiveBranchIds.length === 0) {
+        conditions.push(sql`false`);
+      } else {
+        conditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+      }
     }
 
     return this.db
@@ -3343,10 +3378,24 @@ export class InventoryService {
   /**
    * List reconciliation records for a location.
    */
-  async listReconciliations(locationId?: string) {
+  async listReconciliations(locationId?: string, effectiveBranchIds?: string[] | null) {
     const conditions = [];
     if (locationId) {
       conditions.push(eq(schema.stockReconciliations.locationId, locationId));
+    }
+    // Branch-scope isolation via effectiveBranchIds
+    if (effectiveBranchIds) {
+      if (effectiveBranchIds.length === 0) {
+        conditions.push(sql`false`);
+      } else {
+        const inClause = sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `);
+        conditions.push(
+          sql`${schema.stockReconciliations.locationId} IN (
+            SELECT ll.id FROM logistics_locations ll
+            WHERE ll.branch_id IS NULL OR ll.branch_id IN (${inClause})
+          )`,
+        );
+      }
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

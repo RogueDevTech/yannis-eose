@@ -160,8 +160,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ['DELIVERED', 'REMITTED']
       : null;
 
-  // Always filter to offline orders — this is the defining trait of this route.
-  const orderSource = 'offline' as const;
+  // Show both manually created offline orders AND spreadsheet imports.
+  const orderSource = 'offline_and_import' as const;
 
   const listInput: Record<string, unknown> = {
     page,
@@ -176,7 +176,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(productIdParam && { productId: productIdParam }),
     ...(frozenParam === 'frozen' || frozenParam === 'active' ? { frozenFilter: frozenParam } : {}),
     ...(categoryParam === 'website_order' || categoryParam === 'referrals' ? { offlineOrderCategory: categoryParam } : {}),
-    orderSource,
+    // When "Imported" category is selected, narrow to import-only orders.
+    // Otherwise show both offline + import (the page's default).
+    orderSource: categoryParam === 'imported' ? 'import' : orderSource,
     ...(teamIdParam && { teamId: teamIdParam }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
@@ -266,7 +268,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isCSCloser,
       showCSCloserColumn,
       canCreateOffline,
-      orderSource: 'offline',
+      orderSource: 'offline_and_import',
       ...(teamIdParam && { teamId: teamIdParam }),
     }),
   );

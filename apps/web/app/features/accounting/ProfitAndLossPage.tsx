@@ -1,7 +1,9 @@
+import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
+import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConsolidatedToggle } from './ConsolidatedToggle';
 
@@ -27,7 +29,16 @@ export function ProfitAndLossPage({
   totalExpense,
   netProfit,
   consolidated,
-}: ProfitAndLossPageProps & { consolidated?: boolean }) {
+  filters,
+}: ProfitAndLossPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const setFilter = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next);
+  };
   const columns: CompactTableColumn<PLRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
     { key: 'amount', header: 'Amount', align: 'right', render: (r) => <NairaPrice amount={r.amount} /> },
@@ -42,6 +53,23 @@ export function ProfitAndLossPage({
         description="Income less expenses over the period, straight from the ledger."
         actions={<ConsolidatedToggle active={consolidated} />}
       />
+
+      <div className="flex items-center gap-3">
+        <label htmlFor="pl-from" className="text-sm text-app-fg-muted">From</label>
+        <DateInput
+          id="pl-from"
+          value={filters?.startDate ?? ''}
+          onChange={(e) => setFilter('startDate', e.target.value)}
+          wrapperClassName="w-44"
+        />
+        <label htmlFor="pl-to" className="text-sm text-app-fg-muted">To</label>
+        <DateInput
+          id="pl-to"
+          value={filters?.endDate ?? ''}
+          onChange={(e) => setFilter('endDate', e.target.value)}
+          wrapperClassName="w-44"
+        />
+      </div>
 
       <OverviewStatStrip
         items={[

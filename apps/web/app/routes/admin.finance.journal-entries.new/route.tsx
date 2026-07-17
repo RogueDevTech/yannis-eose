@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, requireAccountingEnabled } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requireAccountingEnabled, requirePermissionOrRoles } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { JournalEntryCreatePage } from '~/features/accounting/JournalEntryCreatePage';

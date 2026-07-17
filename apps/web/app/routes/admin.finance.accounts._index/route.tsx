@@ -4,8 +4,8 @@ import { useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
-  requirePermissionOrRoles,
   requireAccountingEnabled,
+  requirePermissionOrRoles,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -30,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shell = { canWrite: true };
 
   const pageData = (async () => {
-    const input = encodeURIComponent(JSON.stringify({ includeInactive: false }));
+    const input = encodeURIComponent(JSON.stringify({ includeInactive: true }));
     const res = await apiRequest<unknown>(
       `/trpc/generalLedger.listAccounts?input=${input}`,
       { method: 'GET', cookie },
@@ -64,6 +64,37 @@ export async function action({ request }: ActionFunctionArgs) {
       parentAccountId: parentRaw || null,
     };
     const res = await apiRequest<unknown>('/trpc/generalLedger.createAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateAccount') {
+    const body = {
+      accountId: formData.get('accountId')?.toString() ?? '',
+      name: formData.get('name')?.toString()?.trim() ?? '',
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.updateAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'deactivateAccount') {
+    const body = {
+      accountId: formData.get('accountId')?.toString() ?? '',
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.deactivateAccount', {
       method: 'POST',
       cookie,
       body,

@@ -1071,7 +1071,7 @@ export const ordersRouter = router({
            *  graduated deliveries remain visible for remittance. */
           excludeGraduated: z.boolean().optional(),
           /** Filter counts to a specific order source. */
-          orderSource: z.enum(['offline', 'edge-form']).optional(),
+          orderSource: z.enum(['offline', 'edge-form', 'offline_and_import']).optional(),
           /** When set, scope to orders assigned to members of this team. */
           teamId: z.string().uuid().optional(),
         })
@@ -1108,7 +1108,7 @@ export const ordersRouter = router({
       // CS funnel (servicing scope) also excludes cart-graduated orders —
       // they have their own Cart Orders strip. Marketing keeps them (MB credit).
       const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
-      const onlyOffline = input?.orderSource === 'offline' ? true : undefined;
+      const onlyOffline = input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true : undefined;
       const excludeOffline = input?.orderSource === 'edge-form' ? true : undefined;
       // Resolve team filter → member IDs
       const teamMemberIds = input?.teamId
@@ -1427,7 +1427,7 @@ export const ordersRouter = router({
         // Kept for backward compat with cached clients — always ignored now.
         includeCartAbandonment: z.boolean().optional().default(false),
         /** When set, scope status counts to this order source only. */
-        orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up']).optional(),
+        orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import']).optional(),
         /** When set, scope to orders assigned to members of this team. */
         teamId: z.string().uuid().optional(),
       }),
@@ -1763,7 +1763,7 @@ export const ordersRouter = router({
             ctx.effectiveBranchIds,
           ),
           getInventoryService().listTransfers(undefined, ctx.user),
-          getInventoryService().listReturnedOrders(locationFilter),
+          getInventoryService().listReturnedOrders(locationFilter, ctx.effectiveBranchIds),
         ]);
 
       const transferList = (transfers as unknown as { transfers: Array<{ transferStatus: string }> }).transfers ?? [];

@@ -335,7 +335,7 @@ export const listOrdersSchema = z
     status: orderStatusSchema.optional(),
     statuses: z.array(orderStatusSchema).min(1).optional(),
     assignedCsId: z.string().uuid().optional(),
-    mediaBuyerId: z.string().uuid().optional(),
+    mediaBuyerId: z.union([z.string().uuid(), z.literal('__system__')]).optional(),
     /**
      * Server-injected supervisor scope (OR semantics). When set, the list returns rows
      * where `assignedCsId IN csUserIds` OR `mediaBuyerId IN mediaBuyerIds`. Each set
@@ -362,8 +362,8 @@ export const listOrdersSchema = z
     fromCart: z.boolean().optional(),
     /** Filter to orders where customer_name starts with "test" (whole word). Admin only. */
     testOrders: z.boolean().optional(),
-    /** Filter by order source: 'offline' (CS manual entry), 'edge-form' (sales form), or 'delivered_follow_up'. */
-    orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up']).optional(),
+    /** Filter by order source: 'offline' (CS manual entry), 'edge-form' (sales form), 'delivered_follow_up', or 'offline_and_import' (both offline + spreadsheet imports). */
+    orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import', 'import']).optional(),
     /** Filter offline orders by category: 'website_order' or 'referrals'. */
     offlineOrderCategory: z.enum(['website_order', 'referrals']).optional(),
     /** Filter to orders assigned to members of this team. Resolved to user IDs at the router. */

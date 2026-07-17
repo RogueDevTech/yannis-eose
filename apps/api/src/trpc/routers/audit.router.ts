@@ -2,12 +2,14 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure } from '../trpc';
 import type { AuditService } from '../../audit/audit.service';
-import { canAccessGlobalAuditLog, shouldScopeGlobalAuditToBranch } from '../../common/authz';
+import type { ImportHistoryService } from '../../audit/import-history.service';
+import { canAccessGlobalAuditLog, isAdminLevel, shouldScopeGlobalAuditToBranch } from '../../common/authz';
 import { CacheService } from '../../common/cache/cache.service';
 
 // Factory pattern — same as all other routers
 let auditServiceInstance: AuditService | null = null;
 let auditCacheService: CacheService | null = null;
+let importHistoryServiceInstance: ImportHistoryService | null = null;
 
 export function setAuditService(service: AuditService) {
   auditServiceInstance = service;
@@ -17,11 +19,22 @@ export function setAuditCacheService(service: CacheService) {
   auditCacheService = service;
 }
 
+export function setImportHistoryService(service: ImportHistoryService) {
+  importHistoryServiceInstance = service;
+}
+
 function getAuditService(): AuditService {
   if (!auditServiceInstance) {
     throw new Error('AuditService not initialized. Call setAuditService() first.');
   }
   return auditServiceInstance;
+}
+
+function getImportHistoryService(): ImportHistoryService {
+  if (!importHistoryServiceInstance) {
+    throw new Error('ImportHistoryService not initialized. Call setImportHistoryService() first.');
+  }
+  return importHistoryServiceInstance;
 }
 
 /**
@@ -206,5 +219,60 @@ export const auditRouter = router({
         permissions: u.permissions,
         currentBranchId: u.currentBranchId,
       });
+    }),
+
+  // ── Import History ──────────────────────────────────────────────────────
+
+  /**
+   * Record a completed bulk import. Called by any import endpoint after
+   * processing the uploaded file. Any authenticated user who can import
+   * may call this (the import endpoints themselves are already gated).
+   */
+  recordImport: authedProcedure
+    .input(
+      z.object({
+        resourceType: z.enum([
+          'orders',
+          'users',
+          'products',
+          'transfers',
+          'logistics_locations',
+          'logistics_providers',
+        ]),
+        fileName: z.string().nullish(),
+        totalRows: z.number().int().min(0),
+        successCount: z.number().int().min(0),
+        failedCount: z.number().int().min(0),
+        branchId: z.string().uuid().nullish(),
+        metadata: z.record(z.unknown()).nullish(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return getImportHistoryService().recordImport({
+        ...input,
+        createdBy: ctx.user.id,
+      });
+    }),
+
+  /**
+   * Paginated import history list — admin-level only.
+   */
+  listImports: authedProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(20),
+        resourceType: z.string().optional(),
+        createdBy: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      if (!isAdminLevel(ctx.user)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only admins can view import history.',
+        });
+      }
+      return getImportHistoryService().listImports(input);
     }),
 });

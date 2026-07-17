@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -10,6 +10,8 @@ import { Button } from '~/components/ui/button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { useFetcherToast } from '~/components/ui/toast';
 
 export interface JournalEntryRow {
@@ -25,9 +27,23 @@ export interface JournalEntriesPageProps {
   records: JournalEntryRow[];
   pagination: { total: number; page: number; pageSize: number; totalPages: number };
   canWrite: boolean;
+  filters?: { status: string; search: string; startDate: string; endDate: string };
 }
 
-export function JournalEntriesPage({ records, pagination, canWrite }: JournalEntriesPageProps) {
+export function JournalEntriesPage({ records, pagination, canWrite, filters }: JournalEntriesPageProps) {
+  const [, setSearchParams] = useSearchParams();
+  const setFilter = (key: string, value: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (!value) next.delete(key);
+        else next.set(key, value);
+        next.delete('page');
+        return next;
+      },
+      { preventScrollReset: true },
+    );
+  };
   const [reverseTarget, setReverseTarget] = useState<JournalEntryRow | null>(null);
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(fetcher.data);
@@ -95,6 +111,44 @@ export function JournalEntriesPage({ records, pagination, canWrite }: JournalEnt
           { label: 'Posted value', value: <NairaPrice amount={postedTotal} /> },
         ]}
       />
+
+      {/* Filters */}
+      {filters && (
+        <div className="flex flex-wrap items-end gap-2">
+          <TextInput
+            type="date"
+            label="From"
+            value={filters.startDate}
+            onChange={(e) => setFilter('startDate', e.target.value)}
+            className="w-36"
+          />
+          <TextInput
+            type="date"
+            label="To"
+            value={filters.endDate}
+            onChange={(e) => setFilter('endDate', e.target.value)}
+            className="w-36"
+          />
+          <FormSelect
+            label="Status"
+            value={filters.status}
+            onChange={(e) => setFilter('status', e.target.value)}
+            options={[
+              { value: '', label: 'All' },
+              { value: 'POSTED', label: 'Posted' },
+              { value: 'CANCELLED', label: 'Cancelled' },
+              { value: 'DRAFT', label: 'Draft' },
+            ]}
+            className="w-32"
+          />
+          <SearchInput
+            value={filters.search}
+            onChange={(v) => setFilter('search', v)}
+            placeholder="Search description"
+            className="max-w-xs"
+          />
+        </div>
+      )}
 
       {records.length === 0 ? (
         <EmptyState

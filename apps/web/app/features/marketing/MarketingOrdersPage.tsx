@@ -157,6 +157,8 @@ interface MarketingOrdersPageProps {
   enableFromCartStatusOption?: boolean;
   /** Show "Test orders" filter option. Admin only. */
   enableTestOrdersOption?: boolean;
+  /** When true, shows the "System (unattributed)" option in the MB filter dropdown. Admin only. */
+  isAdminUser?: boolean;
   /**
    * Cart-abandonment mode — true when `?fromCart=1` is active and `orders`
    * has been populated with abandoned CARTS (synthetic status `'CART'`).
@@ -192,6 +194,7 @@ export function MarketingOrdersPage({
   activeMediaBuyerFilter,
   enableFromCartStatusOption = false,
   enableTestOrdersOption = false,
+  isAdminUser = false,
   isCartAbandonmentView = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
@@ -692,6 +695,7 @@ export function MarketingOrdersPage({
                         }}
                         options={[
                           { value: 'ALL', label: 'All media buyers' },
+                          ...(isAdminUser ? [{ value: '__system__', label: 'System (unattributed)' }] : []),
                           ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
                         ]}
                         triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
@@ -842,6 +846,7 @@ export function MarketingOrdersPage({
               myTeamTab === 'personal' && personalSecondary ? personalSecondary : ins;
             const mediaBuyerFilterOptions = [
               { value: 'ALL', label: 'All media buyers' },
+              ...(isAdminUser ? [{ value: '__system__', label: 'System (unattributed)' }] : []),
               ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
             ];
             // KPI tiles use `metrics` from `getPerformanceMetrics` so Total /
