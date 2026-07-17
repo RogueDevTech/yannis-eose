@@ -145,7 +145,7 @@ export class LogisticsService {
     return { ...rows[0], locationCount: locationRows[0]?.count ?? 0 };
   }
 
-  async listProviders(input: ListProvidersInput, groupId?: string | null) {
+  async listProviders(input: ListProvidersInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const conditions = [];
     if (input.status) {
       conditions.push(eq(schema.logisticsProviders.status, input.status));
@@ -158,6 +158,17 @@ export class LogisticsService {
     }
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
+    }
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(
+        sql`${schema.logisticsProviders.id} IN (
+          SELECT ll.provider_id FROM logistics_locations ll
+          WHERE ll.branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
+             OR ll.branch_id IS NULL
+        )`,
+      );
+    } else if (effectiveBranchIds && effectiveBranchIds.length === 0) {
+      conditions.push(sql`false`);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -315,7 +326,7 @@ export class LogisticsService {
     });
   }
 
-  async listLocations(input: ListLocationsInput, groupId?: string | null) {
+  async listLocations(input: ListLocationsInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const conditions = [];
     if (input.providerId) {
       conditions.push(eq(schema.logisticsLocations.providerId, input.providerId));
@@ -328,6 +339,13 @@ export class LogisticsService {
     }
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
+    }
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(
+        or(inArray(schema.logisticsLocations.branchId, effectiveBranchIds), isNull(schema.logisticsLocations.branchId))!,
+      );
+    } else if (effectiveBranchIds && effectiveBranchIds.length === 0) {
+      conditions.push(sql`false`);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2144,6 +2162,7 @@ export class LogisticsService {
     input: ListDeliveryRemittancesInput,
     actor: SessionUser,
     groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
@@ -2175,6 +2194,11 @@ export class LogisticsService {
           WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
         )`,
       );
+    }
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+    } else if (effectiveBranchIds && effectiveBranchIds.length === 0) {
+      conditions.push(sql`false`);
     }
 
     // Text search — customer name, order number, or location name

@@ -1312,8 +1312,8 @@ function OrdersListPageImpl({
         key: 'category',
         header: 'Category',
         render: (order) => {
-          const cat = order.offlineOrderCategory;
-          const label = cat === 'website_order' ? 'Website order' : cat === 'referrals' ? 'Referrals' : '—';
+          const cat = order.offlineOrderCategory ?? ((order as { orderSource?: string }).orderSource === 'import' ? 'imported' : undefined);
+          const label = cat === 'website_order' ? 'Website order' : cat === 'referrals' ? 'Referrals' : cat === 'imported' ? 'Imported' : '—';
           return <span className={`text-sm ${cat ? 'text-app-fg' : 'text-app-fg-muted'}`}>{label}</span>;
         },
       });
@@ -1862,6 +1862,7 @@ function OrdersListPageImpl({
                           { value: 'ALL', label: 'All categories' },
                           { value: 'website_order', label: 'Website order' },
                           { value: 'referrals', label: 'Referrals' },
+                          { value: 'imported', label: 'Imported' },
                         ]}
                         controlSize="sm"
                         openAs="modal"

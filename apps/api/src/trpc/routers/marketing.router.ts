@@ -1038,7 +1038,7 @@ export const marketingRouter = router({
     .input(
       z.object({
         // Shared scope — applies to status counts, metrics, daily counts.
-        mediaBuyerId: z.string().uuid().optional(),
+        mediaBuyerId: z.union([z.string().uuid(), z.literal('__system__')]).optional(),
         // Optional status filter for the trend chart only (mirrors timeSeriesByCreated).
         status: z.string().optional(),
         // Date window — accept ISO datetime in addition to plain dates so this matches
@@ -1130,11 +1130,11 @@ export const marketingRouter = router({
           // inflate Unassigned/Assigned counts beyond Total Orders.
           false,
           // Exclude offline orders — marketing metrics only count edge-form orders.
-          // Offline orders affect Sales metrics only (CEO 2026-06-05).
-          true,
+          // Exception: System (unattributed) view includes imports (offline).
+          mediaBuyerId === '__system__' ? false : true,
           // Exclude graduated follow-up + cart orders — they have their own
           // funnels and must not inflate the Marketing Order Funnel.
-          true,
+          mediaBuyerId === '__system__' ? false : true,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,

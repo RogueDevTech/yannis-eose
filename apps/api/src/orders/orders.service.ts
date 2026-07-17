@@ -123,7 +123,13 @@ export function appendOrdersAggregateScopeConditions(
     }
     return;
   }
-  if (opts.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, opts.mediaBuyerId));
+  if (opts.mediaBuyerId) {
+    if (opts.mediaBuyerId === '__system__') {
+      conditions.push(isNull(schema.orders.mediaBuyerId));
+    } else {
+      conditions.push(eq(schema.orders.mediaBuyerId, opts.mediaBuyerId));
+    }
+  }
   if (opts.assignedCsId) conditions.push(eq(schema.orders.assignedCsId, opts.assignedCsId));
 }
 
@@ -4332,7 +4338,11 @@ export class OrdersService {
         conditions.push(eq(schema.orders.assignedCsId, input.assignedCsId));
       }
       if (input.mediaBuyerId) {
-        conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+        if (input.mediaBuyerId === '__system__') {
+          conditions.push(isNull(schema.orders.mediaBuyerId));
+        } else {
+          conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+        }
       }
     }
     // Team filter: only orders assigned to members of a specific team.
@@ -4381,6 +4391,9 @@ export class OrdersService {
         // edge-form includes legacy orders with NULL orderSource (pre-migration)
         // plus cart-graduated orders ('online') so recovered carts appear on Marketing Orders.
         conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
+      } else if (input.orderSource === 'offline_and_import') {
+        // Offline Orders page: both manually created offline orders AND spreadsheet imports.
+        conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
       } else {
         conditions.push(eq(schema.orders.orderSource, input.orderSource));
       }
@@ -4734,7 +4747,13 @@ export class OrdersService {
       }
     } else {
       if (input.assignedCsId) base.push(eq(schema.orders.assignedCsId, input.assignedCsId));
-      if (input.mediaBuyerId) base.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+      if (input.mediaBuyerId) {
+        if (input.mediaBuyerId === '__system__') {
+          base.push(isNull(schema.orders.mediaBuyerId));
+        } else {
+          base.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+        }
+      }
     }
     if (input.status) base.push(eq(schema.orders.status, input.status));
 
@@ -6546,8 +6565,12 @@ export class OrdersService {
       );
     }
     if (onlyOffline) {
-      const src = typeof onlyOffline === 'string' ? onlyOffline : 'offline';
-      conditions.push(eq(schema.orders.orderSource, src));
+      if (typeof onlyOffline === 'string') {
+        conditions.push(eq(schema.orders.orderSource, onlyOffline));
+      } else {
+        // true = include both offline and imported orders
+        conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
+      }
     } else if (excludeOffline) {
       // Match the edge-form filter in orders.list — only count orders from the
       // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus

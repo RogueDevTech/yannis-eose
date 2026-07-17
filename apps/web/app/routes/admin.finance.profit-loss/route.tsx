@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, requireAccountingEnabled, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requireAccountingEnabled, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { ProfitAndLossPage, type ProfitAndLossPageProps } from '~/features/accounting/ProfitAndLossPage';
@@ -42,7 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const data = res.ok
         ? ((res.data as { result?: { data?: ProfitAndLossPageProps } })?.result?.data ?? EMPTY)
         : EMPTY;
-      return { ...data, consolidated: true };
+      return { ...data, consolidated: true, filters: { startDate, endDate } };
     }
 
     const input = encodeURIComponent(JSON.stringify({ startDate, endDate }));
@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data = res.ok
       ? ((res.data as { result?: { data?: ProfitAndLossPageProps } })?.result?.data ?? EMPTY)
       : EMPTY;
-    return { ...data, consolidated: false };
+    return { ...data, consolidated: false, filters: { startDate, endDate } };
   })();
 
   return defer({ pageData });
@@ -63,7 +63,7 @@ export default function ProfitLossRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<ProfitAndLossPage {...EMPTY} />}>
-      {(data) => <ProfitAndLossPage {...data} consolidated={data.consolidated} />}
+      {(data) => <ProfitAndLossPage {...data} consolidated={data.consolidated} filters={data.filters} />}
     </CachedAwait>
   );
 }

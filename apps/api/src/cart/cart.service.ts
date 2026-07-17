@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, gte, lte, desc, count, inArray, ilike, sql, type SQL } from 'drizzle-orm';
+import { eq, and, lt, gte, lte, desc, count, inArray, ilike, isNull, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
@@ -984,7 +984,11 @@ export class CartService {
       eq(schema.cartAbandonments.status, 'ABANDONED'),
     ];
     if (opts.mediaBuyerId) {
-      conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+      if (opts.mediaBuyerId === '__system__') {
+        conditions.push(isNull(schema.campaigns.mediaBuyerId));
+      } else {
+        conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+      }
     }
     if (opts.branchId) {
       conditions.push(eq(schema.campaigns.branchId, opts.branchId));
@@ -1062,7 +1066,11 @@ export class CartService {
       eq(schema.cartAbandonments.status, 'ABANDONED'),
     ];
     if (opts.mediaBuyerId) {
-      conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+      if (opts.mediaBuyerId === '__system__') {
+        conditions.push(isNull(schema.campaigns.mediaBuyerId));
+      } else {
+        conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+      }
     }
     if (opts.branchId) {
       conditions.push(eq(schema.campaigns.branchId, opts.branchId));

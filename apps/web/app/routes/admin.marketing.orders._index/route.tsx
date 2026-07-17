@@ -144,7 +144,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Marketing only shows edge-form orders — offline orders affect Sales only.
     // When an explicit orderSource filter is active (rare), honour it; otherwise
     // default to edge-form so offline orders never appear on this page.
-    orderSource: orderSource ?? 'edge-form',
+    // Exception: System (unattributed) orders include imports (offline), so skip
+    // the edge-form default when viewing unattributed orders.
+    orderSource: orderSource ?? (mediaBuyerId === '__system__' ? undefined : 'edge-form'),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
@@ -212,6 +214,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.isMarketingTeamSupervisorOnActiveBranch === true,
     enableFromCartStatusOption: true,
     isCartAbandonmentView: fromCart,
+    isAdminUser: isAdminLevel(user),
   };
 
   // Defer the orders list — page chrome renders immediately, table swaps from
@@ -527,6 +530,7 @@ export default function MarketingOrdersRoute() {
     enableTestOrdersOption: ordersShell.enableTestOrdersOption,
     enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
     isCartAbandonmentView: ordersShell.isCartAbandonmentView,
+    isAdminUser: ordersShell.isAdminUser,
   };
 
   return (
