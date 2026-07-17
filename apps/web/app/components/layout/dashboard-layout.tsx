@@ -100,6 +100,8 @@ interface NavItemDef {
    * needing the permission.
    */
   roles?: string[];
+  /** Dev-only item: hidden unless NODE_ENV=development. Route loader should also 404 via requireAccountingEnabled(). */
+  devOnly?: boolean;
 }
 
 interface NavGroupDef {
@@ -378,97 +380,61 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.users,
         roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
       },
-    ],
-  },
-  {
-    group: 'Accounting',
-    // Dev-only until the double-entry ledger is fully tested. Hidden in prod
-    // (NODE_ENV !== 'development'); the route loaders also 404 when off.
-    devOnly: true,
-    items: [
       {
         label: 'Chart of Accounts',
         href: '/admin/finance/accounts',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
+        devOnly: true,
       },
       {
         label: 'Journal Entries',
         href: '/admin/finance/journal-entries',
         icon: SidebarIcons.remittances,
         permission: 'finance.ledger.read',
+        devOnly: true,
+      },
+      {
+        label: 'General Ledger',
+        href: '/admin/finance/general-ledger',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        devOnly: true,
       },
       {
         label: 'Trial Balance',
         href: '/admin/finance/trial-balance',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
+        devOnly: true,
       },
       {
         label: 'Profit & Loss',
         href: '/admin/finance/profit-loss',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
+        devOnly: true,
       },
       {
         label: 'Balance Sheet',
         href: '/admin/finance/balance-sheet',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
+        devOnly: true,
       },
       {
         label: 'Cash Flow',
         href: '/admin/finance/cash-flow',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-      },
-      {
-        label: 'Aging (AR/AP)',
-        href: '/admin/finance/aging',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-      },
-      {
-        label: 'Opening Balances',
-        href: '/admin/finance/opening-balances',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.write',
+        devOnly: true,
       },
       {
         label: 'Asset Register',
         href: '/admin/finance/assets',
         icon: SidebarIcons.inventory,
         permission: 'finance.ledger.read',
-      },
-      {
-        label: 'Expenses',
-        href: '/admin/finance/expenses',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-      },
-      {
-        label: 'Budget Report',
-        href: '/admin/finance/budget-report',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-      },
-      {
-        label: 'WHT Certificates',
-        href: '/admin/finance/wht-certificates',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-      },
-      {
-        label: 'Tax Returns',
-        href: '/admin/finance/tax-returns',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-      },
-      {
-        label: 'Bank Reconciliation',
-        href: '/admin/finance/bank-reconciliation',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
+        devOnly: true,
       },
     ],
   },
@@ -688,6 +654,8 @@ function getNavGroupsForUser(
 
     const visibleItems = groupDef.items
       .filter((item) => {
+        // Per-item dev-only gate (same logic as group-level devOnly).
+        if (item.devOnly && !(typeof window !== 'undefined' && window.__ENV?.IS_DEV === true)) return false;
         if (item.href === '/admin/analytics/audit') {
           return canAccessGlobalAuditLog(user);
         }
@@ -1185,15 +1153,21 @@ function DashboardLayoutInner({
 
   // Filter the branches catalog to only the active company group.
   // When selectedBranchIds is set (header group selection), page-level
-  // dropdowns should only show branches within that group.
+  // dropdowns should only show branches within that group. When a single
+  // branch is selected (selectedBranchIds null but activeGroupId set),
+  // filter by group so import/form dropdowns don't leak cross-company branches.
   const selectedBranchIds = (user as { selectedBranchIds?: string[] | null })?.selectedBranchIds;
+  const activeGroupId = (user as { activeGroupId?: string | null })?.activeGroupId;
   const catalogBranches = useMemo(() => {
     if (selectedBranchIds && selectedBranchIds.length > 0) {
       const selectedSet = new Set(selectedBranchIds);
       return (branches ?? []).filter((b) => selectedSet.has(b.id));
     }
+    if (activeGroupId) {
+      return (branches ?? []).filter((b) => (b as { groupId?: string | null }).groupId === activeGroupId);
+    }
     return branches ?? [];
-  }, [branches, selectedBranchIds]);
+  }, [branches, selectedBranchIds, activeGroupId]);
 
   const handleToggleCollapse = () => {
     const next = !collapsed;

@@ -7,6 +7,8 @@ import {
   rejectJournalEntrySchema,
   listAccountsSchema,
   createAccountSchema,
+  updateAccountSchema,
+  deactivateAccountSchema,
   listFiscalYearsSchema,
   createFiscalYearSchema,
   closeFiscalYearSchema,
@@ -201,6 +203,18 @@ export const generalLedgerRouter = router({
         { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
         { id: ctx.user.id },
       );
+    }),
+
+  updateAccount: permissionProcedure('finance.ledger.write')
+    .input(updateAccountSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().updateAccount(input, { id: ctx.user.id });
+    }),
+
+  deactivateAccount: permissionProcedure('finance.ledger.write')
+    .input(deactivateAccountSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().deactivateAccount(input, { id: ctx.user.id });
     }),
 
   // ─── Fiscal Years ────────────────────────────────────────────────────────

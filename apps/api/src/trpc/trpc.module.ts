@@ -50,7 +50,8 @@ import { PushSchedulerService } from '../notifications/push-scheduler.service';
 import { setNotificationsService, setPushSchedulerService } from './routers/notifications.router';
 import { AuditModule } from '../audit/audit.module';
 import { AuditService } from '../audit/audit.service';
-import { setAuditCacheService, setAuditService } from './routers/audit.router';
+import { ImportHistoryService } from '../audit/import-history.service';
+import { setAuditCacheService, setAuditService, setImportHistoryService } from './routers/audit.router';
 import { VoipModule } from '../voip/voip.module';
 import { VoipService } from '../voip/voip.service';
 import { setDashboardServices } from './routers/dashboard.router';
@@ -146,6 +147,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly notificationsService: NotificationsService,
     private readonly pushSchedulerService: PushSchedulerService,
     private readonly auditService: AuditService,
+    private readonly importHistoryService: ImportHistoryService,
     private readonly voipService: VoipService,
     private readonly settingsService: SettingsService,
     private readonly cartService: CartService,
@@ -191,6 +193,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setNotificationsService(this.notificationsService);
     setPushSchedulerService(this.pushSchedulerService);
     setAuditService(this.auditService);
+    setImportHistoryService(this.importHistoryService);
     setAuditCacheService(this.cacheService);
     setAuditCacheService(this.cacheService);
     setVoipService(this.voipService);

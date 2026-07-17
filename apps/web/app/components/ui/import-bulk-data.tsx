@@ -272,57 +272,68 @@ export function ImportBulkData<
     let createdAcc = 0;
     let failedAcc = 0;
 
-    for (let i = 0; i < resolved.length; i += 1) {
+    // Process rows in parallel batches of 5 for speed
+    const BATCH_SIZE = 5;
+    const validIndices = resolved
+      .map((r, i) => (r.errors.length > 0 ? -1 : i))
+      .filter((i) => i >= 0);
+
+    for (let b = 0; b < validIndices.length; b += BATCH_SIZE) {
       if (cancelRef.current) break;
-      const row = resolved[i]!;
-      if (row.errors.length > 0) continue;
+      const batch = validIndices.slice(b, b + BATCH_SIZE);
 
-      setStatuses((prev) => prev.map((s, idx) => (idx === i ? { state: 'in_flight' } : s)));
+      // Mark batch as in-flight
+      setStatuses((prev) =>
+        prev.map((s, idx) => (batch.includes(idx) ? { state: 'in_flight' } : s)),
+      );
 
-      const formData = buildFormData(row);
-      formData.set('intent', actionIntent);
-      formData.set('rowIndex', String(i));
+      const results = await Promise.allSettled(
+        batch.map(async (i) => {
+          const row = resolved[i]!;
+          const formData = buildFormData(row);
+          formData.set('intent', actionIntent);
+          formData.set('rowIndex', String(i));
+          const res = await fetch(actionPath, { method: 'POST', body: formData });
+          return { i, res };
+        }),
+      );
 
-      try {
-        const res = await fetch(actionPath, { method: 'POST', body: formData });
-
-        // With v3_singleFetch, Remix returns turbo-stream instead of JSON.
-        // The HTTP status code is still reliable: 200 = action returned
-        // json({ success: true }), 400+ = json({ error: ... }).
-        // We trust res.ok for success and only parse text for error messages.
-        if (res.ok) {
-          createdAcc += 1;
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          const reason = result.reason instanceof Error ? result.reason.message : 'Network error';
+          failedAcc += 1;
+          // Can't determine index from rejected promise — mark remaining in-flight as failed
           setStatuses((prev) =>
-            prev.map((s, idx) => (idx === i ? { state: 'created' } : s)),
+            prev.map((s) => (s.state === 'in_flight' ? { state: 'failed', reason } : s)),
           );
         } else {
-          // Try to extract error message from the response
-          const text = await res.text().catch(() => '');
-          let reason = `HTTP ${res.status}`;
-          try {
-            const json = JSON.parse(text);
-            if (json.error) reason = json.error;
-          } catch {
-            // turbo-stream: look for "error","<message>" after "actionData"
-            const actionIdx = text.indexOf('"actionData"');
-            if (actionIdx >= 0) {
-              const errMatch = text.slice(actionIdx).match(/"error","([^"]+)"/);
-              if (errMatch) reason = errMatch[1];
+          const { i, res } = result.value;
+          if (res.ok) {
+            createdAcc += 1;
+            setStatuses((prev) =>
+              prev.map((s, idx) => (idx === i ? { state: 'created' } : s)),
+            );
+          } else {
+            const text = await res.text().catch(() => '');
+            let reason = `HTTP ${res.status}`;
+            try {
+              const json = JSON.parse(text);
+              if (json.error) reason = json.error;
+            } catch {
+              const actionIdx = text.indexOf('"actionData"');
+              if (actionIdx >= 0) {
+                const errMatch = text.slice(actionIdx).match(/"error","([^"]+)"/);
+                if (errMatch) reason = errMatch[1]!;
+              }
             }
+            failedAcc += 1;
+            setStatuses((prev) =>
+              prev.map((s, idx) => (idx === i ? { state: 'failed', reason } : s)),
+            );
           }
-          failedAcc += 1;
-          setStatuses((prev) =>
-            prev.map((s, idx) => (idx === i ? { state: 'failed', reason } : s)),
-          );
         }
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : 'Network error';
-        failedAcc += 1;
-        setStatuses((prev) =>
-          prev.map((s, idx) => (idx === i ? { state: 'failed', reason } : s)),
-        );
       }
-      setProcessedCount((c) => c + 1);
+      setProcessedCount((c) => c + batch.length);
     }
 
     setIsImporting(false);

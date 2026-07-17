@@ -4965,7 +4965,7 @@ export class MarketingService {
       pendingSpendConditions.push(cond);
       otherExpenseConditions.push(cond);
     };
-    if (mediaBuyerId) pushSpendScope(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
+    if (mediaBuyerId && mediaBuyerId !== '__system__') pushSpendScope(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
     if (branchCampaignIds && branchCampaignIds.length > 0) {
       // Daily-flow spend rows (campaignId IS NULL) lack a branch FK, so they
       // must be scoped by the media buyer's branch membership.  Without this,
@@ -5043,7 +5043,13 @@ export class MarketingService {
       if (supervisorScope) {
         appendOrdersAggregateScopeConditions(conditions, { supervisorScope });
       } else {
-        if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+        if (mediaBuyerId) {
+          if (mediaBuyerId === '__system__') {
+            conditions.push(isNull(schema.orders.mediaBuyerId));
+          } else {
+            conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+          }
+        }
         if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
       }
       // Branch-scope the orders side whenever a branch is in play — matches the

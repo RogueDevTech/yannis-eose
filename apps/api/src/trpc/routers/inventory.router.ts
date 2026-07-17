@@ -75,7 +75,7 @@ export const inventoryRouter = router({
   levels: authedProcedure
     .input(listInventorySchema)
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listLevels(input, ctx.activeGroupId);
+      return getInventoryService().listLevels(input, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /** Aggregated stock per (product, location) — no batch rows, no pagination. */
@@ -286,8 +286,8 @@ export const inventoryRouter = router({
    * Low stock alerts — products below threshold.
    */
   lowStockAlerts: permissionProcedure('inventory.lowStockAlerts')
-    .query(async () => {
-      return getInventoryService().getLowStockAlerts();
+    .query(async ({ ctx }) => {
+      return getInventoryService().getLowStockAlerts(undefined, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -327,8 +327,8 @@ export const inventoryRouter = router({
    */
   returnedOrders: permissionProcedure('inventory.returnedOrders')
     .input(z.object({ locationId: z.string().uuid().optional() }))
-    .query(async ({ input }) => {
-      return getInventoryService().listReturnedOrders(input.locationId);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().listReturnedOrders(input.locationId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -354,8 +354,8 @@ export const inventoryRouter = router({
    */
   reconciliations: permissionProcedure('inventory.reconciliations')
     .input(z.object({ locationId: z.string().uuid().optional() }))
-    .query(async ({ input }) => {
-      return getInventoryService().listReconciliations(input.locationId);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().listReconciliations(input.locationId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -410,7 +410,7 @@ export const inventoryRouter = router({
         returnedOrders,
         reconciliations,
       ] = await Promise.all([
-        getInventoryService().listLevels(levelsInput),
+        getInventoryService().listLevels(levelsInput, undefined, ctx.effectiveBranchIds),
         getInventoryService().listMovements(
           movementsInput,
           ctx.user,
@@ -425,10 +425,10 @@ export const inventoryRouter = router({
         getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
         getInventoryService().listTransfers(undefined, ctx.user).then((r) => r.transfers),
         canSeeReturned
-          ? getInventoryService().listReturnedOrders(input.locationId)
+          ? getInventoryService().listReturnedOrders(input.locationId, ctx.effectiveBranchIds)
           : Promise.resolve([]),
         canSeeReconciliations
-          ? getInventoryService().listReconciliations(input.locationId)
+          ? getInventoryService().listReconciliations(input.locationId, ctx.effectiveBranchIds)
           : Promise.resolve([]),
       ]);
 
@@ -507,7 +507,7 @@ export const inventoryRouter = router({
         shipments,
         warehouses,
       ] = await Promise.all([
-        getInventoryService().listLevels(levelsInput, ctx.activeGroupId),
+        getInventoryService().listLevels(levelsInput, ctx.activeGroupId, ctx.effectiveBranchIds),
         getInventoryService().listMovements(
           movementsInput,
           ctx.user,
@@ -527,7 +527,7 @@ export const inventoryRouter = router({
         }),
         getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
         getSettingsService().getAll(ctx.activeGroupId).catch(() => [] as unknown[]),
-        getInventoryService().getLowStockAlerts(ctx.activeGroupId).catch((err) => {
+        getInventoryService().getLowStockAlerts(ctx.activeGroupId, ctx.effectiveBranchIds).catch((err) => {
           console.error('[inventoryAdminPageBundle] getLowStockAlerts failed:', err?.message ?? err);
           return { threshold: 10, items: [] as unknown[] };
         }),

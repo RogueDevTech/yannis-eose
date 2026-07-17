@@ -1193,7 +1193,11 @@ export class UsersService {
     // isolation via effectiveBranchIds — "company-wide" means within the active
     // company group, not across all groups. CEO directive 2026-06-10.
     const skipBranchScopeButGroupScoped =
-      skipBranchScope && !input.branchId && effectiveBranchIds && effectiveBranchIds.length > 0;
+      skipBranchScope && !input.branchId && effectiveBranchIds != null && effectiveBranchIds.length > 0;
+    // Empty effectiveBranchIds = company selected but no branches resolved yet
+    // (stale session, new company). Return zero results to prevent cross-company leak.
+    const emptyGroupScope =
+      skipBranchScope && !input.branchId && effectiveBranchIds != null && effectiveBranchIds.length === 0;
     const branchFilter = skipBranchScope
       ? input.branchId
       : (input.branchId ?? currentBranchId ?? undefined);
@@ -1205,7 +1209,10 @@ export class UsersService {
     // hand-crafted URL can't widen their view.
     const orgWideOnlyAllowed =
       input.orgWideOnly === true && this.actorMayListCompanyWideUserRoster(actor, currentBranchId);
-    if (orgWideOnlyAllowed) {
+    if (emptyGroupScope) {
+      // Company selected but no branches resolved — return zero results.
+      conditions.push(sql`false`);
+    } else if (orgWideOnlyAllowed) {
       conditions.push(
         sql<boolean>`NOT EXISTS (
           SELECT 1

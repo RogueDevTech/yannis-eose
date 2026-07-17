@@ -12,7 +12,7 @@
  * if (cond) conditions.push(cond);
  * ```
  */
-import { eq, inArray, isNull, or, type SQL, type Column } from 'drizzle-orm';
+import { eq, inArray, isNull, or, sql, type SQL, type Column } from 'drizzle-orm';
 
 /**
  * Branch scope context — passed from routers to services as a single object.
@@ -74,6 +74,13 @@ export function branchScopeCondition(
       ? eq(column, eIds[0]!)
       : inArray(column, eIds);
     return or(inBranch, isNull(column))!;
+  }
+
+  // Empty array = company selected but no branches resolved yet (stale session,
+  // new company). Return a "match nothing" condition to prevent data leaking
+  // across companies. The /auth/me backfill will fix the session shortly.
+  if (eIds && eIds.length === 0) {
+    return sql`false`;
   }
 
   // Global user or no branch context → no filter

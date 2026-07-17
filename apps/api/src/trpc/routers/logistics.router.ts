@@ -81,7 +81,7 @@ export const logisticsRouter = router({
   listProviders: authedProcedure
     .input(listProvidersSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listProviders(input, ctx.activeGroupId);
+      return getLogisticsService().listProviders(input, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -147,7 +147,7 @@ export const logisticsRouter = router({
   listLocations: authedProcedure
     .input(listLocationsSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listLocations(input, ctx.activeGroupId);
+      return getLogisticsService().listLocations(input, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -297,7 +297,7 @@ export const logisticsRouter = router({
   listDeliveryRemittanceOrders: authedProcedure
     .input(listDeliveryRemittancesSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryRemittanceOrders(input, ctx.user, ctx.activeGroupId);
+      return getLogisticsService().listDeliveryRemittanceOrders(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /** Duplicate order comparison: original + all duplicates with invoices and remittance info. */

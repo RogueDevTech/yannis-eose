@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, requireAccountingEnabled, parsePerPage } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requireAccountingEnabled, requirePermissionOrRoles, parsePerPage } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -35,10 +35,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
 
-  const shell = { canWrite: true };
+  const status = url.searchParams.get('status') || undefined;
+  const search = url.searchParams.get('search') || undefined;
+  const startDate = url.searchParams.get('startDate') || undefined;
+  const endDate = url.searchParams.get('endDate') || undefined;
+
+  const shell = {
+    canWrite: true,
+    filters: { status: status ?? '', search: search ?? '', startDate: startDate ?? '', endDate: endDate ?? '' },
+  };
 
   const pageData = (async () => {
-    const input = encodeURIComponent(JSON.stringify({ page, limit: perPage }));
+    const input = encodeURIComponent(JSON.stringify({
+      page,
+      limit: perPage,
+      ...(status ? { status } : {}),
+      ...(search ? { search } : {}),
+      ...(startDate ? { startDate } : {}),
+      ...(endDate ? { endDate } : {}),
+    }));
     const res = await apiRequest<unknown>(
       `/trpc/generalLedger.listJournalEntries?input=${input}`,
       { method: 'GET', cookie },
@@ -83,13 +98,14 @@ export default function JournalEntriesRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={<JournalEntriesPage records={[]} pagination={EMPTY.pagination} canWrite={shell.canWrite} />}
+      fallback={<JournalEntriesPage records={[]} pagination={EMPTY.pagination} canWrite={shell.canWrite} filters={shell.filters} />}
     >
       {(data) => (
         <JournalEntriesPage
           records={data.records}
           pagination={data.pagination}
           canWrite={shell.canWrite}
+          filters={shell.filters}
         />
       )}
     </CachedAwait>

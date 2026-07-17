@@ -504,6 +504,11 @@ export class NotificationsService {
       return null;
     }
 
+    // Auto-resolve branch_id for company scoping
+    const branchId = await this.resolveBranchId(
+      (input.data as Record<string, unknown> | null | undefined) ?? null,
+    );
+
     const rows = await this.db
       .insert(schema.notifications)
       .values({
@@ -512,6 +517,7 @@ export class NotificationsService {
         title: input.title,
         body: input.body ?? null,
         data: input.data ?? null,
+        branchId,
       })
       .returning();
 
@@ -586,12 +592,12 @@ export class NotificationsService {
 
   /**
    * Company-group isolation predicates for the notification feed.
-   * - branchId: notifications tied to a branch must fall within the active
-   *   group's branches (or carry no branchId).
-   * - groupId: notifications about group-owned resources (inventory/logistics
-   *   alerts) must match the active group (or carry no groupId). Gated on
-   *   activeGroupId independently, since a SuperAdmin browsing a group may have
-   *   no branch assignments, leaving effectiveBranchIds empty.
+   *
+   * Uses the indexed `branch_id` column for efficient filtering. Notifications
+   * with NULL branch_id are considered global (visible in all companies).
+   *
+   * Additionally checks `data->>'groupId'` for inventory/logistics alerts that
+   * are stamped with a company group but no specific branch.
    */
   private groupIsolationClauses(
     effectiveBranchIds?: string[] | null,
@@ -600,8 +606,12 @@ export class NotificationsService {
     const clauses: SQL[] = [];
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       const inList = sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `);
+      // Strict company isolation: only show notifications that belong to the
+      // active company's branches. Exclude NULL-branched notifications (system
+      // alerts, ad spend reminders) when a company filter is active — they are
+      // cross-company and would inflate the badge count in the wrong company.
       clauses.push(
-        sql`(${schema.notifications.data}->>'branchId' IS NULL OR ${schema.notifications.data}->>'branchId' IN (${inList}))`,
+        sql`${schema.notifications.branchId} IN (${inList})`,
       );
     }
     if (activeGroupId) {
@@ -610,6 +620,42 @@ export class NotificationsService {
       );
     }
     return clauses;
+  }
+
+  /**
+   * Resolve the branch_id for a notification from its data payload.
+   * Priority: explicit data.branchId > order's servicing_branch_id > order's branch_id.
+   * Returns null for global/system notifications (account alerts, etc.).
+   */
+  private async resolveBranchId(data: Record<string, unknown> | null | undefined): Promise<string | null> {
+    if (!data) return null;
+
+    // 1. Explicit branchId in data (already stamped by caller)
+    const explicit = data['branchId'];
+    if (typeof explicit === 'string' && explicit.length > 0) {
+      return explicit;
+    }
+
+    // 2. Resolve from orderId → orders.servicing_branch_id (or branch_id)
+    const orderId = data['orderId'];
+    if (typeof orderId === 'string' && orderId.length > 0) {
+      try {
+        const [row] = await this.db
+          .select({
+            servicingBranchId: schema.orders.servicingBranchId,
+            branchId: schema.orders.branchId,
+          })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, orderId))
+          .limit(1);
+        return row?.servicingBranchId ?? row?.branchId ?? null;
+      } catch {
+        // Best-effort; don't break notification creation
+        return null;
+      }
+    }
+
+    return null;
   }
 
   async list(userId: string, input: ListNotificationsInput, effectiveBranchIds?: string[] | null, activeGroupId?: string | null) {

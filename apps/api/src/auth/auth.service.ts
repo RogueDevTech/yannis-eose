@@ -930,9 +930,11 @@ export class AuthService {
       // permitted set so effectiveBranchIds is correctly bounded.
       groupBranchIds = permittedGroupIds;
     } else {
-      // A specific branch is selected — selectedBranchIds stays null so queries
-      // scope to currentBranchId alone.
-      groupBranchIds = null;
+      // A specific branch is selected — still populate selectedBranchIds with
+      // the full group's branches so company-wide queries (Users, aggregates)
+      // scope to the correct company. Normal queries use currentBranchId for
+      // single-branch filtering; effectiveBranchIds provides the company boundary.
+      groupBranchIds = permittedGroupIds ?? null;
     }
 
     const updated: SessionUser = {

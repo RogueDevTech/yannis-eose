@@ -33,6 +33,10 @@ export interface ParsedRow {
   comment1Input: string;
   comment2Input: string;
   comment3Input: string;
+  /** Per-row media buyer override (user UUID or '__system__' or '' for global default) */
+  rowMbId: string;
+  /** Per-row CS agent override (user UUID or '__system__' or '' for global default) */
+  rowCsId: string;
 }
 
 export interface ResolvedRow extends ParsedRow {
@@ -264,5 +268,7 @@ export function makeEmptyParsedRow(rowIndex: number): ParsedRow {
     comment1Input: '',
     comment2Input: '',
     comment3Input: '',
+    rowMbId: '',
+    rowCsId: '',
   };
 }

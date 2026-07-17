@@ -1,7 +1,9 @@
+import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
+import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConsolidatedToggle } from './ConsolidatedToggle';
 
@@ -20,7 +22,15 @@ export interface CashFlowPageProps {
   period: { startDate: string | null; endDate: string | null };
 }
 
-export function CashFlowPage({ accounts, totals, consolidated }: CashFlowPageProps & { consolidated?: boolean }) {
+export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFlowPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const setFilter = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next);
+  };
   const columns: CompactTableColumn<CashFlowRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
     { key: 'opening', header: 'Opening', align: 'right', render: (r) => <NairaPrice amount={r.opening} zeroAsDash /> },
@@ -36,6 +46,23 @@ export function CashFlowPage({ accounts, totals, consolidated }: CashFlowPagePro
         description="Movement across bank and cash accounts over the period."
         actions={<ConsolidatedToggle active={consolidated} />}
       />
+
+      <div className="flex items-center gap-3">
+        <label htmlFor="cf-from" className="text-sm text-app-fg-muted">From</label>
+        <DateInput
+          id="cf-from"
+          value={filters?.startDate ?? ''}
+          onChange={(e) => setFilter('startDate', e.target.value)}
+          wrapperClassName="w-44"
+        />
+        <label htmlFor="cf-to" className="text-sm text-app-fg-muted">To</label>
+        <DateInput
+          id="cf-to"
+          value={filters?.endDate ?? ''}
+          onChange={(e) => setFilter('endDate', e.target.value)}
+          wrapperClassName="w-44"
+        />
+      </div>
 
       <OverviewStatStrip
         items={[
