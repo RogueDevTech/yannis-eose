@@ -105,7 +105,22 @@ async function _ceoOverviewFetch(params: {
     getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     getCartOrdersService().getStatusCounts(branchId, undefined, startDate, endDate, effectiveBranchIds).catch(() => ({})),
     getCartService().countAllCarts({ branchId, effectiveBranchIds, startDate, endDate }).catch(() => 0),
-    ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds).catch(() => ({})),
+    // TOTAL ORDERS: marketing orders (edge-form/NULL) at all statuses; non-marketing
+    // orders (offline, follow-up graduated, cart graduated) only count at DELIVERED/REMITTED.
+    // This prevents double-counting with the Cart/Follow-Up strips that count from
+    // their own tables (cart_orders, follow_up_orders).
+    ordersService!.getStatusCounts(
+      undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined,
+      'servicing', effectiveBranchIds,
+      undefined, // isFollowUp
+      undefined, // excludeOffline
+      undefined, // excludeGraduated
+      undefined, // excludeCartGraduated
+      undefined, // onlyOffline
+      undefined, // servicingBranchId
+      undefined, // teamMemberIds
+      true,      // onlyGraduateNonMarketing — the key fix
+    ).catch(() => ({})),
     // Delivered follow-up orders — separate funnel on dashboard.
     ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, false, false, 'delivered_follow_up').catch(() => ({})),
   ]);
