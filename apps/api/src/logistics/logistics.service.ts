@@ -158,7 +158,7 @@ export class LogisticsService {
     return { ...rows[0], locationCount: locationRows[0]?.count ?? 0 };
   }
 
-  async listProviders(input: ListProvidersInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listProviders(input: ListProvidersInput, groupId?: string | null) {
     const conditions = [];
     if (input.status) {
       conditions.push(eq(schema.logisticsProviders.status, input.status));

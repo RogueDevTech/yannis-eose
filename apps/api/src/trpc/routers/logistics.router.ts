@@ -81,7 +81,7 @@ export const logisticsRouter = router({
   listProviders: authedProcedure
     .input(listProvidersSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listProviders(input, ctx.activeGroupId, ctx.effectiveBranchIds);
+      return getLogisticsService().listProviders(input, ctx.activeGroupId);
     }),
 
   /**
