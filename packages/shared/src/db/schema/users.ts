@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, integer, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, integer, serial, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { userRoleEnum, recordStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { products } from './products';
@@ -77,6 +77,8 @@ export const users = pgTable('users', {
    * Accounts list/filter) don't need a JOIN. See migration 0139.
    */
   isTeamSupervisor: boolean('is_team_supervisor').default(false).notNull(),
+  /** Sequential human-friendly user number (USR-1, USR-2, ...). Auto-increment, backfilled by creation order. */
+  userNumber: serial('user_number'),
   ...temporalColumns,
   ...timestampColumns,
 });

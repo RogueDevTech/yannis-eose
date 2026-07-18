@@ -21,7 +21,9 @@ const TEMPLATE_HEADERS = [
   'More details',
   'Status',
   'Media-Buyer',
+  'Media Buyer ID',
   'CS',
+  'CS ID',
   'Delivery agent',
   'Comment 1',
   'Comment 2',
@@ -31,7 +33,7 @@ const TEMPLATE_HEADERS = [
 const COLUMN_WIDTHS: number[] = [
   16, 22, 16, 16, 28, 44, 10,
   10, 12, 8, 14, 36,
-  28, 14, 10, 18,
+  28, 14, 14, 10, 14, 18,
   36, 36, 30,
 ];
 
@@ -42,14 +44,14 @@ export function downloadOrdersImportTemplate(): void {
       '4/29/2026', 'Chuks David', '08068880766', '08068880766',
       'chuks@example.com', 'O Cube Court Lafaji', 'Lagos',
       1, 100000, 'Male', 'Tomorrow', '',
-      'Delivered and Cash Remitted', 'Exre', 'Annual', 'Fomac Lagos',
+      'Delivered and Cash Remitted', 'Exre', 'USR-5', 'Annual', 'USR-12', 'Fomac Lagos',
       '', '', '',
     ],
     [
       '5/2/2026', 'Adamu Garba', '07012345678', '07012345678',
       'adamu@example.com', '12 Adeola Odeku, Victoria Island', 'Lagos',
       1, 100000, 'Male', '3 Days', 'Gate is blue',
-      'Pending', 'Exre', 'Annual', '',
+      'Pending', 'Exre', '', 'Annual', '', '',
       'Customer wants morning delivery', '', '',
     ],
   ]);
@@ -75,7 +77,9 @@ export function downloadOrdersImportTemplate(): void {
     ['More details', 'Optional notes about delivery.'],
     ['Status', 'Required. See valid values below.'],
     ['Media-Buyer', 'Optional. Stored as reference — batch MB is selected on the import page.'],
+    ['Media Buyer ID', 'Optional. User number (e.g. USR-42). Overrides the batch default media buyer for this row.'],
     ['CS', 'Optional. Stored as reference — batch CS agent is selected on the import page.'],
+    ['CS ID', 'Optional. User number (e.g. USR-12). Overrides the batch default CS agent for this row.'],
     ['Delivery agent', 'Optional. Stored as reference in custom fields.'],
     ['Comment 1–3', 'Optional. Combined and stored in custom fields.'],
     ['', ''],

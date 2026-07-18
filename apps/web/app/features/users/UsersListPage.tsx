@@ -21,6 +21,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { Modal } from '~/components/ui/modal';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
+import { formatUserNumber } from '@yannis/shared';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -441,6 +442,16 @@ export function UsersListPage({
 
   const hrUserColumns: CompactTableColumn<User>[] = useMemo(
     () => [
+      {
+        key: 'userId',
+        header: 'User ID',
+        nowrap: true,
+        render: (user) => (
+          <span className="font-mono text-xs text-app-fg-muted tabular-nums">
+            {formatUserNumber(user.userNumber)}
+          </span>
+        ),
+      },
       {
         key: 'name',
         header: 'Name',

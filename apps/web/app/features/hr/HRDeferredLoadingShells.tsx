@@ -38,6 +38,7 @@ export function hrUsersShellColumns(staffAccounts: boolean): CompactTableColumn<
     ];
   }
   return [
+    { key: 'userId', header: 'User ID', nowrap: true, render: () => <TableCellTextPulse className="w-[5rem]" /> },
     { key: 'name', header: 'Name', render: () => <TableCellTextPulse className="w-[12rem]" /> },
     { key: 'email', header: 'Email', render: () => <TableCellTextPulse className="w-[14rem]" /> },
     { key: 'role', header: 'Role', render: () => <TableCellTextPulse className="w-[8rem]" /> },

@@ -68,6 +68,10 @@ export interface CSTeamPageProps {
     cart: number;
     deliveredFollowUp: number;
   };
+  /** Status counts from the follow_up_orders table (separate from main orders). */
+  followUpTableCounts?: Record<string, number>;
+  /** Status counts from the cart_orders table (separate from main orders). */
+  cartTableCounts?: Record<string, number>;
 }
 
 const CS_ACTIVITY_OPTIONS = [
@@ -443,6 +447,8 @@ export function CSTeamPage({
   offlineCount = 0,
   categories = [],
   categoryCounts = { funnel: 0, offline: 0, followUp: 0, cart: 0, deliveredFollowUp: 0 },
+  followUpTableCounts = {},
+  cartTableCounts = {},
 }: CSTeamPageProps) {
   // Parse flat sort string (e.g. "total-desc") into SortMenu value
   const sortMenuValue = useMemo((): SortMenuValue => {
@@ -824,7 +830,16 @@ export function CSTeamPage({
 
       <div className={`relative transition-opacity duration-200 ${isNavigating ? 'opacity-50 pointer-events-none' : ''}`}>
 
-      {unfilteredCount > 0 && (
+      {unfilteredCount > 0 && (() => {
+        // Follow-up and cart orders from separate tables — sum all statuses except DELETED
+        const sumTableCounts = (counts: Record<string, number>) =>
+          Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        const fuTableTotal = sumTableCounts(followUpTableCounts);
+        const cartTableTotal = sumTableCounts(cartTableCounts);
+        // Grand total = main orders table (from leaderboard) + separate tables
+        const grandTotal = summary.engagedTotal + fuTableTotal + cartTableTotal;
+
+        return (
         <div className="space-y-2">
           {/* Row 1: Category breakdown */}
           <OverviewStatStrip
@@ -837,11 +852,11 @@ export function CSTeamPage({
               },
               {
                 label: 'Total orders',
-                value: summary.engagedTotal.toString(),
+                value: grandTotal.toString(),
                 valueClassName: 'text-brand-600 dark:text-brand-400',
                 title: hasCategoryFilter
                   ? 'Orders matching selected categories in this period'
-                  : 'Total orders assigned to the team in this period',
+                  : 'Total orders across all tables in this period',
               },
               {
                 label: 'Funnel',
@@ -857,15 +872,15 @@ export function CSTeamPage({
               },
               {
                 label: 'Follow-up',
-                value: categoryCounts.followUp.toString(),
-                valueClassName: categoryCounts.followUp > 0 ? 'text-teal-600 dark:text-teal-400' : 'text-app-fg',
-                title: 'Follow-up orders',
+                value: fuTableTotal.toString(),
+                valueClassName: fuTableTotal > 0 ? 'text-teal-600 dark:text-teal-400' : 'text-app-fg',
+                title: 'Follow-up orders (separate table)',
               },
               {
                 label: 'Cart',
-                value: categoryCounts.cart.toString(),
-                valueClassName: categoryCounts.cart > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
-                title: 'Cart-recovered orders',
+                value: cartTableTotal.toString(),
+                valueClassName: cartTableTotal > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
+                title: 'Cart-recovered orders (separate table)',
               },
               {
                 label: 'Delivered follow-up',
@@ -924,7 +939,8 @@ export function CSTeamPage({
             ]}
           />
         </div>
-      )}
+        );
+      })()}
 
       <div>
         <ToolbarFiltersCollapsible

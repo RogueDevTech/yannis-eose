@@ -1129,9 +1129,9 @@ export const marketingRouter = router({
           // filters isFollowUp=false. Without this, reopened follow-up orders
           // inflate Unassigned/Assigned counts beyond Total Orders.
           false,
-          // Exclude offline orders — marketing metrics only count edge-form orders.
-          // Exception: System (unattributed) view includes imports (offline).
-          mediaBuyerId === '__system__' ? false : true,
+          // Include imports alongside edge-form in marketing counts. Exclude manual
+          // offline orders (they belong to the CS funnel). System view drops all filters.
+          mediaBuyerId === '__system__' ? false : ('include-imports' as const),
           // Exclude graduated follow-up + cart orders — they have their own
           // funnels and must not inflate the Marketing Order Funnel.
           mediaBuyerId === '__system__' ? false : true,

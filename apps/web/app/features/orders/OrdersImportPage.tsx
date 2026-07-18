@@ -13,6 +13,7 @@ import {
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
+import { parseUserNumber } from '@yannis/shared';
 import {
   type ProductInfo,
   type ParsedRow,
@@ -28,6 +29,7 @@ interface UserOption {
   id: string;
   name: string;
   role: string;
+  userNumber?: number | null;
 }
 
 export interface OrdersImportPageProps {
@@ -202,6 +204,17 @@ export function OrdersImportPage({
         ),
       },
       {
+        header: 'MB ID',
+        headerClassName: 'min-w-[5rem]',
+        errorTokens: [],
+        errorLabel: 'MB ID',
+        hideErrorInfo: true,
+        getDisplayValue: (row) => row.mbIdInput || '—',
+        renderCell: ({ row }) => (
+          <span className="text-xs text-app-fg-muted font-mono">{row.mbIdInput || '—'}</span>
+        ),
+      },
+      {
         header: 'CS Agent',
         headerClassName: 'min-w-[10rem]',
         errorTokens: [],
@@ -229,6 +242,17 @@ export function OrdersImportPage({
               <option key={u.id} value={u.id}>{u.name}</option>
             ))}
           </select>
+        ),
+      },
+      {
+        header: 'CS ID',
+        headerClassName: 'min-w-[5rem]',
+        errorTokens: [],
+        errorLabel: 'CS ID',
+        hideErrorInfo: true,
+        getDisplayValue: (row) => row.csIdInput || '—',
+        renderCell: ({ row }) => (
+          <span className="text-xs text-app-fg-muted font-mono">{row.csIdInput || '—'}</span>
         ),
       },
       {
@@ -385,39 +409,64 @@ export function OrdersImportPage({
         description="Upload a CRM export spreadsheet to import historical orders."
         backHref={backHref ?? '/admin/data/import'}
         backLabel={backHref ? '← Back to orders' : '← Back to import'}
-        doneHref="/admin/sales/offline-orders?category=imported&period=all_time"
+        doneHref="/admin/sales/orders?period=all_time"
         resourceLabel="order"
         actionPath={actionPath}
         disableImport={!globalReady}
         actionIntent="importOrder"
         maxRows={1000}
         columns={columns}
-        parseSheetRow={(row, sheetRowIndex) => ({
-          rowIndex: sheetRowIndex,
-          dateInput: pickHeaderValue(row, 'date'),
-          name: pickHeaderValue(row, 'name'),
-          phoneInput: pickHeaderValue(row, 'phone_number'),
-          whatsappInput: pickHeaderValue(row, 'whatsapp_number'),
-          emailInput: pickHeaderValue(row, 'email'),
-          addressInput: pickHeaderValue(row, 'address'),
-          stateInput: pickHeaderValue(row, 'state'),
-          productInput: pickHeaderValue(row, 'product_name'),
-          unitInput: pickHeaderValue(row, 'unit'),
-          quantityInput: pickHeaderValue(row, 'quantity'),
-          costInput: pickHeaderValue(row, 'cost'),
-          genderInput: pickHeaderValue(row, 'gender'),
-          deliveryTimeInput: pickHeaderValue(row, 'delivery_time'),
-          moreDetailsInput: pickHeaderValue(row, 'more_details'),
-          statusInput: pickHeaderValue(row, 'status'),
-          mediaBuyerInput: pickHeaderValue(row, 'media_buyer'),
-          csInput: pickHeaderValue(row, 'cs'),
-          deliveryAgentInput: pickHeaderValue(row, 'delivery_agent'),
-          comment1Input: pickHeaderValue(row, 'comment_1'),
-          comment2Input: pickHeaderValue(row, 'comment_2'),
-          comment3Input: pickHeaderValue(row, 'comment_3'),
-          rowMbId: '',
-          rowCsId: '',
-        })}
+        parseSheetRow={(row, sheetRowIndex) => {
+          const mediaBuyerIdInput = pickHeaderValue(row, 'media_buyer_id');
+          const csAgentIdInput = pickHeaderValue(row, 'cs_id') || pickHeaderValue(row, 'cs_agent_id');
+
+          // Resolve USR-N style IDs to user UUIDs
+          let rowMbId = '';
+          if (mediaBuyerIdInput) {
+            const num = parseUserNumber(mediaBuyerIdInput.trim().toUpperCase());
+            if (num != null) {
+              const match = mediaBuyers.find((u) => u.userNumber === num);
+              if (match) rowMbId = match.id;
+            }
+          }
+          let rowCsId = '';
+          if (csAgentIdInput) {
+            const num = parseUserNumber(csAgentIdInput.trim().toUpperCase());
+            if (num != null) {
+              const match = csAgents.find((u) => u.userNumber === num);
+              if (match) rowCsId = match.id;
+            }
+          }
+
+          return {
+            rowIndex: sheetRowIndex,
+            dateInput: pickHeaderValue(row, 'date'),
+            name: pickHeaderValue(row, 'name'),
+            phoneInput: pickHeaderValue(row, 'phone_number'),
+            whatsappInput: pickHeaderValue(row, 'whatsapp_number'),
+            emailInput: pickHeaderValue(row, 'email'),
+            addressInput: pickHeaderValue(row, 'address'),
+            stateInput: pickHeaderValue(row, 'state'),
+            productInput: pickHeaderValue(row, 'product_name'),
+            unitInput: pickHeaderValue(row, 'unit'),
+            quantityInput: pickHeaderValue(row, 'quantity'),
+            costInput: pickHeaderValue(row, 'cost'),
+            genderInput: pickHeaderValue(row, 'gender'),
+            deliveryTimeInput: pickHeaderValue(row, 'delivery_time'),
+            moreDetailsInput: pickHeaderValue(row, 'more_details'),
+            statusInput: pickHeaderValue(row, 'status'),
+            mediaBuyerInput: pickHeaderValue(row, 'media_buyer'),
+            csInput: pickHeaderValue(row, 'cs'),
+            deliveryAgentInput: pickHeaderValue(row, 'delivery_agent'),
+            comment1Input: pickHeaderValue(row, 'comment_1'),
+            comment2Input: pickHeaderValue(row, 'comment_2'),
+            comment3Input: pickHeaderValue(row, 'comment_3'),
+            mbIdInput: mediaBuyerIdInput,
+            csIdInput: csAgentIdInput,
+            rowMbId,
+            rowCsId,
+          };
+        }}
         resolveRow={(parsed) => resolveRow(parsed)}
         makeEmptyRow={(sheetRowIndex) => makeEmptyParsedRow(sheetRowIndex)}
         buildFormData={(row) => {

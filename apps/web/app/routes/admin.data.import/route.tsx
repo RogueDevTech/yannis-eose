@@ -45,7 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }));
   }
 
-  type UserRow = { id: string; name: string; role: string };
+  type UserRow = { id: string; name: string; role: string; userNumber?: number | null };
   let mediaBuyers: UserRow[] = [];
   if (mbRes.ok) {
     const data = mbRes.data as { result?: { data?: { users?: UserRow[] } } };
@@ -60,8 +60,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({
     products,
-    mediaBuyers: mediaBuyers.map((u) => ({ id: u.id, name: u.name, role: u.role })),
-    csAgents: csAgents.map((u) => ({ id: u.id, name: u.name, role: u.role })),
+    mediaBuyers: mediaBuyers.map((u) => ({ id: u.id, name: u.name, role: u.role, userNumber: u.userNumber ?? null })),
+    csAgents: csAgents.map((u) => ({ id: u.id, name: u.name, role: u.role, userNumber: u.userNumber ?? null })),
   });
 }
 

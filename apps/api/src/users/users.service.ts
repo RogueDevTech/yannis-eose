@@ -1364,6 +1364,7 @@ export class UsersService {
           payoutAccountNumber: schema.users.payoutAccountNumber,
           payoutBankCode: schema.users.payoutBankCode,
           isTeamSupervisor: schema.users.isTeamSupervisor,
+          userNumber: schema.users.userNumber,
         })
         .from(schema.users)
         .where(whereClause)

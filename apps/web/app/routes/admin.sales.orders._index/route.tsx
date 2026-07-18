@@ -184,10 +184,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
   const testOrders = testOrdersParam && canFilterTestOrders;
 
-  // Default to edge-form orders only — offline orders have their own page.
+  // Default to edge-form + imported orders — offline (manual CS) orders have their own page.
+  // Imported orders with MB/CS assignment belong in the main funnel alongside form orders.
   // Allow ?orderSource=offline to still work for direct links/backwards compat.
   const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
-  const orderSource = orderSourceParam === 'offline' ? 'offline' : 'edge-form';
+  const orderSource = orderSourceParam === 'offline' ? 'offline' : 'edge-form-and-import';
 
   const teamIdParam = url.searchParams.get('teamId') || undefined;
   const productIdParam = url.searchParams.get('productId') || undefined;
@@ -383,7 +384,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isCSCloser,
         showCSCloserColumn,
         canCreateOffline,
-        orderSource: 'edge-form',
+        orderSource: 'edge-form-and-import',
         ...(teamIdParam && { teamId: teamIdParam }),
       }),
     );

@@ -363,7 +363,7 @@ export const listOrdersSchema = z
     /** Filter to orders where customer_name starts with "test" (whole word). Admin only. */
     testOrders: z.boolean().optional(),
     /** Filter by order source: 'offline' (CS manual entry), 'edge-form' (sales form), 'delivered_follow_up', or 'offline_and_import' (both offline + spreadsheet imports). */
-    orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import', 'import']).optional(),
+    orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import', 'import', 'edge-form-and-import']).optional(),
     /** Filter offline orders by category: 'website_order' or 'referrals'. */
     offlineOrderCategory: z.enum(['website_order', 'referrals']).optional(),
     /** Filter to orders assigned to members of this team. Resolved to user IDs at the router. */

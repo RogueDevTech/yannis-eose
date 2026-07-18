@@ -21,6 +21,7 @@ export * from './accounting/chart-of-accounts';
 export * from './orders/order-clipboard-summary';
 export * from './orders/customer-phone-display';
 export * from './orders/format-order-number';
+export * from './users/format-user-number';
 export * as db from './db/index';
 // `runSqlMigrations` is server-only (uses node:fs / node:path). Re-exporting it
 // from the public barrel pulls Node built-ins into Vite's web bundle and breaks

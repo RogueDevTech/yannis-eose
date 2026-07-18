@@ -4391,6 +4391,9 @@ export class OrdersService {
         // edge-form includes legacy orders with NULL orderSource (pre-migration)
         // plus cart-graduated orders ('online') so recovered carts appear on Marketing Orders.
         conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
+      } else if (input.orderSource === 'edge-form-and-import') {
+        // Funnel Orders page: edge-form + imported orders (imports with MB/CS belong in the main funnel).
+        conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.orderSource} = 'import')`);
       } else if (input.orderSource === 'offline_and_import') {
         // Offline Orders page: both manually created offline orders AND spreadsheet imports.
         conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
@@ -6506,8 +6509,9 @@ export class OrdersService {
     effectiveBranchIds?: string[] | null,
     /** When true, count only follow-up orders. When false, exclude them. When undefined, count all. */
     isFollowUp?: boolean,
-    /** When true, exclude offline-created orders from counts. Marketing surfaces pass true. */
-    excludeOffline?: boolean,
+    /** When true, exclude offline-created orders from counts. Marketing surfaces pass true.
+     *  When 'include-imports', exclude offline but include import-source orders. */
+    excludeOffline?: boolean | 'include-imports',
     /** When true, exclude graduated follow-up orders (is_follow_up=true).
      *  Cart-graduated orders (order_source='online') are real MB sales and
      *  remain unless excludeCartGraduated is also true. */
@@ -6571,11 +6575,14 @@ export class OrdersService {
         // true = include both offline and imported orders
         conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
       }
-    } else if (excludeOffline) {
+    } else if (excludeOffline === true) {
       // Match the edge-form filter in orders.list — only count orders from the
       // sales form (NULL = legacy pre-migration, 'edge-form' = explicit) plus
       // cart-graduated orders ('online') so recovered carts count for the MB.
       conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
+    } else if (excludeOffline === 'include-imports') {
+      // Funnel Orders page: edge-form + imports, but still exclude manual offline orders.
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.orderSource} = 'import')`);
     }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId,

@@ -33,6 +33,10 @@ export interface ParsedRow {
   comment1Input: string;
   comment2Input: string;
   comment3Input: string;
+  /** Raw Media Buyer ID from spreadsheet (e.g. 'USR-42') */
+  mbIdInput: string;
+  /** Raw CS ID from spreadsheet (e.g. 'USR-12') */
+  csIdInput: string;
   /** Per-row media buyer override (user UUID or '__system__' or '' for global default) */
   rowMbId: string;
   /** Per-row CS agent override (user UUID or '__system__' or '' for global default) */
@@ -268,6 +272,8 @@ export function makeEmptyParsedRow(rowIndex: number): ParsedRow {
     comment1Input: '',
     comment2Input: '',
     comment3Input: '',
+    mbIdInput: '',
+    csIdInput: '',
     rowMbId: '',
     rowCsId: '',
   };

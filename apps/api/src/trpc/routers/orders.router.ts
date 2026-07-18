@@ -1071,7 +1071,7 @@ export const ordersRouter = router({
            *  graduated deliveries remain visible for remittance. */
           excludeGraduated: z.boolean().optional(),
           /** Filter counts to a specific order source. */
-          orderSource: z.enum(['offline', 'edge-form', 'offline_and_import']).optional(),
+          orderSource: z.enum(['offline', 'edge-form', 'offline_and_import', 'import', 'edge-form-and-import']).optional(),
           /** When set, scope to orders assigned to members of this team. */
           teamId: z.string().uuid().optional(),
         })
@@ -1109,7 +1109,10 @@ export const ordersRouter = router({
       // they have their own Cart Orders strip. Marketing keeps them (MB credit).
       const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
       const onlyOffline = input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true : undefined;
-      const excludeOffline = input?.orderSource === 'edge-form' ? true : undefined;
+      const excludeOffline: boolean | 'include-imports' | undefined =
+        input?.orderSource === 'edge-form' ? true
+        : input?.orderSource === 'edge-form-and-import' ? 'include-imports'
+        : undefined;
       // Resolve team filter → member IDs
       const teamMemberIds = input?.teamId
         ? await getBranchTeamsService().listTeamMemberIds(input.teamId)
@@ -1427,7 +1430,7 @@ export const ordersRouter = router({
         // Kept for backward compat with cached clients — always ignored now.
         includeCartAbandonment: z.boolean().optional().default(false),
         /** When set, scope status counts to this order source only. */
-        orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import']).optional(),
+        orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import', 'import', 'edge-form-and-import']).optional(),
         /** When set, scope to orders assigned to members of this team. */
         teamId: z.string().uuid().optional(),
       }),
@@ -1680,7 +1683,7 @@ export const ordersRouter = router({
         effEnd = `${y}-${m}-${d}`;
       }
 
-      const [team, workloads, leaderboard, inactiveAgents, supplementary, categoryCounts] = await Promise.all([
+      const [team, workloads, leaderboard, inactiveAgents, supplementary, categoryCounts, followUpCounts, cartCounts] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
         getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats),
         getOrdersService().getCSCloserLeaderboard(
@@ -1703,6 +1706,15 @@ export const ordersRouter = router({
           ctx.effectiveBranchIds,
         ),
         getOrdersService().getCategoryBreakdown(effStart, effEnd, branchId, ctx.effectiveBranchIds),
+        // Follow-up and cart orders live in separate tables — fetch their counts
+        // so the overview strip totals match the Dashboard's TotalOrdersStrip.
+        getFollowUpConfigService().getFollowUpDashboardCounts({
+          branchId: branchId ?? undefined,
+          effectiveBranchIds: eIds,
+          startDate: effStart,
+          endDate: effEnd,
+        }),
+        getCartOrdersService().getStatusCounts(branchId, undefined, effStart, effEnd, eIds),
       ]);
       return {
         team,
@@ -1711,6 +1723,8 @@ export const ordersRouter = router({
         inactiveAgents,
         offlineCount: supplementary.offlineCount,
         categoryCounts,
+        followUpCounts,
+        cartCounts,
       };
     }),
 

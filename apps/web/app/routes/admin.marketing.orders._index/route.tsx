@@ -146,7 +146,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // default to edge-form so offline orders never appear on this page.
     // Exception: System (unattributed) orders include imports (offline), so skip
     // the edge-form default when viewing unattributed orders.
-    orderSource: orderSource ?? (mediaBuyerId === '__system__' ? undefined : 'edge-form'),
+    // Include imported orders alongside edge-form orders. Imports with a real
+    // mediaBuyerId belong in the Marketing funnel. System (unattributed) view
+    // drops the source filter entirely to catch all null-MB orders.
+    orderSource: orderSource ?? (mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import'),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 

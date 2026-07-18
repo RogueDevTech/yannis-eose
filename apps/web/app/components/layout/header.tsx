@@ -240,21 +240,26 @@ export function Header({
     return allMobileBranchIds;
   }, [mobileHasMultipleGroups, mobileActiveGroups, branches, allMobileBranchIds]);
   const defaultMobileBranchIdsKey = defaultMobileBranchIds.join(',');
+  // When currentBranchId is set the user explicitly selected ONE branch.
+  // The session still carries selectedBranchIds (full company set) for
+  // backend company-wide queries, but the UI should reflect the single
+  // branch, not the company boundary.
+  const mobileUiSelectedIds = currentBranchId ? null : selectedBranchIds;
   const [mobileChecked, setMobileChecked] = useState<Set<string>>(() => {
-    if (selectedBranchIds && selectedBranchIds.length > 0) return new Set(selectedBranchIds);
+    if (mobileUiSelectedIds && mobileUiSelectedIds.length > 0) return new Set(mobileUiSelectedIds);
     if (currentBranchId) return new Set([currentBranchId]);
     return new Set(defaultMobileBranchIds);
   });
   // Sync on external session changes.
   useEffect(() => {
-    if (selectedBranchIds && selectedBranchIds.length > 0) {
-      setMobileChecked(new Set(selectedBranchIds));
+    if (mobileUiSelectedIds && mobileUiSelectedIds.length > 0) {
+      setMobileChecked(new Set(mobileUiSelectedIds));
     } else if (currentBranchId) {
       setMobileChecked(new Set([currentBranchId]));
     } else {
       setMobileChecked(new Set(defaultMobileBranchIdsKey.split(',').filter(Boolean)));
     }
-  }, [currentBranchId, selectedBranchIds, defaultMobileBranchIdsKey]);
+  }, [currentBranchId, mobileUiSelectedIds, defaultMobileBranchIdsKey]);
 
   // Collapse all groups when mobile menu opens
   useEffect(() => {
@@ -1086,6 +1091,12 @@ function HeaderBranchSwitcher({
   // to prevent cross-company data mixing.
   const hasMultipleGroups = (activeGroups?.length ?? 0) > 1 || derivedGroups.length > 1;
 
+  // When currentBranchId is set the user explicitly selected ONE branch.
+  // The session still carries selectedBranchIds (full company set) for
+  // backend company-wide queries, but the UI should reflect the single
+  // branch, not the company boundary.
+  const uiSelectedIds = currentBranchId ? null : initialSelectedBranchIds;
+
   // Multi-select state: checked branch IDs within the open dropdown.
   // Initialised from session state; defaults to all visible branches checked.
   const allBranchIds = useMemo(() => visibleBranches.filter((b) => !b.readOnly).map((b) => b.id), [visibleBranches]);
@@ -1100,10 +1111,10 @@ function HeaderBranchSwitcher({
   }, [hasMultipleGroups, activeGroups, visibleBranches, allBranchIds]);
   // Stable string key so the sync effect only fires when IDs actually change.
   const defaultBranchIdsKey = defaultBranchIds.join(',');
-  const selectedIdsKey = initialSelectedBranchIds?.join(',') ?? '';
+  const uiSelectedIdsKey = uiSelectedIds?.join(',') ?? '';
   const [checked, setChecked] = useState<Set<string>>(() => {
-    if (initialSelectedBranchIds && initialSelectedBranchIds.length > 0) {
-      return new Set(initialSelectedBranchIds);
+    if (uiSelectedIds && uiSelectedIds.length > 0) {
+      return new Set(uiSelectedIds);
     }
     if (currentBranchId) return new Set([currentBranchId]);
     return new Set(defaultBranchIds);
@@ -1111,15 +1122,15 @@ function HeaderBranchSwitcher({
 
   // Sync when session changes externally (e.g. mirror mode, other tab)
   useEffect(() => {
-    if (selectedIdsKey) {
-      setChecked(new Set(selectedIdsKey.split(',')));
+    if (uiSelectedIdsKey) {
+      setChecked(new Set(uiSelectedIdsKey.split(',')));
     } else if (currentBranchId) {
       setChecked(new Set([currentBranchId]));
     } else {
       setChecked(new Set(defaultBranchIdsKey.split(',').filter(Boolean)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBranchId, selectedIdsKey, defaultBranchIdsKey]);
+  }, [currentBranchId, uiSelectedIdsKey, defaultBranchIdsKey]);
 
   // Collapse all groups when the dropdown opens
   useEffect(() => {
@@ -1218,10 +1229,10 @@ function HeaderBranchSwitcher({
   // exceeds what the user can actually see (the session may contain group-wide IDs
   // that include branches the user isn't assigned to).
   const visibleSelectedIds = useMemo(() => {
-    if (!initialSelectedBranchIds?.length) return [];
+    if (!uiSelectedIds?.length) return [];
     const visibleSet = new Set(visibleBranches.map((b) => b.id));
-    return initialSelectedBranchIds.filter((id) => visibleSet.has(id));
-  }, [initialSelectedBranchIds, visibleBranches]);
+    return uiSelectedIds.filter((id) => visibleSet.has(id));
+  }, [uiSelectedIds, visibleBranches]);
   const allVisibleSelected = visibleSelectedIds.length > 0 && visibleSelectedIds.length === visibleBranches.length;
   const isAllBranches = canSeeAllBranches && !currentBranchId && (visibleSelectedIds.length === 0 || allVisibleSelected);
   const isMultiBranch = visibleSelectedIds.length > 1;

@@ -26,6 +26,8 @@ export interface User {
   payoutBankCode?: string | null;
   /** "Is supervisor anywhere" — drives the Supervisor badge in user lists. */
   isTeamSupervisor?: boolean;
+  /** Sequential user number for human-friendly reference (USR-1, USR-42). */
+  userNumber?: number | null;
 }
 
 export const ROLE_COLORS: Record<string, string> = {
