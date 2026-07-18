@@ -84,6 +84,19 @@ export class LogisticsService {
 
   async createProvider(input: CreateProviderInput, actorId: string, groupId?: string | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
+      // Block duplicate names within the same company group
+      const groupCondition = groupId
+        ? or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!
+        : isNull(schema.logisticsProviders.groupId);
+      const [existing] = await tx
+        .select({ id: schema.logisticsProviders.id })
+        .from(schema.logisticsProviders)
+        .where(and(ilike(schema.logisticsProviders.name, input.name), groupCondition))
+        .limit(1);
+      if (existing) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'A logistics company with this name already exists' });
+      }
+
       const rows = await tx
         .insert(schema.logisticsProviders)
         .values({
@@ -159,17 +172,9 @@ export class LogisticsService {
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
     }
-    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
-      conditions.push(
-        sql`${schema.logisticsProviders.id} IN (
-          SELECT ll.provider_id FROM logistics_locations ll
-          WHERE ll.branch_id IN (${sql.join(effectiveBranchIds.map(id => sql`${id}`), sql`, `)})
-             OR ll.branch_id IS NULL
-        )`,
-      );
-    } else if (effectiveBranchIds && effectiveBranchIds.length === 0) {
-      conditions.push(sql`false`);
-    }
+    // Providers are company-wide data — groupId already isolates by company.
+    // No branch-level filtering needed here; locations have branch scope,
+    // but the provider list itself should show all providers in the company.
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
