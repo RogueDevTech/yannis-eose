@@ -5075,9 +5075,10 @@ export class MarketingService {
       ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
       // CS/servicing: include all sources (offline etc.) but exclude graduated
       // follow-up and cart-graduated orders — those have their own dashboard strips.
+      // Also excludes delivered_follow_up copies (is_follow_up=false, order_source='delivered_follow_up').
       ...(isServicingScope ? [
         eq(schema.orders.isFollowUp, false),
-        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`,
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up'))`,
       ] : []),
     ];
     appendMetricsOrderScope(orderConditions);
@@ -5097,7 +5098,7 @@ export class MarketingService {
       ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
       ...(isServicingScope ? [
         eq(schema.orders.isFollowUp, false),
-        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`,
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up'))`,
       ] : []),
     ];
     appendMetricsOrderScope(deliveredConditions);
@@ -5127,7 +5128,7 @@ export class MarketingService {
       ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
       ...(isServicingScope ? [
         eq(schema.orders.isFollowUp, false),
-        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} != 'online')`,
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up'))`,
       ] : []),
     ];
     appendMetricsOrderScope(confirmedConditions);

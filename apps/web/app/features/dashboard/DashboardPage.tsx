@@ -11,12 +11,14 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { FormSelect } from '~/components/ui/form-select';
+import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel } from '~/lib/rbac';
 import {
   DashboardCartOrdersSection,
+  DashboardDeliveredFollowUpSection,
   DashboardFollowUpSection,
   DashboardHRSection,
   DashboardMetricsSection,
@@ -397,6 +399,7 @@ function CSDashboard({
 
         <FollowUpDashboardStrip showUnassigned={false} filters={dateFilters} />
         <CartOrdersDashboardStrip showUnassigned={false} filters={dateFilters} />
+        <DeliveredFollowUpDashboardStrip filters={dateFilters} />
 
         <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={{}} offlineCount={0} />
 
@@ -434,7 +437,7 @@ function CSDashboard({
           const offConfirmed = (offSc['CONFIRMED'] ?? 0) + (offSc['AGENT_ASSIGNED'] ?? 0) + (offSc['DISPATCHED'] ?? 0) + (offSc['IN_TRANSIT'] ?? 0);
           const funnelTotal = metrics.totalOrders - offTotal;
           const funnelDelivered = metrics.deliveredOrders - offDelivered;
-          const funnelConfirmed = metrics.confirmedOrders - offConfirmed - offDelivered;
+          const funnelConfirmed = metrics.confirmedOrders - metrics.deliveredOrders - offConfirmed;
           return (
           <div>
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Funnel Orders</h2>
@@ -510,6 +513,7 @@ function CSDashboard({
 
       <FollowUpDashboardStrip filters={dateFilters} />
       <CartOrdersDashboardStrip filters={dateFilters} />
+      <DeliveredFollowUpDashboardStrip filters={dateFilters} />
 
       {showsTeamManagementCard && (
         <div className="card">
@@ -1362,7 +1366,67 @@ function CartOrdersDashboardStrip({ showUnassigned = true, filters }: { showUnas
   );
 }
 
+// ── Delivered Follow-Up stat strip ─────────────────────────────
+function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
+  return (
+    <DashboardDeliveredFollowUpSection fallback={<OverviewStatStripSkeleton count={5} />}>
+      {(sc) => {
+        const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+        if (total === 0) return null;
+        const unassigned = sc['UNPROCESSED'] ?? 0;
+        const assigned = sc['CS_ASSIGNED'] ?? 0;
+        const engaged = sc['CS_ENGAGED'] ?? 0;
+        const confirmed =
+          (sc['CONFIRMED'] ?? 0) +
+          (sc['AGENT_ASSIGNED'] ?? 0) +
+          (sc['DISPATCHED'] ?? 0) +
+          (sc['IN_TRANSIT'] ?? 0);
+        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const cr = total > 0 ? ((confirmed + delivered) / total) * 100 : 0;
+        const dr = total > 0 ? (delivered / total) * 100 : 0;
+        return (
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+              Delivered Follow-Up
+            </h2>
+            <OverviewStatStrip
+              mobileGrid
+              tileClassName="min-w-[6rem]"
+              items={[
+                { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+                { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
+                { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400' },
+                { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+                { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: 'CR', value: `${cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(cr) },
+                { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
+              ]}
+            />
+          </div>
+        );
+      }}
+    </DashboardDeliveredFollowUpSection>
+  );
+}
+
 // ── Total Orders — combined strip across all pipelines ──────
+function TotalOrdersInfoIcon({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors"
+      aria-label="View breakdown"
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="10" />
+        <path strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+      </svg>
+    </button>
+  );
+}
+
 function TotalOrdersStrip({
   orderCounts,
   offlineStatusCounts,
@@ -1372,6 +1436,7 @@ function TotalOrdersStrip({
   offlineStatusCounts: Record<string, number>;
   offlineCount: number;
 }) {
+  const [breakdownModal, setBreakdownModal] = useState<'total' | 'delivered' | null>(null);
   const { bundle } = useDashboardSecondary();
   const fuSc = bundle?.followUpCounts ?? {};
   const cartSc = bundle?.cartOrdersCounts ?? {};
@@ -1401,6 +1466,23 @@ function TotalOrdersStrip({
   const cr = total > 0 ? (confirmedAndBeyond / total) * 100 : 0;
   const dr = total > 0 ? (delivered / total) * 100 : 0;
 
+  // Per-category breakdown
+  const sumExcludeDeleted = (sc: Record<string, number>) =>
+    Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
+  const funnelSc: Record<string, number> = {};
+  for (const k of Object.keys(orderCounts)) {
+    funnelSc[k] = (orderCounts[k] ?? 0) - (offSc[k] ?? 0);
+  }
+  const catFunnel = sumExcludeDeleted(funnelSc);
+  const catOffline = sumExcludeDeleted(offSc);
+  const catFollowUp = sumExcludeDeleted(fuSc);
+  const catCart = sumExcludeDeleted(cartSc);
+
+  const delFunnel = (funnelSc['DELIVERED'] ?? 0) + (funnelSc['REMITTED'] ?? 0);
+  const delOffline = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+  const delFollowUp = (fuSc['DELIVERED'] ?? 0) + (fuSc['REMITTED'] ?? 0);
+  const delCart = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
+
   return (
     <div>
       <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Total Orders</h2>
@@ -1408,17 +1490,61 @@ function TotalOrdersStrip({
         mobileGrid
         tileClassName="min-w-[6rem]"
         items={[
-          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+          {
+            label: <span className="flex items-center">Total<TotalOrdersInfoIcon onClick={() => setBreakdownModal('total')} /></span>,
+            value: total,
+            valueClassName: 'text-app-fg',
+          },
           { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
           { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400' },
           { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
           { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400' },
+          {
+            label: <span className="flex items-center">Delivered<TotalOrdersInfoIcon onClick={() => setBreakdownModal('delivered')} /></span>,
+            value: delivered,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
           { label: 'CR', value: `${cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(cr) },
           { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
           { label: 'Deleted', value: deleted, valueClassName: 'text-danger-600 dark:text-danger-400' },
         ]}
       />
+      <Modal open={breakdownModal === 'total'} onClose={() => setBreakdownModal(null)} maxWidth="max-w-sm" contentClassName="p-5">
+        <h2 className="text-base font-semibold text-app-fg mb-1">Total Orders: Breakdown</h2>
+        <p className="text-sm text-app-fg-muted mb-4">Combined total across all order pipelines.</p>
+        <div className="space-y-0.5">
+          {[
+            { label: 'Funnel (marketing forms)', value: catFunnel },
+            { label: 'Offline (manually created)', value: catOffline },
+            { label: 'Follow-up', value: catFollowUp },
+            { label: 'Cart (recovered)', value: catCart },
+            { label: 'Total', value: total, bold: true },
+          ].map((l, i) => (
+            <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}>
+              <span className="text-sm text-app-fg">{l.label}</span>
+              <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      </Modal>
+      <Modal open={breakdownModal === 'delivered'} onClose={() => setBreakdownModal(null)} maxWidth="max-w-sm" contentClassName="p-5">
+        <h2 className="text-base font-semibold text-app-fg mb-1">Total Delivered: Breakdown</h2>
+        <p className="text-sm text-app-fg-muted mb-4">Delivered orders across all pipelines.</p>
+        <div className="space-y-0.5">
+          {[
+            { label: 'Funnel (marketing forms)', value: delFunnel },
+            { label: 'Offline (manually created)', value: delOffline },
+            { label: 'Follow-up', value: delFollowUp },
+            { label: 'Cart (recovered)', value: delCart },
+            { label: 'Total Delivered', value: delivered, bold: true },
+          ].map((l, i) => (
+            <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}>
+              <span className="text-sm text-app-fg">{l.label}</span>
+              <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }

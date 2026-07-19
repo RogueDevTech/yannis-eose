@@ -62,6 +62,7 @@ export function DashboardSecondaryProvider({
           abandonedCartCount: d.abandonedCartCount ?? 0,
           followUpCounts: d.followUpCounts,
           cartOrdersCounts: d.cartOrdersCounts,
+          deliveredFollowUpCounts: d.deliveredFollowUpCounts,
         },
         retry,
       };
@@ -240,4 +241,25 @@ export function DashboardCartOrdersSection({
   }
   if (loading || !bundle || !bundle.cartOrdersCounts) return <>{fallback}</>;
   return <>{children(bundle.cartOrdersCounts)}</>;
+}
+
+export function DashboardDeliveredFollowUpSection({
+  fallback,
+  children,
+}: {
+  fallback: React.ReactNode;
+  children: (counts: Record<string, number>) => React.ReactNode;
+}) {
+  const { loading, error, bundle, retry } = useDashboardSecondary();
+  if (error) {
+    return (
+      <InlineNotification
+        variant="danger"
+        message={error}
+        actions={[{ label: 'Retry', onClick: retry }]}
+      />
+    );
+  }
+  if (loading || !bundle || !bundle.deliveredFollowUpCounts) return <>{fallback}</>;
+  return <>{children(bundle.deliveredFollowUpCounts)}</>;
 }

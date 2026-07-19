@@ -542,6 +542,17 @@ export class AuthService {
     };
 
     await this.sessionStore.updateSession(sessionToken, mirroredSession, this.sessionTtl);
+    // Flush the per-viewer branches list cache so the mirrored session gets
+    // the target user's actual branch memberships instead of a stale entry
+    // from a previous session (15-min TTL). Uses SCAN to avoid blocking Redis.
+    try {
+      let cursor = '0';
+      do {
+        const [next, keys] = await this.redis.scan(cursor, 'MATCH', 'cache:branches:list:*', 'COUNT', 100);
+        cursor = next;
+        if (keys.length > 0) await this.redis.del(...keys);
+      } while (cursor !== '0');
+    } catch { /* fail-open */ }
     this.logger.log(`mirror_started actor=${actor.id} target=${target.id} session=${mirrorSessionId}`);
     return mirroredSession;
   }

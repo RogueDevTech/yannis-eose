@@ -116,6 +116,8 @@ export type MarketingOrdersSecondaryPayload = {
   abandonedCartCount: number;
   offlineCount: number;
   duplicateCount: number;
+  /** Status counts for cart-graduated orders (orderSource='online') — separate strip. */
+  cartStatusCounts?: Record<string, number>;
 };
 
 interface MarketingOrdersPageProps {
@@ -171,6 +173,7 @@ interface MarketingOrdersPageProps {
    */
   deferredLoading?: boolean;
 }
+
 
 export function MarketingOrdersPage({
   orders,
@@ -242,6 +245,7 @@ export function MarketingOrdersPage({
           : statusFilter || 'ALL',
   );
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [myTeamTab, setMyTeamTab] = useState<'personal' | 'team'>(
     activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team',
   );
@@ -860,9 +864,15 @@ export function MarketingOrdersPage({
             // counts so all filter options are reachable.
             const statusCounts = activeSecondary.statusCounts ?? ins.statusCounts;
             const statusTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
+            // Cart-graduated orders (orderSource='online') from separate query
+            const cartSc = activeSecondary.cartStatusCounts ?? {};
+            const cartGraduatedTotal = Object.entries(cartSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
+            const cartGraduatedDelivered = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
+            // Grand total includes both funnel + cart graduated
+            const grandTotal = statusTotal + cartGraduatedTotal;
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
-            const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+            const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0) + cartGraduatedDelivered;
             // Confirmed tile = narrow bucket (excluding delivered) so tiles tally to total
             const confirmedCount =
               (statusCounts['CONFIRMED'] ?? 0) +
@@ -899,8 +909,22 @@ export function MarketingOrdersPage({
                   loading={deferredLoading}
                   items={[
                     {
-                      label: 'Total Orders',
-                      value: statusTotal,
+                      label: (
+                        <span className="inline-flex items-center gap-1">
+                          Total
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setBreakdownOpen(true); }}
+                            className="text-app-fg-muted hover:text-app-fg transition-colors"
+                            title="View order breakdown"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                            </svg>
+                          </button>
+                        </span>
+                      ),
+                      value: grandTotal,
                       valueClassName: 'text-app-fg',
                       active: selectedStatus === 'ALL',
                       onClick: () => handleStatusChange('ALL'),
@@ -941,8 +965,8 @@ export function MarketingOrdersPage({
                       onClick: () => handleStatusChange('DELIVERED'),
                     },
                     ...(() => {
-                      const cr = statusTotal > 0 ? (confirmedOrBeyond / statusTotal) * 100 : 0;
-                      const dr = statusTotal > 0 ? (deliveredCount / statusTotal) * 100 : 0;
+                      const cr = grandTotal > 0 ? (confirmedOrBeyond / grandTotal) * 100 : 0;
+                      const dr = grandTotal > 0 ? (deliveredCount / grandTotal) * 100 : 0;
                       return [
                         {
                           label: 'CR',
@@ -965,7 +989,7 @@ export function MarketingOrdersPage({
                         activeSecondary.abandonedCartCount > 0
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-app-fg',
-                      title: 'Total abandoned carts — tap to see recovery status',
+                      title: 'Abandoned marketing forms',
                       active: selectedStatus === FROM_CART_STATUS_VALUE,
                       ...(enableFromCartStatusOption
                         ? { onClick: () => handleStatusChange(FROM_CART_STATUS_VALUE) }
@@ -1348,6 +1372,34 @@ export function MarketingOrdersPage({
             </div>
           );
         })()}
+      </Modal>
+      {/* Order breakdown modal */}
+      <Modal open={breakdownOpen} onClose={() => setBreakdownOpen(false)} maxWidth="max-w-xs">
+        <div className="p-5 space-y-3">
+          <h3 className="text-base font-semibold text-app-fg">Order Breakdown</h3>
+          {(() => {
+            const cartSc = secondary.cartStatusCounts ?? {};
+            const cartGrad = Object.entries(cartSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
+            const funnelTotal = Object.entries(secondary.statusCounts ?? {}).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
+            const cartDelivered = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
+            return (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Funnel orders</span>
+                  <span className="font-semibold text-app-fg">{funnelTotal.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Delivered cart orders</span>
+                  <span className="font-semibold text-app-fg">{cartGrad.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between pt-2 border-t border-app-border">
+                  <span className="font-semibold text-app-fg">Total</span>
+                  <span className="font-bold text-app-fg">{(funnelTotal + cartGrad).toLocaleString()}</span>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
       </Modal>
     </div>
   );

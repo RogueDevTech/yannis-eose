@@ -266,12 +266,24 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const catCart = sumExcludeDeleted(cartSc);
         const catDfu = sumExcludeDeleted(dfuSc);
 
-        // Per-category delivered for breakdown
+        // Per-category delivered for breakdown — derived from per-table sources
+        // so the breakdown lines always add up to the displayed total.
         const delFunnel = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
         const delOffline = sumStatus(offSc, 'DELIVERED', 'REMITTED');
         const delFollowUp = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
         const delCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
         const delDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
+
+        // Compute totals from breakdown lines so they always tally.
+        // Total = funnel full pipeline + offline/followup/cart/dfu delivered only.
+        const brkOffline = delOffline;
+        const brkFollowUp = delFollowUp;
+        const brkCart = delCart;
+        const brkDfu = delDfu;
+        const computedTotal = catFunnel + brkOffline + brkFollowUp + brkCart + brkDfu;
+        const computedDelivered = delFunnel + delOffline + delFollowUp + delCart + delDfu;
+        const computedCR = computedTotal > 0 ? ((tConfirmed + computedDelivered) / computedTotal) * 100 : 0;
+        const computedDR = computedTotal > 0 ? (computedDelivered / computedTotal) * 100 : 0;
 
         return (
           <div>
@@ -284,7 +296,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               items={[
                 {
                   label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('totalBreakdown')} /></span>,
-                  value: tTotal,
+                  value: computedTotal,
                   valueClassName: 'text-app-fg',
                 },
                 { label: 'Unassigned', value: tUnprocessed, valueClassName: 'text-warning-600 dark:text-warning-400' },
@@ -293,11 +305,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
                 {
                   label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>,
-                  value: tDelivered,
+                  value: computedDelivered,
                   valueClassName: 'text-success-600 dark:text-success-400',
                 },
-                { label: 'CR', value: `${tCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(tCR) },
-                { label: 'DR', value: `${tDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(tDR) },
+                { label: 'CR', value: `${computedCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(computedCR) },
+                { label: 'DR', value: `${computedDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(computedDR) },
                 { label: 'Deleted', value: tDeleted, valueClassName: 'text-danger-600 dark:text-danger-400' },
               ]}
             />
@@ -305,15 +317,21 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalBreakdown'}
               onClose={() => setBreakdownModal(null)}
               title="Total Orders: Breakdown"
-              description="Funnel and Offline show full pipeline. Follow-up, Cart, and Delivered follow-up only count delivered orders toward the total."
-              lines={[
-                { label: 'Funnel (marketing forms)', value: catFunnel },
-                { label: 'Offline (manually created)', value: catOffline },
-                { label: 'Follow-up (delivered only)', value: sumStatus(followUpSc, 'DELIVERED', 'REMITTED'), muted: true },
-                { label: 'Cart (delivered only)', value: sumStatus(cartSc, 'DELIVERED', 'REMITTED'), muted: true },
-                { label: 'Delivered follow-up (delivered only)', value: sumStatus(dfuSc, 'DELIVERED', 'REMITTED'), muted: true },
-                { label: 'Total', value: tTotal, bold: true },
-              ]}
+              description="Funnel shows full pipeline. All other categories count delivered orders only toward the total."
+              lines={(() => {
+                const brkOffline = sumStatus(offSc, 'DELIVERED', 'REMITTED');
+                const brkFollowUp = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
+                const brkCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
+                const brkDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
+                return [
+                  { label: 'Funnel (marketing forms)', value: catFunnel },
+                  { label: 'Offline (delivered only)', value: brkOffline, muted: true },
+                  { label: 'Follow-up (delivered only)', value: brkFollowUp, muted: true },
+                  { label: 'Cart (delivered only)', value: brkCart, muted: true },
+                  { label: 'Delivered follow-up (delivered only)', value: brkDfu, muted: true },
+                  { label: 'Total', value: catFunnel + brkOffline + brkFollowUp + brkCart + brkDfu, bold: true },
+                ];
+              })()}
             />
             <FunnelBreakdownModal
               open={breakdownModal === 'totalDelivered'}
@@ -326,7 +344,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Follow-up', value: delFollowUp },
                 { label: 'Cart (recovered)', value: delCart },
                 { label: 'Delivered follow-up', value: delDfu },
-                { label: 'Total Delivered', value: tDelivered, bold: true },
+                { label: 'Total Delivered', value: delFunnel + delOffline + delFollowUp + delCart + delDfu, bold: true },
               ]}
             />
           </div>
@@ -355,7 +373,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           <div className="space-y-4">
             <div>
               <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-                Marketing Order Funnel
+                Order Funnel
               </h2>
               <OverviewStatStrip
                 mobileGrid

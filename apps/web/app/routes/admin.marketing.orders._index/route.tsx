@@ -38,6 +38,7 @@ const EMPTY_SECONDARY: MarketingOrdersSecondaryPayload = {
   abandonedCartCount: 0,
   offlineCount: 0,
   duplicateCount: 0,
+  cartStatusCounts: {},
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -333,6 +334,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 abandonedCartCount: number;
                 offlineCount: number;
                 duplicateCount: number;
+                cartStatusCounts?: Record<string, number>;
               };
             };
           })?.result?.data
@@ -374,6 +376,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         abandonedCartCount: data?.abandonedCartCount ?? 0,
         offlineCount: data?.offlineCount ?? 0,
         duplicateCount: data?.duplicateCount ?? 0,
+        cartStatusCounts: data?.cartStatusCounts ?? {},
       };
     } catch (err) {
       console.error('[marketing.ordersPageBundle] Secondary bundle failed:', err instanceof Error ? err.message : err);
@@ -390,6 +393,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         abandonedCartCount: 0,
         offlineCount: 0,
         duplicateCount: 0,
+        cartStatusCounts: {},
       };
     }
   })();
@@ -426,6 +430,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                     abandonedCartCount: number;
                     offlineCount: number;
                     duplicateCount: number;
+                    cartStatusCounts?: Record<string, number>;
                   };
                 };
               })?.result?.data
@@ -444,6 +449,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             abandonedCartCount: data?.abandonedCartCount ?? 0,
             offlineCount: data?.offlineCount ?? 0,
             duplicateCount: data?.duplicateCount ?? 0,
+            cartStatusCounts: data?.cartStatusCounts ?? {},
           };
         } catch {
           return null;

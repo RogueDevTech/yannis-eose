@@ -4268,8 +4268,10 @@ export class OrdersService {
 
     // Follow-up / cart-graduated isolation.
     if (listOpts?.excludeGraduated) {
-      // Exclude graduated follow-up orders (is_follow_up=true).
+      // Exclude graduated follow-up orders (is_follow_up=true) and delivered
+      // follow-up copies (order_source='delivered_follow_up', is_follow_up=false).
       conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
       if (listOpts.excludeCartGraduated) {
         // Also exclude cart-graduated orders (order_source='online').
         // CS funnel passes this — cart orders have their own strip.
@@ -6490,6 +6492,47 @@ export class OrdersService {
 
   /**
    * Get order counts by status — for dashboard stats.
+   * Status counts using the SAME orderSource filter as orders.list.
+   * Ensures the stat strip always matches the table.
+   */
+  async getStatusCountsByOrderSource(opts: {
+    mediaBuyerId?: string; startDate?: string; endDate?: string;
+    assignedCsId?: string; branchId?: string | null;
+    supervisorScope?: OrdersAggregateSupervisorScope;
+    branchScope?: 'servicing' | 'marketing';
+    effectiveBranchIds?: string[] | null;
+    orderSource?: string; teamMemberIds?: string[];
+  }): Promise<Record<string, number>> {
+    const conditions: Parameters<typeof and>[0][] = [
+      sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
+    ];
+    if (opts.orderSource === 'edge-form') {
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
+    } else if (opts.orderSource === 'edge-form-and-import') {
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.orderSource} = 'import')`);
+    } else if (opts.orderSource === 'offline_and_import') {
+      conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
+    } else if (opts.orderSource) {
+      conditions.push(eq(schema.orders.orderSource, opts.orderSource));
+    }
+    appendOrdersAggregateScopeConditions(conditions, {
+      mediaBuyerId: opts.mediaBuyerId, assignedCsId: opts.assignedCsId,
+      supervisorScope: opts.supervisorScope, teamMemberIds: opts.teamMemberIds,
+    });
+    const bCond = this.orderBranchScopeCondition(opts.branchId, opts.branchScope ?? 'servicing', opts.effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+    if (opts.startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(opts.startDate)));
+    if (opts.endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(opts.endDate)));
+    const results = await this.db
+      .select({ status: schema.orders.status, count: count() })
+      .from(schema.orders).where(and(...conditions)).groupBy(schema.orders.status);
+    const counts: Record<string, number> = {};
+    for (const row of results) counts[row.status] = row.count;
+    if (counts['CANCELLED']) { counts['DELETED'] = (counts['DELETED'] ?? 0) + counts['CANCELLED']; delete counts['CANCELLED']; }
+    return counts;
+  }
+
+  /**
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
    * Optional assignedCsId filters to that Sales closer's orders (for Sales Orders page).
    * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
@@ -6551,8 +6594,10 @@ export class OrdersService {
         )`,
       );
     } else if (excludeGraduated) {
-      // Exclude graduated follow-up orders (is_follow_up=true).
+      // Exclude graduated follow-up orders (is_follow_up=true) and delivered
+      // follow-up copies (order_source='delivered_follow_up', is_follow_up=false).
       conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
       if (excludeCartGraduated) {
         // Exclude cart-graduated orders — CS funnel; cart orders have their own strip.
         // Primary: order_source='online' (stamped since cart graduation was added).

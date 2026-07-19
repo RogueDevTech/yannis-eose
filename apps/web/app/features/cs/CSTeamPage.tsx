@@ -68,6 +68,8 @@ export interface CSTeamPageProps {
     cart: number;
     deliveredFollowUp: number;
   };
+  /** Total orders from the main orders table (onlyGraduateNonMarketing logic). */
+  totalOrdersFromMainTable?: number;
   /** Status counts from the follow_up_orders table (separate from main orders). */
   followUpTableCounts?: Record<string, number>;
   /** Status counts from the cart_orders table (separate from main orders). */
@@ -447,6 +449,7 @@ export function CSTeamPage({
   offlineCount = 0,
   categories = [],
   categoryCounts = { funnel: 0, offline: 0, followUp: 0, cart: 0, deliveredFollowUp: 0 },
+  totalOrdersFromMainTable = 0,
   followUpTableCounts = {},
   cartTableCounts = {},
 }: CSTeamPageProps) {
@@ -836,8 +839,10 @@ export function CSTeamPage({
           Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
         const fuTableTotal = sumTableCounts(followUpTableCounts);
         const cartTableTotal = sumTableCounts(cartTableCounts);
-        // Grand total = main orders table (from leaderboard) + separate tables
-        const grandTotal = summary.engagedTotal + fuTableTotal + cartTableTotal;
+        // Grand total = main orders table (onlyGraduateNonMarketing) + separate tables.
+        // This matches the Dashboard's TotalOrdersStrip logic: marketing orders at all
+        // statuses, non-marketing (offline, follow-up, cart graduated) only at DELIVERED/REMITTED.
+        const grandTotal = totalOrdersFromMainTable + fuTableTotal + cartTableTotal;
 
         return (
         <div className="space-y-2">

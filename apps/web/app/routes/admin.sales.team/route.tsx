@@ -122,6 +122,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       inactiveAgents: InactiveAgent[];
       offlineCount: number;
       categoryCounts: CategoryCounts;
+      totalOrdersFromMainTable?: number;
       followUpCounts?: Record<string, number>;
       cartCounts?: Record<string, number>;
     };
@@ -271,6 +272,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       offlineCount: bundle?.offlineCount ?? 0,
       categories: categoriesSync,
       categoryCounts: bundle?.categoryCounts ?? { funnel: 0, offline: 0, followUp: 0, cart: 0, deliveredFollowUp: 0 },
+      totalOrdersFromMainTable: bundle?.totalOrdersFromMainTable ?? 0,
       followUpTableCounts: bundle?.followUpCounts ?? {},
       cartTableCounts: bundle?.cartCounts ?? {},
     };
@@ -305,6 +307,7 @@ export default function CSTeamRoute() {
             offlineCount={data.offlineCount}
             categories={data.categories}
             categoryCounts={data.categoryCounts}
+            totalOrdersFromMainTable={data.totalOrdersFromMainTable}
             followUpTableCounts={data.followUpTableCounts}
             cartTableCounts={data.cartTableCounts}
           />

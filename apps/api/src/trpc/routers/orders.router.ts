@@ -1071,7 +1071,7 @@ export const ordersRouter = router({
            *  graduated deliveries remain visible for remittance. */
           excludeGraduated: z.boolean().optional(),
           /** Filter counts to a specific order source. */
-          orderSource: z.enum(['offline', 'edge-form', 'offline_and_import', 'import', 'edge-form-and-import']).optional(),
+          orderSource: z.enum(['offline', 'edge-form', 'offline_and_import', 'import', 'edge-form-and-import', 'delivered_follow_up']).optional(),
           /** When set, scope to orders assigned to members of this team. */
           teamId: z.string().uuid().optional(),
         })
@@ -1108,7 +1108,10 @@ export const ordersRouter = router({
       // CS funnel (servicing scope) also excludes cart-graduated orders —
       // they have their own Cart Orders strip. Marketing keeps them (MB credit).
       const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
-      const onlyOffline = input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true : undefined;
+      const onlyOffline: boolean | string | undefined =
+        input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true
+        : input?.orderSource === 'delivered_follow_up' ? 'delivered_follow_up'
+        : undefined;
       const excludeOffline: boolean | 'include-imports' | undefined =
         input?.orderSource === 'edge-form' ? true
         : input?.orderSource === 'edge-form-and-import' ? 'include-imports'
@@ -1513,7 +1516,7 @@ export const ordersRouter = router({
           // only contribute their DELIVERED/REMITTED counts.
           input.orderSource ? true : undefined, // excludeGraduated — only for sub-funnels
           input.orderSource ? (bundleBranchScope === 'servicing') : undefined, // excludeCartGraduated — only for sub-funnels
-          input.orderSource === 'offline' ? true : input.orderSource === 'delivered_follow_up' ? 'delivered_follow_up' : undefined, // onlyOffline
+          input.orderSource === 'offline' || input.orderSource === 'offline_and_import' ? true : input.orderSource === 'delivered_follow_up' ? 'delivered_follow_up' : undefined, // onlyOffline
           undefined, // servicingBranchId
           bundleTeamMemberIds, // teamMemberIds
           !input.orderSource ? true : undefined, // onlyGraduateNonMarketing — Total strip only
@@ -1683,7 +1686,7 @@ export const ordersRouter = router({
         effEnd = `${y}-${m}-${d}`;
       }
 
-      const [team, workloads, leaderboard, inactiveAgents, supplementary, categoryCounts, followUpCounts, cartCounts] = await Promise.all([
+      const [team, workloads, leaderboard, inactiveAgents, supplementary, funnelStatusCounts, offlineStatusCounts, totalOrdersStatusCounts, deliveredFollowUpStatusCounts, followUpCounts, cartCounts] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
         getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats),
         getOrdersService().getCSCloserLeaderboard(
@@ -1705,7 +1708,27 @@ export const ordersRouter = router({
           'servicing',
           ctx.effectiveBranchIds,
         ),
-        getOrdersService().getCategoryBreakdown(effStart, effEnd, branchId, ctx.effectiveBranchIds),
+        // Funnel: excludes offline, graduated follow-ups, and cart-graduated orders.
+        // Matches Dashboard csStatusCounts (line 92 of dashboard.router.ts).
+        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, 'include-imports', true, true),
+        // Offline orders — separate category on stat strip.
+        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, false, false, true),
+        // Total orders: marketing orders at all statuses, non-marketing only at DELIVERED/REMITTED.
+        // Prevents double-counting with follow-up/cart strips from their own tables.
+        getOrdersService().getStatusCounts(
+          undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined,
+          'servicing', ctx.effectiveBranchIds,
+          undefined, // isFollowUp
+          undefined, // excludeOffline
+          undefined, // excludeGraduated
+          undefined, // excludeCartGraduated
+          undefined, // onlyOffline
+          undefined, // servicingBranchId
+          undefined, // teamMemberIds
+          true,      // onlyGraduateNonMarketing
+        ),
+        // Delivered follow-up orders — separate category on stat strip.
+        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, false, false, 'delivered_follow_up'),
         // Follow-up and cart orders live in separate tables — fetch their counts
         // so the overview strip totals match the Dashboard's TotalOrdersStrip.
         getFollowUpConfigService().getFollowUpDashboardCounts({
@@ -1716,6 +1739,24 @@ export const ordersRouter = router({
         }),
         getCartOrdersService().getStatusCounts(branchId, undefined, effStart, effEnd, eIds),
       ]);
+
+      // Derive category counts from status-count maps (same logic as Dashboard's TotalOrdersStrip).
+      // Sum all statuses excluding DELETED/CANCELLED to get each category total.
+      const sumExcludeDeleted = (sc: Record<string, number>) =>
+        Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
+
+      const categoryCounts = {
+        funnel: sumExcludeDeleted(funnelStatusCounts),
+        offline: sumExcludeDeleted(offlineStatusCounts),
+        followUp: 0, // follow-up orders come from separate table (followUpCounts)
+        cart: 0, // cart orders come from separate table (cartCounts)
+        deliveredFollowUp: sumExcludeDeleted(deliveredFollowUpStatusCounts),
+      };
+
+      // Total orders from the main orders table (onlyGraduateNonMarketing).
+      // Follow-up and cart table counts are added client-side.
+      const totalOrdersFromMainTable = sumExcludeDeleted(totalOrdersStatusCounts);
+
       return {
         team,
         workloads,
@@ -1723,6 +1764,7 @@ export const ordersRouter = router({
         inactiveAgents,
         offlineCount: supplementary.offlineCount,
         categoryCounts,
+        totalOrdersFromMainTable,
         followUpCounts,
         cartCounts,
       };

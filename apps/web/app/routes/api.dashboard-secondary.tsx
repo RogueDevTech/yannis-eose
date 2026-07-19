@@ -50,6 +50,8 @@ export type DashboardSecondaryApiPayload = {
   followUpCounts?: Record<string, number>;
   /** Cart order per-status counts for dashboard stat strip. */
   cartOrdersCounts?: Record<string, number>;
+  /** Delivered follow-up order per-status counts for dashboard stat strip. */
+  deliveredFollowUpCounts?: Record<string, number>;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -133,8 +135,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const cartOrdersP = needsCartOrders
       ? apiRequest<unknown>(`/trpc/cartOrders.dashboardCounts?input=${encodeURIComponent(cartOrdersInput)}`, deferredOpt)
       : Promise.resolve(null);
+    const dfuInput = JSON.stringify({ startDate, endDate, orderSource: 'delivered_follow_up' });
+    const dfuP = needsFollowUp
+      ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(dfuInput)}`, deferredOpt)
+      : Promise.resolve(null);
 
-    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount, followUpCounts, cartOrdersCounts] = await Promise.all([
+    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount, followUpCounts, cartOrdersCounts, deliveredFollowUpCounts] = await Promise.all([
       metricsP.then((r) => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics),
       personalMetricsP,
       profitP.then((r) => extractTrpc(r, defaultProfit)).catch(() => defaultProfit),
@@ -175,6 +181,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return d ?? undefined;
         })
         .catch(() => undefined) ?? Promise.resolve(undefined),
+      dfuP
+        ?.then((r) => {
+          if (!r) return undefined;
+          const d = r.ok ? (r.data as { result?: { data?: Record<string, number> } })?.result?.data : null;
+          return d ?? undefined;
+        })
+        .catch(() => undefined) ?? Promise.resolve(undefined),
     ]);
 
     return secondaryCacheJson({
@@ -188,6 +201,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       abandonedCartCount,
       followUpCounts,
       cartOrdersCounts,
+      deliveredFollowUpCounts,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Dashboard secondary load failed';

@@ -509,6 +509,45 @@ export class CartOrdersService {
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
 
+    // Pre-delivery duplicate guard: check BEFORE committing DELIVERED so we
+    // never have a delivered cart order that can't graduate. The same check runs
+    // in graduateToOrders() as a safety net, but this blocks the transition
+    // entirely rather than silently converting to CONVERTED after delivery.
+    if (newStatus === 'DELIVERED' && order.customerPhoneHash) {
+      const coItems = await this.db
+        .select()
+        .from(schema.cartOrderItems)
+        .where(eq(schema.cartOrderItems.cartOrderId, orderId));
+      const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
+      const itemPrices = coItems.map((i) => String(i.unitPrice)).filter(Boolean);
+      if (productIds.length > 0) {
+        const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+        const existing = await this.db
+          .select({ id: schema.orders.id })
+          .from(schema.orders)
+          .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+          .where(
+            and(
+              eq(schema.orders.customerPhoneHash, order.customerPhoneHash),
+              inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.orders.deletedAt),
+              gte(schema.orders.deliveredAt, fourteenDaysAgo),
+              inArray(schema.orderItems.productId, productIds),
+              ...(itemPrices.length > 0
+                ? [sql`${schema.orderItems.unitPrice}::text IN (${sql.join(itemPrices.map(p => sql`${p}`), sql`, `)})`]
+                : []),
+            ),
+          )
+          .limit(1);
+        if (existing[0]) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Cannot mark as delivered: a matching order (${existing[0].id}) already exists with the same customer, product, and amount. This appears to be a duplicate.`,
+          });
+        }
+      }
+    }
+
     const timestampUpdates: Record<string, unknown> = { updatedAt: new Date() };
     if (newStatus === 'CONFIRMED') timestampUpdates.confirmedAt = new Date();
     if (newStatus === 'AGENT_ASSIGNED') timestampUpdates.allocatedAt = new Date();
@@ -626,6 +665,26 @@ export class CartOrdersService {
         await this.graduateToOrders(orderId);
       } catch (err) {
         this.logger.error(`Cart order graduation failed for ${orderId} — will be retried by boot sweep: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    // Cascade delete to graduated order — if a cart order is deleted after
+    // graduation, the graduated order in the orders table must also be
+    // soft-deleted so counts stay consistent across both tables.
+    if (newStatus === 'DELETED' && order.customerPhoneHash) {
+      try {
+        await this.db
+          .update(schema.orders)
+          .set({ status: 'DELETED', deletedAt: new Date() })
+          .where(
+            and(
+              eq(schema.orders.orderSource, 'online'),
+              eq(schema.orders.customerPhoneHash, order.customerPhoneHash),
+              isNull(schema.orders.deletedAt),
+            ),
+          );
+      } catch (err) {
+        this.logger.warn(`Cascade delete to graduated order failed for cart order ${orderId}: ${err instanceof Error ? err.message : err}`);
       }
     }
 

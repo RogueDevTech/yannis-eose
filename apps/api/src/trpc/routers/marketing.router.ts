@@ -1103,6 +1103,7 @@ export const marketingRouter = router({
       // running in-process without per-call HTTP / auth overhead.
       const [
         statusCounts,
+        cartStatusCounts,
         metrics,
         timeSeries,
         buyersResult,
@@ -1111,31 +1112,43 @@ export const marketingRouter = router({
         abandonedCartCount,
         supplementaryCounts,
       ] = await Promise.all([
-        getOrdersService().getStatusCounts(
-          ordersScope.mediaBuyerId,
-          ordersScope.startDate,
-          ordersScope.endDate,
-          ordersScope.assignedCsId,
-          undefined,
-          branchId,
-          undefined,
-          ordersScope.supervisorScope,
-          // Marketing Orders page — every viewer (MB / HoM) scopes by the
-          // marketing branch (`orders.branch_id`) so counts match the order
-          // rows and an order CS-routed elsewhere still counts here.
-          'marketing',
-          ctx.effectiveBranchIds,
-          // Exclude follow-up orders — matches getPerformanceMetrics which
-          // filters isFollowUp=false. Without this, reopened follow-up orders
-          // inflate Unassigned/Assigned counts beyond Total Orders.
-          false,
-          // Include imports alongside edge-form in marketing counts. Exclude manual
-          // offline orders (they belong to the CS funnel). System view drops all filters.
-          mediaBuyerId === '__system__' ? false : ('include-imports' as const),
-          // Exclude graduated follow-up + cart orders — they have their own
-          // funnels and must not inflate the Marketing Order Funnel.
-          mediaBuyerId === '__system__' ? false : true,
+        // Status counts must use the SAME filter as orders.list so the strip
+        // matches the table. The list uses orderSource='edge-form-and-import'
+        // (or no filter for __system__). We replicate that here via the
+        // orderSource-aware overload instead of the old excludeOffline flags.
+        getOrdersService().getStatusCountsByOrderSource(
+          {
+            mediaBuyerId: ordersScope.mediaBuyerId,
+            startDate: ordersScope.startDate,
+            endDate: ordersScope.endDate,
+            assignedCsId: ordersScope.assignedCsId,
+            branchId,
+            supervisorScope: ordersScope.supervisorScope,
+            branchScope: 'marketing',
+            effectiveBranchIds: ctx.effectiveBranchIds,
+            orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
+          },
         ),
+        // Cart-graduated orders (orderSource='online') — separate strip on the page.
+        mediaBuyerId === '__system__'
+          ? Promise.resolve({} as Record<string, number>)
+          : getOrdersService().getStatusCounts(
+              ordersScope.mediaBuyerId,
+              ordersScope.startDate,
+              ordersScope.endDate,
+              ordersScope.assignedCsId,
+              undefined,
+              branchId,
+              undefined,
+              ordersScope.supervisorScope,
+              'marketing',
+              ctx.effectiveBranchIds,
+              false,
+              false,
+              false,
+              false,
+              'online',
+            ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
           startDate && endDate ? 'this_month' : 'all_time',
@@ -1268,6 +1281,7 @@ export const marketingRouter = router({
 
       return {
         statusCounts,
+        cartStatusCounts,
         metrics,
         dailyCounts: timeSeries,
         mediaBuyersForFilter,
