@@ -57,6 +57,7 @@ import {
 import { getProductsService } from './products.router';
 import { getUsersService } from './users.router';
 import { getCartService } from './cart.router';
+import { getCartOrdersService } from './cart-orders.router';
 import { getSettingsService } from './settings.router';
 
 import { isAdminLevel } from '../../common/authz';
@@ -1133,26 +1134,16 @@ export const marketingRouter = router({
             excludeCartGraduated: true,
           },
         ),
-        // Cart-graduated orders (orderSource='online') — separate strip on the page.
-        mediaBuyerId === '__system__'
-          ? Promise.resolve({} as Record<string, number>)
-          : getOrdersService().getStatusCounts(
-              ordersScope.mediaBuyerId,
-              ordersScope.startDate,
-              ordersScope.endDate,
-              ordersScope.assignedCsId,
-              undefined,
-              branchId,
-              undefined,
-              ordersScope.supervisorScope,
-              'marketing',
-              ctx.effectiveBranchIds,
-              false,
-              false,
-              false,
-              false,
-              'online',
-            ),
+        // Cart orders — count from cart_orders table (same source as the Cart Orders page)
+        // so the number is consistent everywhere.
+        getCartOrdersService().getStatusCounts(
+          branchId,
+          ordersScope.assignedCsId,
+          ordersScope.startDate,
+          ordersScope.endDate,
+          ctx.effectiveBranchIds,
+          ordersScope.mediaBuyerId,
+        ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
           startDate && endDate ? 'this_month' : 'all_time',

@@ -22,6 +22,8 @@ export interface FundingBalanceRow {
   name: string;
   role: string;
   isTeamSupervisor?: boolean;
+  /** User status — only set for inactive/deactivated MBs surfaced via leaderboard. */
+  userStatus?: 'ACTIVE' | 'INACTIVE' | 'PROBATION';
   totalReceived: string;
   totalDistributed: string;
   totalSpend: string;
@@ -48,6 +50,8 @@ export interface FundingBalanceRow {
 export interface MarketingTeamOverviewStats {
   teamMembers: number;
   totalOrders: number;
+  activeOrders: number;
+  inactiveOrders: number;
   averageConfirmationRate: number | null;
   averageDeliveryRate: number | null;
   totalAdSpend: number;

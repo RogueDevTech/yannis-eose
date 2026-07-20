@@ -27,32 +27,43 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
 function computeMarketingTeamOverview(
   teamMembers: FundingBalanceRow[],
   leaderboard: Array<{
+    mediaBuyerId: string;
     totalSpend: number;
     totalOrders: number;
     confirmedOrders: number;
     deliveredOrders: number;
   }>,
 ): MarketingTeamOverviewStats {
+  const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
+  // All team members (MBs + HoMs) are "active" — only leaderboard entries
+  // not in teamMembers are truly inactive/deactivated.
+  const activeMemberIds = new Set(teamMembers.map((m) => m.userId));
+
   const totals = leaderboard.reduce(
     (acc, entry) => {
       acc.totalOrders += entry.totalOrders;
       acc.confirmedOrders += entry.confirmedOrders;
       acc.deliveredOrders += entry.deliveredOrders;
       acc.totalAdSpend += entry.totalSpend;
+      if (activeMemberIds.has(entry.mediaBuyerId)) {
+        acc.activeOrders += entry.totalOrders;
+      } else {
+        acc.inactiveOrders += entry.totalOrders;
+      }
       return acc;
     },
-    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0 },
+    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0, activeOrders: 0, inactiveOrders: 0 },
   );
 
-  const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
   const totalDisbursed = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
   const mbUnspentBalance = mbMembers.reduce((s, m) => s + Number(m.balance), 0);
-  // totalSpend on balance rows = ALL expenses (ad spend + ad account + recruitment + whatsapp + UGC)
   const totalExpenses = mbMembers.reduce((s, m) => s + Number(m.totalSpend), 0);
 
   return {
     teamMembers: mbMembers.length,
     totalOrders: totals.totalOrders,
+    activeOrders: totals.activeOrders,
+    inactiveOrders: totals.inactiveOrders,
     averageConfirmationRate:
       totals.totalOrders > 0 ? (totals.confirmedOrders / totals.totalOrders) * 100 : null,
     averageDeliveryRate:
@@ -115,6 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   type LeaderboardEntry = {
     mediaBuyerId: string;
+    name: string;
     totalSpend: number;
     totalOrders: number;
     confirmedOrders: number;
@@ -144,11 +156,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ]),
   );
 
+  const teamMemberIds = new Set(teamMembers.map((m) => m.userId));
   const teamMembersWithMetrics: FundingBalanceRow[] = teamMembers.map((m) => {
     const metrics = metricsByUser.get(m.userId);
     return metrics
       ? {
           ...m,
+          userStatus: 'ACTIVE' as const,
           adSpend: metrics.adSpend,
           totalOrders: metrics.totalOrders,
           confirmedOrders: metrics.confirmedOrders,
@@ -159,8 +173,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
           trueRoas: metrics.trueRoas,
           profitabilityScore: metrics.profitabilityScore,
         }
-      : m;
+      : { ...m, userStatus: 'ACTIVE' as const };
   });
+
+  // Add inactive MBs with orders in the period as rows so their data is visible.
+  const inactiveMbRows: FundingBalanceRow[] = leaderboard
+    .filter((e) => !teamMemberIds.has(e.mediaBuyerId) && e.totalOrders > 0)
+    .map((e) => ({
+      userId: e.mediaBuyerId,
+      name: e.name,
+      role: 'MEDIA_BUYER',
+      userStatus: 'INACTIVE' as const,
+      totalReceived: '0',
+      totalDistributed: '0',
+      totalSpend: '0',
+      balance: '0',
+      adSpend: e.totalSpend,
+      totalOrders: e.totalOrders,
+      confirmedOrders: e.confirmedOrders,
+      deliveredOrders: e.deliveredOrders,
+      confirmationRate: e.confirmationRate,
+      deliveryRate: e.deliveryRate,
+      cpa: e.cpa,
+      trueRoas: e.trueRoas,
+      profitabilityScore: e.profitabilityScore,
+    }));
+  teamMembersWithMetrics.push(...inactiveMbRows);
 
   const SORT_BY_VALUES = new Set([
     'name',

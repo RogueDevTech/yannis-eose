@@ -303,6 +303,22 @@ const TEAM_SORT_MENU_OPTIONS = [
   },
 ];
 
+function StatInfoIcon({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors"
+      aria-label="View breakdown"
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="10" />
+        <path strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+      </svg>
+    </button>
+  );
+}
+
 export function MarketingTeamPage({
   teamMembers,
   fundingSummary,
@@ -324,6 +340,7 @@ export function MarketingTeamPage({
   const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
   const [previewMember, setPreviewMember] = useState<FundingBalanceRow | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState(false);
 
   useEffect(() => {
     setSearchQuery(q);
@@ -390,6 +407,9 @@ export function MarketingTeamPage({
               <span className="shrink-0 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-micro font-semibold text-purple-700 dark:text-purple-300">HoM</span>
             )}
             {m.isTeamSupervisor && <SupervisorBadge size="sm" />}
+            {m.userStatus === 'INACTIVE' && (
+              <span className="shrink-0 rounded-full bg-danger-100 dark:bg-danger-900/30 px-2 py-0.5 text-micro font-semibold text-danger-700 dark:text-danger-300">Inactive</span>
+            )}
           </Link>
         ),
       },
@@ -633,7 +653,7 @@ export function MarketingTeamPage({
             valueClassName: 'text-app-fg',
           },
           {
-            label: 'Total Orders',
+            label: <span className="flex items-center">Total Orders<StatInfoIcon onClick={() => setBreakdownModal(true)} /></span>,
             value: overviewStats.totalOrders.toLocaleString(),
             valueClassName: 'text-app-fg',
           },
@@ -677,6 +697,25 @@ export function MarketingTeamPage({
           },
         ]}
       />
+      <Modal open={breakdownModal} onClose={() => setBreakdownModal(false)} maxWidth="max-w-sm" contentClassName="p-5">
+        <h2 className="text-base font-semibold text-app-fg mb-3">Order Breakdown</h2>
+        <div className="space-y-0.5">
+          <div className="flex items-center justify-between gap-4 py-1.5">
+            <span className="text-sm text-app-fg">Active media buyers</span>
+            <span className="text-sm tabular-nums text-app-fg">{overviewStats.activeOrders.toLocaleString()}</span>
+          </div>
+          {overviewStats.inactiveOrders > 0 && (
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <span className="text-sm text-app-fg">Inactive media buyers</span>
+              <span className="text-sm tabular-nums text-app-fg">{overviewStats.inactiveOrders.toLocaleString()}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-4 py-1.5 font-semibold border-t border-app-border pt-2.5 mt-1">
+            <span className="text-sm text-app-fg">Total</span>
+            <span className="text-sm tabular-nums text-app-fg">{overviewStats.totalOrders.toLocaleString()}</span>
+          </div>
+        </div>
+      </Modal>
 
       <div>
         <ToolbarFiltersCollapsible
@@ -825,7 +864,12 @@ export function MarketingTeamPage({
                       <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
                         <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400">{initials}</span>
                       </div>
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">{m.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">
+                        {m.name}
+                        {m.userStatus === 'INACTIVE' && (
+                          <span className="ml-1.5 inline-flex rounded-full bg-danger-100 dark:bg-danger-900/30 px-1.5 py-0.5 text-micro font-semibold text-danger-700 dark:text-danger-300 align-middle">Inactive</span>
+                        )}
+                      </span>
                       <span className={`shrink-0 text-sm font-medium tabular-nums ${Number(m.balance) < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'}`}>
                         {formatNaira(Number(m.balance))}
                       </span>
