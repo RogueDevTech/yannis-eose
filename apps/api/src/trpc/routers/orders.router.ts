@@ -1661,6 +1661,8 @@ export const ordersRouter = router({
           canCreateOffline: input.canCreateOffline,
           includeCartAbandonment: input.includeCartAbandonment,
           effectiveBranchIds: ctx.effectiveBranchIds,
+          orderSource: input.orderSource,
+          teamId: input.teamId,
         });
       return ordersCacheService.getOrSet(bundleCacheKey, ORDERS_AGG_TTL_SECONDS, fetchBundle);
     }),

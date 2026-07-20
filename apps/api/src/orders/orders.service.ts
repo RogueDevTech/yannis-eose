@@ -2463,19 +2463,10 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    // CS SERVICING branch — routing may service the order in a different
-    // branch, but must NEVER overwrite the marketing `branchId` (migration 0150).
-    let servicingBranchId = branchId;
-    if (branchId) {
-      const primaryProductId = input.items?.[0]?.productId ?? null;
-      const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
-        branchId,
-        primaryProductId,
-      );
-      if (servicingBranch) {
-        servicingBranchId = servicingBranch;
-      }
-    }
+    // Offline orders are manually created by a closer — the closer's session
+    // branch is the servicing branch. CS routing rules should NOT override this;
+    // routing is for incoming funnel orders, not closer-created orders.
+    const servicingBranchId = sessionBranchId ?? branchId;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
@@ -2767,17 +2758,10 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    let servicingBranchId = branchId;
-    if (branchId) {
-      const primaryProductId = input.items?.[0]?.productId ?? null;
-      const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
-        branchId,
-        primaryProductId,
-      );
-      if (servicingBranch) {
-        servicingBranchId = servicingBranch;
-      }
-    }
+    // Delivered follow-up orders are manually created by a closer — the closer's
+    // session branch is the servicing branch. CS routing rules should NOT override
+    // this; routing is for incoming funnel orders, not closer-created orders.
+    const servicingBranchId = sessionBranchId ?? branchId;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
