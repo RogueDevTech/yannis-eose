@@ -17,6 +17,7 @@ import {
   ilike,
   getTableColumns,
   isNull,
+  isNotNull,
   sql,
   exists,
   type SQL,
@@ -5367,12 +5368,19 @@ export class MarketingService {
         .from(schema.orders)
         .where(
           and(
-            inArray(schema.orders.mediaBuyerId, buyerIds),
+            // Include ALL media buyers (active + inactive/probation) so the
+            // overview total matches the Marketing Orders page. Per-row
+            // leaderboard data is still scoped to eligible (active) buyers.
+            isNotNull(schema.orders.mediaBuyerId),
             sql`${schema.orders.status} != 'DELETED'`,
             // Exclude graduated follow-up orders — they are re-engagement on
             // existing leads, not new acquisitions. Cart-graduated orders
             // (order_source='online', is_follow_up=false) are real sales and stay.
             eq(schema.orders.isFollowUp, false),
+            // Match getPerformanceMetrics marketing scope: only count funnel +
+            // cart-graduated orders. Excludes offline, import, and
+            // delivered_follow_up which have their own pages/metrics.
+            sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'online'))`,
             branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
           ),
         )
@@ -5391,7 +5399,10 @@ export class MarketingService {
     );
 
     const result = new Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>();
-    for (const buyerId of buyerIds) {
+    // Include requested (active) buyers AND any inactive buyers with orders
+    // in the period so the overview total matches the Marketing Orders page.
+    const allBuyerIdsWithData = new Set([...buyerIds, ...orderByBuyer.keys()]);
+    for (const buyerId of allBuyerIdsWithData) {
       const spend = spendByBuyer.get(buyerId) ?? 0;
       const orderRow = orderByBuyer.get(buyerId);
       result.set(
@@ -5418,21 +5429,19 @@ export class MarketingService {
   ) {
     // Include ALL active media buyers so the leaderboard is always populated,
     // not just those who have approved ad spend in the period.
-    const allBuyers = await this.db
+    const activeBuyers = await this.db
       .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
       .from(schema.users)
       .where(and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE')));
 
     const branchUserIds = await this.getBranchUserIds(branchId, effectiveBranchIds);
     let eligibleBuyers = branchUserIds
-      ? allBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
-      : allBuyers;
+      ? activeBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
+      : activeBuyers;
     if (restrictToMediaBuyerIds && restrictToMediaBuyerIds.length > 0) {
       const allow = new Set(restrictToMediaBuyerIds);
       eligibleBuyers = eligibleBuyers.filter((b) => allow.has(b.id));
     }
-
-    if (eligibleBuyers.length === 0) return [];
 
     const [profitability, metricsByBuyer] = await Promise.all([
       this.getProfitabilityConfig(),
@@ -5446,7 +5455,20 @@ export class MarketingService {
       ),
     ]);
 
-    const leaderboard = eligibleBuyers.map((buyer) => {
+    const eligibleIds = new Set(eligibleBuyers.map((b) => b.id));
+    // Inactive/probation buyers with orders in the period — look up their names
+    // so they appear as rows in the leaderboard.
+    const extraBuyerIds = [...metricsByBuyer.keys()].filter((id) => !eligibleIds.has(id));
+    let extraBuyers: Array<{ id: string; name: string; email: string | null }> = [];
+    if (extraBuyerIds.length > 0) {
+      extraBuyers = await this.db
+        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+        .from(schema.users)
+        .where(inArray(schema.users.id, extraBuyerIds));
+    }
+    const allBuyers = [...eligibleBuyers, ...extraBuyers];
+
+    const leaderboard = allBuyers.map((buyer) => {
       const metrics =
         metricsByBuyer.get(buyer.id) ??
         this.deriveBuyerMetrics({
