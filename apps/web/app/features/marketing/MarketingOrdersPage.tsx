@@ -892,13 +892,22 @@ export function MarketingOrdersPage({
             // Unconfirmed = CS_ENGAGED only (Unassigned + Assigned shown as separate tiles)
             const unconfirmedCount = statusCounts['CS_ENGAGED'] ?? 0;
             const deletedCount = statusCounts['DELETED'] ?? 0;
+            // Collapsed counts matching the stat strip tiles so dropdown and strip stay aligned.
+            const collapsedCounts: Record<string, number> = {
+              UNPROCESSED: unprocessedCount,
+              CS_ASSIGNED: csAssignedCount,
+              CS_ENGAGED: unconfirmedCount,
+              CONFIRMED: confirmedCount,
+              DELIVERED: deliveredCount,
+              DELETED: deletedCount,
+            };
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
                 value: status,
                 label:
                   status === 'ALL'
-                    ? `All Statuses (${statusTotal})`
-                    : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
+                    ? `All Statuses (${grandTotal})`
+                    : `${formatStatus(status)} (${collapsedCounts[status] ?? statusCounts[status] ?? 0})`,
               })),
               ...(enableFromCartStatusOption
                 ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
