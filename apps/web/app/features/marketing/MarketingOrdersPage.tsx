@@ -873,13 +873,11 @@ export function MarketingOrdersPage({
             // counts so all filter options are reachable.
             const statusCounts = activeSecondary.statusCounts ?? ins.statusCounts;
             const statusTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
-            // Cart-graduated orders (orderSource='online') from separate query.
-            // Cart orders graduate into real orders, so include them in the grand total.
+            // Cart orders: only DELIVERED/REMITTED count toward the marketing total
+            // (those are the ones that graduated into real orders).
             const cartSc = activeSecondary.cartStatusCounts ?? {};
-            const cartGraduatedTotal = Object.entries(cartSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
             const cartGraduatedDelivered = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
-            // Grand total includes both funnel + cart graduated
-            const grandTotal = statusTotal + cartGraduatedTotal;
+            const grandTotal = statusTotal + cartGraduatedDelivered;
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
             const deliveredCount = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0) + cartGraduatedDelivered;
@@ -1389,7 +1387,6 @@ export function MarketingOrdersPage({
           <h3 className="text-base font-semibold text-app-fg">Order Breakdown</h3>
           {(() => {
             const cartSc = secondary.cartStatusCounts ?? {};
-            const cartGrad = Object.entries(cartSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
             const funnelTotal = Object.entries(secondary.statusCounts ?? {}).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
             const cartDelivered = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
             return (
@@ -1399,12 +1396,12 @@ export function MarketingOrdersPage({
                   <span className="font-semibold text-app-fg">{funnelTotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-app-fg-muted">Cart-graduated orders</span>
-                  <span className="font-semibold text-app-fg">{cartGrad.toLocaleString()}</span>
+                  <span className="text-app-fg-muted">Delivered cart orders</span>
+                  <span className="font-semibold text-app-fg">{cartDelivered.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-app-border">
                   <span className="font-semibold text-app-fg">Total</span>
-                  <span className="font-bold text-app-fg">{(funnelTotal + cartGrad).toLocaleString()}</span>
+                  <span className="font-bold text-app-fg">{(funnelTotal + cartDelivered).toLocaleString()}</span>
                 </div>
               </div>
             );
