@@ -476,6 +476,27 @@ export function FollowUpPage({
             ),
       },
       {
+        key: 'status',
+        header: 'Status',
+        render: showSkeletonRows
+          ? () => <TableCellTextPulse className="w-[5rem]" />
+          : (cart) => (
+              cart.skipReason ? (
+                <span className="inline-flex items-center rounded-full border border-warning-300 bg-warning-50 px-2 py-0.5 text-micro font-semibold text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400" title={`Skipped: ${cart.skipReason.replace(/_/g, ' ').toLowerCase()}`}>
+                  Duplicate
+                </span>
+              ) : cart.recovered ? (
+                <span className="inline-flex items-center rounded-full border border-success-300 bg-success-50 px-2 py-0.5 text-micro font-semibold text-success-700 dark:border-success-700 dark:bg-success-900/30 dark:text-success-400">
+                  Recovered
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full border border-app-border bg-app-hover px-2 py-0.5 text-micro font-semibold text-app-fg-muted">
+                  Open
+                </span>
+              )
+            ),
+      },
+      {
         key: 'date',
         header: 'Dropped',
         render: showSkeletonRows
@@ -921,7 +942,13 @@ export function FollowUpPage({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-app-fg truncate" title={cart.customerName || undefined}>{cart.customerName ? clipName(cart.customerName) : '(No name)'}</span>
-                <span className="shrink-0 rounded-full bg-warning-50 dark:bg-warning-900/30 border border-warning-200 dark:border-warning-700 px-2 py-0.5 text-micro font-medium text-warning-700 dark:text-warning-400">Abandoned</span>
+                {cart.skipReason ? (
+                  <span className="shrink-0 rounded-full border border-warning-300 bg-warning-50 dark:bg-warning-900/30 dark:border-warning-700 px-2 py-0.5 text-micro font-semibold text-warning-700 dark:text-warning-400">Duplicate</span>
+                ) : cart.recovered ? (
+                  <span className="shrink-0 rounded-full border border-success-300 bg-success-50 dark:bg-success-900/30 dark:border-success-700 px-2 py-0.5 text-micro font-semibold text-success-700 dark:text-success-400">Recovered</span>
+                ) : (
+                  <span className="shrink-0 rounded-full bg-warning-50 dark:bg-warning-900/30 border border-warning-200 dark:border-warning-700 px-2 py-0.5 text-micro font-medium text-warning-700 dark:text-warning-400">Abandoned</span>
+                )}
               </div>
               <p className="text-xs text-app-fg-muted truncate">{cart.productName ?? '—'}{cart.offerLabel ? ` (${cart.offerLabel})` : ''}</p>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">

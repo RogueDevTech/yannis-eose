@@ -850,6 +850,7 @@ export class MarketingService {
   private async countOrdersForMediaBuyersOnUtcDays(params: {
     pairs: Array<{ mediaBuyerId: string; spendDateYmd: string }>;
     branchId?: string | null;
+    effectiveBranchIds?: string[] | null;
   }): Promise<Map<string, number>> {
     const result = new Map<string, number>();
     const pairs = params.pairs.filter((p) => p.mediaBuyerId && p.spendDateYmd);
@@ -867,9 +868,8 @@ export class MarketingService {
       lte(schema.orders.createdAt, rangeEnd),
       sql`${schema.orders.status} != 'DELETED'`,
     ];
-    if (params.branchId) {
-      conditions.push(eq(schema.orders.branchId, params.branchId));
-    }
+    const bCond = branchScopeCondition(schema.orders.branchId, params.branchId, params.effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
 
     const rows = await this.db
       .select({ mediaBuyerId: schema.orders.mediaBuyerId, day: dayExpr, c: count() })
@@ -3319,6 +3319,7 @@ export class MarketingService {
     input: UpdateAdSpendInput,
     actor: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const [existing] = await this.db
       .select()
@@ -3364,7 +3365,7 @@ export class MarketingService {
 
     // Skip campaign/branch validation for daily-flow rows (no campaign).
     if (nextCampaignId) {
-      const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+      const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
       if (branchCampaignIds && branchCampaignIds.length === 0) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'No campaigns in your active branch' });
       }
@@ -3395,7 +3396,7 @@ export class MarketingService {
     let orderCountSnapshot: number | undefined;
     if (isDailyFlow) {
       const spendDateStr = input.spendDate ?? existing.spendDate.toISOString().slice(0, 10);
-      orderCountSnapshot = await this.getOrderCountForDate(existing.mediaBuyerId, spendDateStr, branchId);
+      orderCountSnapshot = await this.getOrderCountForDate(existing.mediaBuyerId, spendDateStr, branchId, effectiveBranchIds);
     }
 
     return withActor(this.db, { id: actor.id }, async (tx) => {
@@ -3801,7 +3802,7 @@ export class MarketingService {
     effectiveBranchIds?: string[] | null,
   ) {
     const mediaBuyerId = actor.id;
-    const orderCount = await this.getOrderCountForDate(mediaBuyerId, input.spendDate, branchId);
+    const orderCount = await this.getOrderCountForDate(mediaBuyerId, input.spendDate, branchId, effectiveBranchIds);
 
     const dayStart = nigeriaDayStart(input.spendDate);
     const dayEnd = nigeriaDayEnd(input.spendDate);
@@ -4659,6 +4660,7 @@ export class MarketingService {
         spendDateYmd: g.spendDay,
       })),
       branchId,
+      effectiveBranchIds,
     });
 
     const groups = pageGroupRows.map((g) => {

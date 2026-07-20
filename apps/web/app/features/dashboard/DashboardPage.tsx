@@ -1385,8 +1385,8 @@ function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: s
         const cr = total > 0 ? ((confirmed + delivered) / total) * 100 : 0;
         const dr = total > 0 ? (delivered / total) * 100 : 0;
         return (
-          <div>
-            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          <Link to="/admin/sales/delivered-follow-up" className="block group">
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
               Delivered Follow-Up
             </h2>
             <OverviewStatStrip
@@ -1403,7 +1403,7 @@ function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: s
                 { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
               ]}
             />
-          </div>
+          </Link>
         );
       }}
     </DashboardDeliveredFollowUpSection>
@@ -1440,15 +1440,17 @@ function TotalOrdersStrip({
   const { bundle } = useDashboardSecondary();
   const fuSc = bundle?.followUpCounts ?? {};
   const cartSc = bundle?.cartOrdersCounts ?? {};
+  const dfuSc = bundle?.deliveredFollowUpCounts ?? {};
   const offSc = offlineStatusCounts;
 
   // orderCounts already includes offline (from the orders table).
-  // Follow-up and cart are in separate tables — add them.
+  // Follow-up, cart, and delivered follow-up are separate — add them.
   const sumStatus = (key: string) => {
     const orders = (orderCounts[key] ?? 0); // funnel + offline combined
     const fu = fuSc[key] ?? 0;
     const cart = cartSc[key] ?? 0;
-    return orders + fu + cart;
+    const dfu = dfuSc[key] ?? 0;
+    return orders + fu + cart + dfu;
   };
 
   const unassigned = sumStatus('UNPROCESSED');
@@ -1477,11 +1479,13 @@ function TotalOrdersStrip({
   const catOffline = sumExcludeDeleted(offSc);
   const catFollowUp = sumExcludeDeleted(fuSc);
   const catCart = sumExcludeDeleted(cartSc);
+  const catDeliveredFollowUp = sumExcludeDeleted(dfuSc);
 
   const delFunnel = (funnelSc['DELIVERED'] ?? 0) + (funnelSc['REMITTED'] ?? 0);
   const delOffline = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
   const delFollowUp = (fuSc['DELIVERED'] ?? 0) + (fuSc['REMITTED'] ?? 0);
   const delCart = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
+  const delDeliveredFollowUp = (dfuSc['DELIVERED'] ?? 0) + (dfuSc['REMITTED'] ?? 0);
 
   return (
     <div>
@@ -1518,6 +1522,7 @@ function TotalOrdersStrip({
             { label: 'Offline (manually created)', value: catOffline },
             { label: 'Follow-up', value: catFollowUp },
             { label: 'Cart (recovered)', value: catCart },
+            { label: 'Delivered follow-up', value: catDeliveredFollowUp },
             { label: 'Total', value: total, bold: true },
           ].map((l, i) => (
             <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}>
@@ -1536,6 +1541,7 @@ function TotalOrdersStrip({
             { label: 'Offline (manually created)', value: delOffline },
             { label: 'Follow-up', value: delFollowUp },
             { label: 'Cart (recovered)', value: delCart },
+            { label: 'Delivered follow-up', value: delDeliveredFollowUp },
             { label: 'Total Delivered', value: delivered, bold: true },
           ].map((l, i) => (
             <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}>

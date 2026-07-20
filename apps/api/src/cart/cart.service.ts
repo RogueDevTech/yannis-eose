@@ -523,6 +523,14 @@ export class CartService {
       customFieldValues: Record<string, unknown> | null;
       /** True when this cart has been pulled into the Cart Orders pipeline. */
       recovered: boolean;
+      /** Why the auto-pull cron skipped this cart. NULL = not yet evaluated or successfully pulled. */
+      skipReason: string | null;
+      /** FK to the duplicate order that blocked recovery. */
+      duplicateOfOrderId: string | null;
+      /** FK to the duplicate cart order that blocked recovery. */
+      duplicateOfCartOrderId: string | null;
+      /** FK to the duplicate follow-up order that blocked recovery. */
+      duplicateOfFollowUpOrderId: string | null;
     }>;
     total: number;
     page: number;
@@ -576,6 +584,10 @@ export class CartService {
         customFieldValues: schema.cartAbandonments.customFieldValues,
         // Whether this cart has been pulled into the Cart Orders pipeline.
         recovered: sql<boolean>`EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})`,
+        skipReason: schema.cartAbandonments.skipReason,
+        duplicateOfOrderId: schema.cartAbandonments.duplicateOfOrderId,
+        duplicateOfCartOrderId: schema.cartAbandonments.duplicateOfCartOrderId,
+        duplicateOfFollowUpOrderId: schema.cartAbandonments.duplicateOfFollowUpOrderId,
       })
       .from(schema.cartAbandonments)
       .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
@@ -617,6 +629,10 @@ export class CartService {
         quantity: r.quantity ?? null,
         customFieldValues: (r.customFieldValues as Record<string, unknown> | null) ?? null,
         recovered: r.recovered === true,
+        skipReason: r.skipReason ?? null,
+        duplicateOfOrderId: r.duplicateOfOrderId ?? null,
+        duplicateOfCartOrderId: r.duplicateOfCartOrderId ?? null,
+        duplicateOfFollowUpOrderId: r.duplicateOfFollowUpOrderId ?? null,
       })),
       total,
       page,

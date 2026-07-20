@@ -1,4 +1,4 @@
-import { integer, jsonb, uuid, pgTable, text } from 'drizzle-orm/pg-core';
+import { integer, jsonb, uuid, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { cartStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { campaigns } from './marketing';
@@ -45,6 +45,16 @@ export const cartAbandonments = pgTable('cart_abandonments', {
   quantity: integer('quantity'),
   /** Form-builder custom fields — keys/values defined by the campaign's form schema. */
   customFieldValues: jsonb('custom_field_values'),
+  /** Why the auto-pull cron skipped this cart. NULL = not yet evaluated or successfully pulled. */
+  skipReason: text('skip_reason'),
+  /** FK to the duplicate order that blocked recovery. */
+  duplicateOfOrderId: uuid('duplicate_of_order_id'),
+  /** FK to the duplicate cart order that blocked recovery. */
+  duplicateOfCartOrderId: uuid('duplicate_of_cart_order_id'),
+  /** FK to the duplicate follow-up order that blocked recovery. */
+  duplicateOfFollowUpOrderId: uuid('duplicate_of_follow_up_order_id'),
+  /** When the skip reason was tagged by the cron. */
+  skipTaggedAt: timestamp('skip_tagged_at', { withTimezone: true }),
   ...temporalColumns,
   ...timestampColumns,
 });
