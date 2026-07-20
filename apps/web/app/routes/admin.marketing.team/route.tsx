@@ -360,7 +360,6 @@ export default function MarketingTeamRoute() {
             profitabilityConfig={data.profitabilityConfig}
             overviewStats={data.overviewStats}
             allMembersForFilter={data.allMembersForFilter}
-            cartOrdersCounts={data.cartOrdersCounts}
           />
         )}
     </CachedAwait>

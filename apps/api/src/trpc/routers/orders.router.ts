@@ -1101,6 +1101,11 @@ export const ordersRouter = router({
         narrowed.assignedCsId,
         effectiveBranchId,
       );
+      // When CS_CLOSER self-query drops the branch, also drop effectiveBranchIds
+      // so stat strip counts match the list's OR-expansion.
+      const countsEffectiveBranchIds = countsBranchId === null && effectiveBranchId !== null
+        ? null
+        : ctx.effectiveBranchIds;
 
       const isFollowUp = input?.isFollowUp;
 
@@ -1135,7 +1140,7 @@ export const ordersRouter = router({
           narrowed.statuses,
           narrowed.supervisorScope,
           branchScope,
-          ctx.effectiveBranchIds,
+          countsEffectiveBranchIds,
           isFollowUp,
           excludeOffline,
           excludeGraduated,
@@ -1155,7 +1160,7 @@ export const ordersRouter = router({
           narrowed,
           isFollowUp,
           branchScope,
-          effectiveBranchIds: ctx.effectiveBranchIds,
+          effectiveBranchIds: countsEffectiveBranchIds,
           orderSource: input?.orderSource,
           teamId: input?.teamId,
         });
@@ -1171,7 +1176,7 @@ export const ordersRouter = router({
           narrowed.statuses,
           narrowed.supervisorScope,
           branchScope,
-          ctx.effectiveBranchIds,
+          countsEffectiveBranchIds,
           isFollowUp,
           excludeOffline,
           excludeGraduated,
@@ -1200,6 +1205,9 @@ export const ordersRouter = router({
       const branchScope: 'servicing' | 'marketing' =
         ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
       const countsBranchId = aggregateBranchIdForCloserSelfQuery(ctx.user, narrowed.assignedCsId, effectiveBranchId);
+      const countsEffBranchIds = countsBranchId === null && effectiveBranchId !== null
+        ? null
+        : ctx.effectiveBranchIds;
       return getOrdersService().getSupplementaryCounts(
         narrowed.mediaBuyerId,
         narrowed.startDate,
@@ -1208,7 +1216,7 @@ export const ordersRouter = router({
         countsBranchId,
         narrowed.supervisorScope,
         branchScope,
-        ctx.effectiveBranchIds,
+        countsEffBranchIds,
       );
     }),
 
@@ -1455,6 +1463,12 @@ export const ordersRouter = router({
         scope.assignedCsId,
         branchId,
       );
+      // When CS_CLOSER self-query drops the branch, also drop effectiveBranchIds
+      // so stat strip counts match the list's OR-expansion (assignedCsId = me is
+      // already sufficient scoping).
+      const aggregateEffectiveBranchIds = aggregateBranchId === null && branchId !== null
+        ? null
+        : ctx.effectiveBranchIds;
 
       const trendFilters = {
         mediaBuyerId: scope.mediaBuyerId,
@@ -1511,7 +1525,7 @@ export const ordersRouter = router({
           undefined,
           scope.supervisorScope,
           bundleBranchScope,
-          ctx.effectiveBranchIds,
+          aggregateEffectiveBranchIds,
           false, // isFollowUp — matches orders.list default
           input.orderSource === 'edge-form' ? true : input.orderSource === 'edge-form-and-import' ? 'include-imports' : undefined, // excludeOffline for edge-form / edge-form-and-import
           // Sub-funnel pages (offline, delivered_follow_up) use the old exclude logic;
@@ -1531,9 +1545,9 @@ export const ordersRouter = router({
           aggregateBranchId,
           trendFilters,
           bundleBranchScope,
-          ctx.effectiveBranchIds,
+          aggregateEffectiveBranchIds,
         ),
-        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, ctx.effectiveBranchIds),
+        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, aggregateEffectiveBranchIds),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
         // agent roster.
@@ -1555,7 +1569,7 @@ export const ordersRouter = router({
         getCartService().countAbandoned({
           mediaBuyerId: scope.mediaBuyerId,
           branchId: aggregateBranchId,
-          effectiveBranchIds: ctx.effectiveBranchIds,
+          effectiveBranchIds: aggregateEffectiveBranchIds,
           startDate: scope.startDate,
           endDate: scope.endDate,
         }),
@@ -1567,7 +1581,7 @@ export const ordersRouter = router({
           aggregateBranchId,
           scope.supervisorScope,
           bundleBranchScope,
-          ctx.effectiveBranchIds,
+          aggregateEffectiveBranchIds,
         ),
         // Offline orders — separate funnel strip on HoCS/closer dashboards.
         getOrdersService().getStatusCounts(
@@ -1580,7 +1594,7 @@ export const ordersRouter = router({
           undefined,
           scope.supervisorScope,
           bundleBranchScope,
-          ctx.effectiveBranchIds,
+          aggregateEffectiveBranchIds,
           false, false, false, false, true, // onlyOffline
         ),
         // Delivered follow-up orders — separate funnel strip.
@@ -1594,7 +1608,7 @@ export const ordersRouter = router({
           undefined,
           scope.supervisorScope,
           bundleBranchScope,
-          ctx.effectiveBranchIds,
+          aggregateEffectiveBranchIds,
           false, false, false, false, 'delivered_follow_up', // onlyDeliveredFollowUp via string overload
         ),
         // Teams for the team filter dropdown

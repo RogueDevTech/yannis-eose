@@ -52,8 +52,6 @@ export interface MarketingTeamPageProps {
    * even when `q` has already narrowed the visible rows.
    */
   allMembersForFilter?: Array<{ id: string; name: string }>;
-  /** Cart order per-status counts — only DELIVERED/REMITTED count toward marketing total. */
-  cartOrdersCounts?: Record<string, number>;
 }
 
 /** Green if trueRoas ≥ green threshold, red below. Neutral when no spend/data. */
@@ -336,11 +334,10 @@ export function MarketingTeamPage({
   profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 },
   overviewStats,
   allMembersForFilter = [],
-  cartOrdersCounts,
 }: MarketingTeamPageProps) {
   const greenThreshold = profitabilityConfig.greenThreshold;
-  const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
-  const totalOrdersWithCart = overviewStats.totalOrders + cartGraduatedDelivered;
+  // Cart graduated delivered are already included in per-MB leaderboard totals
+  // from the backend (getPerformanceMetricsBatched), so no frontend addition needed.
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -659,7 +656,7 @@ export function MarketingTeamPage({
           },
           {
             label: <span className="flex items-center">Total Orders<StatInfoIcon onClick={() => setBreakdownModal(true)} /></span>,
-            value: totalOrdersWithCart.toLocaleString(),
+            value: overviewStats.totalOrders.toLocaleString(),
             valueClassName: 'text-app-fg',
           },
           {
@@ -715,15 +712,9 @@ export function MarketingTeamPage({
               <span className="text-sm tabular-nums text-app-fg">{overviewStats.inactiveOrders.toLocaleString()}</span>
             </div>
           )}
-          {cartGraduatedDelivered > 0 && (
-            <div className="flex items-center justify-between gap-4 py-1.5">
-              <span className="text-sm text-app-fg">Delivered cart orders</span>
-              <span className="text-sm tabular-nums text-app-fg">{cartGraduatedDelivered.toLocaleString()}</span>
-            </div>
-          )}
           <div className="flex items-center justify-between gap-4 py-1.5 font-semibold border-t border-app-border pt-2.5 mt-1">
             <span className="text-sm text-app-fg">Total</span>
-            <span className="text-sm tabular-nums text-app-fg">{totalOrdersWithCart.toLocaleString()}</span>
+            <span className="text-sm tabular-nums text-app-fg">{overviewStats.totalOrders.toLocaleString()}</span>
           </div>
         </div>
       </Modal>

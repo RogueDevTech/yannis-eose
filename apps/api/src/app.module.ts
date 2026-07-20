@@ -36,15 +36,14 @@ import { AiAssistantModule } from './ai-assistant/ai-assistant.module';
   imports: [
     RequestTimingModule,
     ScheduleModule.forRoot(),
-    // Rate limiting — 200 requests per 60 seconds, bucketed per **user session**
-    // (falls back to per-IP for unauthenticated requests). See
-    // `UserAwareThrottlerGuard` for the architectural rationale: in our SSR
-    // setup every authenticated request reaches the API from the Remix server's
-    // single IP, so per-IP throttling effectively starved one bucket across all
-    // users at once. Per-user lets each session enjoy the full budget.
-    // 400/60s gives headroom for ERP power users (CEO dashboard fires 15+
-    // parallel queries per load) while still capping abuse.
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 400 }]),
+    // Rate limiting — bucketed per **user session** (falls back to per-IP for
+    // unauthenticated requests). See `UserAwareThrottlerGuard` for rationale:
+    // in our SSR setup every request reaches the API from the Remix server's
+    // single IP, so per-IP throttling starved one bucket across all users.
+    // 600/60s per user gives headroom for ERP power users browsing heavy pages
+    // (CEO dashboard fires 15+ parallel queries, delivered-follow-up + bundle
+    // + branches fires 3+ per load, and rapid nav stacks them).
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 600 }]),
     DatabaseModule, AuthModule, TrpcModule, EventsModule,
     OrdersModule, UsersModule, ProductsModule, InventoryModule,
     LogisticsModule, MarketingModule, FinanceModule, HrModule,

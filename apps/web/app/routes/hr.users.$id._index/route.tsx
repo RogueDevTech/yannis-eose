@@ -57,7 +57,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // handles authorization, fetches the target user once, then fans out all
   // sub-slices (products, templates, locations, plans, permissions, onboarding,
   // marketing, mirror eligibility) in parallel via Promise.all.
-  const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
+  const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true } | { forbidden: true } | { serverError: true }> => {
     const bundleInput = encodeURIComponent(JSON.stringify({ userId }));
     const bundleRes = await apiRequest<unknown>(
       `/trpc/hr.userDetailPageBundle?input=${bundleInput}`,
@@ -70,7 +70,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         return { notFound: true as const };
       }
       if (status === 403) {
-        throw new Response('Not allowed to view this user.', { status: 403 });
+        return { forbidden: true as const };
+      }
+      if (status === 429 || status >= 500) {
+        return { serverError: true as const };
       }
       return { notFound: true as const };
     }
@@ -638,7 +641,7 @@ export default function UserDetailRoute() {
       deferredKey="userDetail"
     >
       {(data) =>
-        'notFound' in data && data.notFound ? (
+        'notFound' in data && (data as { notFound?: boolean }).notFound ? (
           <div className="card text-center py-12">
             <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
             <h2 className="text-xl font-bold text-app-fg">User not found</h2>
@@ -648,6 +651,31 @@ export default function UserDetailRoute() {
             <a href="/hr/users" className="btn-primary mt-4 inline-block">
               Back to Users
             </a>
+          </div>
+        ) : 'forbidden' in data && (data as { forbidden?: boolean }).forbidden ? (
+          <div className="card text-center py-12">
+            <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">403</p>
+            <h2 className="text-xl font-bold text-app-fg">Access denied</h2>
+            <p className="mt-2 text-sm text-app-fg-muted">
+              You don't have permission to view this user's profile.
+            </p>
+            <a href="/hr/users" className="btn-primary mt-4 inline-block">
+              Back to Users
+            </a>
+          </div>
+        ) : 'serverError' in data && (data as { serverError?: boolean }).serverError ? (
+          <div className="card text-center py-12">
+            <h2 className="text-xl font-bold text-app-fg">Something went wrong</h2>
+            <p className="mt-2 text-sm text-app-fg-muted">
+              Could not load user details. Please try again.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="btn-primary mt-4 inline-block"
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <UserDetailPageWithMirror data={data as UserDetailLoaderData} />

@@ -5353,7 +5353,20 @@ export class MarketingService {
         ? (and(isDelivered, ...inCreatedPeriod) ?? isDelivered)
         : isDelivered;
 
-    const [spendRows, orderRows] = await Promise.all([
+    // Cart graduated per-MB: only DELIVERED/REMITTED from cart_orders table
+    const cartConditions: SQL[] = [
+      isNull(schema.cartOrders.deletedAt),
+      inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+      isNotNull(schema.cartOrders.mediaBuyerId),
+    ];
+    {
+      const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
+      if (bCond) cartConditions.push(bCond);
+    }
+    if (periodStart) cartConditions.push(gte(schema.cartOrders.createdAt, periodStart));
+    if (periodEnd) cartConditions.push(lte(schema.cartOrders.createdAt, periodEnd));
+
+    const [spendRows, orderRows, cartRows] = await Promise.all([
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -5391,6 +5404,16 @@ export class MarketingService {
           ),
         )
         .groupBy(schema.orders.mediaBuyerId),
+      // Per-MB cart graduated delivered — attributed to original MB
+      this.db
+        .select({
+          mediaBuyerId: schema.cartOrders.mediaBuyerId,
+          deliveredCount: count(),
+          deliveredRevenue: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}), 0)`.mapWith(Number),
+        })
+        .from(schema.cartOrders)
+        .where(and(...cartConditions))
+        .groupBy(schema.cartOrders.mediaBuyerId),
     ]);
 
     const spendByBuyer = new Map<string, number>(
@@ -5403,22 +5426,30 @@ export class MarketingService {
         .filter((row): row is typeof row & { mediaBuyerId: string } => row.mediaBuyerId != null)
         .map((row) => [row.mediaBuyerId, row]),
     );
+    const cartByBuyer = new Map(
+      cartRows
+        .filter((row): row is typeof row & { mediaBuyerId: string } => row.mediaBuyerId != null)
+        .map((row) => [row.mediaBuyerId, row]),
+    );
 
     const result = new Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>();
     // Include requested (active) buyers AND any inactive buyers with orders
     // in the period so the overview total matches the Marketing Orders page.
-    const allBuyerIdsWithData = new Set([...buyerIds, ...orderByBuyer.keys()]);
+    const allBuyerIdsWithData = new Set([...buyerIds, ...orderByBuyer.keys(), ...cartByBuyer.keys()]);
     for (const buyerId of allBuyerIdsWithData) {
       const spend = spendByBuyer.get(buyerId) ?? 0;
       const orderRow = orderByBuyer.get(buyerId);
+      const cartRow = cartByBuyer.get(buyerId);
+      const cartDelivered = cartRow?.deliveredCount ?? 0;
+      const cartRevenue = cartRow?.deliveredRevenue ?? 0;
       result.set(
         buyerId,
         this.deriveBuyerMetrics({
           totalSpend: spend,
-          totalOrders: Number(orderRow?.totalOrders ?? 0),
-          deliveredOrders: Number(orderRow?.deliveredOrders ?? 0),
-          deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0),
-          confirmedOrders: Number(orderRow?.confirmedOrders ?? 0),
+          totalOrders: Number(orderRow?.totalOrders ?? 0) + cartDelivered,
+          deliveredOrders: Number(orderRow?.deliveredOrders ?? 0) + cartDelivered,
+          deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0) + cartRevenue,
+          confirmedOrders: Number(orderRow?.confirmedOrders ?? 0) + cartDelivered,
         }),
       );
     }
