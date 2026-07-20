@@ -277,7 +277,9 @@ export function Header({
     let branchId = '';
     let selectedBranchIds = '';
     if (mobileAllChecked || mobileNoneChecked) {
-      // All branches
+      // All branches — send the full set so branch-scoped roles (HoMB, HoCS)
+      // don't hit 'Only org-wide users can clear branch context'.
+      selectedBranchIds = [...allMobileBranchIds].join(',');
     } else if (mobileChecked.size === 1) {
       branchId = [...mobileChecked][0]!;
     } else {
@@ -289,9 +291,23 @@ export function Header({
     body.set('branchId', branchId);
     body.set('selectedBranchIds', selectedBranchIds);
 
-    await fetch('/admin/branches/switch', { method: 'POST', body });
+    try {
+      const res = await fetch('/admin/branches/switch', { method: 'POST', body });
+      const ct = res.headers.get('content-type') ?? '';
+      if (ct.includes('application/json')) {
+        const data = await res.json();
+        if (data?.error) {
+          console.error('[BranchSwitch]', data.error);
+          setIsMobileBranchApplying(false);
+          return;
+        }
+      }
+    } catch {
+      setIsMobileBranchApplying(false);
+      return;
+    }
     window.location.reload();
-  }, [branches, isMobileBranchSwitching, mobileAllChecked, mobileNoneChecked, mobileChecked]);
+  }, [branches, isMobileBranchSwitching, mobileAllChecked, mobileNoneChecked, mobileChecked, allMobileBranchIds]);
 
   return (
     <header
@@ -1188,7 +1204,11 @@ function HeaderBranchSwitcher({
     let branchId = '';
     let selectedBranchIds = '';
     if (allChecked || noneChecked) {
-      // All checked or none = "All Branches" (no filter)
+      // All checked = "All Branches" view. Branch-scoped roles (HoMB, HoCS)
+      // can't clear branch context (branchId=null) via the API — they must send
+      // their full branch set as selectedBranchIds so the backend doesn't reject
+      // with 'Only org-wide users can clear branch context'.
+      selectedBranchIds = [...allBranchIds].join(',');
     } else if (checked.size === 1) {
       branchId = [...checked][0]!;
     } else {
@@ -1203,7 +1223,24 @@ function HeaderBranchSwitcher({
     // POST via fetch (not Remix submit) so we can hard-reload after the
     // session cookie is updated — guarantees every loader refetches with
     // the new branch scope instead of reusing stale React state.
-    await fetch('/admin/branches/switch', { method: 'POST', body });
+    try {
+      const res = await fetch('/admin/branches/switch', { method: 'POST', body });
+      // On success the action returns a redirect (fetch follows it → 200 HTML).
+      // On failure it returns json({ error }, { status: 4xx }). Check for JSON
+      // error so we don't reload on failure (which would revert to old state).
+      const ct = res.headers.get('content-type') ?? '';
+      if (ct.includes('application/json')) {
+        const data = await res.json();
+        if (data?.error) {
+          console.error('[BranchSwitch]', data.error);
+          setIsApplying(false);
+          return;
+        }
+      }
+    } catch {
+      setIsApplying(false);
+      return;
+    }
     window.location.reload();
   };
 

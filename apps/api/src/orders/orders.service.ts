@@ -6502,10 +6502,28 @@ export class OrdersService {
     branchScope?: 'servicing' | 'marketing';
     effectiveBranchIds?: string[] | null;
     orderSource?: string; teamMemberIds?: string[];
+    /** When true, exclude all follow-up orders (is_follow_up=true) and
+     *  delivered_follow_up copies. Matches orders.list excludeGraduated=true
+     *  so strip counts align with the table. */
+    excludeFollowUps?: boolean;
+    /** When true, exclude cart-graduated orders (order_source='online').
+     *  Used when cart-graduated orders are counted in a separate query. */
+    excludeCartGraduated?: boolean;
   }): Promise<Record<string, number>> {
     const conditions: Parameters<typeof and>[0][] = [
       sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
     ];
+    // Follow-up exclusion: matches orders.list's excludeGraduated=true behavior
+    // so strip counts align with the table rows.
+    if (opts.excludeFollowUps) {
+      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
+    }
+    // Cart-graduated exclusion: when cart-graduated orders are counted separately
+    // (in the breakdown modal), exclude them from the funnel count.
+    if (opts.excludeCartGraduated) {
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'online')`);
+    }
     if (opts.orderSource === 'edge-form') {
       conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
     } else if (opts.orderSource === 'edge-form-and-import') {
@@ -7465,6 +7483,7 @@ export class OrdersService {
     if (agents.length === 0) return [];
 
     const agentIds = agents.map((a) => a.id);
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const pendingRows = await this.db
       .select({
         agentId: schema.orders.assignedCsId,
@@ -7476,7 +7495,7 @@ export class OrdersService {
           isNull(schema.orders.deletedAt),
           inArray(schema.orders.assignedCsId, agentIds),
           inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
-          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+          ...(bCond ? [bCond] : []),
         ),
       )
       .groupBy(schema.orders.assignedCsId);
@@ -7628,16 +7647,17 @@ export class OrdersService {
     // Include all orders (normal + follow-up) in agent metrics so that
     // delivered follow-up orders count toward CS delivery performance and
     // the engaged denominator stays consistent (CEO 2026-06-09).
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const orderWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
-      ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+      ...(bCond ? [bCond] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
       ...categoryConditions,
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
       deliveredOrRemitted,
-      ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+      ...(bCond ? [bCond] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
       ...categoryConditions,
     );
@@ -7665,9 +7685,9 @@ export class OrdersService {
         .where(deliveredWhere)
         .groupBy(schema.orders.assignedCsId),
       // When categories are active, call logs must join orders to scope by orderSource.
-      // When no categories, branchId still requires the join; only the no-branch+no-category
-      // path can skip the join for efficiency.
-      branchId || categoryConditions.length
+      // When branch-scoped (branchId or effectiveBranchIds), also requires the join.
+      // Only the no-branch+no-category path can skip the join for efficiency.
+      bCond || categoryConditions.length
         ? this.db
             .select({
               agentId: schema.callLogs.agentId,
@@ -7679,7 +7699,7 @@ export class OrdersService {
             .where(
               and(
                 inArray(schema.callLogs.agentId, agentIds),
-                ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+                ...(bCond ? [bCond] : []),
                 ...(callLogsDateFilter ? [callLogsDateFilter] : []),
                 ...categoryConditions,
               ),
@@ -9177,7 +9197,7 @@ export class OrdersService {
         .where(
           and(
             inArray(schema.orders.id, originalIds),
-            ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
+            ...(bCond ? [bCond] : []),
           ),
         );
       for (const row of originalRows) originalById.set(row.id, row);

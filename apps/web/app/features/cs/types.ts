@@ -134,6 +134,16 @@ export interface PendingCart {
   paymentMethod?: string | null;
   quantity?: number | null;
   customFieldValues?: Record<string, unknown> | null;
+  /** Whether this cart was recovered into a cart order. */
+  recovered?: boolean;
+  /** Why the auto-pull cron skipped this cart (e.g. 'DUPLICATE_ORDER'). */
+  skipReason?: string | null;
+  /** The order that blocked recovery. */
+  duplicateOfOrderId?: string | null;
+  /** The cart order that blocked recovery. */
+  duplicateOfCartOrderId?: string | null;
+  /** The follow-up order that blocked recovery. */
+  duplicateOfFollowUpOrderId?: string | null;
 }
 
 /** Pagination meta for `cart.listAbandoned` (CS abandoned tab + cart resource loader). */

@@ -253,6 +253,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         offerLabel: string | null;
         updatedAt: string;
         recovered: boolean;
+        skipReason?: string | null;
+        duplicateOfOrderId?: string | null;
+        duplicateOfCartOrderId?: string | null;
+        duplicateOfFollowUpOrderId?: string | null;
       };
       const cartsData = cartsRes.ok
         ? (cartsRes.data as { result?: { data?: { items: AbandonedCart[]; total: number; page: number; limit: number } } })?.result?.data
@@ -261,10 +265,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const totalPages = total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE);
       const orders: Order[] = (cartsData?.items ?? []).map((c) => ({
         id: c.id,
+        cartId: c.id,
         orderNumber: 0,
         customerName: c.customerName,
         customerPhoneDisplay: c.customerPhoneDisplay ?? '',
-        status: c.recovered ? 'RECOVERED' : 'ABANDONED',
+        status: c.recovered ? 'RECOVERED' : c.skipReason ? 'DUPLICATE_CART' : 'ABANDONED',
         totalAmount: null,
         createdAt: c.updatedAt,
         assignedCsId: null,

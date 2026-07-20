@@ -132,9 +132,13 @@ export class TrpcMiddleware implements NestMiddleware {
     // branch, ownership-scoped). `switchBranch` explicitly lets an MB clear
     // their branch; without this exemption every request would 401 while the
     // MB is on "All Branches", zeroing dashboards and emptying lists.
+    // Also EXCEPT users with an active multi-branch selection (selectedBranchIds)
+    // — they have a valid branch context via effectiveBranchIds even though
+    // currentBranchId is null (CEO directive 2026-06-10 multi-branch support).
     const branchId = merged.currentBranchId ?? null;
+    const hasMultiBranchSelection = (merged.selectedBranchIds?.length ?? 0) > 0;
     const mayOperateWithoutBranch =
-      canViewAllBranches(merged) || merged.role === 'MEDIA_BUYER';
+      canViewAllBranches(merged) || merged.role === 'MEDIA_BUYER' || hasMultiBranchSelection;
     if (!mayOperateWithoutBranch && !branchId) {
       res.status(401).json({
         error: { message: 'Session has no branch context. Please log in again.' },
