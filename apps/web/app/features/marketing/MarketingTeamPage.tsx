@@ -336,6 +336,8 @@ export function MarketingTeamPage({
   allMembersForFilter = [],
 }: MarketingTeamPageProps) {
   const greenThreshold = profitabilityConfig.greenThreshold;
+  // Cart graduated delivered are already included in per-MB leaderboard totals
+  // from the backend (getPerformanceMetricsBatched), so no frontend addition needed.
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
