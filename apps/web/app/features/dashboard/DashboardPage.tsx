@@ -1379,7 +1379,6 @@ function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: s
     <DashboardDeliveredFollowUpSection fallback={<OverviewStatStripSkeleton count={5} />}>
       {(sc) => {
         const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
-        if (total === 0) return null;
         const unassigned = sc['UNPROCESSED'] ?? 0;
         const assigned = sc['CS_ASSIGNED'] ?? 0;
         const engaged = sc['CS_ENGAGED'] ?? 0;
@@ -1392,25 +1391,25 @@ function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: s
         const cr = total > 0 ? ((confirmed + delivered) / total) * 100 : 0;
         const dr = total > 0 ? (delivered / total) * 100 : 0;
         return (
-          <Link to="/admin/sales/delivered-follow-up" className="block group">
-            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+          <div>
+            <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
               Delivered Follow-Up
             </h2>
             <OverviewStatStrip
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
-                { label: 'Total', value: total, valueClassName: 'text-app-fg' },
-                { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
-                { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400' },
-                { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
-                { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
-                { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: 'Total', value: total, valueClassName: 'text-app-fg', to: '/admin/sales/delivered-follow-up' },
+                { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: '/admin/sales/delivered-follow-up?status=UNPROCESSED' },
+                { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/delivered-follow-up?status=CS_ASSIGNED' },
+                { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/delivered-follow-up?status=CS_ENGAGED' },
+                { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/delivered-follow-up?status=CONFIRMED' },
+                { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/delivered-follow-up?status=DELIVERED' },
                 { label: 'CR', value: `${cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(cr) },
                 { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
               ]}
             />
-          </Link>
+          </div>
         );
       }}
     </DashboardDeliveredFollowUpSection>
