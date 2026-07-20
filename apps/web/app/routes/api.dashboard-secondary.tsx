@@ -135,7 +135,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const cartOrdersP = needsCartOrders
       ? apiRequest<unknown>(`/trpc/cartOrders.dashboardCounts?input=${encodeURIComponent(cartOrdersInput)}`, deferredOpt)
       : Promise.resolve(null);
-    const dfuInput = JSON.stringify({ startDate, endDate, orderSource: 'delivered_follow_up' });
+    const dfuInput = JSON.stringify({ startDate, endDate, orderSource: 'delivered_follow_up', excludeGraduated: false });
     const dfuP = needsFollowUp
       ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(dfuInput)}`, deferredOpt)
       : Promise.resolve(null);

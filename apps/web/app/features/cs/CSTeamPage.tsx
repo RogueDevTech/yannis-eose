@@ -76,6 +76,22 @@ export interface CSTeamPageProps {
   cartTableCounts?: Record<string, number>;
 }
 
+function StatInfoIcon({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors"
+      aria-label="View breakdown"
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="10" />
+        <path strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+      </svg>
+    </button>
+  );
+}
+
 const CS_ACTIVITY_OPTIONS = [
   { value: 'ALL', label: 'All activity' },
   { value: 'ACTIVE', label: 'Active only' },
@@ -464,6 +480,7 @@ export function CSTeamPage({
   }, [sort]);
   const [showExportModal, setShowExportModal] = useState(false);
   const [peekMember, setPeekMember] = useState<CSTeamMemberOverview | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<'total' | 'unassigned' | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
   const navigation = useNavigation();
@@ -631,7 +648,7 @@ export function CSTeamPage({
         render: (member) => {
           const lb = member.leaderboardEntry;
           return lb ? (
-            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersConfirmed}</span>
+            <span className="text-sm font-medium text-brand-600 dark:text-brand-400 tabular-nums">{lb.ordersConfirmed}</span>
           ) : (
             '\u2014'
           );
@@ -645,7 +662,7 @@ export function CSTeamPage({
         render: (member) => {
           const lb = member.leaderboardEntry;
           return lb ? (
-            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersDelivered}</span>
+            <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">{lb.ordersDelivered}</span>
           ) : (
             '\u2014'
           );
@@ -855,7 +872,7 @@ export function CSTeamPage({
                 valueClassName: 'text-app-fg',
               },
               {
-                label: 'Total orders',
+                label: <span className="flex items-center">Total orders<StatInfoIcon onClick={() => setBreakdownModal('total')} /></span>,
                 value: grandTotal.toString(),
                 valueClassName: 'text-brand-600 dark:text-brand-400',
                 title: hasCategoryFilter
@@ -899,9 +916,9 @@ export function CSTeamPage({
             mobileGrid
             items={[
               {
-                label: 'Unassigned',
-                value: (summary.engagedTotal - summary.confirmedTotal - summary.deliveredTotal).toString(),
-                valueClassName: (summary.engagedTotal - summary.confirmedTotal - summary.deliveredTotal) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                label: <span className="flex items-center">Unassigned<StatInfoIcon onClick={() => setBreakdownModal('unassigned')} /></span>,
+                value: (summary.engagedTotal - summary.confirmedTotal).toString(),
+                valueClassName: (summary.engagedTotal - summary.confirmedTotal) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
                 title: 'Orders not yet confirmed or delivered in this period',
               },
               {
@@ -942,6 +959,70 @@ export function CSTeamPage({
               },
             ]}
           />
+          {(() => {
+            const allCatRows = [
+              { key: 'funnel', label: 'Funnel (marketing forms)', value: categoryCounts.funnel },
+              { key: 'offline', label: 'Offline (manually created)', value: categoryCounts.offline },
+              { key: 'follow_up', label: 'Follow-up', value: fuTableTotal },
+              { key: 'cart', label: 'Cart (recovered)', value: cartTableTotal },
+              { key: 'delivered_follow_up', label: 'Delivered follow-up', value: categoryCounts.deliveredFollowUp },
+            ];
+            const catSet = new Set(categories);
+            const visibleCatRows = allCatRows.map((r) => ({
+              ...r,
+              value: hasCategoryFilter && !catSet.has(r.key) ? 0 : r.value,
+              dimmed: hasCategoryFilter && !catSet.has(r.key),
+            }));
+            const filteredTotal = visibleCatRows.reduce((s, r) => s + r.value, 0);
+            return (
+              <>
+                <Modal open={breakdownModal === 'total'} onClose={() => setBreakdownModal(null)} maxWidth="max-w-sm" contentClassName="p-5">
+                  <h2 className="text-base font-semibold text-app-fg mb-1">Total Orders: Breakdown</h2>
+                  <p className="text-sm text-app-fg-muted mb-4">
+                    {hasCategoryFilter ? 'Filtered by selected categories.' : 'Combined total across all order pipelines.'}
+                  </p>
+                  <div className="space-y-0.5">
+                    {visibleCatRows.map((l, i) => (
+                      <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.dimmed ? 'opacity-40' : ''}`}>
+                        <span className="text-sm text-app-fg">{l.label}</span>
+                        <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between gap-4 py-1.5 font-semibold border-t border-app-border pt-2.5 mt-1">
+                      <span className="text-sm text-app-fg">Total</span>
+                      <span className="text-sm tabular-nums text-app-fg">{filteredTotal.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </Modal>
+                <Modal open={breakdownModal === 'unassigned'} onClose={() => setBreakdownModal(null)} maxWidth="max-w-sm" contentClassName="p-5">
+                  <h2 className="text-base font-semibold text-app-fg mb-1">Unassigned: Breakdown</h2>
+                  <p className="text-sm text-app-fg-muted mb-4">
+                    {hasCategoryFilter ? 'Filtered by selected categories.' : 'Engaged minus confirmed, by order category.'}
+                  </p>
+                  <div className="space-y-0.5">
+                    {visibleCatRows.map((l, i) => (
+                      <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.dimmed ? 'opacity-40' : ''}`}>
+                        <span className="text-sm text-app-fg">{l.label}</span>
+                        <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between gap-4 py-1.5 border-t border-app-border pt-2.5 mt-1">
+                      <span className="text-sm text-app-fg">Total engaged</span>
+                      <span className="text-sm tabular-nums text-app-fg font-semibold">{summary.engagedTotal.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4 py-1.5">
+                      <span className="text-sm text-app-fg">Confirmed (incl. delivered)</span>
+                      <span className="text-sm tabular-nums text-app-fg">&minus; {summary.confirmedTotal.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4 py-1.5 font-semibold border-t border-app-border pt-2.5 mt-1">
+                      <span className="text-sm text-app-fg">Unassigned</span>
+                      <span className="text-sm tabular-nums text-app-fg">{(summary.engagedTotal - summary.confirmedTotal).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </Modal>
+              </>
+            );
+          })()}
         </div>
         );
       })()}

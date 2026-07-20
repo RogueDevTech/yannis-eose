@@ -181,7 +181,14 @@ export function CachedAwait<T>({
   }
 
   if (resolved !== null) {
-    return <>{children(resolved)}</>;
+    // When showing cached data while revalidating, apply a subtle opacity
+    // transition so users know numbers are refreshing.
+    const isRefreshing = revalidator.state === 'loading' && cachedRef.current !== null;
+    return (
+      <div className={isRefreshing ? 'opacity-60 transition-opacity duration-300' : 'transition-opacity duration-300'}>
+        {children(resolved)}
+      </div>
+    );
   }
   return <>{fallback}</>;
 }

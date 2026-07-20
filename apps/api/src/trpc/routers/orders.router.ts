@@ -1513,7 +1513,7 @@ export const ordersRouter = router({
           bundleBranchScope,
           ctx.effectiveBranchIds,
           false, // isFollowUp — matches orders.list default
-          input.orderSource === 'edge-form' ? true : undefined, // excludeOffline for edge-form
+          input.orderSource === 'edge-form' ? true : input.orderSource === 'edge-form-and-import' ? 'include-imports' : undefined, // excludeOffline for edge-form / edge-form-and-import
           // Sub-funnel pages (offline, delivered_follow_up) use the old exclude logic;
           // the main Total strip uses onlyGraduateNonMarketing so non-marketing orders
           // only contribute their DELIVERED/REMITTED counts.

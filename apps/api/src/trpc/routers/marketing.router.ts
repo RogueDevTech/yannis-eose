@@ -1129,7 +1129,8 @@ export const marketingRouter = router({
             branchScope: 'marketing',
             effectiveBranchIds: ctx.effectiveBranchIds,
             orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
-            excludeNonGraduatedFollowUps: true,
+            excludeFollowUps: true,
+            excludeCartGraduated: true,
           },
         ),
         // Cart-graduated orders (orderSource='online') — separate strip on the page.

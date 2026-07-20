@@ -6502,19 +6502,27 @@ export class OrdersService {
     branchScope?: 'servicing' | 'marketing';
     effectiveBranchIds?: string[] | null;
     orderSource?: string; teamMemberIds?: string[];
-    /** When true, exclude follow-up orders that haven't graduated (DELIVERED/REMITTED).
-     *  Matches orders.list default behavior so strip counts align with the table. */
-    excludeNonGraduatedFollowUps?: boolean;
+    /** When true, exclude all follow-up orders (is_follow_up=true) and
+     *  delivered_follow_up copies. Matches orders.list excludeGraduated=true
+     *  so strip counts align with the table. */
+    excludeFollowUps?: boolean;
+    /** When true, exclude cart-graduated orders (order_source='online').
+     *  Used when cart-graduated orders are counted in a separate query. */
+    excludeCartGraduated?: boolean;
   }): Promise<Record<string, number>> {
     const conditions: Parameters<typeof and>[0][] = [
       sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
     ];
-    // Follow-up graduation: non-graduated follow-ups are excluded from
-    // marketing surfaces so strip counts match orders.list defaults.
-    if (opts.excludeNonGraduatedFollowUps) {
-      conditions.push(
-        sql`(${schema.orders.isFollowUp} = false OR (${schema.orders.isFollowUp} = true AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
-      );
+    // Follow-up exclusion: matches orders.list's excludeGraduated=true behavior
+    // so strip counts align with the table rows.
+    if (opts.excludeFollowUps) {
+      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
+    }
+    // Cart-graduated exclusion: when cart-graduated orders are counted separately
+    // (in the breakdown modal), exclude them from the funnel count.
+    if (opts.excludeCartGraduated) {
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'online')`);
     }
     if (opts.orderSource === 'edge-form') {
       conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);

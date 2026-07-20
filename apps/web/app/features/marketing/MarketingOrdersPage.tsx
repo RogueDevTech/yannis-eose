@@ -283,7 +283,7 @@ export function MarketingOrdersPage({
     (order: Order) => {
       if (!order.cartId) return;
       setViewCartOrderId(order.id);
-      cartDetailFetcher.load(`/admin/marketing/cart-detail?cartId=${order.cartId}`);
+      cartDetailFetcher.load(`/admin/sales/queue/carts?cartId=${order.cartId}`);
     },
     [cartDetailFetcher],
   );
@@ -476,6 +476,10 @@ export function MarketingOrdersPage({
                 <span className="inline-flex items-center rounded-full bg-success-100 px-2 py-0.5 text-xs font-semibold text-success-700 dark:bg-success-900/30 dark:text-success-400">
                   Recovering
                 </span>
+              ) : order.status === 'DUPLICATE_CART' ? (
+                <span className="inline-flex items-center rounded-full bg-warning-100 px-2 py-0.5 text-xs font-semibold text-warning-700 dark:bg-warning-900/30 dark:text-warning-400">
+                  Duplicate
+                </span>
               ) : (
                 <OrderStatusBadge status={order.status} />
               ),
@@ -514,7 +518,7 @@ export function MarketingOrdersPage({
                   {order.lastCsComment && (
                     <CsCommentIcon comment={order.lastCsComment.comment} actorName={order.lastCsComment.actorName} />
                   )}
-                  {order.status === 'ABANDONED' || order.status === 'RECOVERED' ? (
+                  {order.status === 'ABANDONED' || order.status === 'RECOVERED' || order.status === 'DUPLICATE_CART' ? (
                     <CompactTableActionButton onClick={() => openCartDetail(order)}>View</CompactTableActionButton>
                   ) : (
                     <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
@@ -573,6 +577,10 @@ export function MarketingOrdersPage({
               <span className="inline-flex items-center rounded-full bg-success-100 px-2 py-0.5 text-xs font-semibold text-success-700 dark:bg-success-900/30 dark:text-success-400">
                 Recovering
               </span>
+            ) : order.status === 'DUPLICATE_CART' ? (
+              <span className="inline-flex items-center rounded-full bg-warning-100 px-2 py-0.5 text-xs font-semibold text-warning-700 dark:bg-warning-900/30 dark:text-warning-400">
+                Duplicate
+              </span>
             ) : (
               <OrderStatusBadge status={order.status} />
             )}
@@ -586,8 +594,9 @@ export function MarketingOrdersPage({
         </>
       );
 
-      // Cart rows open the quick-detail modal; real orders open the peek modal.
-      if (order.status === 'CART') {
+      // Cart / abandoned / recovered / duplicate rows open the quick-detail modal;
+      // real orders open the peek modal.
+      if (order.status === 'CART' || order.status === 'ABANDONED' || order.status === 'RECOVERED' || order.status === 'DUPLICATE_CART') {
         return (
           <button
             type="button"
@@ -864,7 +873,8 @@ export function MarketingOrdersPage({
             // counts so all filter options are reachable.
             const statusCounts = activeSecondary.statusCounts ?? ins.statusCounts;
             const statusTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
-            // Cart-graduated orders (orderSource='online') from separate query
+            // Cart-graduated orders (orderSource='online') from separate query.
+            // Cart orders graduate into real orders, so include them in the grand total.
             const cartSc = activeSecondary.cartStatusCounts ?? {};
             const cartGraduatedTotal = Object.entries(cartSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0);
             const cartGraduatedDelivered = (cartSc['DELIVERED'] ?? 0) + (cartSc['REMITTED'] ?? 0);
@@ -1389,7 +1399,7 @@ export function MarketingOrdersPage({
                   <span className="font-semibold text-app-fg">{funnelTotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-app-fg-muted">Delivered cart orders</span>
+                  <span className="text-app-fg-muted">Cart-graduated orders</span>
                   <span className="font-semibold text-app-fg">{cartGrad.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-app-border">

@@ -837,11 +837,30 @@ export class AuthService {
     const user: SessionUser = sessionData;
     const isMediaBuyer = user.role === 'MEDIA_BUYER';
 
-    if (branchId === null) {
+    if (branchId === null && !(selectedBranchIds && selectedBranchIds.length > 0)) {
+      // Clearing branch context entirely (no selectedBranchIds) — only allowed
+      // for org-wide users. When selectedBranchIds is provided, the user is
+      // selecting specific branches (multi-select), not clearing context.
       if (!canViewAllBranches(user) && !isMediaBuyer) {
         throw new ForbiddenException('Only org-wide users can clear branch context');
       }
-    } else if (isMediaBuyer) {
+    } else if (branchId === null && selectedBranchIds && selectedBranchIds.length > 0) {
+      // Multi-branch selection — validate the user is a member of at least one
+      // of the selected branches (the trust boundary sanitisation below will
+      // strip any branches they're not permitted to see).
+      if (!canViewAllBranches(user) && !isMediaBuyer) {
+        const membership = await this.db
+          .select({ branchId: schema.userBranches.branchId })
+          .from(schema.userBranches)
+          .where(eq(schema.userBranches.userId, user.id))
+          .limit(100);
+        const memberIds = new Set(membership.map((m) => m.branchId));
+        const hasAnyMembership = selectedBranchIds.some((id) => memberIds.has(id));
+        if (!hasAnyMembership) {
+          throw new ForbiddenException('You are not a member of any selected branch');
+        }
+      }
+    } else if (branchId && isMediaBuyer) {
       // A Media Buyer may switch to any branch in their data footprint — a
       // branch they were removed from stays reachable as a read-only lens.
       // Branch-scoped mutations there are blocked by the tRPC middleware
@@ -850,7 +869,7 @@ export class AuthService {
       if (!scopeIds.includes(branchId)) {
         throw new ForbiddenException('You have no orders or campaigns in this branch');
       }
-    } else if (!canViewAllBranches(user)) {
+    } else if (branchId && !canViewAllBranches(user)) {
       // Scoped users must be a member of the target branch
       const membership = await this.db
         .select({ branchId: schema.userBranches.branchId })
