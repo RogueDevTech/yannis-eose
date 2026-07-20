@@ -110,12 +110,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboard: LeaderboardEntry[];
     profitabilityConfig: { targetRoas: number; greenThreshold: number };
     usersFallback: Array<{ id: string; name: string; role: string }> | null;
+    cartOrdersCounts?: Record<string, number>;
   };
   const bundle = bundleRes.ok
     ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
     : null;
 
   const profitabilityConfig = bundle?.profitabilityConfig ?? { targetRoas: 3, greenThreshold: 2.5 };
+  const cartOrdersCounts = bundle?.cartOrdersCounts ?? {};
   let teamMembers: FundingBalanceRow[] = bundle?.balances ?? [];
   const fundingSummary = bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 };
 
@@ -324,6 +326,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     profitabilityConfig,
     overviewStats,
     allMembersForFilter,
+    cartOrdersCounts,
   };
   })();
 

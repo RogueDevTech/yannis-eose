@@ -1318,7 +1318,7 @@ export const marketingRouter = router({
 
       const hasDateFilter = !!(input.startDate || input.endDate);
       const balancesBaseOpts = { activeOnly: true, restrictToUserIds: restrictMbIds ?? undefined };
-      const [balancesAllTime, balancesFiltered, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
+      const [balancesAllTime, balancesFiltered, fundingSummary, leaderboard, profitabilityConfig, cartOrdersCounts] = await Promise.all([
         // All-time balances for the Balance column (always reflects actual running balance)
         getMarketingService().listFundingBalances(ctx.user, branchId, balancesBaseOpts, ctx.effectiveBranchIds),
         // Date-filtered balances for Received/Spent/Distributed columns
@@ -1335,6 +1335,8 @@ export const marketingRouter = router({
           ctx.effectiveBranchIds,
         ),
         getMarketingService().getProfitabilityConfig(),
+        // Cart order status counts — only DELIVERED/REMITTED count toward marketing total
+        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds),
       ]);
 
       // Merge: date-filtered received/spent/distributed with all-time balance
@@ -1416,6 +1418,7 @@ export const marketingRouter = router({
         leaderboard,
         profitabilityConfig,
         usersFallback,
+        cartOrdersCounts,
       };
     }),
 
