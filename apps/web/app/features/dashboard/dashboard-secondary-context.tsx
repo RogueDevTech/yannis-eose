@@ -97,7 +97,7 @@ export function DashboardMetricsSection({
   children,
 }: {
   fallback: React.ReactNode;
-  children: (metrics: DashboardData['metrics'], abandonedCartCount: number) => React.ReactNode;
+  children: (metrics: DashboardData['metrics'], abandonedCartCount: number, cartOrdersCounts?: Record<string, number>) => React.ReactNode;
 }) {
   const { loading, error, bundle, retry } = useDashboardSecondary();
   if (error) {
@@ -110,7 +110,7 @@ export function DashboardMetricsSection({
     );
   }
   if (loading || !bundle) return <>{fallback}</>;
-  return <>{children(bundle.metrics, bundle.abandonedCartCount)}</>;
+  return <>{children(bundle.metrics, bundle.abandonedCartCount, bundle.cartOrdersCounts)}</>;
 }
 
 /** Supervisor-aware section: provides both team and personal metrics when available. */
@@ -119,7 +119,7 @@ export function DashboardSupervisorMetricsSection({
   children,
 }: {
   fallback: React.ReactNode;
-  children: (teamMetrics: DashboardData['metrics'], personalMetrics: DashboardData['metrics'] | null, abandonedCartCount: number) => React.ReactNode;
+  children: (teamMetrics: DashboardData['metrics'], personalMetrics: DashboardData['metrics'] | null, abandonedCartCount: number, cartOrdersCounts?: Record<string, number>) => React.ReactNode;
 }) {
   const { loading, error, bundle, retry } = useDashboardSecondary();
   if (error) {
@@ -132,7 +132,7 @@ export function DashboardSupervisorMetricsSection({
     );
   }
   if (loading || !bundle) return <>{fallback}</>;
-  return <>{children(bundle.metrics, bundle.personalMetrics ?? null, bundle.abandonedCartCount)}</>;
+  return <>{children(bundle.metrics, bundle.personalMetrics ?? null, bundle.abandonedCartCount, bundle.cartOrdersCounts)}</>;
 }
 
 export function DashboardProfitSection({

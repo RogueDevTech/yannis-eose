@@ -568,7 +568,7 @@ function CSDashboard({
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string }) {
+function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId, cartOrdersCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string; cartOrdersCounts?: Record<string, number> }) {
   /** Append `&mediaBuyerId=…` when viewing personal performance so the orders
    *  page lands on the "My Orders" tab with the correct filter pre-selected. */
   const q = (base: string) => {
@@ -576,13 +576,17 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
     const sep = base.includes('?') ? '&' : '?';
     return `${base}${sep}mediaBuyerId=${mediaBuyerId}`;
   };
-  const unconfirmedOrders = Math.max(0, metrics.totalOrders - metrics.confirmedOrders);
+  // Cart-graduated orders: only DELIVERED/REMITTED count toward marketing total
+  const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
+  const totalOrders = metrics.totalOrders + cartGraduatedDelivered;
+  const deliveredOrders = metrics.deliveredOrders + cartGraduatedDelivered;
+  const unconfirmedOrders = Math.max(0, totalOrders - metrics.confirmedOrders);
   return (
     <OverviewStatStrip
       mobileGrid
       tileClassName="min-w-[6rem]"
       items={[
-        { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: q('/admin/marketing/orders') },
+        { label: 'Total Orders', value: totalOrders.toString(), valueClassName: 'text-app-fg', to: q('/admin/marketing/orders') },
         {
           label: 'Unconfirmed',
           value: unconfirmedOrders.toString(),
@@ -591,13 +595,13 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
         },
         {
           label: 'Confirmed',
-          value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(),
+          value: Math.max(0, metrics.confirmedOrders - deliveredOrders).toString(),
           valueClassName: 'text-brand-600 dark:text-brand-400',
           to: q('/admin/marketing/orders?status=CONFIRMED'),
         },
         {
           label: 'Delivered',
-          value: metrics.deliveredOrders.toString(),
+          value: deliveredOrders.toString(),
           valueClassName: 'text-success-600 dark:text-success-400',
           to: q('/admin/marketing/orders?status=DELIVERED'),
         },
@@ -633,14 +637,17 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
   );
 }
 
-function MarketingPerformanceSummary({ metrics, naira }: { metrics: DashboardData['metrics']; naira: (amount: number) => string }) {
+function MarketingPerformanceSummary({ metrics, naira, cartOrdersCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; cartOrdersCounts?: Record<string, number> }) {
+  const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
+  const totalOrders = metrics.totalOrders + cartGraduatedDelivered;
+  const deliveredOrders = metrics.deliveredOrders + cartGraduatedDelivered;
   return (
     <div className="card">
       <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
       <div className="space-y-3">
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders)}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{totalOrders}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{deliveredOrders}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, metrics.confirmedOrders - deliveredOrders)}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
       </div>
@@ -685,9 +692,9 @@ function MarketingDashboard({
         />
 
         <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-          {(teamMetrics, personalMetrics, abandonedCartCount) => {
+          {(teamMetrics, personalMetrics, abandonedCartCount, cartOrdersCounts) => {
             const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
-            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
+            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
           }}
         </DashboardSupervisorMetricsSection>
 
@@ -706,11 +713,11 @@ function MarketingDashboard({
         )}
 
         <DashboardSupervisorMetricsSection fallback={<DualCardSkeleton />}>
-          {(teamMetrics, personalMetrics) => {
+          {(teamMetrics, personalMetrics, _abandonedCartCount, cartOrdersCounts) => {
             const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
             return (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} />
+                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} />
                 <QuickActionsCard role={role} unprocessed={0} />
               </div>
             );
@@ -725,7 +732,7 @@ function MarketingDashboard({
     return (
       <>
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-          {(metrics, abandonedCartCount) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />}
+          {(metrics, abandonedCartCount, cartOrdersCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} />}
         </DashboardMetricsSection>
 
         <div className="card">
@@ -743,9 +750,9 @@ function MarketingDashboard({
         </div>
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
-          {(metrics) => (
+          {(metrics, _abandonedCartCount, cartOrdersCounts) => (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} />
+              <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} />
               <QuickActionsCard role={role} unprocessed={0} />
             </div>
           )}
@@ -758,7 +765,7 @@ function MarketingDashboard({
   return (
     <>
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-        {(metrics, abandonedCartCount) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />}
+        {(metrics, abandonedCartCount, cartOrdersCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} />}
       </DashboardMetricsSection>
 
       {showsTeamManagementCard && (
@@ -782,9 +789,9 @@ function MarketingDashboard({
       )}
 
       <DashboardMetricsSection fallback={<DualCardSkeleton />}>
-        {(metrics) => (
+        {(metrics, _abandonedCartCount, cartOrdersCounts) => (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} />
+            <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} />
             <QuickActionsCard role={role} unprocessed={0} />
           </div>
         )}
