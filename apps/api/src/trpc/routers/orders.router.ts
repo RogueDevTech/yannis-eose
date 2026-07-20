@@ -756,7 +756,10 @@ export const ordersRouter = router({
       // excludeGraduated=false so graduated deliveries stay visible.
       const effectiveBranchScope = baseOpts.branchScope ?? 'servicing';
       const callerExcludeGraduated = input.excludeGraduated;
-      if (callerExcludeGraduated !== false) {
+      // Skip excludeGraduated when orderSource is 'delivered_follow_up' — the
+      // exclusion adds `orderSource IS DISTINCT FROM 'delivered_follow_up'` which
+      // contradicts the orderSource filter and returns 0 rows.
+      if (callerExcludeGraduated !== false && effectiveInput.orderSource !== 'delivered_follow_up') {
         (baseOpts as Record<string, unknown>).excludeGraduated = true;
         if (effectiveBranchScope === 'servicing') {
           (baseOpts as Record<string, unknown>).excludeCartGraduated = true;
@@ -1514,8 +1517,8 @@ export const ordersRouter = router({
           // Sub-funnel pages (offline, delivered_follow_up) use the old exclude logic;
           // the main Total strip uses onlyGraduateNonMarketing so non-marketing orders
           // only contribute their DELIVERED/REMITTED counts.
-          input.orderSource ? true : undefined, // excludeGraduated — only for sub-funnels
-          input.orderSource ? (bundleBranchScope === 'servicing') : undefined, // excludeCartGraduated — only for sub-funnels
+          input.orderSource && input.orderSource !== 'delivered_follow_up' ? true : undefined, // excludeGraduated — only for sub-funnels (not delivered_follow_up which uses onlyOffline scoping)
+          input.orderSource && input.orderSource !== 'delivered_follow_up' ? (bundleBranchScope === 'servicing') : undefined, // excludeCartGraduated — only for sub-funnels
           input.orderSource === 'offline' || input.orderSource === 'offline_and_import' ? true : input.orderSource === 'delivered_follow_up' ? 'delivered_follow_up' : undefined, // onlyOffline
           undefined, // servicingBranchId
           bundleTeamMemberIds, // teamMemberIds

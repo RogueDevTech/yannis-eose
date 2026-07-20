@@ -899,10 +899,10 @@ export function CSTeamPage({
             mobileGrid
             items={[
               {
-                label: 'Backlog (unworked)',
-                value: summary.totalPending.toString(),
-                valueClassName: summary.totalPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-                title: 'Orders assigned to closers but not yet engaged or confirmed',
+                label: 'Unassigned',
+                value: (summary.engagedTotal - summary.confirmedTotal - summary.deliveredTotal).toString(),
+                valueClassName: (summary.engagedTotal - summary.confirmedTotal - summary.deliveredTotal) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                title: 'Orders not yet confirmed or delivered in this period',
               },
               {
                 label: 'Confirmed',

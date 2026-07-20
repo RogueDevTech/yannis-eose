@@ -1341,6 +1341,97 @@ export class CartOrdersService {
     `);
 
     this.logger.log(`[pull] Step A: inserted ${inserted.length} cart orders`);
+
+    // ── Tag skipped carts with the reason ────────────────────────────
+    // Carts that were in the input but NOT inserted were blocked by one
+    // of the dedup guards. Tag each with the specific reason + FK to
+    // the duplicate so CS can see why recovery was blocked.
+    const insertedSourceIds = new Set(inserted.map((r) => r.source_cart_id));
+    const skippedIds = cartIds.filter((id) => !insertedSourceIds.has(id));
+    if (skippedIds.length > 0) {
+      const skippedIdList = skippedIds.map((id) => `'${id}'`).join(', ');
+      // Tag: duplicate in orders table
+      await this.pg.unsafe(`
+        UPDATE cart_abandonments ca
+        SET skip_reason = 'DUPLICATE_ORDER',
+            duplicate_of_order_id = sub.order_id,
+            skip_tagged_at = now()
+        FROM (
+          SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, o.id AS order_id
+          FROM cart_abandonments ca2
+          JOIN orders o ON o.customer_phone_hash = ca2.customer_phone_hash
+            AND o.deleted_at IS NULL
+            AND o.status NOT IN ('DELETED', 'CANCELLED')
+            AND o.created_at >= (ca2.created_at - INTERVAL '14 days')
+          JOIN order_items oi ON oi.order_id = o.id AND oi.product_id = ca2.product_id
+          WHERE ca2.id IN (${skippedIdList})
+            AND ca2.skip_reason IS NULL
+          ORDER BY ca2.id, o.created_at DESC
+        ) sub
+        WHERE ca.id = sub.cart_id
+      `).catch((e) => this.logger.warn(`[pull] skip-tag orders failed: ${e instanceof Error ? e.message : e}`));
+
+      // Tag: duplicate in cart_orders table
+      await this.pg.unsafe(`
+        UPDATE cart_abandonments ca
+        SET skip_reason = 'DUPLICATE_CART_ORDER',
+            duplicate_of_cart_order_id = sub.co_id,
+            skip_tagged_at = now()
+        FROM (
+          SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, co2.id AS co_id
+          FROM cart_abandonments ca2
+          JOIN cart_orders co2 ON co2.customer_phone_hash = ca2.customer_phone_hash
+            AND co2.deleted_at IS NULL
+            AND co2.status NOT IN ('DELETED', 'CANCELLED')
+            AND co2.created_at >= (ca2.created_at - INTERVAL '14 days')
+          JOIN cart_order_items coi ON coi.cart_order_id = co2.id AND coi.product_id = ca2.product_id
+          WHERE ca2.id IN (${skippedIdList})
+            AND ca2.skip_reason IS NULL
+          ORDER BY ca2.id, co2.created_at DESC
+        ) sub
+        WHERE ca.id = sub.cart_id
+      `).catch((e) => this.logger.warn(`[pull] skip-tag cart_orders failed: ${e instanceof Error ? e.message : e}`));
+
+      // Tag: duplicate in follow_up_orders table
+      await this.pg.unsafe(`
+        UPDATE cart_abandonments ca
+        SET skip_reason = 'DUPLICATE_FOLLOW_UP',
+            duplicate_of_follow_up_order_id = sub.fu_id,
+            skip_tagged_at = now()
+        FROM (
+          SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, fu.id AS fu_id
+          FROM cart_abandonments ca2
+          JOIN follow_up_orders fu ON fu.customer_phone_hash = ca2.customer_phone_hash
+            AND fu.deleted_at IS NULL
+            AND fu.status NOT IN ('DELETED', 'CANCELLED')
+            AND fu.created_at >= (ca2.created_at - INTERVAL '14 days')
+          JOIN follow_up_order_items fui ON fui.follow_up_order_id = fu.id AND fui.product_id = ca2.product_id
+          WHERE ca2.id IN (${skippedIdList})
+            AND ca2.skip_reason IS NULL
+          ORDER BY ca2.id, fu.created_at DESC
+        ) sub
+        WHERE ca.id = sub.cart_id
+      `).catch((e) => this.logger.warn(`[pull] skip-tag follow_up_orders failed: ${e instanceof Error ? e.message : e}`));
+
+      // Tag: already pulled (source_cart_id exists in cart_orders)
+      await this.pg.unsafe(`
+        UPDATE cart_abandonments ca
+        SET skip_reason = 'ALREADY_PULLED',
+            duplicate_of_cart_order_id = sub.co_id,
+            skip_tagged_at = now()
+        FROM (
+          SELECT ca2.id AS cart_id, co2.id AS co_id
+          FROM cart_abandonments ca2
+          JOIN cart_orders co2 ON co2.source_cart_id = ca2.id
+          WHERE ca2.id IN (${skippedIdList})
+            AND ca2.skip_reason IS NULL
+        ) sub
+        WHERE ca.id = sub.cart_id
+      `).catch((e) => this.logger.warn(`[pull] skip-tag already-pulled failed: ${e instanceof Error ? e.message : e}`));
+
+      this.logger.log(`[pull] Tagged ${skippedIds.length} skipped cart(s) with skip reasons`);
+    }
+
     if (inserted.length === 0) return { pulled: 0 };
 
     const sourceIdList = inserted.map((r) => `'${r.source_cart_id}'`).join(', ');
@@ -1597,6 +1688,7 @@ export class CartOrdersService {
       FROM cart_abandonments ca
       WHERE ca.status = 'ABANDONED'
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+        AND ca.skip_reason IS NULL
       LIMIT 5000
     `);
 

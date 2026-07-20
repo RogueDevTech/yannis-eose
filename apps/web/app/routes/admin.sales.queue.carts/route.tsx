@@ -101,6 +101,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
               paymentMethod?: string | null;
               quantity?: number | null;
               customFieldValues?: Record<string, unknown> | null;
+              recovered?: boolean;
+              skipReason?: string | null;
+              duplicateOfOrderId?: string | null;
+              duplicateOfCartOrderId?: string | null;
+              duplicateOfFollowUpOrderId?: string | null;
             }>;
             total: number;
             page: number;

@@ -583,6 +583,7 @@ export const marketingRouter = router({
           permissions: ctx.user.permissions ?? [],
         },
         branchId ?? ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -625,6 +626,7 @@ export const marketingRouter = router({
           permissions: ctx.user.permissions ?? [],
         },
         branchId ?? ctx.currentBranchId,
+        ctx.effectiveBranchIds,
       );
     }),
 
@@ -1127,6 +1129,7 @@ export const marketingRouter = router({
             branchScope: 'marketing',
             effectiveBranchIds: ctx.effectiveBranchIds,
             orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
+            excludeNonGraduatedFollowUps: true,
           },
         ),
         // Cart-graduated orders (orderSource='online') — separate strip on the page.

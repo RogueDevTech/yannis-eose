@@ -960,7 +960,7 @@ export function MarketingOrdersPage({
                     {
                       label: 'Delivered',
                       value: deliveredCount,
-                      valueClassName: deliveredCount > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+                      valueClassName: 'text-success-600 dark:text-success-400',
                       active: selectedStatus === 'DELIVERED',
                       onClick: () => handleStatusChange('DELIVERED'),
                     },

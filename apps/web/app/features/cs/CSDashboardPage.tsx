@@ -2616,9 +2616,15 @@ function CSDashboardPageLoaded({
                         {c.customerPhoneDisplay}
                       </p>
                       <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide bg-app-hover text-app-fg-muted shrink-0">
-                          Dropped
-                        </span>
+                        {c.skipReason ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400 shrink-0">
+                            Duplicate
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide bg-app-hover text-app-fg-muted shrink-0">
+                            Dropped
+                          </span>
+                        )}
                         <span className="text-micro text-app-fg-muted truncate min-w-0">
                           {c.productName ?? '—'}
                         </span>
