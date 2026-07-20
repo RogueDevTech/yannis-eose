@@ -74,6 +74,10 @@ export interface CSTeamPageProps {
   followUpTableCounts?: Record<string, number>;
   /** Status counts from the cart_orders table (separate from main orders). */
   cartTableCounts?: Record<string, number>;
+  /** Cross-table delivered total (main + follow-up + cart tables) — matches Dashboard. */
+  crossTableDeliveredTotal?: number;
+  /** Cross-table confirmed total (main + follow-up + cart tables) — matches Dashboard. */
+  crossTableConfirmedTotal?: number;
 }
 
 function StatInfoIcon({ onClick }: { onClick: () => void }) {
@@ -468,6 +472,8 @@ export function CSTeamPage({
   totalOrdersFromMainTable = 0,
   followUpTableCounts = {},
   cartTableCounts = {},
+  crossTableDeliveredTotal,
+  crossTableConfirmedTotal,
 }: CSTeamPageProps) {
   // Parse flat sort string (e.g. "total-desc") into SortMenu value
   const sortMenuValue = useMemo((): SortMenuValue => {
@@ -911,39 +917,46 @@ export function CSTeamPage({
               },
             ]}
           />
-          {/* Row 2: Performance stats */}
+          {/* Row 2: Performance stats — use cross-table totals to match Dashboard */}
+          {(() => {
+            const confirmedDisplay = crossTableConfirmedTotal ?? summary.confirmedTotal;
+            const deliveredDisplay = crossTableDeliveredTotal ?? summary.deliveredTotal;
+            const unassignedDisplay = grandTotal - confirmedDisplay - deliveredDisplay;
+            const crDisplay = grandTotal > 0 ? ((confirmedDisplay + deliveredDisplay) / grandTotal) * 100 : null;
+            const drDisplay = grandTotal > 0 ? (deliveredDisplay / grandTotal) * 100 : null;
+            return (
           <OverviewStatStrip
             mobileGrid
             items={[
               {
                 label: <span className="flex items-center">Unassigned<StatInfoIcon onClick={() => setBreakdownModal('unassigned')} /></span>,
-                value: (summary.engagedTotal - summary.confirmedTotal).toString(),
-                valueClassName: (summary.engagedTotal - summary.confirmedTotal) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                value: (unassignedDisplay > 0 ? unassignedDisplay : 0).toString(),
+                valueClassName: unassignedDisplay > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
                 title: 'Orders not yet confirmed or delivered in this period',
               },
               {
                 label: 'Confirmed',
-                value: summary.confirmedTotal.toString(),
+                value: confirmedDisplay.toString(),
                 valueClassName: 'text-app-fg',
-                title: 'Total orders the team confirmed in this period',
+                title: 'Total confirmed orders across all pipelines',
               },
               {
                 label: 'Delivered',
-                value: summary.deliveredTotal.toString(),
+                value: deliveredDisplay.toString(),
                 valueClassName: 'text-success-600 dark:text-success-400',
-                title: 'Total orders attributed to the team that were delivered',
+                title: 'Total delivered orders across all pipelines',
               },
               {
                 label: 'Confirm rate',
-                value: formatRate(summary.confirmationRate),
-                valueClassName: confirmationRateColorClass(summary.confirmationRate),
-                title: 'Confirmed ÷ Engaged across the whole team in this period',
+                value: formatRate(crDisplay),
+                valueClassName: confirmationRateColorClass(crDisplay),
+                title: 'Confirmed ÷ Total across all pipelines',
               },
               {
                 label: 'Delivery rate',
-                value: formatRate(summary.deliveryRate),
-                valueClassName: deliveryRateColorClass(summary.deliveryRate),
-                title: 'Delivered ÷ Engaged across the whole team in this period',
+                value: formatRate(drDisplay),
+                valueClassName: deliveryRateColorClass(drDisplay),
+                title: 'Delivered ÷ Total across all pipelines',
               },
               {
                 label: 'Calls made',
@@ -959,6 +972,8 @@ export function CSTeamPage({
               },
             ]}
           />
+            );
+          })()}
           {(() => {
             const allCatRows = [
               { key: 'funnel', label: 'Funnel (marketing forms)', value: categoryCounts.funnel },

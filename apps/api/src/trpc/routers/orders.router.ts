@@ -1776,6 +1776,24 @@ export const ordersRouter = router({
       // Follow-up and cart table counts are added client-side.
       const totalOrdersFromMainTable = sumExcludeDeleted(totalOrdersStatusCounts);
 
+      // Cross-table delivered total — mirrors Dashboard TotalOrdersStrip.
+      // Uses the same sources: main table (onlyGraduateNonMarketing) + follow-up + cart tables.
+      const sumDelivered = (sc: Record<string, number>) =>
+        (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+      const crossTableDeliveredTotal =
+        sumDelivered(totalOrdersStatusCounts) +
+        sumDelivered(followUpCounts) +
+        sumDelivered(cartCounts);
+
+      // Cross-table confirmed total — same approach.
+      const sumConfirmed = (sc: Record<string, number>) =>
+        (sc['CONFIRMED'] ?? 0) + (sc['AGENT_ASSIGNED'] ?? 0) +
+        (sc['DISPATCHED'] ?? 0) + (sc['IN_TRANSIT'] ?? 0);
+      const crossTableConfirmedTotal =
+        sumConfirmed(totalOrdersStatusCounts) +
+        sumConfirmed(followUpCounts) +
+        sumConfirmed(cartCounts);
+
       return {
         team,
         workloads,
@@ -1786,6 +1804,8 @@ export const ordersRouter = router({
         totalOrdersFromMainTable,
         followUpCounts,
         cartCounts,
+        crossTableDeliveredTotal,
+        crossTableConfirmedTotal,
       };
     }),
 

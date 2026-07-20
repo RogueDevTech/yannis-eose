@@ -275,6 +275,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalOrdersFromMainTable: bundle?.totalOrdersFromMainTable ?? 0,
       followUpTableCounts: bundle?.followUpCounts ?? {},
       cartTableCounts: bundle?.cartCounts ?? {},
+      crossTableDeliveredTotal: bundle?.crossTableDeliveredTotal ?? 0,
+      crossTableConfirmedTotal: bundle?.crossTableConfirmedTotal ?? 0,
     };
   })();
 
@@ -310,6 +312,8 @@ export default function CSTeamRoute() {
             totalOrdersFromMainTable={data.totalOrdersFromMainTable}
             followUpTableCounts={data.followUpTableCounts}
             cartTableCounts={data.cartTableCounts}
+            crossTableDeliveredTotal={data.crossTableDeliveredTotal}
+            crossTableConfirmedTotal={data.crossTableConfirmedTotal}
           />
         )}
     </CachedAwait>
