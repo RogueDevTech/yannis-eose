@@ -773,6 +773,9 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .msg-info{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
     .yannis-form-card .hidden{display:none}
     .yannis-form-card .required{color:#dc2626;font-weight:700}
+    .yannis-form-card .field-error{color:#dc2626;font-size:.75rem;margin:-0.75rem 0 .75rem;display:block}
+    .yannis-form-card input.input-error,.yannis-form-card textarea.input-error,.yannis-form-card select.input-error{border-color:#dc2626}
+    .yannis-form-card .yd.input-error .yd-trigger{border-color:#dc2626}
     .yannis-form-card .product-selector{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem}
     .yannis-form-card .product-option{display:flex;align-items:center;gap:.75rem;padding:.75rem;border:1px solid #ddd;border-radius:8px;cursor:pointer;transition:border-color .2s}
     .yannis-form-card .product-option:hover{border-color:${accentColor}}
@@ -1328,6 +1331,10 @@ function getFormScript(
           opts.forEach(function(o) { o.classList.remove('active'); });
           opt.classList.add('active');
           closePanel();
+          // Clear inline error on selection
+          yd.classList.remove('input-error');
+          var errEl = yd.nextElementSibling;
+          if (errEl && errEl.classList.contains('field-error')) errEl.remove();
           // Fire change event so existing listeners (e.g. payment method → email toggle) work.
           var evt = document.createEvent('HTMLEvents');
           evt.initEvent('change', true, false);
@@ -1380,6 +1387,15 @@ function getFormScript(
         });
         // Expose reset for form.reset().
         yd._ydReset = resetDropdown;
+      });
+
+      // Clear inline errors on regular inputs when user starts typing
+      form.querySelectorAll('input[required], textarea[required]').forEach(function(inp) {
+        inp.addEventListener('input', function() {
+          inp.classList.remove('input-error');
+          var errEl = inp.nextElementSibling;
+          if (errEl && errEl.classList.contains('field-error')) errEl.remove();
+        });
       });
 
       var pmSelect = form.querySelector('#paymentMethod');
@@ -1520,25 +1536,48 @@ function getFormScript(
 
         // Validate required standard fields (hidden inputs from custom dropdowns
         // bypass native browser validation since we use e.preventDefault).
+        // Clear previous inline errors
+        var prevErrors = form.querySelectorAll('.field-error');
+        for (var pe = 0; pe < prevErrors.length; pe++) prevErrors[pe].remove();
+        var prevInvalid = form.querySelectorAll('.input-error');
+        for (var pi2 = 0; pi2 < prevInvalid.length; pi2++) prevInvalid[pi2].classList.remove('input-error');
+
         var reqInputs = form.querySelectorAll('input[required], textarea[required], select[required]');
+        var firstInvalid = null;
+        var missingLabels = [];
         for (var ri = 0; ri < reqInputs.length; ri++) {
           var reqEl = reqInputs[ri];
           var reqVal = (reqEl.value || '').trim();
           if (!reqVal) {
             var fieldLabel = reqEl.name || 'field';
-            // Find label text for user-friendly message
             var assocLabel = form.querySelector('label[for="' + reqEl.id + '"]');
             if (assocLabel) fieldLabel = assocLabel.textContent.replace(/\\s*\\*\\s*$/, '').trim();
-            msg.className = 'msg msg-error';
-            msg.textContent = fieldLabel + ' is required.';
-            btn.disabled = false;
-            btn.textContent = form.dataset.btnText || 'Submit Order';
-            // Try to focus the visible trigger (custom dropdown) or the input itself
+            missingLabels.push(fieldLabel);
+            // Add inline error below field
             var ydParent = reqEl.closest('[data-yd]');
-            if (ydParent) { var trig = ydParent.querySelector('.yd-trigger'); if (trig) trig.focus(); }
-            else reqEl.focus();
-            return;
+            var errorEl = document.createElement('span');
+            errorEl.className = 'field-error';
+            errorEl.textContent = fieldLabel + ' is required.';
+            if (ydParent) {
+              ydParent.classList.add('input-error');
+              ydParent.insertAdjacentElement('afterend', errorEl);
+              if (!firstInvalid) firstInvalid = ydParent;
+            } else {
+              reqEl.classList.add('input-error');
+              reqEl.insertAdjacentElement('afterend', errorEl);
+              if (!firstInvalid) firstInvalid = reqEl;
+            }
           }
+        }
+        if (missingLabels.length > 0) {
+          msg.className = 'msg msg-error';
+          msg.textContent = missingLabels.length === 1
+            ? missingLabels[0] + ' is required.'
+            : 'Please fill in: ' + missingLabels.join(', ') + '.';
+          btn.disabled = false;
+          btn.textContent = form.dataset.btnText || 'Submit Order';
+          if (firstInvalid) firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
         }
 
         var orderData = {

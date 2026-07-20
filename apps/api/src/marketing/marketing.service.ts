@@ -5067,15 +5067,19 @@ export class MarketingService {
     };
 
     // CS/servicing scope includes ALL order sources (offline, edge-form, online).
-    // Marketing scope excludes offline — MBs only care about edge-form/online orders.
+    // Marketing scope: edge-form + import + cart-graduated (online). Excludes offline and delivered_follow_up.
     const isServicingScope = orderBranchScope === 'servicing';
     const orderConditions: Parameters<typeof and>[0][] = [
       // Exclude DELETED orders (editorial) from all marketing metrics.
       // CART is a synthetic frontend status — never exists in the orders table.
       sql`${schema.orders.status} != 'DELETED'`,
-      // Marketing: exclude offline + graduated follow-up orders. Cart-graduated orders
-      // (order_source='online') are real sales and stay in marketing metrics.
-      ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      // Marketing: include funnel (edge-form) and import orders.
+      // Exclude offline, cart-graduated (online), and delivered_follow_up.
+      // Cart-graduated orders are added separately on the frontend (only DELIVERED/REMITTED count).
+      ...(isServicingScope ? [] : [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
+      ]),
       // CS/servicing: include all sources (offline etc.) but exclude graduated
       // follow-up and cart-graduated orders — those have their own dashboard strips.
       // Also excludes delivered_follow_up copies (is_follow_up=false, order_source='delivered_follow_up').
@@ -5098,7 +5102,10 @@ export class MarketingService {
 
     const deliveredConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [] : [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
+      ]),
       ...(isServicingScope ? [
         eq(schema.orders.isFollowUp, false),
         sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up'))`,
@@ -5128,7 +5135,10 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, [...confirmedStatuses]),
-      ...(isServicingScope ? [] : [sql`(${schema.orders.isFollowUp} = false AND (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online'))`]),
+      ...(isServicingScope ? [] : [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
+      ]),
       ...(isServicingScope ? [
         eq(schema.orders.isFollowUp, false),
         sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up'))`,
@@ -5373,14 +5383,10 @@ export class MarketingService {
             // leaderboard data is still scoped to eligible (active) buyers.
             isNotNull(schema.orders.mediaBuyerId),
             sql`${schema.orders.status} != 'DELETED'`,
-            // Exclude graduated follow-up orders — they are re-engagement on
-            // existing leads, not new acquisitions. Cart-graduated orders
-            // (order_source='online', is_follow_up=false) are real sales and stay.
+            // Exclude graduated follow-up and cart-graduated orders.
+            // Cart-graduated are added separately (only DELIVERED/REMITTED count).
             eq(schema.orders.isFollowUp, false),
-            // Match getPerformanceMetrics marketing scope: only count funnel +
-            // cart-graduated orders. Excludes offline, import, and
-            // delivered_follow_up which have their own pages/metrics.
-            sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'online'))`,
+            sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
             branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
           ),
         )
