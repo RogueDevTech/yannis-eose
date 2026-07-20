@@ -839,10 +839,9 @@ export function CSTeamPage({
           Object.entries(counts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
         const fuTableTotal = sumTableCounts(followUpTableCounts);
         const cartTableTotal = sumTableCounts(cartTableCounts);
-        // Grand total = main orders table (onlyGraduateNonMarketing) + separate tables.
-        // This matches the Dashboard's TotalOrdersStrip logic: marketing orders at all
-        // statuses, non-marketing (offline, follow-up, cart graduated) only at DELIVERED/REMITTED.
-        const grandTotal = totalOrdersFromMainTable + fuTableTotal + cartTableTotal;
+        // Grand total = sum of all category counts + separate tables.
+        // Derived from the displayed breakdown so the numbers always tally.
+        const grandTotal = categoryCounts.funnel + categoryCounts.offline + categoryCounts.deliveredFollowUp + fuTableTotal + cartTableTotal;
 
         return (
         <div className="space-y-2">
