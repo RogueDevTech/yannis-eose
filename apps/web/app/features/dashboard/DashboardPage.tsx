@@ -447,7 +447,7 @@ function CSDashboard({
             items={[
               { label: 'Total', value: Math.max(0, funnelTotal).toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
               { label: 'Unassigned', value: Math.max(0, unprocessed).toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
-              { label: 'Assigned', value: Math.max(0, pendingQueue).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
+              { label: 'Assigned', value: Math.max(0, csAssigned).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
               { label: 'Unconfirmed', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
               { label: 'Confirmed', value: Math.max(0, funnelConfirmed).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
               { label: 'Delivered', value: Math.max(0, funnelDelivered).toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
