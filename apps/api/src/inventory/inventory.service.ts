@@ -3876,12 +3876,15 @@ export class InventoryService {
           actorId: actor.id,
         });
 
-        // Restore inventory level at the original location
+        // Restore inventory level at the original location.
+        // Both stockCount and reservedCount were decremented on delivery
+        // (completeDeliveryInventory), so restore both on reversal.
         if (locationId) {
           await tx
             .update(schema.inventoryLevels)
             .set({
               stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
+              reservedCount: sql`${schema.inventoryLevels.reservedCount} + ${reverseQty}`,
               updatedAt: new Date(),
             })
             .where(

@@ -125,6 +125,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalOrdersFromMainTable?: number;
       followUpCounts?: Record<string, number>;
       cartCounts?: Record<string, number>;
+      crossTableDeliveredTotal?: number;
+      crossTableConfirmedTotal?: number;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)

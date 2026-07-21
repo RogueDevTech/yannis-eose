@@ -28,7 +28,7 @@ export function DashboardSecondaryProvider({
   const fetcher = useFetcher<DashboardSecondaryApiResponse>();
   const qs = useMemo(
     () => buildQuery(filters),
-    [filters.startDate, filters.endDate, filters.periodAllTime],
+    [filters.startDate, filters.endDate, filters.periodAllTime, filters.teamId],
   );
   // Cache-bust: include a mount timestamp so a page reload after branch switch
   // doesn't serve a stale HTTP-cached response (max-age=10 on the secondary API).
@@ -80,6 +80,7 @@ function buildQuery(filters: DashboardFilters): string {
   if (filters.startDate) p.set('startDate', filters.startDate);
   if (filters.endDate) p.set('endDate', filters.endDate);
   if (filters.periodAllTime) p.set('periodAllTime', 'true');
+  if (filters.teamId) p.set('teamId', filters.teamId);
   return p.toString();
 }
 

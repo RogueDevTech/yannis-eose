@@ -71,6 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
+  const teamId = url.searchParams.get('teamId') || undefined;
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
   const assignedCsParam = role === 'CS_CLOSER' ? { assignedCsId: user.id } : {};
   const isActualMbSupervisor =
@@ -127,15 +128,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const cartAbandonedP = needsCartAbandoned
       ? apiRequest<unknown>(`/trpc/cart.countAllAbandoned?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
-    const followUpInput = JSON.stringify({ startDate, endDate });
+    const followUpInput = JSON.stringify({ startDate, endDate, ...(teamId && { teamId }) });
     const followUpP = needsFollowUp
       ? apiRequest<unknown>(`/trpc/orders.followUpDashboardCounts?input=${encodeURIComponent(followUpInput)}`, deferredOpt)
       : Promise.resolve(null);
-    const cartOrdersInput = JSON.stringify({ startDate, endDate });
+    const cartOrdersInput = JSON.stringify({ startDate, endDate, ...(teamId && { teamId }) });
     const cartOrdersP = needsCartOrders
       ? apiRequest<unknown>(`/trpc/cartOrders.dashboardCounts?input=${encodeURIComponent(cartOrdersInput)}`, deferredOpt)
       : Promise.resolve(null);
-    const dfuInput = JSON.stringify({ startDate, endDate, orderSource: 'delivered_follow_up', excludeGraduated: false });
+    const dfuInput = JSON.stringify({ startDate, endDate, orderSource: 'delivered_follow_up', excludeGraduated: false, ...(teamId && { teamId }) });
     const dfuP = needsFollowUp
       ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(dfuInput)}`, deferredOpt)
       : Promise.resolve(null);

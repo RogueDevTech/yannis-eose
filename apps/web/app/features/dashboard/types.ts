@@ -59,6 +59,7 @@ export interface DashboardFilters {
   startDate: string;
   endDate: string;
   periodAllTime?: boolean;
+  teamId?: string;
 }
 
 /** Data shape passed to DashboardPage (`ordersAndCounts` resolved in loader; metrics/profit/etc. via context). */

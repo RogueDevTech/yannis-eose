@@ -167,7 +167,7 @@ async function _ceoOverviewFetch(params: {
   if (hasDateRange || isBranchScoped) {
     statusCounts = (statusCountsWhenDated ?? {}) as Record<string, number>;
   } else {
-    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, 'include-imports', true).catch(logErr('statusCounts'));
+    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId, undefined, undefined, 'marketing', effectiveBranchIds, false, 'include-imports', true, true).catch(logErr('statusCounts'));
     statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
   }
 

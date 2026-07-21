@@ -2465,8 +2465,10 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
     return { valid: false, error: 'Campaign ID is required' };
   }
 
-  if (!b['customerName'] || typeof b['customerName'] !== 'string' || (b['customerName'] as string).length < 2) {
-    return { valid: false, error: 'Customer name is required (min 2 characters)' };
+  // customerName is optional for cart saves — phone-first capture sends name
+  // only after the user has typed it. Default to 'Unknown' so the row is valid.
+  if (!b['customerName'] || typeof b['customerName'] !== 'string' || (b['customerName'] as string).trim().length < 1) {
+    b['customerName'] = 'Unknown';
   }
 
   // Nigerian phone format only — same regex used everywhere else in the system.

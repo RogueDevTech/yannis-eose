@@ -48,9 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
-  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
-
   const teamIdParam = url.searchParams.get('teamId') || undefined;
+  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime, ...(teamIdParam && { teamId: teamIdParam }) };
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' && user?.id ? { assignedCsId: user.id } : {};
   // Stock Manager / Finance see ALL deliveries (follow-up + cart included) so

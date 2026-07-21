@@ -576,11 +576,13 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
     const sep = base.includes('?') ? '&' : '?';
     return `${base}${sep}mediaBuyerId=${mediaBuyerId}`;
   };
-  // Cart-graduated orders: only DELIVERED/REMITTED count toward marketing total
+  // Cart-graduated orders: only DELIVERED/REMITTED count toward marketing total.
+  // These are confirmed-and-beyond, so add them to confirmedOrders too.
   const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
   const totalOrders = metrics.totalOrders + cartGraduatedDelivered;
+  const confirmedOrders = metrics.confirmedOrders + cartGraduatedDelivered;
   const deliveredOrders = metrics.deliveredOrders + cartGraduatedDelivered;
-  const unconfirmedOrders = Math.max(0, totalOrders - metrics.confirmedOrders);
+  const unconfirmedOrders = Math.max(0, totalOrders - confirmedOrders);
   return (
     <OverviewStatStrip
       mobileGrid
@@ -595,7 +597,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
         },
         {
           label: 'Confirmed',
-          value: Math.max(0, metrics.confirmedOrders - deliveredOrders).toString(),
+          value: Math.max(0, confirmedOrders - deliveredOrders).toString(),
           valueClassName: 'text-brand-600 dark:text-brand-400',
           to: q('/admin/marketing/orders?status=CONFIRMED'),
         },

@@ -8164,7 +8164,7 @@ export class OrdersService {
             message: 'Scheduled delivery date is required to confirm the order.',
           });
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(preferredTrimmed)) {
+        if (preferredTrimmed && !/^\d{4}-\d{2}-\d{2}$/.test(preferredTrimmed)) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: 'Scheduled delivery date must be a valid calendar date (YYYY-MM-DD).',
@@ -8808,31 +8808,28 @@ export class OrdersService {
     const delayMinutes = options?.delayMinutes ?? 120; // default: 2 hours
 
     if (currentAttempts >= maxAttempts) {
-      // Auto-delete: max callback attempts reached (CEO directive 2026-05-23: DELETED replaces CANCELLED)
+      // Auto-delete via state machine so side effects (stock release, etc.) fire.
+      await this.transition(
+        {
+          orderId,
+          newStatus: 'DELETED',
+          metadata: {
+            reason: `Auto-deleted: max callback attempts (${maxAttempts}) reached`,
+          },
+        },
+        actor,
+      );
+      // Clear callback fields after transition
       await withActor(this.db, actor, async (tx) =>
         tx
           .update(schema.orders)
           .set({
-            status: 'DELETED',
-            deletedAt: new Date(),
             callbackScheduledAt: null,
             callbackNotes: `Auto-deleted: max callback attempts (${maxAttempts}) reached`,
             updatedAt: new Date(),
           })
           .where(eq(schema.orders.id, orderId)),
       );
-
-      this.events.emitOrderStatusChange({
-        orderId,
-        oldStatus: order.status,
-        newStatus: 'DELETED',
-        assignedCsId: order.assignedCsId,
-        mediaBuyerId: order.mediaBuyerId,
-        logisticsLocationId: order.logisticsLocationId,
-        riderId: order.riderId,
-        branchId: order.branchId ?? null,
-        servicingBranchId: order.servicingBranchId ?? null,
-      });
 
       // Notify Head of CS about max-retry deletion
       this.events.emitToRoom('cs-all', 'callback:max_reached', {
