@@ -106,6 +106,8 @@ export class PaystackService {
   verifyWebhookSignature(payload: string, signature: string): boolean {
     if (!this.secretKey) return false;
     const hash = crypto.createHmac('sha512', this.secretKey).update(payload).digest('hex');
-    return hash === signature;
+    // Use timingSafeEqual to prevent timing attacks on HMAC comparison
+    if (hash.length !== signature.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(signature, 'hex'));
   }
 }

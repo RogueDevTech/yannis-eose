@@ -243,29 +243,29 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
     // Also soft-delete follow-up copies of these test orders so they don't
     // linger in the follow-up pipeline after the source is purged.
-    await this.db
-      .update(schema.followUpOrders)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(
-        and(
-          inArray(schema.followUpOrders.sourceOrderId, ids),
-          isNull(schema.followUpOrders.deletedAt),
-        ),
-      )
-      .catch(() => {}); // Non-critical — best-effort cleanup
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      await tx
+        .update(schema.followUpOrders)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            inArray(schema.followUpOrders.sourceOrderId, ids),
+            isNull(schema.followUpOrders.deletedAt),
+          ),
+        );
 
-    // Also catch follow-up orders where the customer name itself is a test name
-    // (cart-origin follow-ups have no sourceOrderId but may have test customer names)
-    await this.db
-      .update(schema.followUpOrders)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(
-        and(
-          sql`${schema.followUpOrders.customerName} ~* '\\mtest\\M'`,
-          isNull(schema.followUpOrders.deletedAt),
-        ),
-      )
-      .catch(() => {});
+      // Also catch follow-up orders where the customer name itself is a test name
+      // (cart-origin follow-ups have no sourceOrderId but may have test customer names)
+      await tx
+        .update(schema.followUpOrders)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            sql`${schema.followUpOrders.customerName} ~* '\\mtest\\M'`,
+            isNull(schema.followUpOrders.deletedAt),
+          ),
+        );
+    }).catch(() => {}); // Non-critical — best-effort cleanup
 
     // The deletion happened outside the tRPC mutation path, so the
     // status-count / time-series cache (`cache:orders:aggregates:*`, populated

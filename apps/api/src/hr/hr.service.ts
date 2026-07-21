@@ -159,7 +159,9 @@ export class HrService {
         lte(schema.commissionPlans.effectiveFrom, new Date()),
       );
       // effectiveTo is null (no end) or in the future
-      // We'll handle this with a raw condition
+      conditions.push(
+        or(isNull(schema.commissionPlans.effectiveTo), gte(schema.commissionPlans.effectiveTo, new Date())),
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -709,20 +711,47 @@ export class HrService {
       deliveredCohortCount,
     });
 
-    const pendingClawbacks = await this.db
-      .select({ total: sum(schema.earningsAdjustments.amount) })
-      .from(schema.earningsAdjustments)
-      .where(
-        and(
-          eq(schema.earningsAdjustments.staffId, staffId),
-          eq(schema.earningsAdjustments.category, 'CLAWBACK'),
-          isNull(schema.earningsAdjustments.payoutId),
+    const [pendingClawbacks, bonusRows, otherAddOnRows] = await Promise.all([
+      this.db
+        .select({ total: sum(schema.earningsAdjustments.amount) })
+        .from(schema.earningsAdjustments)
+        .where(
+          and(
+            eq(schema.earningsAdjustments.staffId, staffId),
+            eq(schema.earningsAdjustments.category, 'CLAWBACK'),
+            isNull(schema.earningsAdjustments.payoutId),
+          ),
         ),
-      );
+      this.db
+        .select({ total: sum(schema.earningsAdjustments.amount) })
+        .from(schema.earningsAdjustments)
+        .where(
+          and(
+            eq(schema.earningsAdjustments.staffId, staffId),
+            eq(schema.earningsAdjustments.category, 'BONUS'),
+            isNull(schema.earningsAdjustments.payoutId),
+          ),
+        ),
+      this.db
+        .select({ total: sum(schema.earningsAdjustments.amount) })
+        .from(schema.earningsAdjustments)
+        .where(
+          and(
+            eq(schema.earningsAdjustments.staffId, staffId),
+            isNull(schema.earningsAdjustments.payoutId),
+            or(
+              eq(schema.earningsAdjustments.category, 'EXTRA_SHIFT'),
+              eq(schema.earningsAdjustments.category, 'PERFORMANCE'),
+              eq(schema.earningsAdjustments.category, 'OTHER'),
+            ),
+          ),
+        ),
+    ]);
     const clawbackTotal = Math.abs(Number(pendingClawbacks[0]?.total ?? 0));
+    const addOnsTotal = Number(bonusRows[0]?.total ?? 0) + Number(otherAddOnRows[0]?.total ?? 0);
 
     const deductionsTotal = penalties + clawbackTotal;
-    const totalPayout = Math.max(0, baseSalary + performanceBonus - deductionsTotal);
+    const totalPayout = Math.max(0, baseSalary + performanceBonus + addOnsTotal - deductionsTotal);
 
     return {
       staffId,
@@ -735,6 +764,7 @@ export class HrService {
       deliveryRate,
       baseSalary,
       performanceBonus,
+      addOnsTotal,
       penalties,
       clawbacks: clawbackTotal,
       deductionsTotal,
@@ -792,6 +822,9 @@ export class HrService {
       const updateFields: Record<string, unknown> = {};
       if (input.approved) {
         updateFields['approvedBy'] = actorId;
+      } else {
+        updateFields['rejectedBy'] = actorId;
+        updateFields['rejectedAt'] = new Date();
       }
 
       const rows = await tx

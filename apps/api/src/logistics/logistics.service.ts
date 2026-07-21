@@ -2605,10 +2605,18 @@ export class LogisticsService {
         })
         .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
 
+      // Subtract remittance-level costs (commitmentFee, posFee, failedDeliveryCost)
+      // to match the one-step createDeliveryRemittance+markReceivedNow path.
+      const remittanceCosts =
+        Number(found.commitmentFee ?? 0) +
+        Number(found.posFee ?? 0) +
+        Number(found.failedDeliveryCost ?? 0);
+      const netAmount = Math.max(0, Number(totals?.amount ?? 0) - remittanceCosts);
+
       await tx.insert(schema.deliveryRemittanceOutcomes).values({
         deliveryRemittanceId: found.id,
         status: 'APPROVED',
-        amount: sql`${totals?.amount ?? '0'}::numeric`,
+        amount: sql`${netAmount.toFixed(2)}::numeric`,
         orderCount: totals?.orderCount ?? 0,
         recordedBy: actor.id,
       });

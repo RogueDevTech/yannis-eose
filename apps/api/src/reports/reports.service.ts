@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevel } from '../common/authz';
 import {
   listFundingSchema,
   listInventorySchema,
@@ -173,7 +174,7 @@ export class ReportsService {
    * cs_team report. SuperAdmin still bypasses everything.
    */
   private ensureExportPermission(user: SessionUser, readPermission: string, exportPermission: string): void {
-    if (user.role === 'SUPER_ADMIN') return;
+    if (isAdminLevel(user)) return;
     const have = user.permissions ?? [];
     if (!have.includes(readPermission)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: `Missing ${readPermission}` });
