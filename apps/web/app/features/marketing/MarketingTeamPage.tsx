@@ -52,6 +52,8 @@ export interface MarketingTeamPageProps {
    * even when `q` has already narrowed the visible rows.
    */
   allMembersForFilter?: Array<{ id: string; name: string }>;
+  /** Cart order per-status counts for the breakdown modal. */
+  cartOrdersCounts?: Record<string, number>;
 }
 
 /** Green if trueRoas ≥ green threshold, red below. Neutral when no spend/data. */
@@ -334,10 +336,12 @@ export function MarketingTeamPage({
   profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 },
   overviewStats,
   allMembersForFilter = [],
+  cartOrdersCounts,
 }: MarketingTeamPageProps) {
   const greenThreshold = profitabilityConfig.greenThreshold;
-  // Cart graduated delivered are already included in per-MB leaderboard totals
-  // from the backend (getPerformanceMetricsBatched), so no frontend addition needed.
+  const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
+  // Funnel orders = total minus cart graduated (already included in per-MB totals from backend)
+  const funnelOrders = overviewStats.totalOrders - cartGraduatedDelivered;
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -710,6 +714,16 @@ export function MarketingTeamPage({
             <div className="flex items-center justify-between gap-4 py-1.5">
               <span className="text-sm text-app-fg">Inactive media buyers</span>
               <span className="text-sm tabular-nums text-app-fg">{overviewStats.inactiveOrders.toLocaleString()}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-4 py-1.5 border-t border-app-border pt-2.5 mt-1">
+            <span className="text-sm text-app-fg-muted">Funnel orders</span>
+            <span className="text-sm tabular-nums text-app-fg">{funnelOrders.toLocaleString()}</span>
+          </div>
+          {cartGraduatedDelivered > 0 && (
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <span className="text-sm text-app-fg-muted">Delivered cart orders</span>
+              <span className="text-sm tabular-nums text-app-fg">{cartGraduatedDelivered.toLocaleString()}</span>
             </div>
           )}
           <div className="flex items-center justify-between gap-4 py-1.5 font-semibold border-t border-app-border pt-2.5 mt-1">
