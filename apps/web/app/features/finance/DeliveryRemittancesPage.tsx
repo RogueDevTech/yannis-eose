@@ -1353,6 +1353,7 @@ export function DeliveryRemittancesPage({
 
           {viewMode === 'orders' ? (
             <CompactTable<RemittanceOrderRow>
+              className="[&_td]:py-[3px] [&_th]:py-[3px]"
               columns={[
                 {
                   key: 'sn',
@@ -1545,6 +1546,7 @@ export function DeliveryRemittancesPage({
             />
           ) : (
           <CompactTable<DeliveryRemittanceListItem>
+            className="[&_td]:py-[3px] [&_th]:py-[3px]"
             columnVisibilityKey="admin.finance.delivery-remittances"
             columns={remittanceColumns}
             rows={remittances}
@@ -1722,7 +1724,7 @@ export function DeliveryRemittancesPage({
 
           <CompactTable<EligibleOrder>
             caption="Delivered orders awaiting remittance"
-            className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
+            className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover [&_td]:py-[3px] [&_th]:py-[3px]"
             columns={eligibleColumns}
             rows={eligibleOrders}
             rowKey={(o) => o.id}

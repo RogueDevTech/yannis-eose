@@ -48,6 +48,7 @@ import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
@@ -1106,6 +1107,245 @@ export class LogisticsService {
   }
 
   // ============================================
+  // Unified Logistics Orders (orders + cart_orders + follow_up_orders)
+  // ============================================
+
+  /**
+   * Unified list of all confirmed+ orders across orders, cart_orders, and
+   * follow_up_orders tables. Uses SQL UNION ALL for consistent pagination
+   * and sorting. Each row includes an `orderCategory` discriminator so the
+   * UI can show which pipeline the order came from.
+   */
+  async listUnifiedLogisticsOrders(input: {
+    page: number;
+    limit: number;
+    status?: string;
+    statuses?: readonly string[];
+    search?: string;
+    logisticsLocationId?: string;
+    servicingBranchId?: string;
+    startDate?: string;
+    endDate?: string;
+    scheduleKind?: string;
+    sortBy?: string;
+    sortOrder?: string;
+  }, effectiveBranchIds?: string[] | null) {
+    const offset = (input.page - 1) * input.limit;
+
+    // Build WHERE conditions as raw SQL fragments for the UNION
+    const sharedConditions: string[] = ['deleted_at IS NULL'];
+
+    // Status scope
+    const logisticsStatuses = input.statuses ?? [
+      'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
+      'DELIVERED', 'PARTIALLY_DELIVERED', 'RETURNED', 'RESTOCKED',
+      'WRITTEN_OFF', 'REMITTED',
+    ];
+    if (input.status) {
+      sharedConditions.push(`status = '${input.status}'`);
+    } else {
+      const statusList = logisticsStatuses.map((s) => `'${s}'`).join(', ');
+      sharedConditions.push(`status IN (${statusList})`);
+    }
+
+    // Parameterised conditions (safe via sql template)
+    const paramConditions: SQL[] = [];
+    if (input.logisticsLocationId) {
+      paramConditions.push(sql`logistics_location_id = ${input.logisticsLocationId}`);
+    }
+    if (input.servicingBranchId) {
+      paramConditions.push(sql`servicing_branch_id = ${input.servicingBranchId}`);
+    }
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      paramConditions.push(sql`servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`);
+    }
+    if (input.startDate) {
+      paramConditions.push(sql`created_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    }
+    if (input.endDate) {
+      paramConditions.push(sql`created_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    }
+    if (input.search) {
+      const term = `%${input.search}%`;
+      paramConditions.push(sql`(customer_name ILIKE ${term} OR CAST(order_number AS text) ILIKE ${term})`);
+    }
+
+    const staticWhere = sharedConditions.join(' AND ');
+    const paramWhere = paramConditions.length > 0
+      ? sql` AND ${sql.join(paramConditions, sql` AND `)}`
+      : sql``;
+
+    // Sort mapping
+    const sortCol = input.sortBy === 'preferredDeliveryDate' ? 'preferred_delivery_date'
+      : input.sortBy === 'deliveredAt' ? 'delivered_at'
+      : input.sortBy === 'totalAmount' ? 'total_amount'
+      : input.sortBy === 'orderNumber' ? 'order_number'
+      : 'created_at';
+    const sortDir = input.sortOrder === 'desc' ? 'DESC' : 'ASC';
+    // NULLS handling: delivery dates should put NULLs last for ASC
+    const nullsClause = sortDir === 'ASC' ? 'NULLS LAST' : 'NULLS FIRST';
+
+    // Overdue filter: only applies to orders table (has preferred_delivery_date)
+    const isOverdue = input.scheduleKind === 'delivery_overdue';
+    const overdueCondition = isOverdue
+      ? sql` AND preferred_delivery_date IS NOT NULL AND preferred_delivery_date::date < CURRENT_DATE AND status NOT IN ('DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF')`
+      : sql``;
+
+    // The orders table needs extra exclusion: skip DELETED-status and
+    // follow-up copies that haven't graduated (they live in follow_up_orders).
+    // But include graduated follow-ups (is_follow_up=true with DELIVERED/REMITTED).
+    const ordersExtraWhere = sql` AND (is_follow_up = false OR status IN ('DELIVERED', 'REMITTED'))`;
+
+    const unionQuery = sql`
+      WITH unified AS (
+        SELECT id, order_number, customer_name, status::text AS status, total_amount, delivery_fee,
+               logistics_location_id, preferred_delivery_date, delivered_at,
+               servicing_branch_id, created_at, 'funnel' AS order_category
+        FROM orders
+        WHERE ${sql.raw(staticWhere)}${paramWhere}${ordersExtraWhere}${overdueCondition}
+
+        UNION ALL
+
+        SELECT id, order_number, customer_name, status, total_amount, delivery_fee,
+               logistics_location_id, NULL AS preferred_delivery_date, delivered_at,
+               servicing_branch_id, created_at, 'cart' AS order_category
+        FROM cart_orders
+        WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``}
+
+        UNION ALL
+
+        SELECT id, order_number, customer_name, status, total_amount, delivery_fee,
+               logistics_location_id, preferred_delivery_date, delivered_at,
+               servicing_branch_id, created_at, 'follow-up' AS order_category
+        FROM follow_up_orders
+        WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``}
+      )
+      SELECT * FROM unified
+      ORDER BY ${sql.raw(sortCol)} ${sql.raw(sortDir)} ${sql.raw(nullsClause)}
+      LIMIT ${input.limit} OFFSET ${offset}
+    `;
+
+    const countQuery = sql`
+      SELECT
+        (SELECT COUNT(*) FROM orders WHERE ${sql.raw(staticWhere)}${paramWhere}${ordersExtraWhere}${overdueCondition}) +
+        (SELECT COUNT(*) FROM cart_orders WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``}) +
+        (SELECT COUNT(*) FROM follow_up_orders WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``})
+        AS total
+    `;
+
+    const [rows, totalRows] = await Promise.all([
+      this.db.execute<{
+        id: string;
+        order_number: number;
+        customer_name: string;
+        status: string;
+        total_amount: string | null;
+        delivery_fee: string | null;
+        logistics_location_id: string | null;
+        preferred_delivery_date: string | null;
+        delivered_at: string | null;
+        servicing_branch_id: string | null;
+        created_at: string;
+        order_category: 'funnel' | 'cart' | 'follow-up';
+      }>(unionQuery),
+      this.db.execute<{ total: string }>(countQuery),
+    ]);
+
+    const records = (rows as unknown as Array<{
+      id: string; order_number: number; customer_name: string;
+      status: string; total_amount: string | null; delivery_fee: string | null;
+      logistics_location_id: string | null; preferred_delivery_date: string | null;
+      delivered_at: string | null; servicing_branch_id: string | null;
+      created_at: string; order_category: 'funnel' | 'cart' | 'follow-up';
+    }>).map((r) => ({
+      id: r.id,
+      orderNumber: r.order_number,
+      customerName: r.customer_name,
+      status: r.status,
+      totalAmount: r.total_amount,
+      deliveryFee: r.delivery_fee,
+      logisticsLocationId: r.logistics_location_id,
+      preferredDeliveryDate: r.preferred_delivery_date,
+      deliveredAt: r.delivered_at,
+      servicingBranchId: r.servicing_branch_id,
+      createdAt: r.created_at,
+      orderCategory: r.order_category,
+    }));
+
+    const total = parseInt((totalRows as unknown as { total: string }[])[0]?.total ?? '0', 10);
+
+    return {
+      orders: records,
+      pagination: { page: input.page, limit: input.limit, total, totalPages: Math.ceil(total / input.limit) },
+    };
+  }
+
+  /**
+   * Unified status counts across orders + cart_orders + follow_up_orders.
+   * Same scoping as listUnifiedLogisticsOrders.
+   */
+  async getUnifiedLogisticsStatusCounts(input: {
+    statuses?: readonly string[];
+    logisticsLocationId?: string;
+    servicingBranchId?: string;
+    startDate?: string;
+    endDate?: string;
+  }, effectiveBranchIds?: string[] | null): Promise<Record<string, number>> {
+    const paramConditions: SQL[] = [];
+    if (input.logisticsLocationId) {
+      paramConditions.push(sql`logistics_location_id = ${input.logisticsLocationId}`);
+    }
+    if (input.servicingBranchId) {
+      paramConditions.push(sql`servicing_branch_id = ${input.servicingBranchId}`);
+    }
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      paramConditions.push(sql`servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`);
+    }
+    if (input.startDate) {
+      paramConditions.push(sql`created_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    }
+    if (input.endDate) {
+      paramConditions.push(sql`created_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    }
+    const paramWhere = paramConditions.length > 0
+      ? sql` AND ${sql.join(paramConditions, sql` AND `)}`
+      : sql``;
+
+    const logisticsStatuses = input.statuses ?? [
+      'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
+      'DELIVERED', 'PARTIALLY_DELIVERED', 'RETURNED', 'RESTOCKED',
+      'WRITTEN_OFF', 'REMITTED',
+    ];
+    const statusList = logisticsStatuses.map((s) => `'${s}'`).join(', ');
+    const statusFilter = `status IN (${statusList})`;
+
+    const ordersExtraWhere = sql` AND (is_follow_up = false OR status IN ('DELIVERED', 'REMITTED'))`;
+
+    const query = sql`
+      WITH unified AS (
+        SELECT status::text AS status, 'funnel' AS category FROM orders
+        WHERE deleted_at IS NULL AND ${sql.raw(statusFilter)}${paramWhere}${ordersExtraWhere}
+        UNION ALL
+        SELECT status, 'cart' AS category FROM cart_orders
+        WHERE deleted_at IS NULL AND ${sql.raw(statusFilter)}${paramWhere}
+        UNION ALL
+        SELECT status, 'follow-up' AS category FROM follow_up_orders
+        WHERE deleted_at IS NULL AND ${sql.raw(statusFilter)}${paramWhere}
+      )
+      SELECT status, category, COUNT(*)::int AS cnt FROM unified GROUP BY status, category
+    `;
+
+    const rows = await this.db.execute<{ status: string; category: string; cnt: number }>(query);
+    const counts: Record<string, number> = {};
+    for (const row of rows as unknown as { status: string; category: string; cnt: number }[]) {
+      counts[row.status] = (counts[row.status] ?? 0) + row.cnt;
+      const catKey = `__${row.category.toUpperCase().replace('-', '_')}`;
+      counts[catKey] = (counts[catKey] ?? 0) + row.cnt;
+    }
+    return counts;
+  }
+
+  // ============================================
   // Transfer Remittances (3PL → warehouse)
   // ============================================
 
@@ -1116,7 +1356,7 @@ export class LogisticsService {
   async createRemittance(input: CreateRemittanceInput, actor: SessionUser) {
     const remitPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const canRemit =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       remitPerms.includes(canonicalPermissionCode('logistics.remit'));
     if (!canRemit || !actor.logisticsLocationId) {
       throw new TRPCError({
@@ -1186,7 +1426,7 @@ export class LogisticsService {
 
     const listPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const has = (code: string) =>
-      actor.role === 'SUPER_ADMIN' || listPerms.includes(canonicalPermissionCode(code));
+      isAdminLevel(actor) || listPerms.includes(canonicalPermissionCode(code));
     const isOrgWideLogistics = has('logistics.scope.global');
     const isLocationOperator = has('logistics.remit') && !!actor.logisticsLocationId;
 
@@ -1264,7 +1504,7 @@ export class LogisticsService {
    */
   async markRemittanceReceived(input: MarkRemittanceReceivedInput, actor: SessionUser) {
     const isOrgWideLogistics =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.transferRemittance.markReceived');
     if (!isOrgWideLogistics && !hasPerm) {
@@ -1373,7 +1613,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const isFinanceCaller =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
@@ -1607,7 +1847,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const isFinanceCaller =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
@@ -1693,7 +1933,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canListGlobal =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
@@ -1948,20 +2188,45 @@ export class LogisticsService {
     if (input.sentBy) {
       outcomeCountConditions.push(sql`dr.sent_by = ${input.sentBy}`);
     }
-    const outcomeCountWhere = outcomeCountConditions.length > 0 ? sql` AND ${sql.join(outcomeCountConditions, sql` AND `)}` : sql``;
-
+    // Outcome amounts + order counts. The old approach used expensive correlated
+    // scalar subqueries (SELECT COUNT(...) FROM ... WHERE ... IN (SELECT ...))
+    // inside the SELECT clause. Replace with a single JOIN-based aggregation that
+    // walks outcomes → remittance → orders once.
     const outcomeSummaryQuery = this.db
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        receivedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id JOIN orders o_date ON o_date.id = dro_inner.order_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'APPROVED')${outcomeCountWhere})::text`,
-        disputedCount: sql<string>`(SELECT COUNT(DISTINCT dro_inner.order_id) FROM delivery_remittance_orders dro_inner JOIN delivery_remittances dr ON dr.id = dro_inner.delivery_remittance_id JOIN orders o_date ON o_date.id = dro_inner.order_id WHERE dro_inner.delivery_remittance_id IN (SELECT dro_o.delivery_remittance_id FROM delivery_remittance_outcomes dro_o WHERE dro_o.status = 'DISPUTED')${outcomeCountWhere})::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
         schema.deliveryRemittances,
         eq(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, schema.deliveryRemittances.id),
       );
+
+    // Separate count queries for outcome order counts — replaces the correlated
+    // scalar subqueries that caused timeouts. Uses a simple JOIN path:
+    // outcomes → remittance_orders → delivery_remittances (for scoping).
+    const outcomeCountBaseWhere = outcomeCountConditions.length > 0
+      ? sql` AND ${sql.join(outcomeCountConditions, sql` AND `)}`
+      : sql``;
+    const receivedOrderCountQuery = sql<{ cnt: string }[]>`
+      SELECT COUNT(DISTINCT dro.order_id)::text AS cnt
+      FROM delivery_remittance_orders dro
+      JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
+      WHERE EXISTS (
+        SELECT 1 FROM delivery_remittance_outcomes oc
+        WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'APPROVED'
+      )${outcomeCountBaseWhere}
+    `;
+    const disputedOrderCountQuery = sql<{ cnt: string }[]>`
+      SELECT COUNT(DISTINCT dro.order_id)::text AS cnt
+      FROM delivery_remittance_orders dro
+      JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
+      WHERE EXISTS (
+        SELECT 1 FROM delivery_remittance_outcomes oc
+        WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'DISPUTED'
+      )${outcomeCountBaseWhere}
+    `;
 
     const awaitingConditions: SQL[] = [
       eq(schema.orders.status, 'DELIVERED'),
@@ -2042,9 +2307,9 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Date filter by createdAt — matches dashboard/marketing/sales funnels.
-    if (input.startDate) deliveredConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) deliveredConditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    // Date filter by deliveredAt — CEO checks delivered on dashboard then analyses here.
+    if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
@@ -2063,12 +2328,14 @@ export class LogisticsService {
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
 
-    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, awaitingPeriodRows, deliveredRows] = await Promise.all([
+    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, awaitingPeriodRows, deliveredRows, receivedCountRows, disputedCountRows] = await Promise.all([
       baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
       summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
       awaitingSummaryQuery,
       awaitingPeriodQuery,
       deliveredCountQuery,
+      this.db.execute(receivedOrderCountQuery),
+      this.db.execute(disputedOrderCountQuery),
     ]);
 
     const baseSummary = baseSummaryRows[0];
@@ -2076,6 +2343,8 @@ export class LogisticsService {
     const awaitingSummary = awaitingSummaryRows[0];
     const awaitingPeriodSummary = awaitingPeriodRows[0];
     const deliveredSummary = deliveredRows[0];
+    const receivedOrderCount = (receivedCountRows as unknown as { cnt: string }[])[0]?.cnt ?? '0';
+    const disputedOrderCount = (disputedCountRows as unknown as { cnt: string }[])[0]?.cnt ?? '0';
     const summary = {
       totalRemitted: baseSummary?.totalRemitted ?? '0',
       pendingAmount: baseSummary?.pendingAmount ?? '0',
@@ -2088,9 +2357,9 @@ export class LogisticsService {
       disputedOrderCount: baseSummary?.disputedOrderCount ?? '0',
       pendingGrossAmount: baseSummary?.pendingGrossAmount ?? '0',
       disputedGrossAmount: baseSummary?.disputedGrossAmount ?? '0',
-      // Outcome-based counts (legacy — may be 0 if no outcome records)
-      receivedCount: outcomeSummary?.receivedCount ?? '0',
-      disputedCount: outcomeSummary?.disputedCount ?? '0',
+      // Outcome-based counts — separate JOIN queries replace old correlated subqueries
+      receivedCount: receivedOrderCount,
+      disputedCount: disputedOrderCount,
       awaitingAmount: awaitingSummary?.awaitingAmount ?? '0',
       awaitingCount: awaitingSummary?.awaitingCount ?? '0',
       awaitingGrossAmount: awaitingSummary?.awaitingGrossAmount ?? '0',
@@ -2191,7 +2460,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canListGlobal =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
@@ -2897,7 +3166,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canListGlobal =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
@@ -3081,7 +3350,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canViewGlobal =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
@@ -3239,7 +3508,7 @@ export class LogisticsService {
 
   async submitDeliveryConfirmation(input: SubmitDeliveryConfirmationInput, actor: SessionUser) {
     const hasPerm =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.submit') ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global');
     if (!hasPerm) {
@@ -3318,7 +3587,7 @@ export class LogisticsService {
     effectiveBranchIds?: string[] | null,
   ) {
     const isOrgWide =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
     if (!isOrgWide && !hasPerm) {
@@ -3401,7 +3670,7 @@ export class LogisticsService {
 
   async approveDeliveryConfirmation(input: ApproveDeliveryConfirmationInput, actor: SessionUser) {
     const isOrgWide =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
     if (!isOrgWide && !hasPerm) {
@@ -3475,7 +3744,7 @@ export class LogisticsService {
 
   async rejectDeliveryConfirmation(input: RejectDeliveryConfirmationInput, actor: SessionUser) {
     const isOrgWide =
-      actor.role === 'SUPER_ADMIN' ||
+      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
     if (!isOrgWide && !hasPerm) {
