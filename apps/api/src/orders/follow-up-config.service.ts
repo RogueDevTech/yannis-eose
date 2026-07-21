@@ -663,9 +663,22 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
       {
         const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
+        // Mirror pullOrdersForRule's ageRelativeTo logic
+        const relativeTo = rule.ageRelativeTo ?? 'STATUS_TIMESTAMP';
+        let ageExpr: ReturnType<typeof sql>;
+        if (relativeTo === 'PREFERRED_DELIVERY_DATE') {
+          ageExpr = sql`COALESCE(${schema.orders.preferredDeliveryDate}::date, ${schema.orders.createdAt}::date)`;
+        } else if (relativeTo === 'CREATED_AT') {
+          ageExpr = sql`${schema.orders.createdAt}`;
+        } else {
+          const statusTsCol = FollowUpConfigService.statusTimestampCol(rule.sourceStatus);
+          ageExpr = statusTsCol
+            ? sql`COALESCE(${statusTsCol}, ${schema.orders.createdAt})`
+            : sql`${schema.orders.createdAt}`;
+        }
         const conditions = [
           sql`${schema.orders.status} = ${rule.sourceStatus}`,
-          lte(schema.orders.createdAt, minCutoff),
+          sql`${ageExpr} <= ${minCutoff.toISOString()}::timestamptz`,
           eq(schema.orders.frozenForFollowUp, false),
           eq(schema.orders.isFollowUp, false),
           isNull(schema.orders.deletedAt),
@@ -673,7 +686,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         if (rule.maxAgeDays) {
           const maxCutoff = new Date();
           maxCutoff.setDate(maxCutoff.getDate() - rule.maxAgeDays);
-          conditions.push(gte(schema.orders.createdAt, maxCutoff));
+          conditions.push(sql`${ageExpr} >= ${maxCutoff.toISOString()}::timestamptz`);
         }
         if (rule.sourceBranchId) {
           conditions.push(eq(schema.orders.servicingBranchId, rule.sourceBranchId));
@@ -681,7 +694,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         const [row] = await this.db
           .select({ count: count() })
           .from(schema.orders)
-          .where(and(...conditions));
+          .where(and(
+            ...conditions,
+            sql`${schema.orders.id} NOT IN (SELECT source_order_id FROM follow_up_orders WHERE source_order_id IS NOT NULL)`,
+          ));
         results.push({ ruleId: rule.id, ruleName: rule.name, eligible: Number(row?.count ?? 0) });
       }
     }
@@ -2020,7 +2036,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
    * Redistribute unprocessed follow-up orders from a deactivated branch to remaining active branches.
    * Only moves orders in UNPROCESSED/CS_ASSIGNED status (no work done yet).
    */
-  async redistributeFromBranch(branchId: string): Promise<number> {
+  async redistributeFromBranch(branchId: string, actor?: SessionUser): Promise<number> {
     const excludedIds = await this.getExcludedIds();
     // Get eligible target branches (active + not excluded)
     const targetBranches = (await this.db
@@ -2052,17 +2068,24 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     if (orders.length === 0) return 0;
 
-    // Round-robin redistribute
-    for (let i = 0; i < orders.length; i++) {
-      const targetBranch = targetBranches[i % targetBranches.length]!;
-      await this.db
-        .update(schema.followUpOrders)
-        .set({
-          servicingBranchId: targetBranch,
-          assignedCsId: null, // Clear assignment — new branch = new closer
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.followUpOrders.id, orders[i]!.id));
+    // Round-robin redistribute — wrap in withActor for audit trail
+    const doRedistribute = async (db: typeof this.db) => {
+      for (let i = 0; i < orders.length; i++) {
+        const targetBranch = targetBranches[i % targetBranches.length]!;
+        await db
+          .update(schema.followUpOrders)
+          .set({
+            servicingBranchId: targetBranch,
+            assignedCsId: null, // Clear assignment — new branch = new closer
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.followUpOrders.id, orders[i]!.id));
+      }
+    };
+    if (actor) {
+      await withActor(this.db, actor, async (tx) => doRedistribute(tx));
+    } else {
+      await doRedistribute(this.db);
     }
 
     this.logger.log(`Redistributed ${orders.length} follow-up orders from branch ${branchId} to ${targetBranches.length} branches`);

@@ -67,11 +67,10 @@ export function CreateDeliveredFollowUpModal({
 
   const handleCreateOrderSuccess = useCallback(
     (data: { success: true } & Record<string, unknown>) => {
-      const orderId = (data as { orderId?: string }).orderId;
-      if (!orderId) return;
-      onSuccess?.(orderId);
       onClose();
       resetForm();
+      const orderId = (data as { orderId?: string }).orderId;
+      if (orderId) onSuccess?.(orderId);
     },
     [onSuccess, onClose],
   );

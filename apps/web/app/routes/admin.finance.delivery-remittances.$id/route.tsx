@@ -48,13 +48,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ]);
 
     if (!detailRes.ok) {
-      throw new Response('Remittance not found', { status: safeStatus(detailRes.status) });
+      throw new Error('Remittance not found');
     }
 
     const detail =
       (detailRes.data as { result?: { data?: DeliveryRemittanceDetail } })?.result?.data ?? null;
     if (!detail) {
-      throw new Response('Remittance not found', { status: 404 });
+      throw new Error('Remittance not found');
     }
 
     const usersData = usersRes.ok

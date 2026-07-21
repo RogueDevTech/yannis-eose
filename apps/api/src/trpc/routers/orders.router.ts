@@ -2626,8 +2626,8 @@ export const ordersRouter = router({
   /** Redistribute unprocessed follow-up orders from a branch to remaining active branches. */
   followUpConfigRedistribute: permissionProcedure('orders.followUpConfig')
     .input(z.object({ branchId: z.string().uuid() }))
-    .mutation(async ({ input }) => {
-      const moved = await getFollowUpConfigService().redistributeFromBranch(input.branchId);
+    .mutation(async ({ input, ctx }) => {
+      const moved = await getFollowUpConfigService().redistributeFromBranch(input.branchId, ctx.user);
       return { moved };
     }),
 

@@ -162,7 +162,7 @@ export class CartOrdersService {
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
-          SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
+          SELECT coi.cart_order_id, SUM(coi.unit_price) AS line_total
           FROM cart_order_items coi
           GROUP BY coi.cart_order_id
         ) sub
@@ -671,15 +671,16 @@ export class CartOrdersService {
     // Cascade delete to graduated order — if a cart order is deleted after
     // graduation, the graduated order in the orders table must also be
     // soft-deleted so counts stay consistent across both tables.
-    if (newStatus === 'DELETED' && order.customerPhoneHash) {
+    // Match on cartId (= sourceCartId) to target the specific graduated order,
+    // not all online orders from the same phone.
+    if (newStatus === 'DELETED' && order.sourceCartId) {
       try {
         await this.db
           .update(schema.orders)
           .set({ status: 'DELETED', deletedAt: new Date() })
           .where(
             and(
-              eq(schema.orders.orderSource, 'online'),
-              eq(schema.orders.customerPhoneHash, order.customerPhoneHash),
+              eq(schema.orders.cartId, order.sourceCartId),
               isNull(schema.orders.deletedAt),
             ),
           );

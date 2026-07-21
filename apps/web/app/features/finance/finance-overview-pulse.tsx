@@ -18,8 +18,8 @@ export function FinanceCashRemittanceSection({
   const [infoModal, setInfoModal] = useState<string | null>(null);
 
   // Use gross delivered amount to match the Cash Remittances page
-  const totalDelivered = pulse.deliveredAmount || pulse.deliveredNetAmount || (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
-  const totalDeliveredOrders = pulse.deliveredCount || (pulse.awaitingOrderCount + pulse.totalRemittedCount);
+  const totalDelivered = pulse.deliveredAmount ?? pulse.deliveredNetAmount ?? (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
+  const totalDeliveredOrders = pulse.deliveredCount ?? (pulse.awaitingOrderCount + pulse.totalRemittedCount);
   const netRemittable = pulse.grossOrderValue - pulse.totalDeliveryFees - pulse.totalCommitmentFees - pulse.totalPosFees - pulse.totalFailedDeliveryCosts;
 
   return (
