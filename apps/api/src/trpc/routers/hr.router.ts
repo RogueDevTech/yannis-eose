@@ -192,7 +192,7 @@ export const hrRouter = router({
       return getHrService().approveAdjustment(input, ctx.user.id);
     }),
 
-  listAdjustments: authedProcedure
+  listAdjustments: permissionProcedure('hr.read')
     .input(z.object({ staffId: z.string().uuid().optional() }))
     .query(async ({ input, ctx }) => {
       return getHrService().listAdjustments(input.staffId, ctx.effectiveBranchIds);

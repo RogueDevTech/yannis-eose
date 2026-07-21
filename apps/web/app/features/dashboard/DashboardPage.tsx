@@ -704,7 +704,7 @@ function MarketingDashboard({
           <div className="card">
             <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
             <p className="text-sm text-app-fg-muted mb-4">
-              Monitor your team's performance — metrics above aggregate across every buyer you supervise on this branch.
+              Monitor your team's performance. Metrics above aggregate across every buyer you supervise on this branch.
             </p>
             <div className="flex flex-wrap gap-2">
               <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
@@ -740,7 +740,7 @@ function MarketingDashboard({
         <div className="card">
           <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
           <p className="text-sm text-app-fg-muted mb-4">
-            Branch-wide performance — metrics above aggregate across all media buyers in your branch.
+            Branch-wide performance. Metrics above aggregate across all media buyers in your branch.
           </p>
           <div className="flex flex-wrap gap-2">
             <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>

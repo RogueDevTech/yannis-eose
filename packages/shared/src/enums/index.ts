@@ -42,6 +42,7 @@ export const USER_ROLE = {
   TPL_RIDER: 'TPL_RIDER',
   HR_MANAGER: 'HR_MANAGER',
   SUPPORT: 'SUPPORT',
+  AUDITOR: 'AUDITOR',
 } as const;
 
 export type UserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE];
@@ -67,6 +68,8 @@ export const TRANSFER_STATUS = {
   IN_TRANSIT: 'IN_TRANSIT',
   RECEIVED: 'RECEIVED',
   DISPUTED: 'DISPUTED',
+  CANCELLED: 'CANCELLED',
+  REJECTED: 'REJECTED',
 } as const;
 
 export type TransferStatus = (typeof TRANSFER_STATUS)[keyof typeof TRANSFER_STATUS];

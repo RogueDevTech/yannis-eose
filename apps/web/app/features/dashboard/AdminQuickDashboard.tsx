@@ -300,7 +300,7 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
             </div>
             <p className="text-sm text-app-fg-muted mt-1">
               Revenue, true profit, cost breakdown, order pipeline, media buyer &amp; CS
-              performance, branch breakdown. Heavier page — loads in 1-2 seconds.
+              performance, branch breakdown. Heavier page, loads in 1-2 seconds.
             </p>
           </div>
         </div>

@@ -15,6 +15,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { hasFinanceAccess } from '~/lib/rbac';
 import type {
   CallLogEntry,
   OrderDetail,
@@ -748,6 +749,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const FINANCE_SELF_AUTHORIZED_INTENTS = new Set([
     'requestDeliveredOrderDeletion',
     'requestOrderRetrack',
+    'transition', // Finance retrack uses direct transition — backend enforces hasFinanceAccess
   ]);
   if (intent && !FINANCE_SELF_AUTHORIZED_INTENTS.has(intent) && !canManageOrderDetail(user)) {
     return json(
@@ -1495,7 +1497,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED'];
     if (csOnlyStatuses.includes(newStatus)) {
       const allowedRoles = ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
-      if (!allowedRoles.includes(user.role)) {
+      if (!allowedRoles.includes(user.role) && !hasFinanceAccess(user)) {
         return json({ error: 'You are not allowed to perform this action' }, { status: 403 });
       }
     }

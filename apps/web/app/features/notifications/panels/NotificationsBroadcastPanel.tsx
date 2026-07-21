@@ -603,7 +603,7 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
                       <label className="text-sm font-medium text-app-fg-muted">User</label>
                       {targetUser && !targetUser.hasPushSubscription && (
                         <span className="text-xs text-amber-600 dark:text-amber-400">
-                          Not connected — may not receive push
+                          Not connected, may not receive push
                         </span>
                       )}
                     </div>

@@ -999,7 +999,7 @@ export class MarketingService {
         .values({
           senderId,
           receiverId: input.receiverId,
-          amount: String(input.amount),
+          amount: sql`${input.amount}::numeric`,
           receiptUrl: input.receiptUrl,
           status: 'SENT',
         })
@@ -2200,7 +2200,7 @@ export class MarketingService {
         .values({
           requesterId,
           targetUserId: validatedTargetUserId ?? undefined,
-          amount: String(amount),
+          amount: sql`${amount}::numeric`,
           reason: reason.trim() || null,
           status: 'PENDING',
         })
@@ -2557,7 +2557,7 @@ export class MarketingService {
         .update(schema.marketingFundingRequests)
         .set({
           status: 'APPROVED',
-          amount: String(sentAmount),
+          amount: sql`${sentAmount}::numeric`,
           receiptUrl,
           resolvedAt: new Date(),
           resolvedBy: approverId,
@@ -2577,7 +2577,7 @@ export class MarketingService {
         .values({
           senderId: approverId,
           receiverId: existing.requesterId,
-          amount: String(sentAmount),
+          amount: sql`${sentAmount}::numeric`,
           receiptUrl,
           status: 'SENT',
           sourceFundingRequestId: requestId,
@@ -3401,12 +3401,21 @@ export class MarketingService {
     }
 
     return withActor(this.db, { id: actor.id }, async (tx) => {
+      // Balance check on the delta: if the new amount exceeds the old,
+      // the MB needs enough balance to cover the increase.
+      const oldAmount = existing.status === 'REJECTED' ? 0 : Number(existing.spendAmount);
+      const delta = input.spendAmount - oldAmount;
+      if (delta > 0) {
+        const balance = await this.computeMbBalanceInTx(tx, existing.mediaBuyerId, branchId ?? null, effectiveBranchIds);
+        this.assertSufficientMbBalance(balance, delta);
+      }
+
       const [row] = await tx
         .update(schema.adSpendLogs)
         .set({
           productId: nextProductId,
           campaignId: nextCampaignId,
-          spendAmount: String(input.spendAmount),
+          spendAmount: sql`${input.spendAmount}::numeric`,
           screenshotUrl: input.screenshotUrl,
           spendDate: input.spendDate ? new Date(input.spendDate) : existing.spendDate,
           ...(orderCountSnapshot !== undefined ? { orderCountSnapshot } : {}),
@@ -3479,7 +3488,7 @@ export class MarketingService {
         .values({
           senderMbId: actor.id,
           receiverMbId: input.receiverMbId,
-          amount: String(input.amount),
+          amount: sql`${input.amount}::numeric`,
           reason: input.reason ?? null,
           status: 'PENDING',
           branchId: branchId ?? undefined,
@@ -5895,7 +5904,7 @@ export class MarketingService {
         .values({
           productId: input.productId,
           name: input.name,
-          price: String(input.price),
+          price: sql`${input.price}::numeric`,
           quantity: input.quantity ?? 1,
           imageUrls: input.imageUrls ?? [],
           variants: input.variants ?? null,
@@ -5930,7 +5939,7 @@ export class MarketingService {
 
       const updateData: Record<string, unknown> = {};
       if (input.name !== undefined) updateData['name'] = input.name;
-      if (input.price !== undefined) updateData['price'] = String(input.price);
+      if (input.price !== undefined) updateData['price'] = sql`${input.price}::numeric`;
       if (input.quantity !== undefined) updateData['quantity'] = input.quantity;
       if (input.imageUrls !== undefined) updateData['imageUrls'] = input.imageUrls;
       if (input.variants !== undefined) updateData['variants'] = input.variants;

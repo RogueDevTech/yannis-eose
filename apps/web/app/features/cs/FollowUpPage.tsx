@@ -1135,7 +1135,7 @@ export function FollowUpPage({
             value={targetBranchId}
             onChange={(e) => setTargetBranchId(e.target.value)}
             options={[
-              { value: '', label: 'No branch — assign later' },
+              { value: '', label: 'No branch (assign later)' },
               ...branchesCatalog.map((b) => ({ value: b.id, label: `${b.name} (${b.code})` })),
             ]}
           />
@@ -1149,7 +1149,7 @@ export function FollowUpPage({
               if (!e.target.value) setAssignmentMode('MANUAL');
             }}
             options={[
-              { value: '', label: 'No group — assign later' },
+              { value: '', label: 'No group (assign later)' },
               ...groups.map((g) => ({ value: g.id, label: `${g.name} (${g.memberCount} members)` })),
             ]}
           />

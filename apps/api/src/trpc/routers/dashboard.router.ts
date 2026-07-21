@@ -93,7 +93,7 @@ async function _ceoOverviewFetch(params: {
     ordersService!.getSupplementaryCounts(undefined, startDate, endDate, undefined, branchId, undefined, 'servicing', effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
     // Offline orders — separate funnel on dashboard.
     ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, false, false, true).catch(logErr('offlineStatusCounts')),
-    financeService!.getInvoiceSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('invoiceSummary')),
+    financeService!.getInvoiceSummary(branchId, effectiveBranchIds, { startDate, endDate }).catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId, undefined, undefined, effectiveBranchIds).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary(effectiveBranchIds, { startDate, endDate }).catch(logErr('payoutSummary')),
     ordersService!.getCSCloserWorkloads(branchId, effectiveBranchIds).catch(logErr('csWorkloads')),

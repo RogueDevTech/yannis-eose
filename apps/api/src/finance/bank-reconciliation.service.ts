@@ -161,36 +161,35 @@ export class BankReconciliationService {
   }
 
   async matchLine(input: MatchLineInput, actor: Actor) {
-    const [line] = await this.db
-      .select()
-      .from(schema.bankReconLines)
-      .where(eq(schema.bankReconLines.id, input.lineId))
-      .limit(1);
-
-    if (!line) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation line not found.' });
-    }
-
-    // Get the GL entry
-    const [glEntry] = await this.db
-      .select({
-        id: schema.glEntries.id,
-        postingDate: schema.glEntries.postingDate,
-        debit: schema.glEntries.debit,
-        credit: schema.glEntries.credit,
-        remarks: schema.glEntries.remarks,
-      })
-      .from(schema.glEntries)
-      .where(eq(schema.glEntries.id, input.glEntryId))
-      .limit(1);
-
-    if (!glEntry) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'GL entry not found.' });
-    }
-
-    const glAmount = Number(glEntry.debit) - Number(glEntry.credit);
-
     return withActor(this.db, actor, async (tx) => {
+      const [line] = await tx
+        .select()
+        .from(schema.bankReconLines)
+        .where(eq(schema.bankReconLines.id, input.lineId))
+        .limit(1);
+
+      if (!line) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation line not found.' });
+      }
+
+      const [glEntry] = await tx
+        .select({
+          id: schema.glEntries.id,
+          postingDate: schema.glEntries.postingDate,
+          debit: schema.glEntries.debit,
+          credit: schema.glEntries.credit,
+          remarks: schema.glEntries.remarks,
+        })
+        .from(schema.glEntries)
+        .where(eq(schema.glEntries.id, input.glEntryId))
+        .limit(1);
+
+      if (!glEntry) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'GL entry not found.' });
+      }
+
+      const glAmount = Number(glEntry.debit) - Number(glEntry.credit);
+
       const [updated] = await tx
         .update(schema.bankReconLines)
         .set({
@@ -209,17 +208,17 @@ export class BankReconciliationService {
   }
 
   async unmatchLine(input: UnmatchLineInput, actor: Actor) {
-    const [line] = await this.db
-      .select()
-      .from(schema.bankReconLines)
-      .where(eq(schema.bankReconLines.id, input.lineId))
-      .limit(1);
-
-    if (!line) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation line not found.' });
-    }
-
     return withActor(this.db, actor, async (tx) => {
+      const [line] = await tx
+        .select()
+        .from(schema.bankReconLines)
+        .where(eq(schema.bankReconLines.id, input.lineId))
+        .limit(1);
+
+      if (!line) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation line not found.' });
+      }
+
       const [updated] = await tx
         .update(schema.bankReconLines)
         .set({
@@ -238,23 +237,23 @@ export class BankReconciliationService {
   }
 
   async completeReconciliation(input: CompleteBankReconciliationInput, actor: Actor) {
-    const [recon] = await this.db
-      .select()
-      .from(schema.bankReconciliations)
-      .where(eq(schema.bankReconciliations.id, input.reconciliationId))
-      .limit(1);
-
-    if (!recon) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found.' });
-    }
-
-    if (recon.status === 'COMPLETED') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reconciliation already completed.' });
-    }
-
-    const difference = Number(recon.statementBalance) - Number(recon.glBalance);
-
     return withActor(this.db, actor, async (tx) => {
+      const [recon] = await tx
+        .select()
+        .from(schema.bankReconciliations)
+        .where(eq(schema.bankReconciliations.id, input.reconciliationId))
+        .limit(1);
+
+      if (!recon) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found.' });
+      }
+
+      if (recon.status === 'COMPLETED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reconciliation already completed.' });
+      }
+
+      const difference = Number(recon.statementBalance) - Number(recon.glBalance);
+
       const [updated] = await tx
         .update(schema.bankReconciliations)
         .set({

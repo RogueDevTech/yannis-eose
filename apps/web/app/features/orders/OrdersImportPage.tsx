@@ -382,7 +382,7 @@ export function OrdersImportPage({
               { value: '__system__', label: 'System' },
               ...mediaBuyers.map((u) => ({ value: u.id, label: u.name })),
             ]}
-            placeholder="— Optional —"
+            placeholder="Optional"
             searchPlaceholder="Search media buyers..."
             clearable
           />

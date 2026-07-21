@@ -1,4 +1,4 @@
-import { text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { timestamp, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from 'uuidv7';
 
 /**
@@ -33,7 +33,7 @@ export const temporalColumns = {
     .defaultNow()
     .notNull(),
   validTo: timestamp('valid_to', { withTimezone: true }),
-  modifiedBy: text('modified_by'),
+  modifiedBy: uuid('modified_by'),
 };
 
 /**

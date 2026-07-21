@@ -154,7 +154,7 @@ export function AdminQuickDashboardLoadingShell({
   })();
 
   const description = isSuperAdminOnly({ role })
-    ? 'Quick snapshot — open the Executive Overview for the full picture.'
+    ? 'Quick snapshot: open the Executive Overview for the full picture.'
     : 'Quick snapshot of today.';
 
   return (
@@ -232,7 +232,7 @@ export function AdminQuickDashboardLoadingShell({
             </div>
             <p className="text-sm text-app-fg-muted mt-1">
               Revenue, true profit, cost breakdown, order pipeline, media buyer &amp; CS
-              performance, branch breakdown. Heavier page — loads in 1-2 seconds.
+              performance, branch breakdown. Heavier page, loads in 1-2 seconds.
             </p>
           </div>
         </div>

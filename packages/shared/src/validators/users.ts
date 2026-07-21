@@ -19,6 +19,7 @@ export const userRoleSchema = z.enum([
   'TPL_RIDER',
   'HR_MANAGER',
   'SUPPORT',
+  'AUDITOR',
 ]);
 
 /**

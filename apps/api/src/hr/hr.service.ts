@@ -359,11 +359,11 @@ export class HrService {
             staffId: member.id,
             periodStart,
             periodEnd,
-            baseSalary: baseSalary.toFixed(2),
-            performanceBonus: performanceBonus.toFixed(2),
-            addOnsTotal: addOnsTotal.toFixed(2),
-            deductionsTotal: deductionsTotal.toFixed(2),
-            totalPayout: totalPayout.toFixed(2),
+            baseSalary: sql`${baseSalary}::numeric`,
+            performanceBonus: sql`${performanceBonus}::numeric`,
+            addOnsTotal: sql`${addOnsTotal}::numeric`,
+            deductionsTotal: sql`${deductionsTotal}::numeric`,
+            totalPayout: sql`${totalPayout}::numeric`,
             status: 'DRAFT',
           })
           .returning();
@@ -584,7 +584,7 @@ export class HrService {
           .insert(schema.earningsAdjustments)
           .values({
             staffId,
-            amount: (-clawbackAmount).toFixed(2),
+            amount: sql`${-clawbackAmount}::numeric`,
             category: 'CLAWBACK',
             reason: `Return clawback for order ${orderId.slice(0, 8)}`,
           });
@@ -782,7 +782,7 @@ export class HrService {
         .insert(schema.earningsAdjustments)
         .values({
           staffId: input.staffId,
-          amount: String(input.amount),
+          amount: sql`${input.amount}::numeric`,
           category: input.category,
           reason: input.reason,
         })

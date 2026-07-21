@@ -114,7 +114,7 @@ export type ApprovePayoutInput = z.infer<typeof approvePayoutSchema>;
 
 export const listPayoutsSchema = z.object({
   staffId: z.string().uuid().optional(),
-  status: z.enum(['DRAFT', 'APPROVED', 'PAID', 'REJECTED']).optional(),
+  status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REJECTED']).optional(),
   periodStart: z.string().date().optional(),
   periodEnd: z.string().date().optional(),
   page: z.number().int().min(1).default(1),
@@ -234,7 +234,7 @@ export const addBatchAdjustmentSchema = z.object({
   batchId: z.string().uuid(),
   payoutId: z.string().uuid(),
   amount: z.coerce.number().multipleOf(0.01),
-  category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'OTHER']),
+  category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'CLAWBACK', 'OTHER']),
   reason: z.string().min(5).max(500),
 });
 export type AddBatchAdjustmentInput = z.infer<typeof addBatchAdjustmentSchema>;

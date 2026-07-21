@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, asc, desc, count, sql, inArray, gt } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql, inArray, gt, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -665,7 +665,7 @@ export class InventoryService {
         actorId: actor.id,
       });
 
-      // Add stock to destination
+      // Add stock to destination — use FOR UPDATE to prevent concurrent insert race
       const destLevel = await tx
         .select()
         .from(schema.inventoryLevels)
@@ -673,8 +673,10 @@ export class InventoryService {
           and(
             eq(schema.inventoryLevels.productId, line.productId),
             eq(schema.inventoryLevels.locationId, toLocationId),
+            isNull(schema.inventoryLevels.batchId),
           ),
         )
+        .for('update')
         .limit(1);
 
       if (destLevel[0]) {

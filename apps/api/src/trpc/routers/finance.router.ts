@@ -158,12 +158,12 @@ export const financeRouter = router({
   listInvoices: authedProcedure
     .input(listInvoicesSchema)
     .query(async ({ input, ctx }) => {
-      return getFinanceService().listInvoices(input, ctx.effectiveBranchIds);
+      return getFinanceService().listInvoices(input, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   invoiceSummary: permissionProcedure('finance.read')
     .query(async ({ ctx }) => {
-      return getFinanceService().getInvoiceSummary(ctx.effectiveBranchIds);
+      return getFinanceService().getInvoiceSummary(ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   // Profit reports

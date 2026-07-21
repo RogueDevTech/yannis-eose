@@ -169,9 +169,6 @@ export class FinanceService {
     };
     actorId: string;
   }) {
-    const existing = await this.getInvoiceByOrderId(params.order.id);
-    if (existing) return existing;
-
     if (!params.order.confirmedAt) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -199,6 +196,9 @@ export class FinanceService {
     );
 
     return withActor(this.db, { id: params.actorId }, async (tx) => {
+      // Check inside tx to prevent concurrent duplicate creation
+      const existing = await this.getInvoiceByOrderId(params.order.id);
+      if (existing) return existing;
       // Insert via raw SQL so we can explicitly set reference_number to
       // MAX+1, bypassing the serial sequence entirely. This avoids the
       // "duplicate key" error that occurs when the serial sequence is out
@@ -279,13 +279,13 @@ export class FinanceService {
         .update(schema.invoices)
         .set({
           lineItems,
-          totalAmount: totalAmount.toFixed(2),
+          totalAmount: sql`${totalAmount}::numeric`,
         })
         .where(eq(schema.invoices.id, existing.id));
     });
   }
 
-  async listInvoices(input: ListInvoicesInput, effectiveBranchIds?: string[] | null) {
+  async listInvoices(input: ListInvoicesInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const conditions: SQL[] = [];
     if (input.status) {
       conditions.push(eq(schema.invoices.status, input.status));
@@ -296,7 +296,7 @@ export class FinanceService {
     if (input.endDate) {
       conditions.push(lte(schema.invoices.createdAt, new Date(input.endDate)));
     }
-    const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const needsBranchJoin = !!bCond;
     if (bCond) conditions.push(bCond);
 
@@ -341,9 +341,9 @@ export class FinanceService {
     };
   }
 
-  async getInvoiceSummary(effectiveBranchIds?: string[] | null, dateRange?: { startDate?: string; endDate?: string }) {
+  async getInvoiceSummary(branchId?: string | null, effectiveBranchIds?: string[] | null, dateRange?: { startDate?: string; endDate?: string }) {
     const conditions: SQL[] = [];
-    const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
     if (dateRange?.startDate) conditions.push(gte(schema.invoices.createdAt, nigeriaDayStart(dateRange.startDate)));
     if (dateRange?.endDate) conditions.push(lte(schema.invoices.createdAt, nigeriaDayEnd(dateRange.endDate)));
@@ -790,7 +790,7 @@ export class FinanceService {
     // Summary across all time
     const [profitData, invoiceSummary] = await Promise.all([
       this.getProfitReport({ groupBy: 'product' }, effectiveBranchIds),
-      this.getInvoiceSummary(effectiveBranchIds),
+      this.getInvoiceSummary(null, effectiveBranchIds),
     ]);
 
     return {
@@ -810,7 +810,7 @@ export class FinanceService {
         .values({
           type: input.type,
           requesterId: actorId,
-          amount: String(input.amount),
+          amount: sql`${input.amount}::numeric`,
           description: input.description,
           budgetId: input.budgetId ?? null,
         })
@@ -995,7 +995,7 @@ export class FinanceService {
         .values({
           name: input.name,
           departmentOrCampaign: input.departmentOrCampaign,
-          totalBudget: String(input.totalBudget),
+          totalBudget: sql`${input.totalBudget}::numeric`,
           periodStart: new Date(input.periodStart),
           periodEnd: new Date(input.periodEnd),
           createdBy: actorId,
@@ -1518,7 +1518,7 @@ export class FinanceService {
 
   async getGeneralLedger(
     input: GeneralLedgerInput,
-    _branchId?: string | null,
+    branchId?: string | null,
     effectiveBranchIds?: string[] | null,
   ) {
     const { userId, startDate, endDate, entryType, search, page, limit } = input;
@@ -1538,7 +1538,8 @@ export class FinanceService {
       isNotNull(schema.orders.deliveredAt),
       isNotNull(schema.orders.totalAmount),
     ];
-    if (effectiveBranchIds?.length) revenueConds.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+    const revBranchCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (revBranchCond) revenueConds.push(revBranchCond);
     if (userId) revenueConds.push(eq(schema.orders.mediaBuyerId, userId));
     if (dStart) revenueConds.push(gte(schema.orders.deliveredAt, dStart));
     if (dEnd) revenueConds.push(lte(schema.orders.deliveredAt, dEnd));
