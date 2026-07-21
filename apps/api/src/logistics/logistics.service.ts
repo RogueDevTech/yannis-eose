@@ -2005,6 +2005,19 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...awaitingConditions));
 
+    // Period-specific awaiting: same as above but filtered by deliveredAt date range.
+    const awaitingPeriodConditions = [...awaitingConditions];
+    if (input.startDate) awaitingPeriodConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) awaitingPeriodConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+    const awaitingPeriodQuery = this.db
+      .select({
+        awaitingPeriodAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        awaitingPeriodCount: sql<string>`COUNT(*)::text`,
+        awaitingPeriodGrossAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+      })
+      .from(schema.orders)
+      .where(and(...awaitingPeriodConditions));
+
     // Count all delivered orders in the period (both awaiting and on remittance).
     // Uses the SAME scoping as awaitingConditions (minus the status + notExists filters)
     // so the stat strip reconciles: delivered = awaiting + remitted.
@@ -2050,16 +2063,18 @@ export class LogisticsService {
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
 
-    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, deliveredRows] = await Promise.all([
+    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, awaitingPeriodRows, deliveredRows] = await Promise.all([
       baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
       summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
       awaitingSummaryQuery,
+      awaitingPeriodQuery,
       deliveredCountQuery,
     ]);
 
     const baseSummary = baseSummaryRows[0];
     const outcomeSummary = outcomeSummaryRows[0];
     const awaitingSummary = awaitingSummaryRows[0];
+    const awaitingPeriodSummary = awaitingPeriodRows[0];
     const deliveredSummary = deliveredRows[0];
     const summary = {
       totalRemitted: baseSummary?.totalRemitted ?? '0',
@@ -2081,6 +2096,9 @@ export class LogisticsService {
       awaitingGrossAmount: awaitingSummary?.awaitingGrossAmount ?? '0',
       awaitingDeliveryFees: awaitingSummary?.awaitingDeliveryFees ?? '0',
       awaitingDeliveryFeeCount: awaitingSummary?.awaitingDeliveryFeeCount ?? '0',
+      awaitingPeriodAmount: awaitingPeriodSummary?.awaitingPeriodAmount ?? '0',
+      awaitingPeriodCount: awaitingPeriodSummary?.awaitingPeriodCount ?? '0',
+      awaitingPeriodGrossAmount: awaitingPeriodSummary?.awaitingPeriodGrossAmount ?? '0',
       deliveredCount: deliveredSummary?.deliveredCount ?? '0',
       deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
       deliveredNetAmount: deliveredSummary?.deliveredNetAmount ?? '0',
@@ -2101,6 +2119,7 @@ export class LogisticsService {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', batchedOrderCount: '0', receivedOrderCount: '0', pendingCount: '0', disputedOrderCount: '0', pendingGrossAmount: '0', disputedGrossAmount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', awaitingGrossAmount: '0', awaitingDeliveryFees: '0', awaitingDeliveryFeeCount: '0',
+      awaitingPeriodAmount: '0', awaitingPeriodCount: '0', awaitingPeriodGrossAmount: '0',
       deliveredCount: '0', deliveredAmount: '0', deliveredNetAmount: '0',
       grossOrderValue: '0', grossOrderCount: '0', totalDeliveryFees: '0', deliveryFeeCount: '0',
       totalCommitmentFees: '0', commitmentFeeCount: '0',

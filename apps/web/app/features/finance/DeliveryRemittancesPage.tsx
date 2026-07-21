@@ -939,9 +939,15 @@ export function DeliveryRemittancesPage({
                   label: <span className="flex items-center">Awaiting · All time ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
                   value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
                   valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
-                  title: 'Not yet on any remittance batch',
+                  title: 'Not yet on any remittance batch (all time)',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
                   active: viewTab === 'eligible' && !pendingStatus,
+                },
+                {
+                  label: `Awaiting · Period (${Number((summary as unknown as Record<string, unknown>).awaitingPeriodCount ?? 0)})`,
+                  value: <NairaPrice amount={(summary as unknown as Record<string, unknown>).awaitingPeriodGrossAmount as string ?? '0'} />,
+                  valueClassName: 'text-blue-600 dark:text-blue-400 tabular-nums',
+                  title: 'Not yet on any remittance batch (delivered in selected period)',
                 },
                 {
                   label: <span className="flex items-center">Remitted ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
