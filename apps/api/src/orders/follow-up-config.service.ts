@@ -33,6 +33,17 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
+    // One-time: cancel all pending retrack permission requests — Finance now
+    // has direct retrack access (CEO directive 2026-07-21).
+    this.db.execute(sql`
+      UPDATE permission_requests
+      SET status = 'CANCELLED', updated_at = NOW()
+      WHERE type = 'ORDER_STATUS_RETRACK' AND status = 'PENDING'
+    `).then((res) => {
+      const count = (res as unknown as { rowCount?: number }).rowCount ?? 0;
+      if (count > 0) this.logger.log(`Cancelled ${count} pending retrack permission requests (Finance now has direct access)`);
+    }).catch(() => {});
+
     setTimeout(() => {
       this.backfillFollowUpMbAttribution()
         .then(() => this.retryFailedGraduations())

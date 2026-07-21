@@ -3091,19 +3091,18 @@ export function OrderDetailPage({
                       Copy order
                     </Button>
                   )}
-                  {/* Retrack is scoped to DELIVERED only — a REMITTED order must have its
-                      cash remittance reversed first (backend rejects REMITTED retracks). */}
-                  {order.status === 'DELIVERED' && !order.pendingRetrackRequestId && (
+                  {/* Direct retrack — Finance now retracks directly, no approval needed */}
+                  {canEditOrderStatus && order.status !== 'UNPROCESSED' && (
                     <Button
                       type="button"
                       variant="secondary"
                       className="w-full"
                       onClick={() => {
-                        setRetrackRequestTarget('');
-                        setRetrackRequestReason('');
-                        setRetrackRequestModalOpen(true);
+                        setEditStatusTarget('');
+                        setEditStatusReason('');
+                        setEditStatusModalOpen(true);
                       }}
-                      disabled={retrackRequestFetcher.state === 'submitting'}
+                      disabled={fetcher.state === 'submitting'}
                     >
                       Retrack order status
                     </Button>
