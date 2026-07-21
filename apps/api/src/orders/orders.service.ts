@@ -4935,11 +4935,12 @@ export class OrdersService {
         actor.role === 'ADMIN' ||
         actor.role === 'SUPPORT' ||
         actor.role === 'HEAD_OF_CS' ||
-        actor.role === 'HEAD_OF_LOGISTICS';
+        actor.role === 'HEAD_OF_LOGISTICS' ||
+        hasFinanceAccess(actor);
       if (!canRetrack) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only Head of CS, Head of Logistics, or an Admin can retrack an order to an earlier status.',
+          message: 'Only Head of CS, Head of Logistics, Finance, or an Admin can retrack an order to an earlier status.',
         });
       }
     }

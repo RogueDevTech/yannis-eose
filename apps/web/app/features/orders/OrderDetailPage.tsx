@@ -1413,13 +1413,16 @@ export function OrderDetailPage({
   const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
   const canEditOrderStatus =
     userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'SUPPORT' ||
-    userRole === 'HEAD_OF_LOGISTICS' || userRole === 'HEAD_OF_CS';
+    userRole === 'HEAD_OF_LOGISTICS' || userRole === 'HEAD_OF_CS' ||
+    hasFinanceAccess({ role: userRole, permissions });
   // Finance-access users who are NOT already covered by the main Order Actions
   // card get a separate finance actions section on DELIVERED/REMITTED orders.
+  // With direct retrack access, finance still needs this card for non-retrack
+  // finance actions (e.g. cost editing).
   const isFinanceOnlyViewer =
     hasFinanceAccess({ role: userRole, permissions }) &&
     !isCSOrHoS &&
-    !canEditOrderStatus &&
+    !['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HEAD_OF_LOGISTICS', 'HEAD_OF_CS'].includes(userRole) &&
     (order.status === 'DELIVERED' || order.status === 'REMITTED');
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
   // CEO directive 2026-06-10: block ALL forward transitions while item/price
