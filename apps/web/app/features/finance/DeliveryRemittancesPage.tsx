@@ -944,6 +944,12 @@ export function DeliveryRemittancesPage({
                   active: viewTab === 'eligible' && !pendingStatus,
                 },
                 {
+                  label: `Total Delivered (${Number(summary.deliveredCount ?? 0)})`,
+                  value: <NairaPrice amount={summary.deliveredAmount ?? '0'} />,
+                  valueClassName: 'text-app-fg tabular-nums',
+                  title: 'All delivered orders in the selected period (DELIVERED + REMITTED)',
+                },
+                {
                   label: `Awaiting · Period (${Number((summary as unknown as Record<string, unknown>).awaitingPeriodCount ?? 0)})`,
                   value: <NairaPrice amount={(summary as unknown as Record<string, unknown>).awaitingPeriodGrossAmount as string ?? '0'} />,
                   valueClassName: 'text-blue-600 dark:text-blue-400 tabular-nums',
@@ -1724,7 +1730,7 @@ export function DeliveryRemittancesPage({
 
           <CompactTable<EligibleOrder>
             caption="Delivered orders awaiting remittance"
-            className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover [&_td]:py-[3px] [&_th]:py-[3px]"
+            className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover [&_td]:py-[2px] [&_th]:py-[2px] [&_td]:text-[13px]"
             columns={eligibleColumns}
             rows={eligibleOrders}
             rowKey={(o) => o.id}

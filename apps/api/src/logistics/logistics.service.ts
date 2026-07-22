@@ -2233,10 +2233,11 @@ export class LogisticsService {
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     // Scoped by date, location, group, and sentBy — must mirror summaryConditions
     // so the counts reconcile with the amounts.
-    // Outcome count/amount conditions — filter by sentAt to match batch stats.
+    // Outcome count/amount conditions — filter by orders.delivered_at so
+    // stat strip balances: Total Delivered = Awaiting + Remitted + Pending + Disputed.
     const outcomeCountConditions: SQL[] = [];
-    if (input.startDate) outcomeCountConditions.push(sql`dr.sent_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeCountConditions.push(sql`dr.sent_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.startDate) outcomeCountConditions.push(sql`o.delivered_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`o.delivered_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     if (groupId) {
       outcomeCountConditions.push(sql`dr.logistics_location_id IN (
         SELECT ll.id FROM logistics_locations ll
@@ -2277,6 +2278,7 @@ export class LogisticsService {
       SELECT COUNT(DISTINCT dro.order_id)::text AS cnt
       FROM delivery_remittance_orders dro
       JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
+      JOIN orders o ON o.id = dro.order_id
       WHERE EXISTS (
         SELECT 1 FROM delivery_remittance_outcomes oc
         WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'APPROVED'
@@ -2286,6 +2288,7 @@ export class LogisticsService {
       SELECT COUNT(DISTINCT dro.order_id)::text AS cnt
       FROM delivery_remittance_orders dro
       JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
+      JOIN orders o ON o.id = dro.order_id
       WHERE EXISTS (
         SELECT 1 FROM delivery_remittance_outcomes oc
         WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'DISPUTED'
@@ -2293,7 +2296,7 @@ export class LogisticsService {
     `;
 
     const awaitingConditions: SQL[] = [
-      eq(schema.orders.status, 'DELIVERED'),
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       isNull(schema.orders.deletedAt),
       notExists(
         this.db
@@ -2384,10 +2387,11 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
-    // Batch stats filter by sentAt — matches the Remitted tab's date filter.
+    // Batch stats filter by orders.deliveredAt — aligns with Awaiting Period
+    // and Total Delivered so the stat strip balances: Total = Awaiting + Remitted + Pending + Disputed.
     const batchDateConditions: SQL[] = [];
-    if (input.startDate) batchDateConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) batchDateConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
+    if (input.startDate) batchDateConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) batchDateConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
     const baseSummaryWhere = summaryWhere
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
