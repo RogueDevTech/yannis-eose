@@ -10,7 +10,7 @@ INSERT INTO order_timeline_events (id, order_id, event_type, actor_id, actor_nam
 SELECT
   gen_random_uuid(),
   o.id,
-  fote.event_type,
+  fote.event_type::text::timeline_event_type,
   fote.actor_id,
   fote.actor_name,
   fote.description,
@@ -40,7 +40,7 @@ INSERT INTO order_timeline_events (id, order_id, event_type, actor_id, actor_nam
 SELECT
   gen_random_uuid(),
   o.id,
-  cote.event_type,
+  cote.event_type::text::timeline_event_type,
   cote.actor_id,
   cote.actor_name,
   cote.description,
