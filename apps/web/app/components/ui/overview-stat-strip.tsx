@@ -109,6 +109,9 @@ type OverviewStatStripProps = {
    * should see everything at a glance. Desktop layout is unchanged.
    */
   mobileGrid?: boolean;
+  /** Number of columns in the mobile grid (default 2). Use 1 for strips
+   *  with long labels that would truncate in a 2-col layout. */
+  mobileGridCols?: 1 | 2 | 3;
   /**
    * Wrap tiles to new lines on desktop instead of scrolling horizontally.
    * Useful for strips with many dynamic items (e.g. per-product breakdowns).
@@ -156,6 +159,7 @@ export function OverviewStatStrip({
   tileClassName = '',
   embedded = false,
   mobileGrid = false,
+  mobileGridCols = 2,
   wrap = false,
   liveFlash = false,
   loading = false,
@@ -299,7 +303,7 @@ export function OverviewStatStrip({
     <div className="md:hidden">
       <div
         className="gap-1.5 px-1.5 py-1.5"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)' }}
+        style={{ display: 'grid', gridTemplateColumns: `repeat(${mobileGridCols}, 1fr)` }}
       >
       {items.map((item, i) => {
         const stamp = changedAt.get(i);

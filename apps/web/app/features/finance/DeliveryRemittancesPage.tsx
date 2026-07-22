@@ -995,7 +995,9 @@ export function DeliveryRemittancesPage({
         const commitmentFees = Number(summary.totalCommitmentFees ?? 0);
         const posFees = Number(summary.totalPosFees ?? 0);
         const failedDelivery = Number(summary.totalFailedDeliveryCosts ?? 0);
-        const netRemittable = grossVal - deliveryFees - commitmentFees - posFees - failedDelivery;
+        const discounts = Number((summary as unknown as Record<string, string>).totalDiscounts ?? 0);
+        const waybillCosts = Number((summary as unknown as Record<string, string>).totalWaybillCosts ?? 0);
+        const netRemittable = grossVal - deliveryFees - commitmentFees - posFees - failedDelivery - discounts - waybillCosts;
         return (
         <>
         {/* Main stats — Delivered = Awaiting + Remitted + Pending + Disputed */}
@@ -1102,6 +1104,16 @@ export function DeliveryRemittancesPage({
                 valueClassName: 'text-red-500 tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.set('deduction', 'failedDeliveryCost'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: new URLSearchParams(location.search).get('deduction') === 'failedDeliveryCost',
+              },
+              {
+                label: `Discount (${Number((summary as unknown as Record<string, string>).discountCount ?? 0)})`,
+                value: <NairaPrice amount={(summary as unknown as Record<string, string>).totalDiscounts ?? '0'} />,
+                valueClassName: 'text-red-500 tabular-nums',
+              },
+              {
+                label: `Waybill (${Number((summary as unknown as Record<string, string>).waybillCostCount ?? 0)})`,
+                value: <NairaPrice amount={(summary as unknown as Record<string, string>).totalWaybillCosts ?? '0'} />,
+                valueClassName: 'text-red-500 tabular-nums',
               },
               {
                 label: <span className="flex items-center">Expected Net<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,

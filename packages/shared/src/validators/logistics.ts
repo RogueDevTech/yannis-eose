@@ -179,6 +179,8 @@ export const createDeliveryRemittanceSchema = z.object({
   commitmentFee: z.string().optional(),
   posFee: z.string().optional(),
   failedDeliveryCost: z.string().optional(),
+  discount: z.string().optional(),
+  waybillCost: z.string().optional(),
   /** When true, skip the same-customer-product duplicate warning and proceed. */
   skipDuplicateWarning: z.boolean().optional().default(false),
 });
@@ -191,6 +193,8 @@ export const updateDeliveryRemittanceSchema = z.object({
   commitmentFee: z.string().optional(),
   posFee: z.string().optional(),
   failedDeliveryCost: z.string().optional(),
+  discount: z.string().optional(),
+  waybillCost: z.string().optional(),
   /** Per-order delivery fees. Keys are order IDs, values are numeric fee amounts. */
   deliveryFees: z.record(z.string().uuid(), z.string()).optional(),
 });

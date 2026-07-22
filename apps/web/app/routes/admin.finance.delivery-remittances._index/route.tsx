@@ -340,12 +340,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const commitmentFee = formData.get('commitmentFee')?.toString() || undefined;
     const posFee = formData.get('posFee')?.toString() || undefined;
     const failedDeliveryCost = formData.get('failedDeliveryCost')?.toString() || undefined;
+    const discount = formData.get('discount')?.toString() || undefined;
+    const waybillCost = formData.get('waybillCost')?.toString() || undefined;
     const skipDuplicateWarning = formData.get('skipDuplicateWarning')?.toString() === 'true';
 
     const res = await apiRequest<unknown>('/trpc/logistics.createDeliveryRemittance', {
       method: 'POST',
       cookie,
-      body: { orderIds, receiptUrls, notes, markReceivedNow, deliveryFees, commitmentFee, posFee, failedDeliveryCost, skipDuplicateWarning },
+      body: { orderIds, receiptUrls, notes, markReceivedNow, deliveryFees, commitmentFee, posFee, failedDeliveryCost, discount, waybillCost, skipDuplicateWarning },
     });
     if (!res.ok) {
       return json(

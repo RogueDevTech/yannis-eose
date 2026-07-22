@@ -1642,11 +1642,15 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
     }
 
-    // Persist logistics fields from metadata (mirrors regular order transitions)
+    // Persist logistics fields from metadata. Only update location/provider/rider
+    // on AGENT_ASSIGNED — later transitions (DISPATCHED, DELIVERED) must not
+    // overwrite the assigned location with stale form values.
     const logisticsUpdates: Record<string, unknown> = {};
-    if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
-    if (metadata?.logisticsProviderId) logisticsUpdates.logisticsProviderId = metadata.logisticsProviderId;
-    if (metadata?.riderId) logisticsUpdates.riderId = metadata.riderId;
+    if (newStatus === 'AGENT_ASSIGNED') {
+      if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
+      if (metadata?.logisticsProviderId) logisticsUpdates.logisticsProviderId = metadata.logisticsProviderId;
+      if (metadata?.riderId) logisticsUpdates.riderId = metadata.riderId;
+    }
     if (metadata?.preferredDeliveryDate) logisticsUpdates.preferredDeliveryDate = metadata.preferredDeliveryDate;
     if (metadata?.deliveryNote) logisticsUpdates.deliveryNotes = metadata.deliveryNote;
     if (metadata?.deliveryProofUrl) logisticsUpdates.deliveryProofUrl = metadata.deliveryProofUrl;
