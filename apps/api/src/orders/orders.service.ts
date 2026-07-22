@@ -7150,6 +7150,41 @@ export class OrdersService {
    * Returns delivery counts for today, this week, and this month per product/brand.
    * Bounded to the current month for index-friendly scans.
    */
+  /**
+   * Per-source delivered counts for the dashboard Total Delivered breakdown modal.
+   * Groups DELIVERED+REMITTED orders from the orders table by order_source.
+   */
+  async getDeliveredBySource(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<Record<string, number>> {
+    const conditions: SQL[] = [
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      isNull(schema.orders.deletedAt),
+    ];
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+
+    const rows = await this.db
+      .select({
+        source: sql<string>`COALESCE(${schema.orders.orderSource}, 'edge-form')`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .groupBy(sql`COALESCE(${schema.orders.orderSource}, 'edge-form')`);
+
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      result[row.source] = row.count;
+    }
+    return result;
+  }
+
   async getDeliveriesByProduct(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<
     Array<{
       productId: string;

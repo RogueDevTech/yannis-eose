@@ -191,6 +191,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const followUpSc = data?.followUpCounts as Record<string, number> ?? {};
         const cartSc = data?.cartOrdersCounts as Record<string, number> ?? {};
         const dfuSc = (data as unknown as Record<string, unknown>)?.deliveredFollowUpCounts as Record<string, number> ?? {};
+        const deliveredBySource = (data as unknown as Record<string, unknown>)?.deliveredBySource as Record<string, number> ?? {};
 
         const sumExcludeDeleted = (sc: Record<string, number>) =>
           Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
@@ -298,11 +299,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalDelivered'}
               onClose={() => setBreakdownModal(null)}
               title="Total Delivered: Breakdown"
-              description="All delivered + remitted orders by source."
+              description="Delivered + remitted orders by source category."
               lines={[
-                { label: 'Funnel Orders', value: sumStatus(tSc, 'DELIVERED', 'REMITTED') - sumStatus(offSc, 'DELIVERED', 'REMITTED') - sumStatus(dfuSc, 'DELIVERED', 'REMITTED') },
-                { label: 'Offline Orders', value: delOffline },
-                { label: 'Delivered Follow-Up', value: delDfu },
+                { label: 'Funnel (marketing forms)', value: (deliveredBySource['edge-form'] ?? 0) + (deliveredBySource['import'] ?? 0) },
+                { label: 'Offline (manually created)', value: deliveredBySource['offline'] ?? 0 },
+                { label: 'Follow-Up', value: deliveredBySource['follow-up'] ?? 0 },
+                { label: 'Cart (recovered)', value: deliveredBySource['online'] ?? 0 },
+                { label: 'Delivered Follow-Up', value: deliveredBySource['delivered_follow_up'] ?? 0 },
                 { label: 'Total', value: tDelivered, bold: true },
               ]}
             />
@@ -310,9 +313,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalRemitted'}
               onClose={() => setBreakdownModal(null)}
               title="Total Remitted: Breakdown"
-              description="Remitted orders by source."
+              description="Orders where cash has been collected and confirmed."
               lines={[
-                { label: 'Funnel Orders', value: tRemitted - sumStatus(offSc, 'REMITTED') - sumStatus(dfuSc, 'REMITTED') },
+                { label: 'Funnel Orders', value: sumStatus(mktSc, 'REMITTED') },
                 { label: 'Offline Orders', value: sumStatus(offSc, 'REMITTED') },
                 { label: 'Delivered Follow-Up', value: sumStatus(dfuSc, 'REMITTED') },
                 { label: 'Total', value: tRemitted, bold: true },
