@@ -63,6 +63,7 @@ export function DashboardSecondaryProvider({
           followUpCounts: d.followUpCounts,
           cartOrdersCounts: d.cartOrdersCounts,
           deliveredFollowUpCounts: d.deliveredFollowUpCounts,
+          marketingStatusCounts: d.marketingStatusCounts,
         },
         retry,
       };
@@ -98,7 +99,7 @@ export function DashboardMetricsSection({
   children,
 }: {
   fallback: React.ReactNode;
-  children: (metrics: DashboardData['metrics'], abandonedCartCount: number, cartOrdersCounts?: Record<string, number>) => React.ReactNode;
+  children: (metrics: DashboardData['metrics'], abandonedCartCount: number, cartOrdersCounts?: Record<string, number>, marketingStatusCounts?: Record<string, number>) => React.ReactNode;
 }) {
   const { loading, error, bundle, retry } = useDashboardSecondary();
   if (error) {
@@ -111,7 +112,7 @@ export function DashboardMetricsSection({
     );
   }
   if (loading || !bundle) return <>{fallback}</>;
-  return <>{children(bundle.metrics, bundle.abandonedCartCount, bundle.cartOrdersCounts)}</>;
+  return <>{children(bundle.metrics, bundle.abandonedCartCount, bundle.cartOrdersCounts, bundle.marketingStatusCounts)}</>;
 }
 
 /** Supervisor-aware section: provides both team and personal metrics when available. */
@@ -120,7 +121,7 @@ export function DashboardSupervisorMetricsSection({
   children,
 }: {
   fallback: React.ReactNode;
-  children: (teamMetrics: DashboardData['metrics'], personalMetrics: DashboardData['metrics'] | null, abandonedCartCount: number, cartOrdersCounts?: Record<string, number>) => React.ReactNode;
+  children: (teamMetrics: DashboardData['metrics'], personalMetrics: DashboardData['metrics'] | null, abandonedCartCount: number, cartOrdersCounts?: Record<string, number>, marketingStatusCounts?: Record<string, number>) => React.ReactNode;
 }) {
   const { loading, error, bundle, retry } = useDashboardSecondary();
   if (error) {
@@ -133,7 +134,7 @@ export function DashboardSupervisorMetricsSection({
     );
   }
   if (loading || !bundle) return <>{fallback}</>;
-  return <>{children(bundle.metrics, bundle.personalMetrics ?? null, bundle.abandonedCartCount, bundle.cartOrdersCounts)}</>;
+  return <>{children(bundle.metrics, bundle.personalMetrics ?? null, bundle.abandonedCartCount, bundle.cartOrdersCounts, bundle.marketingStatusCounts)}</>;
 }
 
 export function DashboardProfitSection({

@@ -1073,6 +1073,9 @@ export const ordersRouter = router({
            *  Defaults to true for funnel pages; logistics passes false so
            *  graduated deliveries remain visible for remittance. */
           excludeGraduated: z.boolean().optional(),
+          /** When true, exclude cart-graduated orders (order_source='online').
+           *  Marketing dashboard passes true so cart orders are counted separately. */
+          excludeCartGraduated: z.boolean().optional(),
           /** Filter counts to a specific order source. */
           orderSource: z.enum(['offline', 'edge-form', 'offline_and_import', 'import', 'edge-form-and-import', 'delivered_follow_up']).optional(),
           /** When true, marketing orders (edge-form/NULL) count at all statuses,
@@ -1122,8 +1125,9 @@ export const ordersRouter = router({
       // filtering — don't also apply excludeGraduated/excludeCartGraduated.
       const excludeGraduated = input?.onlyGraduateNonMarketing ? undefined : (input?.excludeGraduated ?? !isFollowUp);
       // CS funnel (servicing scope) also excludes cart-graduated orders —
-      // they have their own Cart Orders strip. Marketing keeps them (MB credit).
-      const excludeCartGraduated = input?.onlyGraduateNonMarketing ? undefined : (excludeGraduated && branchScope === 'servicing');
+      // they have their own Cart Orders strip. Marketing dashboard also passes
+      // explicit excludeCartGraduated=true so cart orders are counted separately.
+      const excludeCartGraduated = input?.onlyGraduateNonMarketing ? undefined : (input?.excludeCartGraduated ?? (excludeGraduated && branchScope === 'servicing'));
       const onlyOffline: boolean | string | undefined =
         input?.onlyOffline ? true
         : input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true

@@ -52,6 +52,8 @@ export type DashboardSecondaryApiPayload = {
   cartOrdersCounts?: Record<string, number>;
   /** Delivered follow-up order per-status counts for dashboard stat strip. */
   deliveredFollowUpCounts?: Record<string, number>;
+  /** Marketing funnel status counts (from getStatusCountsByOrderSource) for dashboard stat strip alignment. */
+  marketingStatusCounts?: Record<string, number>;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -102,6 +104,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const needsFollowUp =
     isAdminLevel({ role }) || role === 'HEAD_OF_CS' || role === 'CS_CLOSER' || role === 'STOCK_MANAGER';
   const needsCartOrders = needsFollowUp || role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER' || isSupervisor;
+  const needsMarketingStatusCounts =
+    role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER' || isSupervisor;
 
   try {
     const metricsP = needsMetrics
@@ -140,8 +144,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const dfuP = needsFollowUp
       ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(dfuInput)}`, deferredOpt)
       : Promise.resolve(null);
+    // Marketing funnel status counts — same query the Marketing Orders page uses,
+    // so the dashboard stat strip aligns with the orders page totals.
+    // excludeCartGraduated=true ensures cart-graduated (online) orders are excluded
+    // from the funnel count and added separately from cartOrdersCounts.
+    const mktStatusInput = JSON.stringify({ startDate, endDate, orderSource: 'edge-form-and-import', excludeCartGraduated: true });
+    const mktStatusP = needsMarketingStatusCounts
+      ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(mktStatusInput)}`, deferredOpt)
+      : Promise.resolve(null);
 
-    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount, followUpCounts, cartOrdersCounts, deliveredFollowUpCounts] = await Promise.all([
+    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount, followUpCounts, cartOrdersCounts, deliveredFollowUpCounts, marketingStatusCounts] = await Promise.all([
       metricsP.then((r) => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics),
       personalMetricsP,
       profitP.then((r) => extractTrpc(r, defaultProfit)).catch(() => defaultProfit),
@@ -189,6 +201,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
           return d ?? undefined;
         })
         .catch(() => undefined) ?? Promise.resolve(undefined),
+      mktStatusP
+        ?.then((r) => {
+          if (!r) return undefined;
+          const d = r.ok ? (r.data as { result?: { data?: Record<string, number> } })?.result?.data : null;
+          return d ?? undefined;
+        })
+        .catch(() => undefined) ?? Promise.resolve(undefined),
     ]);
 
     return secondaryCacheJson({
@@ -203,6 +222,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       followUpCounts,
       cartOrdersCounts,
       deliveredFollowUpCounts,
+      marketingStatusCounts,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Dashboard secondary load failed';
