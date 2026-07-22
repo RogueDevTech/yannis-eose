@@ -660,14 +660,11 @@ export class CartOrdersService {
     }
 
     // Graduate to orders on DELIVERED.
-    // Wrapped in try/catch so the DELIVERED status (already committed above)
-    // is never rolled back. Failed graduations are retried by the boot sweep.
+    // Must succeed — the pre-delivery dedup guard (above) catches duplicates
+    // before status change, so graduation should never be blocked. If it fails
+    // for an unexpected reason, let it throw so the user sees the error.
     if (newStatus === 'DELIVERED') {
-      try {
-        await this.graduateToOrders(orderId);
-      } catch (err) {
-        this.logger.error(`Cart order graduation failed for ${orderId} — will be retried by boot sweep: ${err instanceof Error ? err.message : err}`);
-      }
+      await this.graduateToOrders(orderId);
     }
 
     // Cascade delete to graduated order — if a cart order is deleted after

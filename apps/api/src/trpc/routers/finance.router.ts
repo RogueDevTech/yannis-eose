@@ -282,6 +282,7 @@ export const financeRouter = router({
         endDate: z.string().optional(),
         branchId: z.string().uuid().optional(),
         mediaBuyerId: z.string().uuid().optional(),
+        dateScope: z.enum(['createdAt', 'deliveredAt']).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -300,6 +301,7 @@ export const financeRouter = router({
           .listDeliveryRemittances({
             page: 1,
             limit: 1,
+            dateScope: input.dateScope ?? 'createdAt',
             ...(input.startDate && { startDate: input.startDate }),
             ...(input.endDate && { endDate: input.endDate }),
           }, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds)

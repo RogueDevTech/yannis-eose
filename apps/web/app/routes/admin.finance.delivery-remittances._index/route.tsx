@@ -78,6 +78,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
+  const dateScope = url.searchParams.get('dateScope') === 'deliveredAt' ? 'deliveredAt' : 'createdAt';
+  listInput.dateScope = dateScope;
   const remittanceSearch = url.searchParams.get('rq')?.trim() ?? undefined;
   if (remittanceSearch) listInput.search = remittanceSearch;
   const category = url.searchParams.get('category') ?? undefined;
@@ -127,6 +129,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       periodAllTime,
       eligibleQ: eligibleQ ?? '',
       remittanceSearch: remittanceSearch ?? '',
+      dateScope: dateScope as 'createdAt' | 'deliveredAt',
     },
     canCreateRemittance,
     canMarkReceived,
@@ -252,6 +255,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       periodAllTime,
       eligibleQ: eligibleQ ?? '',
       remittanceSearch: remittanceSearch ?? '',
+      dateScope: dateScope as 'createdAt' | 'deliveredAt',
     },
     userMap,
     sentByOptions,

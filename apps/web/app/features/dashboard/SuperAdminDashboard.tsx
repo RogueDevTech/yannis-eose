@@ -35,7 +35,7 @@ export interface SuperAdminDashboardProps {
 
 export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const [breakdownModal, setBreakdownModal] = useState<'totalBreakdown' | 'totalDelivered' | 'mktTotal' | 'csTotal' | 'csDelivered' | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<'totalBreakdown' | 'totalDelivered' | 'totalRemitted' | 'mktTotal' | 'csTotal' | 'csDelivered' | null>(null);
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -235,7 +235,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const brkCart = delCart;
         const brkDfu = delDfu;
         const computedTotal = catFunnel + brkOffline + brkFollowUp + brkCart + brkDfu;
-        const computedDelivered = delFunnel + delOffline + delFollowUp + delCart + delDfu;
+        // Use tDelivered (from deduplicated tSc query against orders table)
+        // instead of summing across source tables which double-counts graduated orders.
+        const computedDelivered = tDelivered;
         const computedCR = computedTotal > 0 ? ((tConfirmed + computedDelivered) / computedTotal) * 100 : 0;
         const computedDR = computedTotal > 0 ? (computedDelivered / computedTotal) * 100 : 0;
 
@@ -259,12 +261,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
                 {
                   label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>,
-                  value: computedDelivered - (sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED')),
+                  value: tDeliveredOnly,
                   valueClassName: 'text-success-600 dark:text-success-400',
                 },
                 {
                   label: <span className="flex items-center">Remitted<FunnelInfoIcon onClick={() => setBreakdownModal('totalRemitted')} /></span>,
-                  value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'),
+                  value: tRemitted,
                   valueClassName: 'text-green-600 dark:text-green-400',
                 },
                 { label: 'CR', value: `${computedCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(computedCR) },
@@ -296,28 +298,24 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalDelivered'}
               onClose={() => setBreakdownModal(null)}
               title="Total Delivered: Breakdown"
-              description="Delivered orders across all categories."
+              description="All delivered + remitted orders by source."
               lines={[
-                { label: 'Funnel Orders', value: delFunnel },
+                { label: 'Funnel Orders', value: sumStatus(tSc, 'DELIVERED', 'REMITTED') - sumStatus(offSc, 'DELIVERED', 'REMITTED') - sumStatus(dfuSc, 'DELIVERED', 'REMITTED') },
                 { label: 'Offline Orders', value: delOffline },
-                { label: 'Follow-Up Orders', value: delFollowUp },
-                { label: 'Cart Orders', value: delCart },
                 { label: 'Delivered Follow-Up', value: delDfu },
-                { label: 'Total Delivered', value: delFunnel + delOffline + delFollowUp + delCart + delDfu, bold: true },
+                { label: 'Total', value: tDelivered, bold: true },
               ]}
             />
             <FunnelBreakdownModal
               open={breakdownModal === 'totalRemitted'}
               onClose={() => setBreakdownModal(null)}
               title="Total Remitted: Breakdown"
-              description="Remitted orders across all categories."
+              description="Remitted orders by source."
               lines={[
-                { label: 'Funnel Orders', value: sumStatus(mktSc, 'REMITTED') },
+                { label: 'Funnel Orders', value: tRemitted - sumStatus(offSc, 'REMITTED') - sumStatus(dfuSc, 'REMITTED') },
                 { label: 'Offline Orders', value: sumStatus(offSc, 'REMITTED') },
-                { label: 'Follow-Up Orders', value: sumStatus(followUpSc, 'REMITTED') },
-                { label: 'Cart Orders', value: sumStatus(cartSc, 'REMITTED') },
                 { label: 'Delivered Follow-Up', value: sumStatus(dfuSc, 'REMITTED') },
-                { label: 'Total Remitted', value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'), bold: true },
+                { label: 'Total', value: tRemitted, bold: true },
               ]}
             />
           </div>
@@ -580,7 +578,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 (offSc['AGENT_ASSIGNED'] ?? 0) +
                 (offSc['DISPATCHED'] ?? 0) +
                 (offSc['IN_TRANSIT'] ?? 0);
-              const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+              const offDeliveredOnly = offSc['DELIVERED'] ?? 0;
+              const offRemitted = offSc['REMITTED'] ?? 0;
+              const offDelivered = offDeliveredOnly + offRemitted;
               const offDeleted = offSc['DELETED'] ?? 0;
               const offConfirmedAndBeyond = offConfirmed + offDelivered;
               const offCR = offTotal > 0 ? (offConfirmedAndBeyond / offTotal) * 100 : 0;
@@ -631,9 +631,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       },
                       {
                         label: 'Delivered',
-                        value: offDelivered,
+                        value: offDeliveredOnly,
                         valueClassName: 'text-success-600 dark:text-success-400',
                         to: offlineLink({ status: 'DELIVERED' }),
+                      },
+                      {
+                        label: 'Remitted',
+                        value: offRemitted,
+                        valueClassName: 'text-green-600 dark:text-green-400',
                       },
                       {
                         label: 'CR',
@@ -673,7 +678,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           (sc['AGENT_ASSIGNED'] ?? 0) +
           (sc['DISPATCHED'] ?? 0) +
           (sc['IN_TRANSIT'] ?? 0);
-        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const deliveredOnly = sc['DELIVERED'] ?? 0;
+        const remitted = sc['REMITTED'] ?? 0;
+        const delivered = deliveredOnly + remitted;
         const total = Object.entries(sc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
         return (
           <div>
@@ -716,9 +723,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 },
                 {
                   label: 'Delivered',
-                  value: delivered,
+                  value: deliveredOnly,
                   valueClassName: 'text-success-600 dark:text-success-400',
                   to: followUpLink({ status: 'DELIVERED' }),
+                },
+                {
+                  label: 'Remitted',
+                  value: remitted,
+                  valueClassName: 'text-green-600 dark:text-green-400',
                 },
                 {
                   label: 'CR',
@@ -754,7 +766,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           (sc['AGENT_ASSIGNED'] ?? 0) +
           (sc['DISPATCHED'] ?? 0) +
           (sc['IN_TRANSIT'] ?? 0);
-        const dfuDelivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const dfuDeliveredOnly = sc['DELIVERED'] ?? 0;
+        const dfuRemitted = sc['REMITTED'] ?? 0;
+        const dfuDelivered = dfuDeliveredOnly + dfuRemitted;
         const dfuCR = dfuTotal > 0 ? ((dfuConfirmed + dfuDelivered) / dfuTotal) * 100 : 0;
         const dfuDR = dfuTotal > 0 ? (dfuDelivered / dfuTotal) * 100 : 0;
         const dfuLink = (params?: Record<string, string>) => buildLink('/admin/sales/delivered-follow-up', params);
@@ -772,7 +786,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Assigned', value: dfuAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: dfuLink({ status: 'CS_ASSIGNED' }) },
                 { label: 'Unconfirmed', value: dfuEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: dfuLink({ status: 'CS_ENGAGED' }) },
                 { label: 'Confirmed', value: dfuConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: dfuLink({ status: 'CONFIRMED' }) },
-                { label: 'Delivered', value: dfuDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: dfuLink({ status: 'DELIVERED' }) },
+                { label: 'Delivered', value: dfuDeliveredOnly, valueClassName: 'text-success-600 dark:text-success-400', to: dfuLink({ status: 'DELIVERED' }) },
+                { label: 'Remitted', value: dfuRemitted, valueClassName: 'text-green-600 dark:text-green-400' },
                 { label: 'CR', value: pct(dfuCR), valueClassName: confirmationRateColorClass(dfuCR) },
                 { label: 'DR', value: pct(dfuDR), valueClassName: deliveryRateColorClass(dfuDR) },
                 { label: 'Deleted', value: sc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: dfuLink({ status: 'DELETED' }) },

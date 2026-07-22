@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
+import { Modal } from '~/components/ui/modal';
 import type { OrderInvoice } from '~/features/orders/types';
 import { formatOrderNumber } from '@yannis/shared';
 import { Link, useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
@@ -31,6 +32,7 @@ import { SortMenu } from '~/components/ui/sort-menu';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { useNavigate } from '@remix-run/react';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 import type { EligibleOrder } from './CashRemittanceCreateModal';
 
 export interface DeliveryRemittanceListItem {
@@ -121,6 +123,8 @@ export interface DeliveryRemittancesPageProps {
     eligibleQ: string;
     /** Server-side search for the Remitted tab (`rq` query param). */
     remittanceSearch: string;
+    /** Controls which date column stat strip uses. 'createdAt' matches dashboard (default). */
+    dateScope?: 'createdAt' | 'deliveredAt';
   };
   userMap: Record<string, string>;
   /** Phase 18 — accountants (Finance / admin / Finance hat) for the Sent by select. */
@@ -236,6 +240,7 @@ export function DeliveryRemittancesPage({
   const [eligibleSearchDraft, setEligibleSearchDraft] = useState(filters.eligibleQ);
   const [remittanceSearchDraft, setRemittanceSearchDraft] = useState(filters.remittanceSearch);
   const [infoModal, setInfoModal] = useState<string | null>(null);
+  const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
   useEffect(() => {
     setEligibleSearchDraft(filters.eligibleQ);
   }, [filters.eligibleQ]);
@@ -750,6 +755,17 @@ export function DeliveryRemittancesPage({
             desktop={
               <>
                 <PageRefreshButton />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setDateScopeModalOpen(true)}
+                  title={`Stats scoped by ${(filters.dateScope ?? 'createdAt') === 'createdAt' ? 'order creation date' : 'delivery date'}`}
+                >
+                  <svg className="h-4 w-4 mr-1.5 -ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  {(filters.dateScope ?? 'createdAt') === 'createdAt' ? 'By order date' : 'By delivery date'}
+                </Button>
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
@@ -772,6 +788,17 @@ export function DeliveryRemittancesPage({
                 >
                   Generate report
                 </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setDateScopeModalOpen(true);
+                  }}
+                >
+                  {(filters.dateScope ?? 'createdAt') === 'createdAt' ? 'By order date' : 'By delivery date'}
+                </Button>
               </>
             )}
           />
@@ -788,6 +815,53 @@ export function DeliveryRemittancesPage({
         invoice={eligibleInvoicePreview}
         onClose={() => setEligibleInvoicePreview(null)}
       />
+
+      {/* Date scope selector modal */}
+      <Modal open={dateScopeModalOpen} onClose={() => setDateScopeModalOpen(false)} maxWidth="max-w-xs" contentClassName="p-5 space-y-3">
+        <h3 className="text-base font-semibold text-app-fg">Stats date scope</h3>
+        <p className="text-sm text-app-fg-muted">
+          Choose which date the stat strip uses for period filtering.
+        </p>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => {
+              setDateScopeModalOpen(false);
+              invalidateCachedLoader('/admin/finance/delivery-remittances');
+              const p = new URLSearchParams(window.location.search);
+              p.set('dateScope', 'createdAt');
+              p.set('page', '1');
+              navigateTo(`${window.location.pathname}?${p.toString()}`);
+            }}
+            className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+              (filters.dateScope ?? 'createdAt') === 'createdAt'
+                ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-300'
+                : 'border-app-border bg-app-elevated text-app-fg hover:border-brand-400'
+            }`}
+          >
+            <span className="font-medium">By order date</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDateScopeModalOpen(false);
+              invalidateCachedLoader('/admin/finance/delivery-remittances');
+              const p = new URLSearchParams(window.location.search);
+              p.set('dateScope', 'deliveredAt');
+              p.set('page', '1');
+              navigateTo(`${window.location.pathname}?${p.toString()}`);
+            }}
+            className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+              filters.dateScope === 'deliveredAt'
+                ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-300'
+                : 'border-app-border bg-app-elevated text-app-fg hover:border-brand-400'
+            }`}
+          >
+            <span className="font-medium">By delivery date</span>
+          </button>
+        </div>
+      </Modal>
+
       <LocalExportModal
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
@@ -928,12 +1002,15 @@ export function DeliveryRemittancesPage({
         {(() => {
           const pendingGross = Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0);
           const disputedGross = Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0);
-          // grossOrderValue is now RECEIVED-only, so it IS the remitted gross
-          const remittedGross = Number(summary.grossOrderValue ?? 0);
-          const remittedCount = Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? summary.receivedCount ?? 0);
+          const s = summary as unknown as Record<string, unknown>;
+          // Use per-status counts from orders table (same dateScope) so the
+          // Remitted tile matches the dashboard exactly.
+          const remittedGross = Number(s.remittedOnlyAmount ?? summary.grossOrderValue ?? 0);
+          const remittedCount = Number(s.remittedOnlyCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
           return (
             <OverviewStatStrip
               mobileGrid
+              mobileGridCols={1}
               items={[
                 {
                   label: <span className="flex items-center">Awaiting · All time ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
@@ -950,10 +1027,10 @@ export function DeliveryRemittancesPage({
                   title: 'All delivered orders in the selected period (DELIVERED + REMITTED)',
                 },
                 {
-                  label: `Awaiting · Period (${Number((summary as unknown as Record<string, unknown>).awaitingPeriodCount ?? 0)})`,
-                  value: <NairaPrice amount={(summary as unknown as Record<string, unknown>).awaitingPeriodGrossAmount as string ?? '0'} />,
+                  label: `Awaiting · Period (${Number(s.deliveredOnlyCount ?? (summary as unknown as Record<string, unknown>).awaitingPeriodCount ?? 0)})`,
+                  value: <NairaPrice amount={s.deliveredOnlyAmount as string ?? (summary as unknown as Record<string, unknown>).awaitingPeriodGrossAmount as string ?? '0'} />,
                   valueClassName: 'text-blue-600 dark:text-blue-400 tabular-nums',
-                  title: 'Not yet on any remittance batch (delivered in selected period)',
+                  title: 'Orders with status DELIVERED in selected period (not yet remitted)',
                 },
                 {
                   label: <span className="flex items-center">Remitted ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
@@ -988,6 +1065,7 @@ export function DeliveryRemittancesPage({
         {grossVal > 0 && (
           <OverviewStatStrip
             mobileGrid
+            mobileGridCols={1}
             tileClassName="!py-2"
             items={[
               {
@@ -1657,7 +1735,7 @@ export function DeliveryRemittancesPage({
                 controlSize="md"
               />
             </form>
-            <div className="relative w-full sm:w-fit sm:justify-self-end">
+            <div className="relative hidden sm:block sm:w-fit sm:justify-self-end">
               {!!filters.location && (
                 <FilterDismiss onClear={() => handleLocationChange('')} />
               )}

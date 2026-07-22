@@ -1608,6 +1608,40 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
     }
 
+    // Broader dedup guard: block delivery if ANY order with the same
+    // customer phone + product already exists as DELIVERED/REMITTED within 14 days.
+    // Prevents follow-up orders from graduating into duplicates.
+    if (newStatus === 'DELIVERED' && order.customerPhoneHash) {
+      const fuItems = await this.db
+        .select()
+        .from(schema.followUpOrderItems)
+        .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+      const productIds = fuItems.map((i) => i.productId).filter(Boolean) as string[];
+      if (productIds.length > 0) {
+        const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+        const [existing] = await this.db
+          .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
+          .from(schema.orders)
+          .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+          .where(
+            and(
+              eq(schema.orders.customerPhoneHash, order.customerPhoneHash),
+              inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.orders.deletedAt),
+              gte(schema.orders.deliveredAt, fourteenDaysAgo),
+              inArray(schema.orderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Cannot mark as delivered: order YNS-${existing.orderNumber ?? existing.id.slice(0, 8)} for this customer and product was already delivered. This appears to be a duplicate.`,
+          });
+        }
+      }
+    }
+
     // Persist logistics fields from metadata (mirrors regular order transitions)
     const logisticsUpdates: Record<string, unknown> = {};
     if (metadata?.logisticsLocationId) logisticsUpdates.logisticsLocationId = metadata.logisticsLocationId;
@@ -1712,14 +1746,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
 
     // Graduation: when DELIVERED, copy into orders table.
-    // Wrapped in try/catch so the DELIVERED status (already committed above)
-    // is never rolled back. Failed graduations are retried by the boot sweep.
+    // Must succeed — if graduation fails, the DELIVERED status is already committed
+    // but the pre-delivery dedup guard (above) should have caught any duplicates.
+    // If graduation still fails for an unexpected reason, log it for manual review
+    // but do NOT silently swallow — surface the error.
     if (newStatus === 'DELIVERED') {
-      try {
-        await this.graduateToOrders(orderId);
-      } catch (err) {
-        this.logger.error(`Follow-up graduation failed for ${orderId} — will be retried by boot sweep: ${err instanceof Error ? err.message : err}`);
-      }
+      await this.graduateToOrders(orderId);
     }
 
     return { success: true };

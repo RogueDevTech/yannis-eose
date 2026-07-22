@@ -203,6 +203,10 @@ export const listDeliveryRemittancesSchema = z.object({
   status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  /** Controls which date column the stat strip uses for period scoping.
+   *  'createdAt' = matches dashboard pipeline view (default).
+   *  'deliveredAt' = matches cash collection operations view. */
+  dateScope: z.enum(['createdAt', 'deliveredAt']).optional().default('createdAt'),
   search: z.string().trim().max(200).optional(),
   /** Filter by order category in the orders view. */
   category: z.enum(['marketing', 'cart', 'follow-up', 'offline']).optional(),

@@ -367,6 +367,7 @@ export const logisticsRouter = router({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         search: z.string().trim().max(200).optional(),
+        dateScope: z.enum(['createdAt', 'deliveredAt']).optional().default('createdAt'),
       }),
     )
     .query(async ({ input, ctx }) => {

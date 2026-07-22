@@ -2233,11 +2233,16 @@ export class LogisticsService {
     // deliveryRemittanceOrders so the stat strip shows order counts consistently.
     // Scoped by date, location, group, and sentBy — must mirror summaryConditions
     // so the counts reconcile with the amounts.
-    // Outcome count/amount conditions — filter by orders.delivered_at so
-    // stat strip balances: Total Delivered = Awaiting + Remitted + Pending + Disputed.
+    // dateScope controls which date column the stat strip uses.
+    // 'createdAt' matches the dashboard pipeline view (default).
+    // 'deliveredAt' matches cash collection operations view.
+    const useCreatedAt = input.dateScope !== 'deliveredAt';
+    const dateScopeCol = useCreatedAt ? schema.orders.createdAt : schema.orders.deliveredAt;
+    const dateScopeRawCol = useCreatedAt ? 'o.created_at' : 'o.delivered_at';
+
     const outcomeCountConditions: SQL[] = [];
-    if (input.startDate) outcomeCountConditions.push(sql`o.delivered_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
-    if (input.endDate) outcomeCountConditions.push(sql`o.delivered_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.startDate) outcomeCountConditions.push(sql`${sql.raw(dateScopeRawCol)} >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) outcomeCountConditions.push(sql`${sql.raw(dateScopeRawCol)} <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
     if (groupId) {
       outcomeCountConditions.push(sql`dr.logistics_location_id IN (
         SELECT ll.id FROM logistics_locations ll
@@ -2296,7 +2301,7 @@ export class LogisticsService {
     `;
 
     const awaitingConditions: SQL[] = [
-      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      eq(schema.orders.status, 'DELIVERED'),
       isNull(schema.orders.deletedAt),
       notExists(
         this.db
@@ -2337,10 +2342,10 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...awaitingConditions));
 
-    // Period-specific awaiting: same as above but filtered by deliveredAt date range.
+    // Period-specific awaiting: same as above but filtered by dateScope column.
     const awaitingPeriodConditions = [...awaitingConditions];
-    if (input.startDate) awaitingPeriodConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) awaitingPeriodConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+    if (input.startDate) awaitingPeriodConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
+    if (input.endDate) awaitingPeriodConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
     const awaitingPeriodQuery = this.db
       .select({
         awaitingPeriodAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
@@ -2374,24 +2379,30 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
-    // Date filter by deliveredAt — CEO checks delivered on dashboard then analyses here.
-    if (input.startDate) deliveredConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) deliveredConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+    // Date filter uses the same dateScope column as the rest of the stat strip.
+    if (input.startDate) deliveredConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
+    if (input.endDate) deliveredConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
     if (effectiveBranchIds && effectiveBranchIds.length > 0) deliveredConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     const deliveredCountQuery = this.db
       .select({
         deliveredCount: sql<string>`COUNT(*)::text`,
         deliveredAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
         deliveredNetAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        // Per-status breakdown so stat strip can show Delivered vs Remitted
+        // using the same date scope — no batch-join needed.
+        deliveredOnlyCount: sql<string>`COUNT(CASE WHEN ${schema.orders.status} = 'DELIVERED' THEN 1 END)::text`,
+        deliveredOnlyAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.status} = 'DELIVERED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        remittedOnlyCount: sql<string>`COUNT(CASE WHEN ${schema.orders.status} = 'REMITTED' THEN 1 END)::text`,
+        remittedOnlyAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.status} = 'REMITTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
       })
       .from(schema.orders)
       .where(and(...deliveredConditions));
 
-    // Batch stats filter by orders.deliveredAt — aligns with Awaiting Period
-    // and Total Delivered so the stat strip balances: Total = Awaiting + Remitted + Pending + Disputed.
+    // Batch stats use the same dateScope column as all other stat strip queries
+    // so the strip always balances: Total = Awaiting + Remitted + Pending + Disputed.
     const batchDateConditions: SQL[] = [];
-    if (input.startDate) batchDateConditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(input.startDate)));
-    if (input.endDate) batchDateConditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(input.endDate)));
+    if (input.startDate) batchDateConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
+    if (input.endDate) batchDateConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
     const baseSummaryWhere = summaryWhere
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
@@ -2439,6 +2450,11 @@ export class LogisticsService {
       deliveredCount: deliveredSummary?.deliveredCount ?? '0',
       deliveredAmount: deliveredSummary?.deliveredAmount ?? '0',
       deliveredNetAmount: deliveredSummary?.deliveredNetAmount ?? '0',
+      // Per-status counts from orders table (same dateScope, no batch join)
+      deliveredOnlyCount: deliveredSummary?.deliveredOnlyCount ?? '0',
+      deliveredOnlyAmount: deliveredSummary?.deliveredOnlyAmount ?? '0',
+      remittedOnlyCount: deliveredSummary?.remittedOnlyCount ?? '0',
+      remittedOnlyAmount: deliveredSummary?.remittedOnlyAmount ?? '0',
       // Deduction breakdown for remitted orders
       grossOrderValue: baseSummary?.grossOrderValue ?? '0',
       grossOrderCount: baseSummary?.grossOrderCount ?? '0',
