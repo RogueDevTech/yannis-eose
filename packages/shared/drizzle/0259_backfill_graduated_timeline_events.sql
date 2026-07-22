@@ -6,11 +6,18 @@
 -- to order_timeline_events so the Order Activity log is complete.
 
 -- 1. Copy follow-up order timeline events to graduated orders
+-- Map event types that don't exist in the order timeline enum:
+--   CS_COMMENT → CS_ORDER_COMMENT
+--   ORDER_DETAILS_UPDATED → ORDER_VIEWED (closest match)
 INSERT INTO order_timeline_events (id, order_id, event_type, actor_id, actor_name, description, metadata, branch_id, created_at)
 SELECT
   gen_random_uuid(),
   o.id,
-  fote.event_type::text::timeline_event_type,
+  (CASE fote.event_type::text
+    WHEN 'CS_COMMENT' THEN 'CS_ORDER_COMMENT'
+    WHEN 'ORDER_DETAILS_UPDATED' THEN 'ORDER_VIEWED'
+    ELSE fote.event_type::text
+  END)::timeline_event_type,
   fote.actor_id,
   fote.actor_name,
   fote.description,
@@ -40,7 +47,11 @@ INSERT INTO order_timeline_events (id, order_id, event_type, actor_id, actor_nam
 SELECT
   gen_random_uuid(),
   o.id,
-  cote.event_type::text::timeline_event_type,
+  (CASE cote.event_type::text
+    WHEN 'CS_COMMENT' THEN 'CS_ORDER_COMMENT'
+    WHEN 'ORDER_DETAILS_UPDATED' THEN 'ORDER_VIEWED'
+    ELSE cote.event_type::text
+  END)::timeline_event_type,
   cote.actor_id,
   cote.actor_name,
   cote.description,
