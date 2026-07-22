@@ -336,11 +336,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const commitmentFee = formData.get('commitmentFee')?.toString() || undefined;
     const posFee = formData.get('posFee')?.toString() || undefined;
     const failedDeliveryCost = formData.get('failedDeliveryCost')?.toString() || undefined;
+    const skipDuplicateWarning = formData.get('skipDuplicateWarning')?.toString() === 'true';
 
     const res = await apiRequest<unknown>('/trpc/logistics.createDeliveryRemittance', {
       method: 'POST',
       cookie,
-      body: { orderIds, receiptUrls, notes, markReceivedNow, deliveryFees, commitmentFee, posFee, failedDeliveryCost },
+      body: { orderIds, receiptUrls, notes, markReceivedNow, deliveryFees, commitmentFee, posFee, failedDeliveryCost, skipDuplicateWarning },
     });
     if (!res.ok) {
       return json(
@@ -348,6 +349,14 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: safeStatus(res.status) },
       );
     }
+
+    // Backend returns duplicateWarnings when it detects same customer+product
+    // already remitted this month. Surface to the UI for confirmation.
+    const resData = (res.data as { result?: { data?: { duplicateWarnings?: unknown[]; remittance?: unknown } } })?.result?.data;
+    if (resData?.duplicateWarnings && Array.isArray(resData.duplicateWarnings) && resData.duplicateWarnings.length > 0) {
+      return json({ duplicateWarnings: resData.duplicateWarnings });
+    }
+
     return json({ success: true });
   }
 

@@ -179,6 +179,8 @@ export const createDeliveryRemittanceSchema = z.object({
   commitmentFee: z.string().optional(),
   posFee: z.string().optional(),
   failedDeliveryCost: z.string().optional(),
+  /** When true, skip the same-customer-product duplicate warning and proceed. */
+  skipDuplicateWarning: z.boolean().optional().default(false),
 });
 export type CreateDeliveryRemittanceInput = z.infer<typeof createDeliveryRemittanceSchema>;
 

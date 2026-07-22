@@ -1704,6 +1704,63 @@ export class LogisticsService {
         });
       }
 
+      // ── Duplicate remittance warning ──────────────────────────────
+      // Check if any submitted order shares (customerPhoneHash + productId)
+      // with an already-REMITTED order from the current calendar month.
+      // Returns warnings instead of blocking — Finance can override.
+      if (!input.skipDuplicateWarning) {
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+
+        const dupRows = await tx.execute<{
+          order_id: string;
+          customer_name: string;
+          product_name: string;
+          remitted_order_id: string;
+          remitted_customer_name: string;
+          remitted_delivered_at: string;
+        }>(sql`
+          SELECT
+            o.id AS order_id,
+            o.customer_name,
+            p.name AS product_name,
+            ro.id AS remitted_order_id,
+            ro.customer_name AS remitted_customer_name,
+            ro.delivered_at AS remitted_delivered_at
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.id
+          JOIN products p ON p.id = oi.product_id
+          JOIN orders ro ON ro.customer_phone_hash = o.customer_phone_hash
+            AND ro.status = 'REMITTED'
+            AND ro.deleted_at IS NULL
+            AND ro.delivered_at >= ${monthStart.toISOString()}::timestamptz
+            AND ro.id != o.id
+          JOIN order_items roi ON roi.order_id = ro.id AND roi.product_id = oi.product_id
+          WHERE o.id IN (${sql.join(input.orderIds.map((id) => sql`${id}`), sql`, `)})
+          GROUP BY o.id, o.customer_name, p.name, ro.id, ro.customer_name, ro.delivered_at
+        `);
+
+        const warnings = (dupRows as unknown as Array<{
+          order_id: string;
+          customer_name: string;
+          product_name: string;
+          remitted_order_id: string;
+          remitted_customer_name: string;
+          remitted_delivered_at: string;
+        }>).map((r) => ({
+          orderId: r.order_id,
+          customerName: r.customer_name,
+          productName: r.product_name,
+          remittedOrderId: r.remitted_order_id,
+          remittedDeliveredAt: r.remitted_delivered_at,
+        }));
+
+        if (warnings.length > 0) {
+          return { duplicateWarnings: warnings, remittance: null };
+        }
+      }
+
       const markReceivedNow = !!input.markReceivedNow;
       const now = new Date();
 
@@ -1805,6 +1862,11 @@ export class LogisticsService {
 
       return { remittance: row, orderRows, markReceivedNow, completedAmountTotal };
     });
+
+    // Early return when duplicate warnings are surfaced (no remittance created)
+    if ('duplicateWarnings' in result) {
+      return result as { duplicateWarnings: Array<{ orderId: string; customerName: string; productName: string; remittedOrderId: string; remittedDeliveredAt: string }>; remittance: null };
+    }
 
     // Phase 3 — when a remittance is created already RECEIVED, post its cash
     // settlement to the ledger too (same non-fatal, idempotent contract).

@@ -3,12 +3,21 @@ import { useFetcher, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Checkbox } from '~/components/ui/checkbox';
+import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { PageHeader } from '~/components/ui/page-header';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { EligibleOrder } from './CashRemittanceCreateModal';
+
+type DuplicateWarning = {
+  orderId: string;
+  customerName: string;
+  productName: string;
+  remittedOrderId: string;
+  remittedDeliveredAt: string;
+};
 
 function lineAmount(o: EligibleOrder): number {
   const raw = o.invoice?.totalAmount ?? o.totalAmount;
@@ -24,7 +33,7 @@ export function CashRemittanceCreatePage({
   selectedOrders,
   onBack,
 }: CashRemittanceCreatePageProps) {
-  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcher = useFetcher<{ success?: boolean; error?: string; duplicateWarnings?: DuplicateWarning[] }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -37,6 +46,7 @@ export function CashRemittanceCreatePage({
   const [batchNote, setBatchNote] = useState('');
   const [showExtraCosts, setShowExtraCosts] = useState(true);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [duplicateWarnings, setDuplicateWarnings] = useState<DuplicateWarning[]>([]);
 
   useEffect(() => {
     const initial: Record<string, string> = {};
@@ -57,6 +67,13 @@ export function CashRemittanceCreatePage({
     navigate('/admin/finance/delivery-remittances');
   }, [markReceivedNow, selectedOrders.length, navigate, toast]);
   useCloseOnFetcherSuccess(fetcher, handleSuccess);
+
+  // Surface duplicate warnings from the backend
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data?.duplicateWarnings?.length) {
+      setDuplicateWarnings(fetcher.data.duplicateWarnings);
+    }
+  }, [fetcher.state, fetcher.data]);
 
   const multiLocationError = useMemo(() => {
     const locs = new Set(selectedOrders.map((o) => o.logisticsLocationId ?? ''));
@@ -94,11 +111,7 @@ export function CashRemittanceCreatePage({
   const submitting = fetcher.state !== 'idle';
   const n = selectedOrders.length;
 
-  const handleSubmit = () => {
-    setInlineError(null);
-    if (n === 0) { setInlineError('No orders selected.'); return; }
-    if (multiLocationError) { setInlineError(multiLocationError); return; }
-
+  const buildFormData = (skipDuplicateWarning = false): FormData => {
     const fd = new FormData();
     fd.set('intent', 'createRemittance');
     fd.set('orderIds', JSON.stringify(selectedOrders.map((o) => o.id)));
@@ -116,7 +129,20 @@ export function CashRemittanceCreatePage({
     if (totalPosFee > 0) fd.set('posFee', totalPosFee.toFixed(2));
     if (totalFailedDeliveryCost > 0) fd.set('failedDeliveryCost', totalFailedDeliveryCost.toFixed(2));
     if (batchNote.trim()) fd.set('notes', batchNote.trim());
-    fetcher.submit(fd, { method: 'POST' });
+    if (skipDuplicateWarning) fd.set('skipDuplicateWarning', 'true');
+    return fd;
+  };
+
+  const handleSubmit = () => {
+    setInlineError(null);
+    if (n === 0) { setInlineError('No orders selected.'); return; }
+    if (multiLocationError) { setInlineError(multiLocationError); return; }
+    fetcher.submit(buildFormData(), { method: 'POST' });
+  };
+
+  const handleDuplicateOverride = () => {
+    setDuplicateWarnings([]);
+    fetcher.submit(buildFormData(true), { method: 'POST' });
   };
 
   const error = inlineError ?? fetcherSurface.errorMatchingIntent('createRemittance');
@@ -414,6 +440,47 @@ export function CashRemittanceCreatePage({
           </div>
         </div>
       </div>
+
+      {/* Duplicate remittance warning modal */}
+      <Modal
+        open={duplicateWarnings.length > 0}
+        onClose={() => setDuplicateWarnings([])}
+        maxWidth="max-w-md"
+        contentClassName="p-5 space-y-4"
+      >
+        <h3 className="text-base font-semibold text-warning-600 dark:text-warning-400">
+          Possible duplicate remittance
+        </h3>
+        <p className="text-sm text-app-fg-muted">
+          The following orders match a customer and product that was already remitted this month.
+          Review before proceeding.
+        </p>
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {duplicateWarnings.map((w, i) => (
+            <div key={i} className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50/50 dark:bg-warning-950/20 px-3 py-2">
+              <p className="text-sm font-medium text-app-fg">{w.customerName}</p>
+              <p className="text-xs text-app-fg-muted">
+                {w.productName} was already remitted on{' '}
+                {w.remittedDeliveredAt
+                  ? new Date(w.remittedDeliveredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                  : 'unknown date'}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={() => setDuplicateWarnings([])}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleDuplicateOverride}
+            loading={submitting}
+          >
+            Proceed anyway
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
