@@ -58,7 +58,7 @@ export function DeliveryRemittanceDetailPage({
   });
 
   const closeEditModal = () => {
-    closeEditModal();
+    setShowEditModal(false);
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.delete('edit');
@@ -96,7 +96,9 @@ export function DeliveryRemittanceDetailPage({
   const commitmentFee = Number(detail.commitmentFee ?? 0);
   const posFee = Number(detail.posFee ?? 0);
   const failedDeliveryCost = Number(detail.failedDeliveryCost ?? 0);
-  const totalExtraCosts = commitmentFee + posFee + failedDeliveryCost;
+  const discountAmount = Number((detail as any).discount ?? 0);
+  const waybillAmount = Number((detail as any).waybillCost ?? 0);
+  const totalExtraCosts = commitmentFee + posFee + failedDeliveryCost + discountAmount + waybillAmount;
   const remittanceTotal = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
   const recordedByLabel =
@@ -376,6 +378,8 @@ export function DeliveryRemittanceDetailPage({
               {commitmentFee > 0 && <> · -<NairaPrice amount={commitmentFee} /> commitment</>}
               {posFee > 0 && <> · -<NairaPrice amount={posFee} /> POS</>}
               {failedDeliveryCost > 0 && <> · -<NairaPrice amount={failedDeliveryCost} /> failed</>}
+              {discountAmount > 0 && <> · -<NairaPrice amount={discountAmount} /> discount</>}
+              {waybillAmount > 0 && <> · -<NairaPrice amount={waybillAmount} /> waybill</>}
             </span>
           ) : null}
           <span className="text-xs text-brand-500 dark:text-brand-400">

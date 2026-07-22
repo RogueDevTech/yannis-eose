@@ -569,7 +569,8 @@ function CSDashboard({
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId, cartOrdersCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string; cartOrdersCounts?: Record<string, number> }) {
+function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId, cartOrdersCounts, marketingStatusCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string; cartOrdersCounts?: Record<string, number>; marketingStatusCounts?: Record<string, number> }) {
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
   /** Append `&mediaBuyerId=…` when viewing personal performance so the orders
    *  page lands on the "My Orders" tab with the correct filter pre-selected. */
   const q = (base: string) => {
@@ -578,80 +579,133 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
     return `${base}${sep}mediaBuyerId=${mediaBuyerId}`;
   };
   // Cart-graduated orders: only DELIVERED/REMITTED count toward marketing total.
-  // These are confirmed-and-beyond, so add them to confirmedOrders too.
   const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
-  const totalOrders = metrics.totalOrders + cartGraduatedDelivered;
-  const confirmedOrders = metrics.confirmedOrders + cartGraduatedDelivered;
-  const deliveredOrders = metrics.deliveredOrders + cartGraduatedDelivered;
+
+  // When marketingStatusCounts is available (from orders.statusCounts), use it
+  // for the order count tiles so the dashboard matches the Marketing Orders page.
+  // Fall back to metrics.* (from getPerformanceMetrics) when unavailable.
+  const funnelTotal = marketingStatusCounts
+    ? Object.entries(marketingStatusCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0)
+    : metrics.totalOrders;
+  const funnelDelivered = marketingStatusCounts
+    ? (marketingStatusCounts['DELIVERED'] ?? 0) + (marketingStatusCounts['REMITTED'] ?? 0)
+    : metrics.deliveredOrders;
+  const funnelConfirmedOrBeyond = marketingStatusCounts
+    ? (marketingStatusCounts['CONFIRMED'] ?? 0) + (marketingStatusCounts['AGENT_ASSIGNED'] ?? 0) +
+      (marketingStatusCounts['DISPATCHED'] ?? 0) + (marketingStatusCounts['IN_TRANSIT'] ?? 0) +
+      funnelDelivered
+    : metrics.confirmedOrders;
+
+  const totalOrders = funnelTotal + cartGraduatedDelivered;
+  const confirmedOrders = funnelConfirmedOrBeyond + cartGraduatedDelivered;
+  const deliveredOrders = funnelDelivered + cartGraduatedDelivered;
   const unconfirmedOrders = Math.max(0, totalOrders - confirmedOrders);
+  // CR/DR use the same base as the Marketing Orders page for consistency
+  const cr = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
+  const dr = totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0;
   return (
-    <OverviewStatStrip
-      mobileGrid
-      tileClassName="min-w-[6rem]"
-      items={[
-        { label: 'Total Orders', value: totalOrders.toString(), valueClassName: 'text-app-fg', to: q('/admin/marketing/orders') },
-        {
-          label: 'Unconfirmed',
-          value: unconfirmedOrders.toString(),
-          valueClassName: 'text-warning-600 dark:text-warning-400',
-          to: q('/admin/marketing/orders?status=UNPROCESSED'),
-        },
-        {
-          label: 'Confirmed',
-          value: Math.max(0, confirmedOrders - deliveredOrders).toString(),
-          valueClassName: 'text-brand-600 dark:text-brand-400',
-          to: q('/admin/marketing/orders?status=CONFIRMED'),
-        },
-        {
-          label: 'Delivered',
-          value: deliveredOrders.toString(),
-          valueClassName: 'text-success-600 dark:text-success-400',
-          to: q('/admin/marketing/orders?status=DELIVERED'),
-        },
-        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
-        {
-          label: 'True ROAS',
-          value: `${metrics.trueRoas.toFixed(2)}x`,
-          valueClassName: metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
-          to: '/admin/marketing/overview',
-        },
-        {
-          label: 'Delivery Rate',
-          value: `${metrics.deliveryRate.toFixed(1)}%`,
-          valueClassName: deliveryRateColorClass(metrics.deliveryRate),
-          to: q('/admin/marketing/orders?status=DELIVERED'),
-        },
-        {
-          label: 'Confirmation Rate',
-          value: `${metrics.confirmationRate.toFixed(1)}%`,
-          valueClassName: confirmationRateColorClass(metrics.confirmationRate),
-          to: q('/admin/marketing/orders?status=CONFIRMED'),
-        },
-        {
-          label: 'Cart Abandonment',
-          value: abandonedCartCount.toString(),
-          valueClassName: 'text-amber-600 dark:text-amber-400',
-          title: 'Captured carts not yet recovered (browsing + dropped off)',
-          to: q('/admin/marketing/orders?fromCart=1'),
-        },
-        { label: 'Ad Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
-      ]}
-    />
+    <>
+      <OverviewStatStrip
+        mobileGrid
+        tileClassName="min-w-[6rem]"
+        items={[
+          {
+            label: (
+              <span className="inline-flex items-center gap-0.5">
+                Total
+                <FunnelInfoIcon onClick={() => setBreakdownOpen(true)} />
+              </span>
+            ),
+            value: totalOrders.toString(),
+            valueClassName: 'text-app-fg',
+            to: q('/admin/marketing/orders'),
+          },
+          {
+            label: 'Unconfirmed',
+            value: unconfirmedOrders.toString(),
+            valueClassName: 'text-warning-600 dark:text-warning-400',
+            to: q('/admin/marketing/orders?status=UNPROCESSED'),
+          },
+          {
+            label: 'Confirmed',
+            value: Math.max(0, confirmedOrders - deliveredOrders).toString(),
+            valueClassName: 'text-brand-600 dark:text-brand-400',
+            to: q('/admin/marketing/orders?status=CONFIRMED'),
+          },
+          {
+            label: 'Delivered',
+            value: deliveredOrders.toString(),
+            valueClassName: 'text-success-600 dark:text-success-400',
+            to: q('/admin/marketing/orders?status=DELIVERED'),
+          },
+          { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
+          {
+            label: 'True ROAS',
+            value: `${metrics.trueRoas.toFixed(2)}x`,
+            valueClassName: metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
+            to: '/admin/marketing/overview',
+          },
+          {
+            label: 'Delivery Rate',
+            value: `${dr.toFixed(1)}%`,
+            valueClassName: deliveryRateColorClass(dr),
+            to: q('/admin/marketing/orders?status=DELIVERED'),
+          },
+          {
+            label: 'Confirmation Rate',
+            value: `${cr.toFixed(1)}%`,
+            valueClassName: confirmationRateColorClass(cr),
+            to: q('/admin/marketing/orders?status=CONFIRMED'),
+          },
+          {
+            label: 'Cart Abandonment',
+            value: abandonedCartCount.toString(),
+            valueClassName: 'text-amber-600 dark:text-amber-400',
+            title: 'Captured carts not yet recovered (browsing + dropped off)',
+            to: q('/admin/marketing/orders?fromCart=1'),
+          },
+          { label: 'Ad Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
+        ]}
+      />
+      <FunnelBreakdownModal
+        open={breakdownOpen}
+        onClose={() => setBreakdownOpen(false)}
+        title="Order Breakdown"
+        description="How the total is calculated"
+        lines={[
+          { label: 'Funnel orders', value: funnelTotal },
+          { label: 'Delivered cart orders', value: cartGraduatedDelivered },
+          { label: 'Total', value: totalOrders, bold: true },
+        ]}
+      />
+    </>
   );
 }
 
-function MarketingPerformanceSummary({ metrics, naira, cartOrdersCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; cartOrdersCounts?: Record<string, number> }) {
+function MarketingPerformanceSummary({ metrics, naira, cartOrdersCounts, marketingStatusCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; cartOrdersCounts?: Record<string, number>; marketingStatusCounts?: Record<string, number> }) {
   const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
-  const totalOrders = metrics.totalOrders + cartGraduatedDelivered;
-  const deliveredOrders = metrics.deliveredOrders + cartGraduatedDelivered;
+  const funnelTotal = marketingStatusCounts
+    ? Object.entries(marketingStatusCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + n, 0)
+    : metrics.totalOrders;
+  const funnelDelivered = marketingStatusCounts
+    ? (marketingStatusCounts['DELIVERED'] ?? 0) + (marketingStatusCounts['REMITTED'] ?? 0)
+    : metrics.deliveredOrders;
+  const totalOrders = funnelTotal + cartGraduatedDelivered;
+  const deliveredOrders = funnelDelivered + cartGraduatedDelivered;
+  const confirmedOrders = marketingStatusCounts
+    ? (marketingStatusCounts['CONFIRMED'] ?? 0) + (marketingStatusCounts['AGENT_ASSIGNED'] ?? 0) +
+      (marketingStatusCounts['DISPATCHED'] ?? 0) + (marketingStatusCounts['IN_TRANSIT'] ?? 0) +
+      funnelDelivered + cartGraduatedDelivered
+    : metrics.confirmedOrders + cartGraduatedDelivered;
+  const cr = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
   return (
     <div className="card">
       <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
       <div className="space-y-3">
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{totalOrders}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{deliveredOrders}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, metrics.confirmedOrders - deliveredOrders)}</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, confirmedOrders - deliveredOrders)}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{cr.toFixed(1)}%</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
       </div>
     </div>
@@ -695,9 +749,9 @@ function MarketingDashboard({
         />
 
         <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-          {(teamMetrics, personalMetrics, abandonedCartCount, cartOrdersCounts) => {
+          {(teamMetrics, personalMetrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => {
             const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
-            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
+            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
           }}
         </DashboardSupervisorMetricsSection>
 
@@ -716,11 +770,11 @@ function MarketingDashboard({
         )}
 
         <DashboardSupervisorMetricsSection fallback={<DualCardSkeleton />}>
-          {(teamMetrics, personalMetrics, _abandonedCartCount, cartOrdersCounts) => {
+          {(teamMetrics, personalMetrics, _abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => {
             const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
             return (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} />
+                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />
                 <QuickActionsCard role={role} unprocessed={0} />
               </div>
             );
@@ -735,7 +789,7 @@ function MarketingDashboard({
     return (
       <>
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-          {(metrics, abandonedCartCount, cartOrdersCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} />}
+          {(metrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />}
         </DashboardMetricsSection>
 
         <div className="card">
@@ -753,9 +807,9 @@ function MarketingDashboard({
         </div>
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
-          {(metrics, _abandonedCartCount, cartOrdersCounts) => (
+          {(metrics, _abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} />
+              <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />
               <QuickActionsCard role={role} unprocessed={0} />
             </div>
           )}
@@ -768,7 +822,7 @@ function MarketingDashboard({
   return (
     <>
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-        {(metrics, abandonedCartCount, cartOrdersCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} />}
+        {(metrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />}
       </DashboardMetricsSection>
 
       {showsTeamManagementCard && (
@@ -792,9 +846,9 @@ function MarketingDashboard({
       )}
 
       <DashboardMetricsSection fallback={<DualCardSkeleton />}>
-        {(metrics, _abandonedCartCount, cartOrdersCounts) => (
+        {(metrics, _abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} />
+            <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />
             <QuickActionsCard role={role} unprocessed={0} />
           </div>
         )}

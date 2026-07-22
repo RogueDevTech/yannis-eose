@@ -1830,7 +1830,7 @@ export class LogisticsService {
           completedAmountTotal += orderTotal - (Number.isFinite(fee) ? fee : 0);
         }
         // Deduct remittance-level costs from the completed total
-        completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost;
+        completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost + discount + waybillCost;
         const remittedRows = await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })
@@ -2999,7 +2999,9 @@ export class LogisticsService {
       const remittanceCosts =
         Number(found.commitmentFee ?? 0) +
         Number(found.posFee ?? 0) +
-        Number(found.failedDeliveryCost ?? 0);
+        Number(found.failedDeliveryCost ?? 0) +
+        Number(found.discount ?? 0) +
+        Number(found.waybillCost ?? 0);
       const netAmount = Math.max(0, Number(totals?.amount ?? 0) - remittanceCosts);
 
       await tx.insert(schema.deliveryRemittanceOutcomes).values({

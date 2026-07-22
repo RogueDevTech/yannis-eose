@@ -180,6 +180,7 @@ export const cartOrdersRouter = router({
     .query(async ({ input, ctx }) => {
       const isCloser = ctx.user.role === 'CS_CLOSER';
       const isMB = ctx.user.role === 'MEDIA_BUYER';
+      const isMarketingRole = ctx.user.role === 'HEAD_OF_MARKETING' || isMB;
       return getCartOrdersService().getStatusCounts(
         ctx.currentBranchId,
         isCloser ? ctx.user.id : undefined,
@@ -187,6 +188,8 @@ export const cartOrdersRouter = router({
         input?.endDate,
         ctx.effectiveBranchIds,
         isMB ? ctx.user.id : undefined,
+        undefined,
+        isMarketingRole ? 'marketing' : 'servicing',
       );
     }),
 
