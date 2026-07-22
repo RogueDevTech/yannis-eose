@@ -186,6 +186,8 @@ export interface FinanceOverviewLoaderData {
     /** Media-buyer slice — UUID, empty string for "all buyers". */
     mediaBuyerId?: string;
     periodAllTime?: boolean;
+    /** Date scope for cash remittance stats: order creation date or delivery date. */
+    dateScope?: 'createdAt' | 'deliveredAt';
   };
   /** Picklists for the filter bar. Empty arrays when the user can't filter. */
   branches?: Array<{ id: string; name: string }>;

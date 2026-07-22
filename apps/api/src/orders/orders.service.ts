@@ -5258,12 +5258,18 @@ export class OrdersService {
       }
     }
 
-    // Set assignment fields based on transition metadata
-    if (input.metadata?.logisticsLocationId) {
-      updateFields['logisticsLocationId'] = input.metadata.logisticsLocationId;
-    }
-    if (input.metadata?.logisticsProviderId) {
-      updateFields['logisticsProviderId'] = input.metadata.logisticsProviderId;
+    // Set assignment fields based on transition metadata. Only update
+    // location/provider on AGENT_ASSIGNED — later transitions (DISPATCHED,
+    // DELIVERED) must not overwrite the assigned location with stale form values.
+    if (newStatus === 'AGENT_ASSIGNED') {
+      if (input.metadata?.logisticsLocationId) {
+        updateFields['logisticsLocationId'] = input.metadata.logisticsLocationId;
+      }
+      if (input.metadata?.logisticsProviderId) {
+        updateFields['logisticsProviderId'] = input.metadata.logisticsProviderId;
+      } else if (allocationProviderId) {
+        updateFields['logisticsProviderId'] = allocationProviderId;
+      }
     } else if (allocationProviderId) {
       updateFields['logisticsProviderId'] = allocationProviderId;
     }

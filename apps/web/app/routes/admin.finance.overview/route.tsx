@@ -77,6 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Optional dimensional slice — branch and/or media buyer.
   const branchId = url.searchParams.get('branchId') || undefined;
   const mediaBuyerId = url.searchParams.get('mediaBuyerId') || undefined;
+  const dateScope = (url.searchParams.get('dateScope') as 'createdAt' | 'deliveredAt' | null) || undefined;
 
   const financeShell = {
     filters: {
@@ -87,6 +88,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       branchId: branchId ?? '',
       mediaBuyerId: mediaBuyerId ?? '',
       periodAllTime,
+      dateScope: dateScope ?? 'createdAt',
     },
   };
 
@@ -101,6 +103,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         endDate,
         ...(branchId && { branchId }),
         ...(mediaBuyerId && { mediaBuyerId }),
+        ...(dateScope && { dateScope }),
       }),
     );
 

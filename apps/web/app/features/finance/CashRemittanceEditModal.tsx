@@ -33,6 +33,8 @@ export function CashRemittanceEditModal({
   const [commitmentFee, setCommitmentFee] = useState('');
   const [posFee, setPosFee] = useState('');
   const [failedDeliveryCost, setFailedDeliveryCost] = useState('');
+  const [discount, setDiscount] = useState('');
+  const [waybillCost, setWaybillCost] = useState('');
   const [showExtraCosts, setShowExtraCosts] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
@@ -43,10 +45,14 @@ export function CashRemittanceEditModal({
       setCommitmentFee(Number(detail.commitmentFee ?? 0) > 0 ? String(Number(detail.commitmentFee)) : '');
       setPosFee(Number(detail.posFee ?? 0) > 0 ? String(Number(detail.posFee)) : '');
       setFailedDeliveryCost(Number(detail.failedDeliveryCost ?? 0) > 0 ? String(Number(detail.failedDeliveryCost)) : '');
+      setDiscount(Number((detail as any).discount ?? 0) > 0 ? String(Number((detail as any).discount)) : '');
+      setWaybillCost(Number((detail as any).waybillCost ?? 0) > 0 ? String(Number((detail as any).waybillCost)) : '');
       const hasExtras =
         Number(detail.commitmentFee ?? 0) > 0 ||
         Number(detail.posFee ?? 0) > 0 ||
-        Number(detail.failedDeliveryCost ?? 0) > 0;
+        Number(detail.failedDeliveryCost ?? 0) > 0 ||
+        Number((detail as any).discount ?? 0) > 0 ||
+        Number((detail as any).waybillCost ?? 0) > 0;
       setShowExtraCosts(hasExtras);
 
       const initial: Record<string, string> = {};
@@ -81,7 +87,9 @@ export function CashRemittanceEditModal({
   const parsedCommitmentFee = parseFloat(commitmentFee) || 0;
   const parsedPosFee = parseFloat(posFee) || 0;
   const parsedFailedDeliveryCost = parseFloat(failedDeliveryCost) || 0;
-  const totalExtraCosts = parsedCommitmentFee + parsedPosFee + parsedFailedDeliveryCost;
+  const parsedDiscount = parseFloat(discount) || 0;
+  const parsedWaybillCost = parseFloat(waybillCost) || 0;
+  const totalExtraCosts = parsedCommitmentFee + parsedPosFee + parsedFailedDeliveryCost + parsedDiscount + parsedWaybillCost;
   const totalAmount = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
   const submitting = fetcher.state !== 'idle';
@@ -109,6 +117,8 @@ export function CashRemittanceEditModal({
     fd.set('commitmentFee', parsedCommitmentFee > 0 ? commitmentFee : '0');
     fd.set('posFee', parsedPosFee > 0 ? posFee : '0');
     fd.set('failedDeliveryCost', parsedFailedDeliveryCost > 0 ? failedDeliveryCost : '0');
+    fd.set('discount', parsedDiscount > 0 ? discount : '0');
+    fd.set('waybillCost', parsedWaybillCost > 0 ? waybillCost : '0');
 
     fetcher.submit(fd, {
       method: 'POST',
@@ -237,12 +247,32 @@ export function CashRemittanceEditModal({
                         className="input input-sm w-full"
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div>
                       <label className="block text-xs text-app-fg-muted mb-1">Failed delivery</label>
                       <AmountInput
                         placeholder="0"
                         value={failedDeliveryCost}
                         onChange={setFailedDeliveryCost}
+                        prefix="N"
+                        className="input input-sm w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-app-fg-muted mb-1">Discount</label>
+                      <AmountInput
+                        placeholder="0"
+                        value={discount}
+                        onChange={setDiscount}
+                        prefix="N"
+                        className="input input-sm w-full"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs text-app-fg-muted mb-1">Waybill sent/pickup</label>
+                      <AmountInput
+                        placeholder="0"
+                        value={waybillCost}
+                        onChange={setWaybillCost}
                         prefix="N"
                         className="input input-sm w-full"
                       />
@@ -302,6 +332,22 @@ export function CashRemittanceEditModal({
                     <span className="text-xs text-app-fg-muted">Failed delivery</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
                       -<NairaPrice amount={parsedFailedDeliveryCost} />
+                    </span>
+                  </div>
+                )}
+                {parsedDiscount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-app-fg-muted">Discount</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={parsedDiscount} />
+                    </span>
+                  </div>
+                )}
+                {parsedWaybillCost > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-app-fg-muted">Waybill sent/pickup</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={parsedWaybillCost} />
                     </span>
                   </div>
                 )}

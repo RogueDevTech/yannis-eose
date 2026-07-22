@@ -237,7 +237,7 @@ export default function AdminLayout() {
   const [resolvedBranches, setResolvedBranches] = useState<
     Array<{ id: string; name: string; code: string; status?: string; groupId?: string | null }> | null
   >(null);
-  const [resolvedGroups, setResolvedGroups] = useState<Array<{ id: string; name: string }>>([]);
+  const [resolvedGroups, setResolvedGroups] = useState<Array<{ id: string; name: string }> | null>(null);
   const [resolvedAdSpendBacklog, setResolvedAdSpendBacklog] = useState<{ missingDates: string[]; isBlocked: boolean } | null>(null);
 
   useEffect(() => {
@@ -274,8 +274,8 @@ export default function AdminLayout() {
           ? (resolvedBranches ?? []).filter((b) => b.id === user!.currentBranchId)
           : (resolvedBranches ?? [])
       }
-      branchGroups={resolvedGroups}
-      branchesHydrationReady={resolvedBranches !== null}
+      branchGroups={resolvedGroups ?? []}
+      branchesHydrationReady={resolvedBranches !== null && resolvedGroups !== null}
       notificationsPromise={notifications}
       notificationsActionUrl="/admin"
       adSpendBacklog={resolvedAdSpendBacklog}

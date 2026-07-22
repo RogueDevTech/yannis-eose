@@ -137,7 +137,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
       />
 
       {activeTab === 'remittance' && (
-        <FinanceCashRemittanceSection pulse={pulse} byProduct={byProduct} byLocation={byLocation} />
+        <FinanceCashRemittanceSection pulse={pulse} byProduct={byProduct} byLocation={byLocation} dateScope={filters.dateScope ?? 'createdAt'} />
       )}
 
       {activeTab === 'disbursements' && fundingSummary && (

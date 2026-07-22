@@ -29,6 +29,8 @@ export const deliveryRemittances = pgTable('delivery_remittances', {
   commitmentFee: numeric('commitment_fee', { precision: 12, scale: 2 }).default('0').notNull(),
   posFee: numeric('pos_fee', { precision: 12, scale: 2 }).default('0').notNull(),
   failedDeliveryCost: numeric('failed_delivery_cost', { precision: 12, scale: 2 }).default('0').notNull(),
+  discount: numeric('discount', { precision: 12, scale: 2 }).default('0').notNull(),
+  waybillCost: numeric('waybill_cost', { precision: 12, scale: 2 }).default('0').notNull(),
   ...temporalColumns,
 });
 

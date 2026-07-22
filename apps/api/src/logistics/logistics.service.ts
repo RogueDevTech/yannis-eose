@@ -1770,6 +1770,8 @@ export class LogisticsService {
       const commitmentFee = parseFloat(input.commitmentFee ?? '0') || 0;
       const posFee = parseFloat(input.posFee ?? '0') || 0;
       const failedDeliveryCost = parseFloat(input.failedDeliveryCost ?? '0') || 0;
+      const discount = parseFloat(input.discount ?? '0') || 0;
+      const waybillCost = parseFloat(input.waybillCost ?? '0') || 0;
 
       const [row] = await tx
         .insert(schema.deliveryRemittances)
@@ -1782,6 +1784,8 @@ export class LogisticsService {
           ...(commitmentFee > 0 ? { commitmentFee: sql`${commitmentFee.toFixed(2)}::numeric` } : {}),
           ...(posFee > 0 ? { posFee: sql`${posFee.toFixed(2)}::numeric` } : {}),
           ...(failedDeliveryCost > 0 ? { failedDeliveryCost: sql`${failedDeliveryCost.toFixed(2)}::numeric` } : {}),
+          ...(discount > 0 ? { discount: sql`${discount.toFixed(2)}::numeric` } : {}),
+          ...(waybillCost > 0 ? { waybillCost: sql`${waybillCost.toFixed(2)}::numeric` } : {}),
           ...(markReceivedNow ? { receivedAt: now, receivedBy: actor.id } : {}),
         })
         .returning();
@@ -1826,7 +1830,7 @@ export class LogisticsService {
           completedAmountTotal += orderTotal - (Number.isFinite(fee) ? fee : 0);
         }
         // Deduct remittance-level costs from the completed total
-        completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost;
+        completedAmountTotal -= commitmentFee + posFee + failedDeliveryCost + discount + waybillCost;
         const remittedRows = await tx
           .update(schema.orders)
           .set({ status: 'REMITTED', updatedAt: now })
@@ -1953,6 +1957,14 @@ export class LogisticsService {
       if (input.failedDeliveryCost !== undefined) {
         const cost = parseFloat(input.failedDeliveryCost) || 0;
         updateSet.failedDeliveryCost = sql`${cost.toFixed(2)}::numeric`;
+      }
+      if (input.discount !== undefined) {
+        const val = parseFloat(input.discount) || 0;
+        updateSet.discount = sql`${val.toFixed(2)}::numeric`;
+      }
+      if (input.waybillCost !== undefined) {
+        const val = parseFloat(input.waybillCost) || 0;
+        updateSet.waybillCost = sql`${val.toFixed(2)}::numeric`;
       }
 
       const [updated] = await tx
@@ -2221,6 +2233,10 @@ export class LogisticsService {
         posFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
         totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.failedDeliveryCost} ELSE 0 END), 0)::text`,
         failedDeliveryCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
+        totalDiscounts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.discount}, 0) > 0 THEN ${schema.deliveryRemittances.discount} ELSE 0 END), 0)::text`,
+        discountCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.discount}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
+        totalWaybillCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.waybillCost}, 0) > 0 THEN ${schema.deliveryRemittances.waybillCost} ELSE 0 END), 0)::text`,
+        waybillCostCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.waybillCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(
@@ -2279,25 +2295,19 @@ export class LogisticsService {
     const outcomeCountBaseWhere = outcomeCountConditions.length > 0
       ? sql` AND ${sql.join(outcomeCountConditions, sql` AND `)}`
       : sql``;
-    const receivedOrderCountQuery = sql<{ cnt: string }[]>`
-      SELECT COUNT(DISTINCT dro.order_id)::text AS cnt
+    // Combined outcome order counts — one scan instead of two separate queries.
+    const outcomeOrderCountsQuery = sql<{ received_cnt: string; disputed_cnt: string }[]>`
+      SELECT
+        COUNT(DISTINCT dro.order_id) FILTER (
+          WHERE EXISTS (SELECT 1 FROM delivery_remittance_outcomes oc WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'APPROVED')
+        )::text AS received_cnt,
+        COUNT(DISTINCT dro.order_id) FILTER (
+          WHERE EXISTS (SELECT 1 FROM delivery_remittance_outcomes oc WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'DISPUTED')
+        )::text AS disputed_cnt
       FROM delivery_remittance_orders dro
       JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
       JOIN orders o ON o.id = dro.order_id
-      WHERE EXISTS (
-        SELECT 1 FROM delivery_remittance_outcomes oc
-        WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'APPROVED'
-      )${outcomeCountBaseWhere}
-    `;
-    const disputedOrderCountQuery = sql<{ cnt: string }[]>`
-      SELECT COUNT(DISTINCT dro.order_id)::text AS cnt
-      FROM delivery_remittance_orders dro
-      JOIN delivery_remittances dr ON dr.id = dro.delivery_remittance_id
-      JOIN orders o ON o.id = dro.order_id
-      WHERE EXISTS (
-        SELECT 1 FROM delivery_remittance_outcomes oc
-        WHERE oc.delivery_remittance_id = dro.delivery_remittance_id AND oc.status = 'DISPUTED'
-      )${outcomeCountBaseWhere}
+      WHERE true${outcomeCountBaseWhere}
     `;
 
     const awaitingConditions: SQL[] = [
@@ -2342,7 +2352,7 @@ export class LogisticsService {
       .from(schema.orders)
       .where(and(...awaitingConditions));
 
-    // Period-specific awaiting: same as above but filtered by dateScope column.
+    // Period-specific awaiting: same base conditions + date filter.
     const awaitingPeriodConditions = [...awaitingConditions];
     if (input.startDate) awaitingPeriodConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
     if (input.endDate) awaitingPeriodConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
@@ -2407,14 +2417,14 @@ export class LogisticsService {
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
 
-    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, awaitingPeriodRows, deliveredRows, receivedCountRows, disputedCountRows] = await Promise.all([
+    // 6 parallel queries (down from 7): received + disputed outcome counts merged.
+    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, awaitingPeriodRows, deliveredRows, outcomeCountRows] = await Promise.all([
       baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
       summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
       awaitingSummaryQuery,
       awaitingPeriodQuery,
       deliveredCountQuery,
-      this.db.execute(receivedOrderCountQuery),
-      this.db.execute(disputedOrderCountQuery),
+      this.db.execute(outcomeOrderCountsQuery),
     ]);
 
     const baseSummary = baseSummaryRows[0];
@@ -2422,8 +2432,9 @@ export class LogisticsService {
     const awaitingSummary = awaitingSummaryRows[0];
     const awaitingPeriodSummary = awaitingPeriodRows[0];
     const deliveredSummary = deliveredRows[0];
-    const receivedOrderCount = (receivedCountRows as unknown as { cnt: string }[])[0]?.cnt ?? '0';
-    const disputedOrderCount = (disputedCountRows as unknown as { cnt: string }[])[0]?.cnt ?? '0';
+    const outcomeCounts = (outcomeCountRows as unknown as { received_cnt: string; disputed_cnt: string }[])[0];
+    const receivedOrderCount = outcomeCounts?.received_cnt ?? '0';
+    const disputedOrderCount = outcomeCounts?.disputed_cnt ?? '0';
     const summary = {
       totalRemitted: baseSummary?.totalRemitted ?? '0',
       pendingAmount: baseSummary?.pendingAmount ?? '0',
@@ -2436,7 +2447,7 @@ export class LogisticsService {
       disputedOrderCount: baseSummary?.disputedOrderCount ?? '0',
       pendingGrossAmount: baseSummary?.pendingGrossAmount ?? '0',
       disputedGrossAmount: baseSummary?.disputedGrossAmount ?? '0',
-      // Outcome-based counts — separate JOIN queries replace old correlated subqueries
+      // Outcome-based counts — combined into one query (down from two)
       receivedCount: receivedOrderCount,
       disputedCount: disputedOrderCount,
       awaitingAmount: awaitingSummary?.awaitingAmount ?? '0',
@@ -2466,6 +2477,10 @@ export class LogisticsService {
       posFeeCount: baseSummary?.posFeeCount ?? '0',
       totalFailedDeliveryCosts: baseSummary?.totalFailedDeliveryCosts ?? '0',
       failedDeliveryCount: baseSummary?.failedDeliveryCount ?? '0',
+      totalDiscounts: baseSummary?.totalDiscounts ?? '0',
+      discountCount: baseSummary?.discountCount ?? '0',
+      totalWaybillCosts: baseSummary?.totalWaybillCosts ?? '0',
+      waybillCostCount: baseSummary?.waybillCostCount ?? '0',
     };
 
     const fallbackSummary = {
@@ -2478,6 +2493,8 @@ export class LogisticsService {
       totalCommitmentFees: '0', commitmentFeeCount: '0',
       totalPosFees: '0', posFeeCount: '0',
       totalFailedDeliveryCosts: '0', failedDeliveryCount: '0',
+      totalDiscounts: '0', discountCount: '0',
+      totalWaybillCosts: '0', waybillCostCount: '0',
     };
 
     return {
@@ -2982,7 +2999,9 @@ export class LogisticsService {
       const remittanceCosts =
         Number(found.commitmentFee ?? 0) +
         Number(found.posFee ?? 0) +
-        Number(found.failedDeliveryCost ?? 0);
+        Number(found.failedDeliveryCost ?? 0) +
+        Number(found.discount ?? 0) +
+        Number(found.waybillCost ?? 0);
       const netAmount = Math.max(0, Number(totals?.amount ?? 0) - remittanceCosts);
 
       await tx.insert(schema.deliveryRemittanceOutcomes).values({

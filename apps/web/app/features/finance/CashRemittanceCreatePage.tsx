@@ -43,6 +43,8 @@ export function CashRemittanceCreatePage({
   const [commitmentFee, setCommitmentFee] = useState('');
   const [posFee, setPosFee] = useState('');
   const [failedDeliveryCost, setFailedDeliveryCost] = useState('');
+  const [discount, setDiscount] = useState('');
+  const [waybillCost, setWaybillCost] = useState('');
   const [batchNote, setBatchNote] = useState('');
   const [showExtraCosts, setShowExtraCosts] = useState(true);
   const [inlineError, setInlineError] = useState<string | null>(null);
@@ -109,7 +111,9 @@ export function CashRemittanceCreatePage({
   const totalCommitmentFee = parseFloat(commitmentFee) || 0;
   const totalPosFee = parseFloat(posFee) || 0;
   const totalFailedDeliveryCost = parseFloat(failedDeliveryCost) || 0;
-  const totalExtraCosts = totalCommitmentFee + totalPosFee + totalFailedDeliveryCost;
+  const totalDiscount = parseFloat(discount) || 0;
+  const totalWaybillCost = parseFloat(waybillCost) || 0;
+  const totalExtraCosts = totalCommitmentFee + totalPosFee + totalFailedDeliveryCost + totalDiscount + totalWaybillCost;
   const totalAmount = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
   const submitting = fetcher.state !== 'idle';
@@ -132,6 +136,8 @@ export function CashRemittanceCreatePage({
     if (totalCommitmentFee > 0) fd.set('commitmentFee', totalCommitmentFee.toFixed(2));
     if (totalPosFee > 0) fd.set('posFee', totalPosFee.toFixed(2));
     if (totalFailedDeliveryCost > 0) fd.set('failedDeliveryCost', totalFailedDeliveryCost.toFixed(2));
+    if (totalDiscount > 0) fd.set('discount', totalDiscount.toFixed(2));
+    if (totalWaybillCost > 0) fd.set('waybillCost', totalWaybillCost.toFixed(2));
     if (batchNote.trim()) fd.set('notes', batchNote.trim());
     if (skipDuplicateWarning) fd.set('skipDuplicateWarning', 'true');
     return fd;
@@ -293,6 +299,26 @@ export function CashRemittanceCreatePage({
                     />
                   </div>
                   <div>
+                    <label className="block text-xs text-app-fg-muted mb-1">Discount</label>
+                    <AmountInput
+                      placeholder="0"
+                      value={discount}
+                      onChange={setDiscount}
+                      prefix="₦"
+                      className="input w-full text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-app-fg-muted mb-1">Waybill sent/pickup</label>
+                    <AmountInput
+                      placeholder="0"
+                      value={waybillCost}
+                      onChange={setWaybillCost}
+                      prefix="₦"
+                      className="input w-full text-sm"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs text-app-fg-muted mb-1">Note (optional)</label>
                     <input
                       type="text"
@@ -354,6 +380,22 @@ export function CashRemittanceCreatePage({
                     <span className="text-sm text-app-fg-muted">Failed delivery</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
                       -<NairaPrice amount={totalFailedDeliveryCost} />
+                    </span>
+                  </div>
+                )}
+                {totalDiscount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-app-fg-muted">Discount</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={totalDiscount} />
+                    </span>
+                  </div>
+                )}
+                {totalWaybillCost > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-app-fg-muted">Waybill sent/pickup</span>
+                    <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
+                      -<NairaPrice amount={totalWaybillCost} />
                     </span>
                   </div>
                 )}
