@@ -499,7 +499,7 @@ export const dashboardRouter = router({
       // CS funnel — excludes offline + graduated follow-up + cart orders
       ordersService!.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, 'include-imports', true, true).catch(() => ({})),
       ordersService!.getSupplementaryCounts(undefined, startIso, endIso, undefined, ctx.currentBranchId, undefined, 'servicing', ctx.effectiveBranchIds).catch(() => ({ offlineCount: 0, offlineDeliveredCount: 0, duplicateCount: 0 })),
-      financeService!.countPendingApprovalRequests().catch(() => 0),
+      financeService!.countPendingApprovalRequests(ctx.effectiveBranchIds).catch(() => 0),
       getFollowUpConfigService().getFollowUpOrderStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
       getCartOrdersService().getStatusCounts(ctx.currentBranchId, undefined, startIso, endIso, ctx.effectiveBranchIds).catch(() => ({})),
     ]);

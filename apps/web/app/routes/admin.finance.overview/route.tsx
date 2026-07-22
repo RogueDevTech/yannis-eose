@@ -145,7 +145,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       disputedRemittanceAmount: Number(remSummary?.disputedGrossAmount ?? remSummary?.disputedAmount ?? 0),
       totalRemitted: Number(remSummary?.totalRemitted ?? 0),
       totalRemittedCount: Number(remSummary?.totalCount ?? 0),
-      // Use baseSummary fields (createdAt-scoped) so counts/amounts match the Cash Remittances page.
+      // Use baseSummary fields (deliveredAt-scoped) so counts/amounts match the Cash Remittances page.
       receivedAmount: Number(remSummary?.grossOrderValue ?? remSummary?.receivedAmount ?? 0),
       receivedCount: Number(remSummary?.grossOrderCount ?? remSummary?.receivedOrderCount ?? remSummary?.receivedCount ?? 0),
       deliveredCount: Number(remSummary?.deliveredCount ?? 0),

@@ -52,9 +52,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime, ...(teamIdParam && { teamId: teamIdParam }) };
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' && user?.id ? { assignedCsId: user.id } : {};
-  // Stock Manager / Finance see ALL deliveries (follow-up + cart included) so
+  // Finance sees ALL deliveries (follow-up + cart included) so
   // their dashboard "Delivered" stat matches Cash Remittances.
-  const includeAllDeliveries = role === 'STOCK_MANAGER' || role === 'FINANCE_OFFICER';
+  // Stock Manager uses onlyGraduateNonMarketing (same as SuperAdmin TOTAL ORDERS).
+  const includeAllDeliveries = role === 'FINANCE_OFFICER';
   const ordersCountsInput = JSON.stringify({
     startDate, endDate,
     ...mediaBuyerIdParam,
@@ -125,7 +126,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
        .catch(() => [] as Array<{ id: string; name: string | null; department: string }>)
     : Promise.resolve([] as Array<{ id: string; name: string | null; department: string }>);
 
-  const pageData = Promise.all([ordersP, countsP, supplementaryP, offlineStatusP, teamsP]).then(([ordersRes, countsRes, offlineCount, offlineStatusCounts, teamsForFilter]): OrdersAndCounts => {
+  // Stock Manager: fetch totalOrdersCounts (onlyGraduateNonMarketing), funnel counts,
+  // offline counts, and DFU counts — mirrors the SuperAdmin TOTAL ORDERS strip exactly.
+  const isStockManager = role === 'STOCK_MANAGER';
+  const smTotalInput = JSON.stringify({ startDate, endDate, onlyGraduateNonMarketing: true });
+  const smTotalP = isStockManager
+    ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(smTotalInput)}`, deferredOpt)
+        .then((r) => r.ok ? ((r.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}) : {})
+        .catch(() => ({} as Record<string, number>))
+    : Promise.resolve(undefined);
+  // Funnel counts (marketing forms only, excludes graduated + cart graduated)
+  const smFunnelInput = JSON.stringify({ startDate, endDate, isFollowUp: false, orderSource: 'edge-form-and-import', excludeGraduated: true });
+  const smFunnelP = isStockManager
+    ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(smFunnelInput)}`, deferredOpt)
+        .then((r) => r.ok ? ((r.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}) : {})
+        .catch(() => ({} as Record<string, number>))
+    : Promise.resolve(undefined);
+  // Offline counts
+  const smOfflineInput = JSON.stringify({ startDate, endDate, onlyOffline: true });
+  const smOfflineP = isStockManager
+    ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(smOfflineInput)}`, deferredOpt)
+        .then((r) => r.ok ? ((r.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}) : {})
+        .catch(() => ({} as Record<string, number>))
+    : Promise.resolve(undefined);
+  // Delivered follow-up counts (from orders table, order_source='delivered_follow_up')
+  const smDfuInput = JSON.stringify({ startDate, endDate, orderSource: 'delivered_follow_up', excludeGraduated: false });
+  const smDfuP = isStockManager
+    ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(smDfuInput)}`, deferredOpt)
+        .then((r) => r.ok ? ((r.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}) : {})
+        .catch(() => ({} as Record<string, number>))
+    : Promise.resolve(undefined);
+
+  const pageData = Promise.all([ordersP, countsP, supplementaryP, offlineStatusP, teamsP, smTotalP, smFunnelP, smOfflineP, smDfuP]).then(([ordersRes, countsRes, offlineCount, offlineStatusCounts, teamsForFilter, smTotalCounts, smFunnelCounts, smOfflineCounts, smDfuCounts]): OrdersAndCounts => {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
       : null;
@@ -139,6 +171,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       offlineCount,
       offlineStatusCounts,
       teamsForFilter,
+      ...(smTotalCounts && { totalOrdersCounts: smTotalCounts }),
+      ...(smFunnelCounts && { funnelCounts: smFunnelCounts }),
+      ...(smOfflineCounts && { offlineOrdersCounts: smOfflineCounts }),
+      ...(smDfuCounts && { dfuCounts: smDfuCounts }),
     };
   }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [], offlineCount: 0, offlineStatusCounts: {}, teamsForFilter: [] }));
 

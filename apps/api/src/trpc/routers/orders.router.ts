@@ -1075,6 +1075,12 @@ export const ordersRouter = router({
           excludeGraduated: z.boolean().optional(),
           /** Filter counts to a specific order source. */
           orderSource: z.enum(['offline', 'edge-form', 'offline_and_import', 'import', 'edge-form-and-import', 'delivered_follow_up']).optional(),
+          /** When true, marketing orders (edge-form/NULL) count at all statuses,
+           *  non-marketing (offline, follow-up, cart) only at DELIVERED/REMITTED.
+           *  Used for the Total Orders strip (SuperAdmin + Stock Manager). */
+          onlyGraduateNonMarketing: z.boolean().optional(),
+          /** When true, only count offline orders. */
+          onlyOffline: z.boolean().optional(),
           /** When set, scope to orders assigned to members of this team. */
           teamId: z.string().uuid().optional(),
         })
@@ -1112,12 +1118,15 @@ export const ordersRouter = router({
       // Exclude graduated follow-up orders from funnel counts — they belong
       // in the Follow-Up strip only. Logistics passes excludeGraduated=false
       // so graduated deliveries stay visible for remittance.
-      const excludeGraduated = input?.excludeGraduated ?? !isFollowUp;
+      // When onlyGraduateNonMarketing is set, the service handles its own
+      // filtering — don't also apply excludeGraduated/excludeCartGraduated.
+      const excludeGraduated = input?.onlyGraduateNonMarketing ? undefined : (input?.excludeGraduated ?? !isFollowUp);
       // CS funnel (servicing scope) also excludes cart-graduated orders —
       // they have their own Cart Orders strip. Marketing keeps them (MB credit).
-      const excludeCartGraduated = excludeGraduated && branchScope === 'servicing';
+      const excludeCartGraduated = input?.onlyGraduateNonMarketing ? undefined : (excludeGraduated && branchScope === 'servicing');
       const onlyOffline: boolean | string | undefined =
-        input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true
+        input?.onlyOffline ? true
+        : input?.orderSource === 'offline' || input?.orderSource === 'offline_and_import' ? true
         : input?.orderSource === 'delivered_follow_up' ? 'delivered_follow_up'
         : undefined;
       const excludeOffline: boolean | 'include-imports' | undefined =
@@ -1148,6 +1157,7 @@ export const ordersRouter = router({
           onlyOffline,
           undefined,
           teamMemberIds,
+          input?.onlyGraduateNonMarketing,
         );
       }
 
@@ -1163,6 +1173,8 @@ export const ordersRouter = router({
           effectiveBranchIds: countsEffectiveBranchIds,
           orderSource: input?.orderSource,
           teamId: input?.teamId,
+          onlyGraduateNonMarketing: input?.onlyGraduateNonMarketing,
+          onlyOffline: input?.onlyOffline,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1184,6 +1196,7 @@ export const ordersRouter = router({
           onlyOffline,
           undefined,
           teamMemberIds,
+          input?.onlyGraduateNonMarketing,
         ),
       );
     }),

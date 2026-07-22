@@ -397,6 +397,7 @@ export class FinanceService {
     // received. Excluding it dropped revenue for any order the accountant
     // had already marked received within the window.
     orderConditions.push(inArray(schema.orders.status, ['DELIVERED', 'REMITTED']));
+    orderConditions.push(isNull(schema.orders.deletedAt));
     orderConditions.push(eq(schema.orders.isFollowUp, false));
     const orderWhere = and(...orderConditions);
 
@@ -914,12 +915,24 @@ export class FinanceService {
   /**
    * Count of approval requests currently in PENDING state. Used by the lightweight admin
    * landing KPI — a single indexed count, intentionally cheap.
+   * Scoped by effectiveBranchIds (via requester's branch membership) for company isolation.
    */
-  async countPendingApprovalRequests(): Promise<number> {
+  async countPendingApprovalRequests(effectiveBranchIds?: string[] | null): Promise<number> {
+    const conditions: SQL[] = [eq(schema.approvalRequests.status, 'PENDING')];
+    const bCond = branchScopeCondition(schema.userBranches.branchId, null, effectiveBranchIds);
+    if (bCond) {
+      conditions.push(bCond);
+      const [row] = await this.db
+        .select({ count: sql<number>`COUNT(DISTINCT ${schema.approvalRequests.id})` })
+        .from(schema.approvalRequests)
+        .innerJoin(schema.userBranches, eq(schema.approvalRequests.requesterId, schema.userBranches.userId))
+        .where(and(...conditions));
+      return row?.count ?? 0;
+    }
     const [row] = await this.db
       .select({ count: count() })
       .from(schema.approvalRequests)
-      .where(eq(schema.approvalRequests.status, 'PENDING'));
+      .where(and(...conditions));
     return row?.count ?? 0;
   }
 
@@ -1348,7 +1361,19 @@ export class FinanceService {
    * The UI labels this clearly so finance reads it as an estimate, not a
    * line-item P&L.
    */
-  async getProfitByShipment(input: ProfitByShipmentInput) {
+  async getProfitByShipment(input: ProfitByShipmentInput, groupId?: string | null) {
+    // Company-group isolation: verify shipment's destination location belongs to the caller's group
+    const groupCondition = groupId
+      ? and(
+          eq(schema.shipments.id, input.shipmentId),
+          sql`${schema.shipments.destinationLocationId} IN (
+            SELECT ll.id FROM logistics_locations ll
+            JOIN logistics_providers lp ON lp.id = ll.provider_id
+            WHERE lp.group_id = ${groupId}
+          )`,
+        )
+      : eq(schema.shipments.id, input.shipmentId);
+
     const [shipment] = await this.db
       .select({
         id: schema.shipments.id,
@@ -1363,7 +1388,7 @@ export class FinanceService {
         createdAt: schema.shipments.createdAt,
       })
       .from(schema.shipments)
-      .where(eq(schema.shipments.id, input.shipmentId))
+      .where(groupCondition)
       .limit(1);
 
     if (!shipment) {

@@ -19,6 +19,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { CacheService } from '../../common/cache/cache.service';
+import { withActor } from '../../common/db/with-actor';
 
 /** Injected from {@link TrpcModule}; Redis cache for {@link messagingRouter}.templates.list */
 let messagingCacheService: CacheService | null = null;
@@ -230,13 +231,15 @@ export const messagingRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
       assertSupportedTemplatePlaceholders(input.body);
-      await db.insert(schema.messageTemplates).values({
-        name: input.name,
-        channel: input.channel,
-        body: input.body,
-        createdBy: ctx.user.id,
-        branchId: ctx.user.currentBranchId ?? null,
-        status: 'ACTIVE',
+      await withActor(db, ctx.user, async (tx) => {
+        await tx.insert(schema.messageTemplates).values({
+          name: input.name,
+          channel: input.channel,
+          body: input.body,
+          createdBy: ctx.user.id,
+          branchId: ctx.user.currentBranchId ?? null,
+          status: 'ACTIVE',
+        });
       });
       await invalidateMessageTemplatesListCache();
       return { success: true };
@@ -291,10 +294,12 @@ export const messagingRouter = router({
       }
       if (input.status !== undefined) updates.status = input.status;
 
-      await db
-        .update(schema.messageTemplates)
-        .set(updates)
-        .where(eq(schema.messageTemplates.id, input.templateId));
+      await withActor(db, ctx.user, async (tx) => {
+        await tx
+          .update(schema.messageTemplates)
+          .set(updates)
+          .where(eq(schema.messageTemplates.id, input.templateId));
+      });
       await invalidateMessageTemplatesListCache();
       return { success: true };
     }),
@@ -382,7 +387,7 @@ export const messagingRouter = router({
         input.channel === 'WHATSAPP'
           ? 'WhatsApp message sent to customer (agent-confirmed)'
           : 'SMS sent to customer';
-      await db.transaction(async (tx) => {
+      await withActor(db, ctx.user, async (tx) => {
         const inserted = await tx
           .insert(schema.outboundMessages)
           .values({
@@ -545,22 +550,24 @@ export const messagingRouter = router({
 
       if (isFollowUpOrder) {
         // Follow-up orders live in a separate table — log to follow-up timeline only.
-        await db.insert(schema.followUpOrderTimelineEvents).values({
-          followUpOrderId: order.id,
-          eventType: 'WHATSAPP_SENT',
-          actorId: ctx.user.id,
-          actorName: ctx.user.name ?? null,
-          description: `Order shared to ${location.name} via WhatsApp group`,
-          metadata: {
-            channel: 'WHATSAPP_GROUP',
-            templateId: template.id,
-            locationId: location.id,
-            locationName: location.name,
-          },
-          branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
+        await withActor(db, ctx.user, async (tx) => {
+          await tx.insert(schema.followUpOrderTimelineEvents).values({
+            followUpOrderId: order.id,
+            eventType: 'WHATSAPP_SENT',
+            actorId: ctx.user.id,
+            actorName: ctx.user.name ?? null,
+            description: `Order shared to ${location.name} via WhatsApp group`,
+            metadata: {
+              channel: 'WHATSAPP_GROUP',
+              templateId: template.id,
+              locationId: location.id,
+              locationName: location.name,
+            },
+            branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
+          });
         });
       } else {
-        await db.transaction(async (tx) => {
+        await withActor(db, ctx.user, async (tx) => {
           const inserted = await tx
             .insert(schema.outboundMessages)
             .values({

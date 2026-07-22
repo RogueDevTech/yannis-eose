@@ -48,6 +48,14 @@ export interface OrdersAndCounts {
   offlineStatusCounts?: Record<string, number>;
   /** Teams available for the team filter dropdown. */
   teamsForFilter?: Array<{ id: string; name: string | null; department: string }>;
+  /** Stock Manager: total orders counts using onlyGraduateNonMarketing (matches SuperAdmin). */
+  totalOrdersCounts?: Record<string, number>;
+  /** Stock Manager: funnel (marketing form) status counts. */
+  funnelCounts?: Record<string, number>;
+  /** Stock Manager: offline order status counts. */
+  offlineOrdersCounts?: Record<string, number>;
+  /** Stock Manager: delivered follow-up order status counts. */
+  dfuCounts?: Record<string, number>;
 }
 
 /** What the loader returns — orders shell deferred; KPIs load post-mount via `/api/dashboard-secondary`. */

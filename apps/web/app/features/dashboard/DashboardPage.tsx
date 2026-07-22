@@ -16,6 +16,7 @@ import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel } from '~/lib/rbac';
+import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
 import {
   DashboardCartOrdersSection,
   DashboardDeliveredFollowUpSection,
@@ -936,27 +937,105 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 // ── Warehouse Dashboard ──────────────────────────────────
 
 function WarehouseDashboard({ data }: { data: DashboardPageData }) {
+  const [breakdownModal, setBreakdownModal] = useState<'totalBreakdown' | 'totalDelivered' | null>(null);
+
+  // Use the same computation as SuperAdmin TOTAL ORDERS strip.
+  // totalOrdersCounts = onlyGraduateNonMarketing (marketing at all statuses + others only DELIVERED/REMITTED).
+  // Follow-up + cart counts come from the secondary context (separate tables).
+  const tSc = data.totalOrdersCounts ?? data.orderCounts;
+  const mktSc = data.funnelCounts ?? {};
+  const offSc = data.offlineOrdersCounts ?? {};
+  const dfuSc = data.dfuCounts ?? {};
+
+  const sumExcludeDeleted = (sc: Record<string, number>) =>
+    Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
+  const sumStatus = (sc: Record<string, number>, ...keys: string[]) =>
+    keys.reduce((s, k) => s + (sc[k] ?? 0), 0);
+
   return (
     <>
       <DashboardTotalProductsSection fallback={<OverviewStatStripSkeleton count={4} />}>
-        {(total) => (
-          <OverviewStatStrip
-            mobileGrid
-            items={[
-              { label: 'Products', value: total.toString(), valueClassName: 'text-app-fg' },
-              { label: 'Total Orders', value: data.totalOrders.toString(), valueClassName: 'text-app-fg' },
-              {
-                label: 'Delivered',
-                value: (((data.orderCounts as Record<string, number>)['DELIVERED'] ?? 0) + ((data.orderCounts as Record<string, number>)['REMITTED'] ?? 0)).toString(),
-                valueClassName: 'text-success-600 dark:text-success-400',
-              },
-              {
-                label: 'Returns',
-                value: ((data.orderCounts as Record<string, number>)['RETURNED'] ?? 0).toString(),
-                valueClassName: 'text-danger-600 dark:text-danger-400',
-              },
-            ]}
-          />
+        {(totalProducts) => (
+          <DashboardFollowUpSection fallback={<OverviewStatStripSkeleton count={4} />}>
+            {(followUpCounts) => (
+              <DashboardCartOrdersSection fallback={<OverviewStatStripSkeleton count={4} />}>
+                {(cartOrdersCounts) => {
+                  const followUpSc = followUpCounts as Record<string, number>;
+                  const cartSc = cartOrdersCounts as Record<string, number>;
+
+                  const catFunnel = sumExcludeDeleted(mktSc);
+                  const delFunnel = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
+                  const delOffline = sumStatus(offSc, 'DELIVERED', 'REMITTED');
+                  const delFollowUp = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
+                  const delCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
+                  const delDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
+
+                  // Total = funnel full pipeline + offline/followup/cart/dfu delivered only
+                  const computedTotal = catFunnel + delOffline + delFollowUp + delCart + delDfu;
+                  const computedDelivered = delFunnel + delOffline + delFollowUp + delCart + delDfu;
+
+                  return (
+                    <>
+                      <OverviewStatStrip
+                        mobileGrid
+                        items={[
+                          { label: 'Products', value: totalProducts.toString(), valueClassName: 'text-app-fg' },
+                          {
+                            label: <span className="flex items-center">Total Orders<FunnelInfoIcon onClick={() => setBreakdownModal('totalBreakdown')} /></span>,
+                            value: computedTotal,
+                            valueClassName: 'text-app-fg',
+                          },
+                          {
+                            label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>,
+                            value: computedDelivered,
+                            valueClassName: 'text-success-600 dark:text-success-400',
+                          },
+                          {
+                            label: 'Remitted',
+                            value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'),
+                            valueClassName: 'text-green-600 dark:text-green-400',
+                          },
+                          {
+                            label: 'Returns',
+                            value: ((tSc['RETURNED'] ?? 0)).toString(),
+                            valueClassName: 'text-danger-600 dark:text-danger-400',
+                          },
+                        ]}
+                      />
+                      <FunnelBreakdownModal
+                        open={breakdownModal === 'totalBreakdown'}
+                        onClose={() => setBreakdownModal(null)}
+                        title="Total Orders: Breakdown"
+                        description="Funnel shows full pipeline. All other categories count delivered orders only toward the total."
+                        lines={[
+                          { label: 'Funnel (marketing forms)', value: catFunnel },
+                          { label: 'Offline (delivered only)', value: delOffline, muted: true },
+                          { label: 'Follow-up (delivered only)', value: delFollowUp, muted: true },
+                          { label: 'Cart (delivered only)', value: delCart, muted: true },
+                          { label: 'Delivered follow-up (delivered only)', value: delDfu, muted: true },
+                          { label: 'Total', value: computedTotal, bold: true },
+                        ]}
+                      />
+                      <FunnelBreakdownModal
+                        open={breakdownModal === 'totalDelivered'}
+                        onClose={() => setBreakdownModal(null)}
+                        title="Total Delivered: Breakdown"
+                        description="Delivered orders across all categories."
+                        lines={[
+                          { label: 'Funnel (marketing forms)', value: delFunnel },
+                          { label: 'Offline (manually created)', value: delOffline },
+                          { label: 'Follow-up', value: delFollowUp },
+                          { label: 'Cart (recovered)', value: delCart },
+                          { label: 'Delivered follow-up', value: delDfu },
+                          { label: 'Total Delivered', value: computedDelivered, bold: true },
+                        ]}
+                      />
+                    </>
+                  );
+                }}
+              </DashboardCartOrdersSection>
+            )}
+          </DashboardFollowUpSection>
         )}
       </DashboardTotalProductsSection>
 
@@ -1469,7 +1548,9 @@ function TotalOrdersStrip({
     sumStatus('AGENT_ASSIGNED') +
     sumStatus('DISPATCHED') +
     sumStatus('IN_TRANSIT');
-  const delivered = sumStatus('DELIVERED') + sumStatus('REMITTED');
+  const deliveredOnly = sumStatus('DELIVERED');
+  const remitted = sumStatus('REMITTED');
+  const delivered = deliveredOnly + remitted;
   const deleted = sumStatus('DELETED');
   const total = unassigned + assigned + engaged + confirmed + delivered;
   const confirmedAndBeyond = confirmed + delivered;
@@ -1513,9 +1594,10 @@ function TotalOrdersStrip({
           { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
           {
             label: <span className="flex items-center">Delivered<TotalOrdersInfoIcon onClick={() => setBreakdownModal('delivered')} /></span>,
-            value: delivered,
+            value: deliveredOnly,
             valueClassName: 'text-success-600 dark:text-success-400',
           },
+          { label: 'Remitted', value: remitted, valueClassName: 'text-green-600 dark:text-green-400' },
           { label: 'CR', value: `${cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(cr) },
           { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
           { label: 'Deleted', value: deleted, valueClassName: 'text-danger-600 dark:text-danger-400' },

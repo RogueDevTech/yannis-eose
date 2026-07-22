@@ -79,8 +79,8 @@ export const inventoryRouter = router({
     }),
 
   /** Aggregated stock per (product, location) — no batch rows, no pagination. */
-  levelsSummary: authedProcedure.query(async () => {
-    return getInventoryService().listLevelsSummary();
+  levelsSummary: authedProcedure.query(async ({ ctx }) => {
+    return getInventoryService().listLevelsSummary(ctx.activeGroupId);
   }),
 
   /**
@@ -88,8 +88,8 @@ export const inventoryRouter = router({
    */
   availableStock: authedProcedure
     .input(z.object({ productId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getInventoryService().getAvailableStock(input.productId);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().getAvailableStock(input.productId, ctx.activeGroupId);
     }),
 
   /**
@@ -105,13 +105,13 @@ export const inventoryRouter = router({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return getInventoryService().levelDetail(input.productId, input.locationId, {
         page: input.page,
         limit: input.limit,
         startDate: input.startDate,
         endDate: input.endDate,
-      });
+      }, ctx.activeGroupId);
     }),
 
   /**
@@ -120,8 +120,8 @@ export const inventoryRouter = router({
    */
   providerShipments: authedProcedure
     .input(z.object({ providerId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getInventoryService().getProviderShipments(input.providerId);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().getProviderShipments(input.providerId, ctx.activeGroupId);
     }),
 
   providerLocationBreakdown: authedProcedure
@@ -129,8 +129,8 @@ export const inventoryRouter = router({
       providerId: z.string().uuid(),
       shipmentId: z.string().uuid().optional(),
     }))
-    .query(async ({ input }) => {
-      return getInventoryService().getProviderLocationBreakdown(input);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().getProviderLocationBreakdown(input, ctx.activeGroupId);
     }),
 
   providerProductBreakdown: authedProcedure
@@ -138,8 +138,8 @@ export const inventoryRouter = router({
       providerId: z.string().uuid(),
       shipmentId: z.string().uuid().optional(),
     }))
-    .query(async ({ input }) => {
-      return getInventoryService().getProviderProductBreakdown(input);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().getProviderProductBreakdown(input, ctx.activeGroupId);
     }),
 
   providerMovements: authedProcedure
@@ -152,8 +152,8 @@ export const inventoryRouter = router({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }))
-    .query(async ({ input }) => {
-      return getInventoryService().getProviderMovements(input);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().getProviderMovements(input, ctx.activeGroupId);
     }),
 
   /**
@@ -168,13 +168,13 @@ export const inventoryRouter = router({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return getInventoryService().getLevelById(input.id, {
         page: input.page,
         limit: input.limit,
         startDate: input.startDate,
         endDate: input.endDate,
-      });
+      }, ctx.activeGroupId);
     }),
 
   /**
@@ -410,7 +410,7 @@ export const inventoryRouter = router({
         returnedOrders,
         reconciliations,
       ] = await Promise.all([
-        getInventoryService().listLevels(levelsInput, undefined, ctx.effectiveBranchIds),
+        getInventoryService().listLevels(levelsInput, ctx.activeGroupId, ctx.effectiveBranchIds),
         getInventoryService().listMovements(
           movementsInput,
           ctx.user,
@@ -421,9 +421,10 @@ export const inventoryRouter = router({
           {},
           ctx.user.id,
           ctx.user.role,
+          ctx.activeGroupId,
         ),
-        getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
-        getInventoryService().listTransfers(undefined, ctx.user).then((r) => r.transfers),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        getInventoryService().listTransfers(undefined, ctx.user, undefined, undefined, ctx.activeGroupId).then((r) => r.transfers),
         canSeeReturned
           ? getInventoryService().listReturnedOrders(input.locationId, ctx.effectiveBranchIds)
           : Promise.resolve([]),

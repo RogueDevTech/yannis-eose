@@ -320,7 +320,7 @@ export function canAccessStaffHrUserDetail(
   if (isAdminLevel(viewer)) return true;
 
   /** Same branch as `requireStaffAccountsAccess` — primary Finance Officer only (not hat-only). */
-  if (viewer.role === 'FINANCE_OFFICER') return true;
+  if (hasFinanceAccess(viewer)) return true;
 
   const perms = viewer.permissions ?? [];
   for (const p of perms) {

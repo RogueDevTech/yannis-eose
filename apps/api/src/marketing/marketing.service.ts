@@ -1308,7 +1308,7 @@ export class MarketingService {
     // sees only their own requests by default.
     const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const canApproveFunding =
-      user.role === 'SUPER_ADMIN' ||
+      isAdminLevel(user) ||
       userPerms.includes(canonicalPermissionCode('marketing.funding.approve')) ||
       // Finance disburses against pending funding requests via
       // /admin/finance/disbursements — they need to see every request, not
@@ -1741,7 +1741,7 @@ export class MarketingService {
     } else {
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasGlobalView =
-      caller.role === 'SUPER_ADMIN' ||
+      isAdminLevel(caller) ||
       callerPerms.includes(canonicalPermissionCode('finance.read')) ||
       callerPerms.includes(canonicalPermissionCode('marketing.scope.global'));
 
@@ -1949,7 +1949,7 @@ export class MarketingService {
     }
     const balancePerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasBalancePerm = (code: string) =>
-      caller.role === 'SUPER_ADMIN' || balancePerms.includes(canonicalPermissionCode(code));
+      isAdminLevel(caller) || balancePerms.includes(canonicalPermissionCode(code));
     // Anyone with finance read, marketing org-wide scope, or general user-read can view a
     // recipient's funding balance. HoM-can-view-MB is captured by `marketing.scope.global`.
     if (
@@ -2069,7 +2069,7 @@ export class MarketingService {
       .filter((r) => {
         // Finance / SuperAdmin / Admin are valid recipients for HoM requesters
         // only — a normal Media Buyer cannot request funding directly from them.
-        if (r.role === 'FINANCE_OFFICER' || r.role === 'SUPER_ADMIN') {
+        if (hasFinanceAccess(r)) {
           return requesterRole !== 'MEDIA_BUYER';
         }
         if (requesterRole !== 'MEDIA_BUYER') return false;
@@ -2081,7 +2081,7 @@ export class MarketingService {
         return branchUserIdSet.has(r.id);
       })
       .map((r) => {
-        const isFinance = r.role === 'FINANCE_OFFICER' || r.role === 'SUPER_ADMIN';
+        const isFinance = hasFinanceAccess(r);
         const isHoM = r.role === 'HEAD_OF_MARKETING';
         const isSupervisor = supervisorIdsSet.has(r.id);
         // Preferred / preselected order:
@@ -2149,7 +2149,7 @@ export class MarketingService {
       if (!target) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipient not found' });
       }
-      const targetIsFinance = target.role === 'FINANCE_OFFICER';
+      const targetIsFinance = hasFinanceAccess(target);
       const targetIsHoM = target.role === 'HEAD_OF_MARKETING';
       const targetIsMediaBuyer = target.role === 'MEDIA_BUYER';
       const requesterIsMb = requesterRole === 'MEDIA_BUYER';
@@ -3349,7 +3349,7 @@ export class MarketingService {
 
     const adSpendPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasSpendPerm = (code: string) =>
-      actor.role === 'SUPER_ADMIN' || adSpendPerms.includes(canonicalPermissionCode(code));
+      isAdminLevel(actor) || adSpendPerms.includes(canonicalPermissionCode(code));
     // Caller may update if they can submit ad spend (their own) or approve it (anyone's).
     const canSubmit = hasSpendPerm('marketing.adSpend');
     const canApprove = hasSpendPerm('marketing.adSpend.approve');
@@ -5369,7 +5369,8 @@ export class MarketingService {
       isNotNull(schema.cartOrders.mediaBuyerId),
     ];
     {
-      const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
+      // Marketing surfaces scope by branch_id (campaign attribution), not servicing_branch_id
+      const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
       if (bCond) cartConditions.push(bCond);
     }
     if (periodStart) cartConditions.push(gte(schema.cartOrders.createdAt, periodStart));
@@ -5503,8 +5504,12 @@ export class MarketingService {
 
     const eligibleIds = new Set(eligibleBuyers.map((b) => b.id));
     // Inactive/probation buyers with orders in the period — look up their names
-    // so they appear as rows in the leaderboard.
-    const extraBuyerIds = [...metricsByBuyer.keys()].filter((id) => !eligibleIds.has(id));
+    // so they appear as rows in the leaderboard. Only include those assigned to
+    // the selected branch so MBs from other branches don't leak in.
+    const branchUserIdSet = branchUserIds ? new Set(branchUserIds) : null;
+    const extraBuyerIds = [...metricsByBuyer.keys()].filter(
+      (id) => !eligibleIds.has(id) && (!branchUserIdSet || branchUserIdSet.has(id)),
+    );
     let extraBuyers: Array<{ id: string; name: string; email: string | null }> = [];
     if (extraBuyerIds.length > 0) {
       extraBuyers = await this.db
@@ -5630,7 +5635,7 @@ export class MarketingService {
     const conditions: SQL[] = [];
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasCallerPerm = (code: string) =>
-      caller.role === 'SUPER_ADMIN' || callerPerms.includes(canonicalPermissionCode(code));
+      isAdminLevel(caller) || callerPerms.includes(canonicalPermissionCode(code));
 
     if (hasCallerPerm('marketing.scope.global')) {
       // Explicit org-wide marketing scope → optionally narrow to a branch.
@@ -5769,7 +5774,7 @@ export class MarketingService {
     const conditions: SQL[] = [];
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasCallerPerm = (code: string) =>
-      caller.role === 'SUPER_ADMIN' || callerPerms.includes(canonicalPermissionCode(code));
+      isAdminLevel(caller) || callerPerms.includes(canonicalPermissionCode(code));
 
     if (hasCallerPerm('marketing.scope.global')) {
       const bCond = branchScopeCondition(schema.crossFunnelAttempts.branchId, branchId, effectiveBranchIds);

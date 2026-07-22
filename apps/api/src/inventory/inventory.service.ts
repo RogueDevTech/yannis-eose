@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, asc, desc, count, sql, inArray, gt, isNull } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql, inArray, gt, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -1800,7 +1800,7 @@ export class InventoryService {
    * Used by the transfer form to show "X units in stock" per location without
    * being affected by FIFO batch count × page-size limits.
    */
-  async listLevelsSummary(): Promise<
+  async listLevelsSummary(groupId?: string | null): Promise<
     Array<{
       productId: string;
       locationId: string;
@@ -1808,7 +1808,17 @@ export class InventoryService {
       reservedCount: number;
     }>
   > {
-    const rows = await this.db
+    const conditions: SQL[] = [];
+    if (groupId) {
+      conditions.push(
+        sql`${schema.inventoryLevels.locationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
+    const query = this.db
       .select({
         productId: schema.inventoryLevels.productId,
         locationId: schema.inventoryLevels.locationId,
@@ -1819,6 +1829,9 @@ export class InventoryService {
       })
       .from(schema.inventoryLevels)
       .groupBy(schema.inventoryLevels.productId, schema.inventoryLevels.locationId);
+    const rows = conditions.length > 0
+      ? await query.where(and(...conditions))
+      : await query;
     return rows;
   }
 
@@ -1830,7 +1843,15 @@ export class InventoryService {
   async getLevelById(
     id: string,
     opts: { page?: number; limit?: number; startDate?: string; endDate?: string } = {},
+    groupId?: string | null,
   ) {
+    const groupFilter = groupId
+      ? sql` AND loc.id IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`
+      : sql``;
     const rows = await this.db.execute<{
       id: string;
       productId: string;
@@ -1855,7 +1876,7 @@ export class InventoryService {
       FROM inventory_levels il
       LEFT JOIN products p ON p.id = il.product_id
       LEFT JOIN logistics_locations loc ON loc.id = il.location_id
-      WHERE il.id = ${id}
+      WHERE il.id = ${id}${groupFilter}
       LIMIT 1
     `);
 
@@ -1894,6 +1915,7 @@ export class InventoryService {
     productId: string,
     locationId: string,
     opts: { page?: number; limit?: number; startDate?: string; endDate?: string } | number = {},
+    _groupId?: string | null,
   ) {
     // Back-compat: callers passing a bare `limit` number still work.
     const normalized = typeof opts === 'number' ? { limit: opts } : opts;
@@ -2050,11 +2072,19 @@ export class InventoryService {
    * List shipments that were received at this provider's locations.
    * Powers the shipment filter dropdown on the provider detail page.
    */
-  async getProviderShipments(providerId: string) {
+  async getProviderShipments(providerId: string, groupId?: string | null) {
+    const locConditions: SQL[] = [eq(schema.logisticsLocations.providerId, providerId)];
+    if (groupId) {
+      locConditions.push(
+        sql`${schema.logisticsLocations.providerId} IN (
+          SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     const locRows = await this.db
       .select({ id: schema.logisticsLocations.id })
       .from(schema.logisticsLocations)
-      .where(eq(schema.logisticsLocations.providerId, providerId));
+      .where(and(...locConditions));
 
     if (locRows.length === 0) return [];
 
@@ -2092,14 +2122,22 @@ export class InventoryService {
   async getProviderLocationBreakdown(opts: {
     providerId: string;
     shipmentId?: string;
-  }) {
+  }, groupId?: string | null) {
+    const locConditions: SQL[] = [eq(schema.logisticsLocations.providerId, opts.providerId)];
+    if (groupId) {
+      locConditions.push(
+        sql`${schema.logisticsLocations.providerId} IN (
+          SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     const locRows = await this.db
       .select({
         id: schema.logisticsLocations.id,
         name: schema.logisticsLocations.name,
       })
       .from(schema.logisticsLocations)
-      .where(eq(schema.logisticsLocations.providerId, opts.providerId));
+      .where(and(...locConditions));
 
     if (locRows.length === 0) return [];
 
@@ -2244,14 +2282,22 @@ export class InventoryService {
   async getProviderProductBreakdown(opts: {
     providerId: string;
     shipmentId?: string;
-  }) {
+  }, groupId?: string | null) {
     const shipmentId = opts.shipmentId?.trim() || null;
 
     // Resolve location IDs for this provider
+    const locConditions: SQL[] = [eq(schema.logisticsLocations.providerId, opts.providerId)];
+    if (groupId) {
+      locConditions.push(
+        sql`${schema.logisticsLocations.providerId} IN (
+          SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     const locRows = await this.db
       .select({ id: schema.logisticsLocations.id })
       .from(schema.logisticsLocations)
-      .where(eq(schema.logisticsLocations.providerId, opts.providerId));
+      .where(and(...locConditions));
     const locationIds = locRows.map((r) => r.id);
 
     if (locationIds.length === 0) return [];
@@ -2410,7 +2456,7 @@ export class InventoryService {
     limit?: number;
     startDate?: string;
     endDate?: string;
-  }) {
+  }, groupId?: string | null) {
     const limit = Math.max(1, Math.min(opts.limit ?? 40, 200));
     const page = Math.max(1, opts.page ?? 1);
     const offset = (page - 1) * limit;
@@ -2420,10 +2466,18 @@ export class InventoryService {
     const locationId = opts.locationId?.trim() || null;
 
     // Resolve location IDs for this provider
+    const locConditions: SQL[] = [eq(schema.logisticsLocations.providerId, opts.providerId)];
+    if (groupId) {
+      locConditions.push(
+        sql`${schema.logisticsLocations.providerId} IN (
+          SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     const locRows = await this.db
       .select({ id: schema.logisticsLocations.id })
       .from(schema.logisticsLocations)
-      .where(eq(schema.logisticsLocations.providerId, opts.providerId));
+      .where(and(...locConditions));
     let locationIds = locRows.map((r) => r.id);
 
     // If a specific location is selected, scope to just that one
@@ -2944,11 +2998,21 @@ export class InventoryService {
    * Get available stock for a product across all locations.
    * Applies the virtual buffer (10% less for oversell protection).
    */
-  async getAvailableStock(productId: string) {
+  async getAvailableStock(productId: string, groupId?: string | null) {
+    const conditions: SQL[] = [eq(schema.inventoryLevels.productId, productId)];
+    if (groupId) {
+      conditions.push(
+        sql`${schema.inventoryLevels.locationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
     const levels = await this.db
       .select()
       .from(schema.inventoryLevels)
-      .where(eq(schema.inventoryLevels.productId, productId));
+      .where(and(...conditions));
 
     const totalStock = levels.reduce((sum, l) => sum + l.stockCount, 0);
     const totalReserved = levels.reduce((sum, l) => sum + l.reservedCount, 0);

@@ -2331,10 +2331,12 @@ export class OrdersService {
             .limit(5);
           if (matchingCartOrders.length > 0) {
             const cartOrderIds = matchingCartOrders.map((c) => c.id);
-            await this.db
-              .update(schema.cartOrders)
-              .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
-              .where(inArray(schema.cartOrders.id, cartOrderIds));
+            await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, async (tx) => {
+              await tx
+                .update(schema.cartOrders)
+                .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
+                .where(inArray(schema.cartOrders.id, cartOrderIds));
+            });
             this.logger.log(
               { orderId: order.id, supersededCartOrderIds: cartOrderIds },
               'edge-form order superseded matching cart orders',
@@ -5899,10 +5901,12 @@ export class OrdersService {
     const orderAmountKobo = Math.round((parseFloat(String(order.totalAmount ?? 0)) || 0) * 100);
     if (verified.amount !== orderAmountKobo && verified.amount > 0) return null;
 
-    await this.db
-      .update(schema.orders)
-      .set({ paymentStatus: 'PAID', updatedAt: new Date() })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, { id: 'SYSTEM_PAYSTACK' }, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({ paymentStatus: 'PAID', updatedAt: new Date() })
+        .where(eq(schema.orders.id, orderId));
+    });
     void this.writeTimelineEvent({
       orderId,
       eventType: 'PAYMENT_RECEIVED',

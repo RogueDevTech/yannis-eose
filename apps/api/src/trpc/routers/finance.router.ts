@@ -176,8 +176,8 @@ export const financeRouter = router({
   /** Per-shipment unit economics — costs in vs estimated revenue from sold qty. */
   profitByShipment: permissionProcedure('finance.read')
     .input(profitByShipmentSchema)
-    .query(async ({ input }) => {
-      return getFinanceService().getProfitByShipment(input);
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().getProfitByShipment(input, ctx.activeGroupId);
     }),
 
   overview: permissionProcedure('finance.read')

@@ -100,7 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const needsCartAbandoned =
     isAdminLevel({ role }) || role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER' || isSupervisor;
   const needsFollowUp =
-    isAdminLevel({ role }) || role === 'HEAD_OF_CS' || role === 'CS_CLOSER';
+    isAdminLevel({ role }) || role === 'HEAD_OF_CS' || role === 'CS_CLOSER' || role === 'STOCK_MANAGER';
   const needsCartOrders = needsFollowUp || role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER' || isSupervisor;
 
   try {

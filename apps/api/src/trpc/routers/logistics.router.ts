@@ -308,6 +308,49 @@ export const logisticsRouter = router({
     }),
 
   /**
+   * Unified logistics orders page bundle. Queries orders + cart_orders +
+   * follow_up_orders via SQL UNION so the stat strip and table are consistent.
+   */
+  logisticsOrdersPageBundle: permissionProcedure('logistics.read')
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(1000).default(100),
+        status: z.string().optional(),
+        statuses: z.array(z.string()).min(1).optional(),
+        search: z.string().trim().max(200).optional(),
+        logisticsLocationId: z.string().uuid().optional(),
+        servicingBranchId: z.string().uuid().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        scheduleKind: z.enum(['delivery_overdue']).optional(),
+        sortBy: z.string().optional(),
+        sortOrder: z.enum(['asc', 'desc']).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const [ordersResult, statusCounts, locations, branches] = await Promise.all([
+        getLogisticsService().listUnifiedLogisticsOrders(input, ctx.effectiveBranchIds),
+        getLogisticsService().getUnifiedLogisticsStatusCounts(
+          {
+            statuses: input.statuses,
+            logisticsLocationId: input.logisticsLocationId,
+            servicingBranchId: input.servicingBranchId,
+            startDate: input.startDate,
+            endDate: input.endDate,
+          },
+          ctx.effectiveBranchIds,
+        ),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        (async () => {
+          const { listBranchesForUser } = await import('./branches.router');
+          return listBranchesForUser(ctx.user);
+        })(),
+      ]);
+      return { ...ordersResult, statusCounts, locations, branches };
+    }),
+
+  /**
    * Single-request bundle for the Cash Remittances page. Replaces 4 parallel
    * HTTP round-trips (listDeliveryRemittances + locationOptions + users.list +
    * eligible orders) with one server-side fan-out. Eligible orders are excluded

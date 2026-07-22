@@ -462,15 +462,17 @@ export class AuthService {
     // Global users (org-wide heads, admins) default to null = "All Branches".
     // They can narrow via the header switcher.
 
-    const insertedRows = await this.db
-      .insert(schema.mirrorSessions)
-      .values({
-        actorId: actor.id,
-        targetId: target.id,
-        ipAddress: requestMeta.ipAddress ?? null,
-        userAgent: requestMeta.userAgent ?? null,
-      })
-      .returning({ id: schema.mirrorSessions.id });
+    const insertedRows = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.mirrorSessions)
+        .values({
+          actorId: actor.id,
+          targetId: target.id,
+          ipAddress: requestMeta.ipAddress ?? null,
+          userAgent: requestMeta.userAgent ?? null,
+        })
+        .returning({ id: schema.mirrorSessions.id }),
+    );
     const mirrorSessionId = insertedRows[0]?.id;
     if (!mirrorSessionId) {
       throw new BadRequestException('Failed to record mirror session.');
@@ -571,28 +573,30 @@ export class AuthService {
 
     // Close the audit row. Match by id when we have it; fall back to the most
     // recent open row for this actor+target so a stale session still closes.
-    if (mirrorSessionId) {
-      await this.db
-        .update(schema.mirrorSessions)
-        .set({ endedAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(schema.mirrorSessions.id, mirrorSessionId),
-            isNull(schema.mirrorSessions.endedAt),
-          ),
-        );
-    } else {
-      await this.db
-        .update(schema.mirrorSessions)
-        .set({ endedAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(schema.mirrorSessions.actorId, originalActorId),
-            eq(schema.mirrorSessions.targetId, currentSession.id),
-            isNull(schema.mirrorSessions.endedAt),
-          ),
-        );
-    }
+    await withActor(this.db, { id: originalActorId }, async (tx) => {
+      if (mirrorSessionId) {
+        await tx
+          .update(schema.mirrorSessions)
+          .set({ endedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(schema.mirrorSessions.id, mirrorSessionId),
+              isNull(schema.mirrorSessions.endedAt),
+            ),
+          );
+      } else {
+        await tx
+          .update(schema.mirrorSessions)
+          .set({ endedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(schema.mirrorSessions.actorId, originalActorId),
+              eq(schema.mirrorSessions.targetId, currentSession.id),
+              isNull(schema.mirrorSessions.endedAt),
+            ),
+          );
+      }
+    });
 
     // Re-hydrate the original user fresh from DB.
     const actorRows = await this.db

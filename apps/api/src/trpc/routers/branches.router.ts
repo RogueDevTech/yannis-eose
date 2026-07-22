@@ -11,6 +11,7 @@ import type { SettingsService } from '../../settings/settings.service';
 import { OVERRIDABLE_TEAM_SETTINGS } from '../../settings/settings.service';
 import { canMirror, isAdminLevel } from '../../common/authz';
 import { CacheService } from '../../common/cache/cache.service';
+import { withActor } from '../../common/db/with-actor';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
@@ -738,7 +739,7 @@ export const branchesRouter = router({
         settings: z.record(z.unknown()).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const branchTeams = getBranchTeamsService();
 
@@ -760,7 +761,7 @@ export const branchesRouter = router({
         throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists` });
       }
 
-      const rows = await db.transaction(async (tx) => {
+      const rows = await withActor(db, ctx.user, async (tx) => {
         const inserted = await tx
           .insert(schema.branches)
           .values({
@@ -801,7 +802,7 @@ export const branchesRouter = router({
         settings: z.record(z.unknown()).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
 
       // Uniqueness checks — name and code must be unique org-wide (excluding self)
@@ -828,11 +829,13 @@ export const branchesRouter = router({
       if (input.status) updateFields.status = input.status;
       if (input.settings !== undefined) updateFields.settings = input.settings;
       try {
-        const rows = await db
-          .update(schema.branches)
-          .set(updateFields)
-          .where(eq(schema.branches.id, input.branchId))
-          .returning();
+        const rows = await withActor(db, ctx.user, async (tx) =>
+          tx
+            .update(schema.branches)
+            .set(updateFields)
+            .where(eq(schema.branches.id, input.branchId))
+            .returning(),
+        );
         await invalidateBranchesListCache();
         return rows[0];
       } catch (err) {
@@ -861,7 +864,7 @@ export const branchesRouter = router({
         isPrimary: z.boolean().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const notifications = getBranchesNotificationsService();
 
@@ -908,12 +911,14 @@ export const branchesRouter = router({
         return { success: true, alreadyMember: true as const };
       }
 
-      await db.insert(schema.userBranches).values({
-        userId: input.userId,
-        branchId: input.branchId,
-        roleInBranch:
-          (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
-        isPrimary: input.isPrimary ?? false,
+      await withActor(db, ctx.user, async (tx) => {
+        await tx.insert(schema.userBranches).values({
+          userId: input.userId,
+          branchId: input.branchId,
+          roleInBranch:
+            (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
+          isPrimary: input.isPrimary ?? false,
+        });
       });
       await invalidateBranchesListCache();
       // `branchIds` is captured on the Redis session at login and never
@@ -955,7 +960,7 @@ export const branchesRouter = router({
         branchId: z.string().uuid(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const notifications = getBranchesNotificationsService();
       const branchTeams = getBranchTeamsService();
@@ -973,7 +978,7 @@ export const branchesRouter = router({
       // no longer belongs to the branch must not linger as a member — or a
       // stale supervisor — of any team in it. Done in one transaction so the
       // membership delete and the org-chart cleanup commit together.
-      const removed = await db.transaction(async (tx) => {
+      const removed = await withActor(db, ctx.user, async (tx) => {
         const removedRows = await tx
           .delete(schema.userBranches)
           .where(
@@ -1753,12 +1758,14 @@ export const branchesRouter = router({
   /** Create a new branch group. SuperAdmin only. */
   createGroup: permissionProcedure('branches.manage')
     .input(z.object({ name: z.string().min(1).max(100) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
-      const [created] = await db
-        .insert(schema.branchGroups)
-        .values({ name: input.name.trim() })
-        .returning();
+      const [created] = await withActor(db, ctx.user, async (tx) =>
+        tx
+          .insert(schema.branchGroups)
+          .values({ name: input.name.trim() })
+          .returning(),
+      );
       await invalidateBranchesListCache();
       return created;
     }),
@@ -1766,13 +1773,15 @@ export const branchesRouter = router({
   /** Update a branch group name. SuperAdmin only. */
   updateGroup: permissionProcedure('branches.manage')
     .input(z.object({ groupId: z.string().uuid(), name: z.string().min(1).max(100) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
-      const [updated] = await db
-        .update(schema.branchGroups)
-        .set({ name: input.name.trim(), updatedAt: new Date() })
-        .where(eq(schema.branchGroups.id, input.groupId))
-        .returning();
+      const [updated] = await withActor(db, ctx.user, async (tx) =>
+        tx
+          .update(schema.branchGroups)
+          .set({ name: input.name.trim(), updatedAt: new Date() })
+          .where(eq(schema.branchGroups.id, input.groupId))
+          .returning(),
+      );
       if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
       await invalidateBranchesListCache();
       return updated;
@@ -1781,7 +1790,7 @@ export const branchesRouter = router({
   /** Toggle a branch group's active status. SuperAdmin only. */
   toggleGroupStatus: permissionProcedure('branches.manage')
     .input(z.object({ groupId: z.string().uuid() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const [group] = await db
         .select({ id: schema.branchGroups.id, status: schema.branchGroups.status })
@@ -1790,11 +1799,13 @@ export const branchesRouter = router({
         .limit(1);
       if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
       const newStatus = group.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-      const [updated] = await db
-        .update(schema.branchGroups)
-        .set({ status: newStatus, updatedAt: new Date() })
-        .where(eq(schema.branchGroups.id, input.groupId))
-        .returning();
+      const [updated] = await withActor(db, ctx.user, async (tx) =>
+        tx
+          .update(schema.branchGroups)
+          .set({ status: newStatus, updatedAt: new Date() })
+          .where(eq(schema.branchGroups.id, input.groupId))
+          .returning(),
+      );
       await invalidateBranchesListCache();
       return updated;
     }),
@@ -1802,7 +1813,7 @@ export const branchesRouter = router({
   /** Move a branch to a different group. SuperAdmin only. */
   assignBranchToGroup: permissionProcedure('branches.manage')
     .input(z.object({ branchId: z.string().uuid(), groupId: z.string().uuid() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       // Verify group exists
       const [group] = await db
@@ -1812,11 +1823,13 @@ export const branchesRouter = router({
         .limit(1);
       if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch group not found' });
 
-      const [updated] = await db
-        .update(schema.branches)
-        .set({ groupId: input.groupId, updatedAt: new Date() })
-        .where(eq(schema.branches.id, input.branchId))
-        .returning();
+      const [updated] = await withActor(db, ctx.user, async (tx) =>
+        tx
+          .update(schema.branches)
+          .set({ groupId: input.groupId, updatedAt: new Date() })
+          .where(eq(schema.branches.id, input.branchId))
+          .returning(),
+      );
       if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch not found' });
       await invalidateBranchesListCache();
       return updated;

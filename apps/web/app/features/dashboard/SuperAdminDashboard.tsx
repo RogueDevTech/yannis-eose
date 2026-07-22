@@ -8,57 +8,9 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
-import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import type { CEODashboardData } from '~/features/ceo/types';
-
-function FunnelInfoIcon({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
-      className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors"
-      aria-label="View breakdown"
-    >
-      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <circle cx="12" cy="12" r="10" />
-        <path strokeLinecap="round" d="M12 16v-4M12 8h.01" />
-      </svg>
-    </button>
-  );
-}
-
-function FunnelBreakdownModal({
-  open,
-  onClose,
-  title,
-  description,
-  lines,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  description: string;
-  lines: Array<{ label: string; value: number; bold?: boolean; muted?: boolean }>;
-}) {
-  return (
-    <Modal open={open} onClose={onClose} maxWidth="max-w-sm" contentClassName="p-5">
-      <h2 className="text-base font-semibold text-app-fg mb-1">{title}</h2>
-      <p className="text-sm text-app-fg-muted mb-4">{description}</p>
-      <div className="space-y-0.5">
-        {lines.map((l, i) => (
-          <div
-            key={i}
-            className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}
-          >
-            <span className={`text-sm ${l.muted ? 'text-app-fg-muted' : 'text-app-fg'}`}>{l.label}</span>
-            <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
-    </Modal>
-  );
-}
+import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
 
 function fmt(n: number): string {
   return formatNaira(Math.round(n));
@@ -254,7 +206,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           (tSc['AGENT_ASSIGNED'] ?? 0) +
           (tSc['DISPATCHED'] ?? 0) +
           (tSc['IN_TRANSIT'] ?? 0);
-        const tDelivered = (tSc['DELIVERED'] ?? 0) + (tSc['REMITTED'] ?? 0);
+        const tDeliveredOnly = tSc['DELIVERED'] ?? 0;
+        const tRemitted = tSc['REMITTED'] ?? 0;
+        const tDelivered = tDeliveredOnly + tRemitted;
         const tDeleted = tSc['DELETED'] ?? 0;
         const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
         const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
@@ -305,8 +259,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
                 {
                   label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>,
-                  value: computedDelivered,
+                  value: computedDelivered - (sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED')),
                   valueClassName: 'text-success-600 dark:text-success-400',
+                },
+                {
+                  label: 'Remitted',
+                  value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'),
+                  valueClassName: 'text-green-600 dark:text-green-400',
                 },
                 { label: 'CR', value: `${computedCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(computedCR) },
                 { label: 'DR', value: `${computedDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(computedDR) },
@@ -364,7 +323,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           (sc['AGENT_ASSIGNED'] ?? 0) +
           (sc['DISPATCHED'] ?? 0) +
           (sc['IN_TRANSIT'] ?? 0);
-        const delivered = (sc['DELIVERED'] ?? 0) + (sc['REMITTED'] ?? 0);
+        const deliveredOnly = sc['DELIVERED'] ?? 0;
+        const remitted = sc['REMITTED'] ?? 0;
+        const delivered = deliveredOnly + remitted;
         const deleted = sc['DELETED'] ?? 0;
         const confirmedAndBeyond = confirmed + delivered;
         const confirmationRate = ordersTotal > 0 ? (confirmedAndBeyond / ordersTotal) * 100 : 0;
@@ -411,9 +372,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   },
                   {
                     label: 'Delivered',
-                    value: delivered,
+                    value: deliveredOnly,
                     valueClassName: 'text-success-600 dark:text-success-400',
                     to: marketingLink({ status: 'DELIVERED' }),
+                  },
+                  {
+                    label: 'Remitted',
+                    value: remitted,
+                    valueClassName: 'text-green-600 dark:text-green-400',
                   },
                   {
                     label: 'CR',
@@ -475,7 +441,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       { label: 'Assigned', value: cartAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: cartOrdersLink({ status: 'CS_ASSIGNED' }) },
                       { label: 'Unconfirmed', value: cartEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: cartOrdersLink({ status: 'CS_ENGAGED' }) },
                       { label: 'Confirmed', value: cartConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: cartOrdersLink({ status: 'CONFIRMED' }) },
-                      { label: 'Delivered', value: cartDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: cartOrdersLink({ status: 'DELIVERED' }) },
+                      { label: 'Delivered', value: (cartSc['DELIVERED'] ?? 0), valueClassName: 'text-success-600 dark:text-success-400', to: cartOrdersLink({ status: 'DELIVERED' }) },
+                      { label: 'Remitted', value: (cartSc['REMITTED'] ?? 0), valueClassName: 'text-green-600 dark:text-green-400' },
                       { label: 'CR', value: pct(cartCR), valueClassName: confirmationRateColorClass(cartCR) },
                       { label: 'DR', value: pct(cartDR), valueClassName: deliveryRateColorClass(cartDR) },
                       { label: 'Deleted', value: cartSc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: cartOrdersLink({ status: 'DELETED' }) },
@@ -497,7 +464,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 (csSc['AGENT_ASSIGNED'] ?? 0) +
                 (csSc['DISPATCHED'] ?? 0) +
                 (csSc['IN_TRANSIT'] ?? 0);
-              const csDelivered = (csSc['DELIVERED'] ?? 0) + (csSc['REMITTED'] ?? 0);
+              const csDeliveredOnly = csSc['DELIVERED'] ?? 0;
+              const csRemitted = csSc['REMITTED'] ?? 0;
+              const csDelivered = csDeliveredOnly + csRemitted;
               const csDeleted = csSc['DELETED'] ?? 0;
               const csConfirmedAndBeyond = csConfirmed + csDelivered;
               const csCR = csTotal > 0 ? (csConfirmedAndBeyond / csTotal) * 100 : 0;
@@ -543,9 +512,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       },
                       {
                         label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('csDelivered')} /></span>,
-                        value: csDelivered,
+                        value: csDeliveredOnly,
                         valueClassName: 'text-success-600 dark:text-success-400',
                         to: salesLink({ status: 'DELIVERED' }),
+                      },
+                      {
+                        label: 'Remitted',
+                        value: csRemitted,
+                        valueClassName: 'text-green-600 dark:text-green-400',
                       },
                       {
                         label: 'CR',
