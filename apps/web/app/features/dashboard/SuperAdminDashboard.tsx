@@ -283,11 +283,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 const brkCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
                 const brkDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
                 return [
-                  { label: 'Funnel (marketing forms)', value: catFunnel },
-                  { label: 'Offline (delivered only)', value: brkOffline, muted: true },
-                  { label: 'Follow-up (delivered only)', value: brkFollowUp, muted: true },
-                  { label: 'Cart (delivered only)', value: brkCart, muted: true },
-                  { label: 'Delivered follow-up (delivered only)', value: brkDfu, muted: true },
+                  { label: 'Funnel Orders', value: catFunnel },
+                  { label: 'Offline Orders (delivered only)', value: brkOffline, muted: true },
+                  { label: 'Follow-Up Orders (delivered only)', value: brkFollowUp, muted: true },
+                  { label: 'Cart Orders (delivered only)', value: brkCart, muted: true },
+                  { label: 'Delivered Follow-Up (delivered only)', value: brkDfu, muted: true },
                   { label: 'Total', value: catFunnel + brkOffline + brkFollowUp + brkCart + brkDfu, bold: true },
                 ];
               })()}
@@ -298,11 +298,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               title="Total Delivered: Breakdown"
               description="Delivered orders across all categories."
               lines={[
-                { label: 'Funnel (marketing forms)', value: delFunnel },
-                { label: 'Offline (manually created)', value: delOffline },
-                { label: 'Follow-up', value: delFollowUp },
-                { label: 'Cart (recovered)', value: delCart },
-                { label: 'Delivered follow-up', value: delDfu },
+                { label: 'Funnel Orders', value: delFunnel },
+                { label: 'Offline Orders', value: delOffline },
+                { label: 'Follow-Up Orders', value: delFollowUp },
+                { label: 'Cart Orders', value: delCart },
+                { label: 'Delivered Follow-Up', value: delDfu },
                 { label: 'Total Delivered', value: delFunnel + delOffline + delFollowUp + delCart + delDfu, bold: true },
               ]}
             />
@@ -312,11 +312,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               title="Total Remitted: Breakdown"
               description="Remitted orders across all categories."
               lines={[
-                { label: 'Funnel (marketing forms)', value: sumStatus(mktSc, 'REMITTED') },
-                { label: 'Offline (manually created)', value: sumStatus(offSc, 'REMITTED') },
-                { label: 'Follow-up', value: sumStatus(followUpSc, 'REMITTED') },
-                { label: 'Cart (recovered)', value: sumStatus(cartSc, 'REMITTED') },
-                { label: 'Delivered follow-up', value: sumStatus(dfuSc, 'REMITTED') },
+                { label: 'Funnel Orders', value: sumStatus(mktSc, 'REMITTED') },
+                { label: 'Offline Orders', value: sumStatus(offSc, 'REMITTED') },
+                { label: 'Follow-Up Orders', value: sumStatus(followUpSc, 'REMITTED') },
+                { label: 'Cart Orders', value: sumStatus(cartSc, 'REMITTED') },
+                { label: 'Delivered Follow-Up', value: sumStatus(dfuSc, 'REMITTED') },
                 { label: 'Total Remitted', value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'), bold: true },
               ]}
             />

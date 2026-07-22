@@ -1008,11 +1008,11 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
                         title="Total Orders: Breakdown"
                         description="Funnel shows full pipeline. All other categories count delivered orders only toward the total."
                         lines={[
-                          { label: 'Funnel (marketing forms)', value: catFunnel },
-                          { label: 'Offline (delivered only)', value: delOffline, muted: true },
-                          { label: 'Follow-up (delivered only)', value: delFollowUp, muted: true },
-                          { label: 'Cart (delivered only)', value: delCart, muted: true },
-                          { label: 'Delivered follow-up (delivered only)', value: delDfu, muted: true },
+                          { label: 'Funnel Orders', value: catFunnel },
+                          { label: 'Offline Orders (delivered only)', value: delOffline, muted: true },
+                          { label: 'Follow-Up Orders (delivered only)', value: delFollowUp, muted: true },
+                          { label: 'Cart Orders (delivered only)', value: delCart, muted: true },
+                          { label: 'Delivered Follow-Up (delivered only)', value: delDfu, muted: true },
                           { label: 'Total', value: computedTotal, bold: true },
                         ]}
                       />
@@ -1022,11 +1022,11 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
                         title="Total Delivered: Breakdown"
                         description="Delivered orders across all categories."
                         lines={[
-                          { label: 'Funnel (marketing forms)', value: delFunnel },
-                          { label: 'Offline (manually created)', value: delOffline },
-                          { label: 'Follow-up', value: delFollowUp },
-                          { label: 'Cart (recovered)', value: delCart },
-                          { label: 'Delivered follow-up', value: delDfu },
+                          { label: 'Funnel Orders', value: delFunnel },
+                          { label: 'Offline Orders', value: delOffline },
+                          { label: 'Follow-Up Orders', value: delFollowUp },
+                          { label: 'Cart Orders', value: delCart },
+                          { label: 'Delivered Follow-Up', value: delDfu },
                           { label: 'Total Delivered', value: computedDelivered, bold: true },
                         ]}
                       />
@@ -1608,11 +1608,11 @@ function TotalOrdersStrip({
         <p className="text-sm text-app-fg-muted mb-4">Combined total across all order pipelines.</p>
         <div className="space-y-0.5">
           {[
-            { label: 'Funnel (marketing forms)', value: catFunnel },
-            { label: 'Offline (manually created)', value: catOffline },
-            { label: 'Follow-up', value: catFollowUp },
-            { label: 'Cart (recovered)', value: catCart },
-            { label: 'Delivered follow-up', value: catDeliveredFollowUp },
+            { label: 'Funnel Orders', value: catFunnel },
+            { label: 'Offline Orders', value: catOffline },
+            { label: 'Follow-Up Orders', value: catFollowUp },
+            { label: 'Cart Orders', value: catCart },
+            { label: 'Delivered Follow-Up', value: catDeliveredFollowUp },
             { label: 'Total', value: total, bold: true },
           ].map((l, i) => (
             <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}>
@@ -1627,11 +1627,11 @@ function TotalOrdersStrip({
         <p className="text-sm text-app-fg-muted mb-4">Delivered orders across all pipelines.</p>
         <div className="space-y-0.5">
           {[
-            { label: 'Funnel (marketing forms)', value: delFunnel },
-            { label: 'Offline (manually created)', value: delOffline },
-            { label: 'Follow-up', value: delFollowUp },
-            { label: 'Cart (recovered)', value: delCart },
-            { label: 'Delivered follow-up', value: delDeliveredFollowUp },
+            { label: 'Funnel Orders', value: delFunnel },
+            { label: 'Offline Orders', value: delOffline },
+            { label: 'Follow-Up Orders', value: delFollowUp },
+            { label: 'Cart Orders', value: delCart },
+            { label: 'Delivered Follow-Up', value: delDeliveredFollowUp },
             { label: 'Total Delivered', value: delivered, bold: true },
           ].map((l, i) => (
             <div key={i} className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}>

@@ -976,11 +976,11 @@ export function CSTeamPage({
           })()}
           {(() => {
             const allCatRows = [
-              { key: 'funnel', label: 'Funnel (marketing forms)', value: categoryCounts.funnel },
-              { key: 'offline', label: 'Offline (manually created)', value: categoryCounts.offline },
-              { key: 'follow_up', label: 'Follow-up', value: fuTableTotal },
-              { key: 'cart', label: 'Cart (recovered)', value: cartTableTotal },
-              { key: 'delivered_follow_up', label: 'Delivered follow-up', value: categoryCounts.deliveredFollowUp },
+              { key: 'funnel', label: 'Funnel Orders', value: categoryCounts.funnel },
+              { key: 'offline', label: 'Offline Orders', value: categoryCounts.offline },
+              { key: 'follow_up', label: 'Follow-Up Orders', value: fuTableTotal },
+              { key: 'cart', label: 'Cart Orders', value: cartTableTotal },
+              { key: 'delivered_follow_up', label: 'Delivered Follow-Up', value: categoryCounts.deliveredFollowUp },
             ];
             const catSet = new Set(categories);
             const visibleCatRows = allCatRows.map((r) => ({
