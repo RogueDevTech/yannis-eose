@@ -263,7 +263,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   valueClassName: 'text-success-600 dark:text-success-400',
                 },
                 {
-                  label: 'Remitted',
+                  label: <span className="flex items-center">Remitted<FunnelInfoIcon onClick={() => setBreakdownModal('totalRemitted')} /></span>,
                   value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'),
                   valueClassName: 'text-green-600 dark:text-green-400',
                 },
@@ -304,6 +304,20 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Cart (recovered)', value: delCart },
                 { label: 'Delivered follow-up', value: delDfu },
                 { label: 'Total Delivered', value: delFunnel + delOffline + delFollowUp + delCart + delDfu, bold: true },
+              ]}
+            />
+            <FunnelBreakdownModal
+              open={breakdownModal === 'totalRemitted'}
+              onClose={() => setBreakdownModal(null)}
+              title="Total Remitted: Breakdown"
+              description="Remitted orders across all categories."
+              lines={[
+                { label: 'Funnel (marketing forms)', value: sumStatus(mktSc, 'REMITTED') },
+                { label: 'Offline (manually created)', value: sumStatus(offSc, 'REMITTED') },
+                { label: 'Follow-up', value: sumStatus(followUpSc, 'REMITTED') },
+                { label: 'Cart (recovered)', value: sumStatus(cartSc, 'REMITTED') },
+                { label: 'Delivered follow-up', value: sumStatus(dfuSc, 'REMITTED') },
+                { label: 'Total Remitted', value: sumStatus(mktSc, 'REMITTED') + sumStatus(offSc, 'REMITTED') + sumStatus(followUpSc, 'REMITTED') + sumStatus(cartSc, 'REMITTED') + sumStatus(dfuSc, 'REMITTED'), bold: true },
               ]}
             />
           </div>

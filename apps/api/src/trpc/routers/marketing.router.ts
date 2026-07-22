@@ -1134,8 +1134,8 @@ export const marketingRouter = router({
             excludeCartGraduated: true,
           },
         ),
-        // Cart orders — count from cart_orders table (same source as the Cart Orders page)
-        // so the number is consistent everywhere.
+        // Cart orders — count from cart_orders table, scoped by marketing branch
+        // (branchId) since this is a marketing surface.
         getCartOrdersService().getStatusCounts(
           branchId,
           ordersScope.assignedCsId,
@@ -1143,6 +1143,8 @@ export const marketingRouter = router({
           ordersScope.endDate,
           ctx.effectiveBranchIds,
           ordersScope.mediaBuyerId,
+          undefined,
+          'marketing',
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1335,8 +1337,9 @@ export const marketingRouter = router({
           ctx.effectiveBranchIds,
         ),
         getMarketingService().getProfitabilityConfig(),
-        // Cart order status counts — only DELIVERED/REMITTED count toward marketing total
-        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds),
+        // Cart order status counts — only DELIVERED/REMITTED count toward marketing total.
+        // Marketing surface: scope by branchId (campaign attribution).
+        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds, undefined, undefined, 'marketing'),
       ]);
 
       // Merge: date-filtered received/spent/distributed with all-time balance

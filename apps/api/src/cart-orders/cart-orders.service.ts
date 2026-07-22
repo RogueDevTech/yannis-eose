@@ -322,12 +322,14 @@ export class CartOrdersService {
     effectiveBranchIds?: string[] | null,
     mediaBuyerId?: string | null,
     viewerCloserId?: string | null,
+    branchScope: 'servicing' | 'marketing' = 'servicing',
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.cartOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
     {
-      const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
+      const branchCol = branchScope === 'marketing' ? schema.cartOrders.branchId : schema.cartOrders.servicingBranchId;
+      const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
       const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
       if (isSelfQuery && bCond) {
         conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);

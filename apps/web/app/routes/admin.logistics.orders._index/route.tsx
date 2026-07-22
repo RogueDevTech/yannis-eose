@@ -44,6 +44,7 @@ export interface LogisticsOrder extends Order {
   logisticsLocationId?: string | null;
   riderId?: string | null;
   preferredDeliveryDate?: string | null;
+  orderCategory?: 'funnel' | 'cart' | 'follow-up';
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -85,7 +86,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
-  const listInput = {
+  // Unified bundle input — queries orders + cart_orders + follow_up_orders
+  const bundleInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
     // OVERDUE is not a real status — use scheduleKind filter instead
@@ -99,34 +101,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
     ...(branchFilter && { servicingBranchId: branchFilter }),
-    // Logistics must see graduated follow-up + cart orders for remittance.
-    excludeGraduated: false as const,
   };
-  const countsInput: {
-    startDate?: string;
-    endDate?: string;
-    logisticsLocationId?: string;
-    servicingBranchId?: string;
-    statuses?: readonly string[];
-    isFollowUp?: boolean;
-    excludeGraduated?: boolean;
-  } = {};
-  if (startDate) countsInput.startDate = startDate;
-  if (endDate) countsInput.endDate = endDate;
-  if (effectiveLogisticsLocationId) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
-  if (branchFilter) countsInput.servicingBranchId = branchFilter;
-  // Stat strip always shows unfiltered totals across all logistics statuses —
-  // the selected status filter only affects the table rows, not the overview.
-  countsInput.statuses = [...LOGISTICS_STATUS_SCOPE];
-  // Match orders.list default: exclude non-graduated follow-ups so stat strip
-  // counts agree with the paginated list totals.
-  countsInput.isFollowUp = false;
-  // Logistics must see graduated follow-up + cart orders — they are real
-  // deliveries that flow through remittance.
-  countsInput.excludeGraduated = false;
-
-  const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
-  const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
+  const bundleInputEnc = encodeURIComponent(JSON.stringify(bundleInput));
 
   const logisticsOrdersShell = {
     filters: {
@@ -150,68 +126,65 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-    const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
+    // Unified bundle: orders + cart_orders + follow_up_orders in one call.
+    // Overdue count is a separate lightweight query (only the main orders table
+    // has preferred_delivery_date, so overdue is already scoped there).
+    const overdueCountInput: Record<string, unknown> = {
+      page: 1,
+      limit: 1,
+      scheduleKind: 'delivery_overdue' as const,
+      ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
+      ...(startDate && { startDate }),
+      ...(endDate && { endDate }),
+      ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
+    };
+    const [bundleRes, overdueRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/logistics.logisticsOrdersPageBundle?input=${bundleInputEnc}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(overdueCountInput))}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
 
-    const ordersData = ordersRes.ok
-      ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
-          ?.result?.data
+    type BundleData = {
+      orders: Array<LogisticsOrder & { orderCategory: 'funnel' | 'cart' | 'follow-up' }>;
+      pagination: { total: number; totalPages: number };
+      statusCounts: Record<string, number>;
+      locations: Location[];
+      branches: Array<{ id: string; name: string }>;
+    };
+    const bundleData = bundleRes.ok
+      ? (bundleRes.data as { result?: { data?: BundleData } })?.result?.data
       : null;
-    const listErrorMessage = !ordersRes.ok
-      ? extractApiErrorMessage(ordersRes.data, 'Could not load logistics orders')
+    const listErrorMessage = !bundleRes.ok
+      ? extractApiErrorMessage(bundleRes.data, 'Could not load logistics orders')
       : undefined;
-    const ordersRaw = ordersData?.orders ?? [];
-    const total = ordersData?.pagination?.total ?? 0;
-    const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
-    const placeholderOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> =
-      ordersRaw.map((o) => ({
-        ...o,
-        locationName: '—',
-        locationProviderName: null,
-        riderName: '—',
-      }));
+    const ordersRaw = bundleData?.orders ?? [];
+    const total = bundleData?.pagination?.total ?? 0;
+    const totalPages = bundleData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+    const statusCounts = bundleData?.statusCounts ?? {};
+    const locations = bundleData?.locations ?? [];
+    const branches = bundleData?.branches ?? [];
 
-    let statusCounts: Record<string, number> = {};
-    let locations: Location[] = [];
-    let branches: Array<{ id: string; name: string }> = [];
-    try {
-      const overdueCountInput = {
-        page: 1,
-        limit: 1,
-        scheduleKind: 'delivery_overdue' as const,
-        ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
-        ...(startDate && { startDate }),
-        ...(endDate && { endDate }),
-        ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
-      };
-      const [countsRes, locationsRes, overdueRes, branchesRes] = await Promise.all([
-        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
-        apiRequest<unknown>(
-          `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 200, status: 'ACTIVE' }))}`,
-          { method: 'GET', cookie },
-        ),
-        apiRequest<unknown>(
-          `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(overdueCountInput))}`,
-          { method: 'GET', cookie },
-        ),
-        apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>('/trpc/branches.list', { method: 'GET', cookie }),
-      ]);
-      statusCounts = countsRes.ok
-        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-        : {};
-      const locationsData = locationsRes.ok
-        ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
-        : null;
-      locations = locationsData?.locations ?? [];
-      const overdueData = overdueRes.ok
-        ? (overdueRes.data as { result?: { data?: { pagination?: { total?: number } } } })?.result?.data
-        : null;
-      statusCounts['__OVERDUE'] = overdueData?.pagination?.total ?? 0;
-      branches = branchesRes.ok ? branchesRes.data?.result?.data ?? [] : [];
-    } catch {
-      statusCounts = {};
-      locations = [];
-    }
+    const placeholderOrders = ordersRaw.map((o) => ({
+      ...o,
+      // Fields required by Order interface but not returned by unified query
+      customerPhoneDisplay: o.customerPhoneDisplay ?? '',
+      assignedCsId: o.assignedCsId ?? null,
+      locationName: '—',
+      locationProviderName: null,
+      riderName: '—',
+    }));
+
+    // Overdue count
+    const overdueData = overdueRes.ok
+      ? (overdueRes.data as { result?: { data?: { pagination?: { total?: number } } } })?.result?.data
+      : null;
+    statusCounts['__OVERDUE'] = overdueData?.pagination?.total ?? 0;
 
     return {
       orders: placeholderOrders,
