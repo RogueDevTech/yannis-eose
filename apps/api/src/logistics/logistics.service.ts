@@ -1709,9 +1709,11 @@ export class LogisticsService {
       // with an already-REMITTED order from the current calendar month.
       // Returns warnings instead of blocking — Finance can override.
       if (!input.skipDuplicateWarning) {
-        const monthStart = new Date();
-        monthStart.setDate(1);
-        monthStart.setHours(0, 0, 0, 0);
+        // First day of current month in WAT (Africa/Lagos, UTC+1)
+        const nowWat = new Date(Date.now() + 3600_000); // UTC+1
+        const monthStart = nigeriaDayStart(
+          `${nowWat.getUTCFullYear()}-${String(nowWat.getUTCMonth() + 1).padStart(2, '0')}-01`,
+        );
 
         const dupRows = await tx.execute<{
           order_id: string;

@@ -68,9 +68,13 @@ export function CashRemittanceCreatePage({
   }, [markReceivedNow, selectedOrders.length, navigate, toast]);
   useCloseOnFetcherSuccess(fetcher, handleSuccess);
 
-  // Surface duplicate warnings from the backend
+  // Surface duplicate warnings from the backend (but not after a successful override)
   useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data?.duplicateWarnings?.length) {
+    if (
+      fetcher.state === 'idle' &&
+      fetcher.data?.duplicateWarnings?.length &&
+      !fetcher.data?.success
+    ) {
       setDuplicateWarnings(fetcher.data.duplicateWarnings);
     }
   }, [fetcher.state, fetcher.data]);
