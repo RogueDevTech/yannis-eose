@@ -22,7 +22,7 @@ SELECT
   fote.actor_name,
   fote.description,
   fote.metadata,
-  fote.branch_id,
+  CASE WHEN EXISTS (SELECT 1 FROM branches b WHERE b.id = fote.branch_id) THEN fote.branch_id ELSE NULL END,
   fote.created_at
 FROM follow_up_order_timeline_events fote
 JOIN follow_up_orders fo ON fo.id = fote.follow_up_order_id
@@ -56,7 +56,7 @@ SELECT
   cote.actor_name,
   cote.description,
   cote.metadata,
-  cote.branch_id,
+  CASE WHEN EXISTS (SELECT 1 FROM branches b WHERE b.id = cote.branch_id) THEN cote.branch_id ELSE NULL END,
   cote.created_at
 FROM cart_order_timeline_events cote
 JOIN cart_orders co ON co.id = cote.cart_order_id
