@@ -368,6 +368,8 @@ export const logisticsRouter = router({
         endDate: z.string().date().optional(),
         search: z.string().trim().max(200).optional(),
         dateScope: z.enum(['createdAt', 'deliveredAt']).optional().default('createdAt'),
+        /** When true, skip paginated records and only return summary + locations + users. */
+        summaryOnly: z.boolean().optional().default(false),
       }),
     )
     .query(async ({ input, ctx }) => {

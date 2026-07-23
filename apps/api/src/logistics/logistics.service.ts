@@ -55,6 +55,131 @@ import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
+/**
+ * After remitting graduated orders, sync REMITTED status back to their source
+ * tables (cart_orders, follow_up_orders) so dashboard breakdowns are accurate.
+ */
+async function syncRemittedToSourceTables(
+  tx: PostgresJsDatabase<typeof schema>,
+  remittedRows: Array<{
+    id: string;
+    orderSource: string | null;
+    isFollowUp: boolean;
+    customerPhoneHash: string | null;
+  }>,
+) {
+  const remittedIds = remittedRows.map((r) => r.id);
+  if (remittedIds.length === 0) return;
+
+  // Cart-graduated: use sourceCartOrderId FK (direct link, no fuzzy matching).
+  // Fallback to source_cart_id = cart_id for orders graduated before migration 0263.
+  const cartGraduatedIds = remittedRows
+    .filter((r) => r.orderSource === 'online' && !r.isFollowUp)
+    .map((r) => r.id);
+  if (cartGraduatedIds.length > 0) {
+    // Primary: direct FK
+    const cartOrderIds = (
+      await tx
+        .select({ sourceCartOrderId: schema.orders.sourceCartOrderId })
+        .from(schema.orders)
+        .where(
+          and(
+            inArray(schema.orders.id, cartGraduatedIds),
+            isNotNull(schema.orders.sourceCartOrderId),
+          ),
+        )
+    ).map((r) => r.sourceCartOrderId).filter(Boolean) as string[];
+    if (cartOrderIds.length > 0) {
+      await tx
+        .update(schema.cartOrders)
+        .set({ status: 'REMITTED', updatedAt: new Date() })
+        .where(
+          and(
+            inArray(schema.cartOrders.id, cartOrderIds),
+            eq(schema.cartOrders.status, 'DELIVERED'),
+            isNull(schema.cartOrders.deletedAt),
+          ),
+        );
+    }
+    // Fallback for pre-0263 orders: match via source_cart_id = cart_id
+    const fallbackIds = cartGraduatedIds.filter((id) => !cartOrderIds.length || !cartOrderIds.includes(id));
+    if (fallbackIds.length > 0) {
+      const cartIds = (
+        await tx
+          .select({ cartId: schema.orders.cartId })
+          .from(schema.orders)
+          .where(
+            and(
+              inArray(schema.orders.id, fallbackIds),
+              isNotNull(schema.orders.cartId),
+              isNull(schema.orders.sourceCartOrderId),
+            ),
+          )
+      ).map((r) => r.cartId).filter(Boolean) as string[];
+      if (cartIds.length > 0) {
+        await tx
+          .update(schema.cartOrders)
+          .set({ status: 'REMITTED', updatedAt: new Date() })
+          .where(
+            and(
+              inArray(schema.cartOrders.sourceCartId, cartIds),
+              eq(schema.cartOrders.status, 'DELIVERED'),
+              isNull(schema.cartOrders.deletedAt),
+            ),
+          );
+      }
+    }
+  }
+
+  // Follow-up graduated: use sourceFollowUpOrderId FK (direct link).
+  // Fallback to customerPhoneHash for orders graduated before migration 0263.
+  const fuGraduatedIds = remittedRows
+    .filter((r) => r.isFollowUp)
+    .map((r) => r.id);
+  if (fuGraduatedIds.length > 0) {
+    // Primary: direct FK
+    const followUpOrderIds = (
+      await tx
+        .select({ sourceFollowUpOrderId: schema.orders.sourceFollowUpOrderId })
+        .from(schema.orders)
+        .where(
+          and(
+            inArray(schema.orders.id, fuGraduatedIds),
+            isNotNull(schema.orders.sourceFollowUpOrderId),
+          ),
+        )
+    ).map((r) => r.sourceFollowUpOrderId).filter(Boolean) as string[];
+    if (followUpOrderIds.length > 0) {
+      await tx
+        .update(schema.followUpOrders)
+        .set({ status: 'REMITTED', updatedAt: new Date() })
+        .where(
+          and(
+            inArray(schema.followUpOrders.id, followUpOrderIds),
+            eq(schema.followUpOrders.status, 'DELIVERED'),
+            isNull(schema.followUpOrders.deletedAt),
+          ),
+        );
+    }
+    // Fallback for pre-0263 orders: match via customerPhoneHash
+    const fuFallback = remittedRows.filter(
+      (r) => r.isFollowUp && r.customerPhoneHash && !followUpOrderIds.length,
+    );
+    for (const row of fuFallback) {
+      await tx
+        .update(schema.followUpOrders)
+        .set({ status: 'REMITTED', updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.followUpOrders.customerPhoneHash, row.customerPhoneHash!),
+            eq(schema.followUpOrders.status, 'DELIVERED'),
+            isNull(schema.followUpOrders.deletedAt),
+          ),
+        );
+    }
+  }
+}
+
 @Injectable()
 export class LogisticsService {
   private readonly logger = new Logger(LogisticsService.name);
@@ -1840,7 +1965,13 @@ export class LogisticsService {
               eq(schema.orders.status, 'DELIVERED'),
             ),
           )
-          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+          .returning({
+            id: schema.orders.id,
+            branchId: schema.orders.branchId,
+            orderSource: schema.orders.orderSource,
+            isFollowUp: schema.orders.isFollowUp,
+            customerPhoneHash: schema.orders.customerPhoneHash,
+          });
 
         // Write timeline events for each order that transitioned to REMITTED
         if (remittedRows.length > 0) {
@@ -1855,6 +1986,9 @@ export class LogisticsService {
               branchId: r.branchId ?? null,
             })),
           );
+
+          // Sync REMITTED back to source tables so dashboard breakdowns match.
+          await syncRemittedToSourceTables(tx, remittedRows);
         }
 
         await tx.insert(schema.deliveryRemittanceOutcomes).values({
@@ -2005,7 +2139,7 @@ export class LogisticsService {
   /**
    * List delivery remittances. TPL_MANAGER sees own location's; Finance and HoL see all.
    */
-  async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listDeliveryRemittances(input: Omit<ListDeliveryRemittancesInput, 'summaryOnly'> & { summaryOnly?: boolean }, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const canListGlobal =
@@ -2072,114 +2206,128 @@ export class LogisticsService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
-    const [records, totalRows] = await Promise.all([
-      this.db
-        .select()
-        .from(schema.deliveryRemittances)
-        .where(whereClause)
-        .orderBy(desc(schema.deliveryRemittances.sentAt))
-        .limit(input.limit)
-        .offset(offset),
-      this.db
-        .select({ count: count() })
-        .from(schema.deliveryRemittances)
-        .where(whereClause),
-    ]);
+    // summaryOnly mode: skip paginated records + per-record enrichment queries.
+    // Only compute summary stats (6 parallel queries below). Used by the eligible
+    // tab which only needs stat strip numbers, not the remittance list.
+    type RemittanceRecord = typeof schema.deliveryRemittances.$inferSelect;
+    let records: RemittanceRecord[] = [];
+    let total = 0;
+    const locationMap = new Map<string, string>();
+    const locationProviderMap = new Map<string, string | null>();
+    let orderSummaries: Array<Array<{ count: number; amount: string; deliveryFeeTotal: string }>> = [];
+    const dupCountMap = new Map<string, number>();
+    const sentByNameMap = new Map<string, string>();
+    const outcomesByRemittance = new Map<string, Array<{ deliveryRemittanceId: string; status: string; amount: unknown; orderCount: unknown; reason: string | null; recordedAt: unknown }>>();
 
-    const total = totalRows[0]?.count ?? 0;
-    const locationIds = [...new Set(records.map((r) => r.logisticsLocationId))];
-    const locations =
-      locationIds.length > 0
+    if (!input.summaryOnly) {
+      const [recordsResult, totalRows] = await Promise.all([
+        this.db
+          .select()
+          .from(schema.deliveryRemittances)
+          .where(whereClause)
+          .orderBy(desc(schema.deliveryRemittances.sentAt))
+          .limit(input.limit)
+          .offset(offset),
+        this.db
+          .select({ count: count() })
+          .from(schema.deliveryRemittances)
+          .where(whereClause),
+      ]);
+      records = recordsResult;
+      total = totalRows[0]?.count ?? 0;
+
+      const locationIds = [...new Set(recordsResult.map((r) => r.logisticsLocationId))];
+      const locations =
+        locationIds.length > 0
+          ? await this.db
+              .select({
+                id: schema.logisticsLocations.id,
+                name: schema.logisticsLocations.name,
+                providerName: schema.logisticsProviders.name,
+              })
+              .from(schema.logisticsLocations)
+              .leftJoin(
+                schema.logisticsProviders,
+                eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+              )
+              .where(inArray(schema.logisticsLocations.id, locationIds))
+          : [];
+      for (const l of locations) { locationMap.set(l.id, l.name); locationProviderMap.set(l.id, l.providerName ?? null); }
+
+      // Count every order linked to the batch — single grouped query replaces
+      // the previous N+1 (one query per remittance). After Finance marks received,
+      // rows move DELIVERED → REMITTED — they must still count.
+      const remittanceIds = recordsResult.map((r) => r.id);
+      const orderSummaryRows = remittanceIds.length > 0
         ? await this.db
             .select({
-              id: schema.logisticsLocations.id,
-              name: schema.logisticsLocations.name,
-              providerName: schema.logisticsProviders.name,
+              deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
+              count: count(),
+              amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+              deliveryFeeTotal: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
             })
-            .from(schema.logisticsLocations)
-            .leftJoin(
-              schema.logisticsProviders,
-              eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+            .from(schema.deliveryRemittanceOrders)
+            .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+            .where(inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds))
+            .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
+        : [];
+      const orderSummaryMap = new Map(
+        orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount, deliveryFeeTotal: r.deliveryFeeTotal }]),
+      );
+      orderSummaries = recordsResult.map((r) => {
+        const s = orderSummaryMap.get(r.id);
+        return [{ count: s?.count ?? 0, amount: s?.amount ?? '0', deliveryFeeTotal: s?.deliveryFeeTotal ?? '0' }];
+      });
+
+      // Count duplicate-flagged orders per batch for the batch list UI
+      const dupCountRows = remittanceIds.length > 0
+        ? await this.db
+            .select({
+              deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
+              dupCount: count(),
+            })
+            .from(schema.deliveryRemittanceOrders)
+            .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+            .where(
+              and(
+                inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds),
+                isNotNull(schema.orders.isDuplicate),
+              ),
             )
-            .where(inArray(schema.logisticsLocations.id, locationIds))
+            .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
         : [];
-    const locationMap = new Map(locations.map((l) => [l.id, l.name]));
-    const locationProviderMap = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
+      for (const r of dupCountRows) dupCountMap.set(r.deliveryRemittanceId, r.dupCount);
 
-    // Count every order linked to the batch — single grouped query replaces
-    // the previous N+1 (one query per remittance). After Finance marks received,
-    // rows move DELIVERED → REMITTED — they must still count.
-    const remittanceIds = records.map((r) => r.id);
-    const orderSummaryRows = remittanceIds.length > 0
-      ? await this.db
-          .select({
-            deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
-            count: count(),
-            amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
-            deliveryFeeTotal: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
-          })
-          .from(schema.deliveryRemittanceOrders)
-          .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
-          .where(inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds))
-          .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
-      : [];
-    const orderSummaryMap = new Map(
-      orderSummaryRows.map((r) => [r.deliveryRemittanceId, { count: r.count, amount: r.amount, deliveryFeeTotal: r.deliveryFeeTotal }]),
-    );
-    const orderSummaries = records.map((r) => {
-      const s = orderSummaryMap.get(r.id);
-      return [{ count: s?.count ?? 0, amount: s?.amount ?? '0', deliveryFeeTotal: s?.deliveryFeeTotal ?? '0' }];
-    });
+      const sentByIds = [...new Set(recordsResult.map((r) => r.sentBy))];
+      const senders =
+        sentByIds.length > 0
+          ? await this.db
+              .select({ id: schema.users.id, name: schema.users.name })
+              .from(schema.users)
+              .where(inArray(schema.users.id, sentByIds))
+          : [];
+      for (const u of senders) sentByNameMap.set(u.id, u.name);
 
-    // Count duplicate-flagged orders per batch for the batch list UI
-    const dupCountRows = remittanceIds.length > 0
-      ? await this.db
-          .select({
-            deliveryRemittanceId: schema.deliveryRemittanceOrders.deliveryRemittanceId,
-            dupCount: count(),
-          })
-          .from(schema.deliveryRemittanceOrders)
-          .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
-          .where(
-            and(
-              inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds),
-              isNotNull(schema.orders.isDuplicate),
-            ),
-          )
-          .groupBy(schema.deliveryRemittanceOrders.deliveryRemittanceId)
-      : [];
-    const dupCountMap = new Map(dupCountRows.map((r) => [r.deliveryRemittanceId, r.dupCount]));
-
-    const sentByIds = [...new Set(records.map((r) => r.sentBy))];
-    const senders =
-      sentByIds.length > 0
-        ? await this.db
-            .select({ id: schema.users.id, name: schema.users.name })
-            .from(schema.users)
-            .where(inArray(schema.users.id, sentByIds))
-        : [];
-    const sentByNameMap = new Map(senders.map((u) => [u.id, u.name]));
-
-    const outcomes =
-      remittanceIds.length > 0
-        ? await this.db
-            .select({
-              deliveryRemittanceId: schema.deliveryRemittanceOutcomes.deliveryRemittanceId,
-              status: schema.deliveryRemittanceOutcomes.status,
-              amount: schema.deliveryRemittanceOutcomes.amount,
-              orderCount: schema.deliveryRemittanceOutcomes.orderCount,
-              reason: schema.deliveryRemittanceOutcomes.reason,
-              recordedAt: schema.deliveryRemittanceOutcomes.recordedAt,
-            })
-            .from(schema.deliveryRemittanceOutcomes)
-            .where(inArray(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, remittanceIds))
-            .orderBy(desc(schema.deliveryRemittanceOutcomes.recordedAt))
-        : [];
-    const outcomesByRemittance = new Map<string, typeof outcomes>();
-    for (const outcome of outcomes) {
-      const bucket = outcomesByRemittance.get(outcome.deliveryRemittanceId) ?? [];
-      bucket.push(outcome);
-      outcomesByRemittance.set(outcome.deliveryRemittanceId, bucket);
+      const outcomes =
+        remittanceIds.length > 0
+          ? await this.db
+              .select({
+                deliveryRemittanceId: schema.deliveryRemittanceOutcomes.deliveryRemittanceId,
+                status: schema.deliveryRemittanceOutcomes.status,
+                amount: schema.deliveryRemittanceOutcomes.amount,
+                orderCount: schema.deliveryRemittanceOutcomes.orderCount,
+                reason: schema.deliveryRemittanceOutcomes.reason,
+                recordedAt: schema.deliveryRemittanceOutcomes.recordedAt,
+              })
+              .from(schema.deliveryRemittanceOutcomes)
+              .where(inArray(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, remittanceIds))
+              .orderBy(desc(schema.deliveryRemittanceOutcomes.recordedAt))
+          : [];
+      for (const outcome of outcomes) {
+        const bucket = outcomesByRemittance.get(outcome.deliveryRemittanceId) ?? [];
+        bucket.push(outcome);
+        outcomesByRemittance.set(outcome.deliveryRemittanceId, bucket);
+      }
     }
 
     // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page).
@@ -3032,7 +3180,13 @@ export class LogisticsService {
               eq(schema.orders.status, 'DELIVERED'),
             ),
           )
-          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+          .returning({
+            id: schema.orders.id,
+            branchId: schema.orders.branchId,
+            orderSource: schema.orders.orderSource,
+            isFollowUp: schema.orders.isFollowUp,
+            customerPhoneHash: schema.orders.customerPhoneHash,
+          });
 
         // Write timeline events for each order that transitioned to REMITTED
         if (remittedRows.length > 0) {
@@ -3047,6 +3201,9 @@ export class LogisticsService {
               branchId: r.branchId ?? null,
             })),
           );
+
+          // Sync REMITTED back to source tables so dashboard breakdowns match.
+          await syncRemittedToSourceTables(tx, remittedRows);
         }
       }
 
@@ -3329,6 +3486,23 @@ export class LogisticsService {
     const whereClause = and(...conditions);
     const offset = (input.page - 1) * input.limit;
 
+    const hasSearch = !!(input.search && input.search.trim());
+
+    // Count query: when no search, skip JOINs (the WHERE only touches orders table).
+    // With search, JOINs are needed because the search clause references invoice/location columns.
+    const countQuery = hasSearch
+      ? this.db
+          .select({ count: sql<number>`count(distinct ${schema.orders.id})` })
+          .from(schema.orders)
+          .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
+          .leftJoin(provAlias, eq(locAlias.providerId, provAlias.id))
+          .leftJoin(schema.invoices, eq(schema.invoices.orderId, schema.orders.id))
+          .where(whereClause)
+      : this.db
+          .select({ count: sql<number>`count(*)` })
+          .from(schema.orders)
+          .where(whereClause);
+
     const [orders, totalRows] = await Promise.all([
       this.db
         .select({
@@ -3360,13 +3534,7 @@ export class LogisticsService {
         .orderBy(desc(schema.orders.deliveredAt))
         .limit(input.limit)
         .offset(offset),
-      this.db
-        .select({ count: sql<number>`count(distinct ${schema.orders.id})` })
-        .from(schema.orders)
-        .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
-        .leftJoin(provAlias, eq(locAlias.providerId, provAlias.id))
-        .leftJoin(schema.invoices, eq(schema.invoices.orderId, schema.orders.id))
-        .where(whereClause),
+      countQuery,
     ]);
 
     return {

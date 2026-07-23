@@ -797,6 +797,12 @@ export class CartOrdersService {
       .limit(1);
     if (!co) return;
 
+    // Graduation guard: if already graduated, skip (prevents double-graduation).
+    if (co.graduatedOrderId) {
+      this.logger.warn(`Cart order ${cartOrderId} already graduated to ${co.graduatedOrderId}, skipping.`);
+      return;
+    }
+
     const coItems = await this.db
       .select()
       .from(schema.cartOrderItems)
@@ -883,12 +889,21 @@ export class CartOrdersService {
           deliveryGpsLng: co.deliveryGpsLng,
           createdAt: co.createdAt,
           isFollowUp: false,
+          sourceCartOrderId: cartOrderId,
           confirmedAt: co.confirmedAt,
           allocatedAt: co.allocatedAt,
           dispatchedAt: co.dispatchedAt,
           deliveredAt: co.deliveredAt,
         })
         .returning({ id: schema.orders.id });
+
+      // Link back: set graduatedOrderId on the source cart order.
+      if (graduated) {
+        await tx
+          .update(schema.cartOrders)
+          .set({ graduatedOrderId: graduated.id, updatedAt: new Date() })
+          .where(eq(schema.cartOrders.id, cartOrderId));
+      }
 
       if (graduated && coItems.length > 0) {
         await tx.insert(schema.orderItems).values(

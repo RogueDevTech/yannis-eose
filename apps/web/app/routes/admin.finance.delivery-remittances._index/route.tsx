@@ -119,6 +119,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // View mode: 'batches' (default) or 'orders' (flat list)
   const viewMode = url.searchParams.get('view') === 'orders' ? 'orders' : 'batches';
 
+  // Active tab: 'eligible' (default) or 'remittances'
+  const activeTab = url.searchParams.get('tab') === 'remittances' ? 'remittances' : 'eligible';
+
   const remittancesShell = {
     filters: {
       status: statusFilter ?? '',
@@ -138,7 +141,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pageData = (async () => {
   // Single bundled call replaces 4 parallel HTTP round-trips. Eligible orders
   // are deferred — loaded on demand when the Create modal opens.
-  const bundleInput = encodeURIComponent(JSON.stringify(listInput));
+  // When on the eligible tab, pass summaryOnly=true to skip paginated records.
+  const bundlePayload = activeTab === 'eligible'
+    ? { ...listInput, summaryOnly: true }
+    : listInput;
+  const bundleInput = encodeURIComponent(JSON.stringify(bundlePayload));
 
   // Orders view: flat list of individual orders across remittance batches
   type RemittanceOrderRow = {
@@ -151,9 +158,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     category: 'marketing' | 'cart' | 'follow-up' | 'offline';
   };
   const ordersViewInput = encodeURIComponent(JSON.stringify(listInput));
-  const ordersViewPromise = viewMode === 'orders'
+  const ordersViewPromise = viewMode === 'orders' && activeTab === 'remittances'
     ? apiRequest<unknown>(
         `/trpc/logistics.listDeliveryRemittanceOrders?input=${ordersViewInput}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve(null);
+
+  // Skip eligible orders fetch on remittances tab — only needed on eligible tab
+  const eligiblePromise = activeTab === 'eligible'
+    ? apiRequest<unknown>(
+        '/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' +
+          encodeURIComponent(eligibleListInput),
         { method: 'GET', cookie },
       )
     : Promise.resolve(null);
@@ -163,11 +179,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/logistics.deliveryRemittancesPageBundle?input=${bundleInput}`,
       { method: 'GET', cookie },
     ),
-    apiRequest<unknown>(
-      '/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' +
-        encodeURIComponent(eligibleListInput),
-      { method: 'GET', cookie },
-    ),
+    eligiblePromise,
     ordersViewPromise,
   ]);
 
@@ -228,7 +240,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   sentByOptions.sort((a, b) => a.name.localeCompare(b.name));
 
-  const eligibleListData = eligibleListRes.ok
+  const eligibleListData = eligibleListRes && 'ok' in eligibleListRes && eligibleListRes.ok
     ? (eligibleListRes.data as { result?: { data?: { orders: EligibleOrder[]; total: number } } })?.result
         ?.data
     : null;

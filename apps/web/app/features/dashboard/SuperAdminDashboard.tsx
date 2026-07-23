@@ -191,7 +191,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const followUpSc = data?.followUpCounts as Record<string, number> ?? {};
         const cartSc = data?.cartOrdersCounts as Record<string, number> ?? {};
         const dfuSc = (data as unknown as Record<string, unknown>)?.deliveredFollowUpCounts as Record<string, number> ?? {};
-        const deliveredBySource = (data as unknown as Record<string, unknown>)?.deliveredBySource as Record<string, number> ?? {};
+        const deliveredBySource = (data as unknown as Record<string, unknown>)?.deliveredBySource as { delivered: Record<string, number>; remitted: Record<string, number> } ?? { delivered: {}, remitted: {} };
 
         const sumExcludeDeleted = (sc: Record<string, number>) =>
           Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
@@ -298,28 +298,49 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             <FunnelBreakdownModal
               open={breakdownModal === 'totalDelivered'}
               onClose={() => setBreakdownModal(null)}
-              title="Total Delivered: Breakdown"
-              description="Delivered + remitted orders by source category."
-              lines={[
-                { label: 'Funnel (marketing forms)', value: (deliveredBySource['edge-form'] ?? 0) + (deliveredBySource['import'] ?? 0) },
-                { label: 'Offline (manually created)', value: deliveredBySource['offline'] ?? 0 },
-                { label: 'Follow-Up', value: deliveredBySource['follow-up'] ?? 0 },
-                { label: 'Cart (recovered)', value: deliveredBySource['online'] ?? 0 },
-                { label: 'Delivered Follow-Up', value: deliveredBySource['delivered_follow_up'] ?? 0 },
-                { label: 'Total', value: tDelivered, bold: true },
-              ]}
+              title="Delivered: Breakdown"
+              description="Orders at Delivered status, by source category."
+              lines={(() => {
+                // Use per-table sources so the breakdown matches every strip exactly.
+                // Funnel + Offline from orders table; Follow-Up, Cart, DFU from their own tables.
+                const dOffline = offSc['DELIVERED'] ?? 0;
+                const dFollowUp = followUpSc['DELIVERED'] ?? 0;
+                const dCart = cartSc['DELIVERED'] ?? 0;
+                const dDfu = dfuSc['DELIVERED'] ?? 0;
+                // Funnel = tile total minus all other categories
+                const dFunnel = tDeliveredOnly - dOffline - dFollowUp - dCart - dDfu;
+                return [
+                  { label: 'Funnel (marketing forms)', value: Math.max(0, dFunnel) },
+                  { label: 'Offline (manually created)', value: dOffline },
+                  { label: 'Follow-Up', value: dFollowUp },
+                  { label: 'Cart (recovered)', value: dCart },
+                  { label: 'Delivered Follow-Up', value: dDfu },
+                  { label: 'Total', value: tDeliveredOnly, bold: true },
+                ];
+              })()}
             />
             <FunnelBreakdownModal
               open={breakdownModal === 'totalRemitted'}
               onClose={() => setBreakdownModal(null)}
-              title="Total Remitted: Breakdown"
+              title="Remitted: Breakdown"
               description="Orders where cash has been collected and confirmed."
-              lines={[
-                { label: 'Funnel Orders', value: sumStatus(mktSc, 'REMITTED') },
-                { label: 'Offline Orders', value: sumStatus(offSc, 'REMITTED') },
-                { label: 'Delivered Follow-Up', value: sumStatus(dfuSc, 'REMITTED') },
-                { label: 'Total', value: tRemitted, bold: true },
-              ]}
+              lines={(() => {
+                // Use per-table sources so the breakdown matches every strip exactly.
+                const remOffline = offSc['REMITTED'] ?? 0;
+                const remFollowUp = followUpSc['REMITTED'] ?? 0;
+                const remCart = cartSc['REMITTED'] ?? 0;
+                const remDfu = dfuSc['REMITTED'] ?? 0;
+                // Funnel = tile total minus all other categories
+                const remFunnel = tRemitted - remOffline - remFollowUp - remCart - remDfu;
+                return [
+                  { label: 'Funnel Orders', value: Math.max(0, remFunnel) },
+                  { label: 'Offline Orders', value: remOffline },
+                  { label: 'Follow-Up Orders', value: remFollowUp },
+                  { label: 'Cart Orders', value: remCart },
+                  { label: 'Delivered Follow-Up', value: remDfu },
+                  { label: 'Total', value: tRemitted, bold: true },
+                ];
+              })()}
             />
           </div>
         );
@@ -563,6 +584,15 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     description="Form orders only. Excludes offline, graduated follow-up, and cart orders (they have their own strips)."
                     lines={[
                       { label: 'Form orders', value: csTotal },
+                    ]}
+                  />
+                  <FunnelBreakdownModal
+                    open={breakdownModal === 'csDelivered'}
+                    onClose={() => setBreakdownModal(null)}
+                    title="CS Delivered: Breakdown"
+                    description="Orders at Delivered status in the CS funnel (form orders only)."
+                    lines={[
+                      { label: 'Form orders (delivered)', value: csDeliveredOnly },
                     ]}
                   />
                 </div>

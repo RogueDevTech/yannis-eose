@@ -125,7 +125,7 @@ async function _ceoOverviewFetch(params: {
     // Delivered follow-up orders — separate funnel on dashboard.
     ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId, undefined, undefined, 'servicing', effectiveBranchIds, false, false, false, false, 'delivered_follow_up').catch(() => ({})),
     // Per-source delivered breakdown for the Total Delivered info modal.
-    ordersService!.getDeliveredBySource(startDate, endDate, branchId, effectiveBranchIds).catch(() => ({} as Record<string, number>)),
+    ordersService!.getDeliveredBySource(startDate, endDate, branchId, effectiveBranchIds).catch(() => ({ delivered: {}, remitted: {} })),
   ]);
 
   let profitReport: {
@@ -280,7 +280,7 @@ async function _ceoOverviewFetch(params: {
     // funnels exclude graduated (they have their own strips).
     totalOrdersCounts: (totalOrdersCounts ?? {}) as Record<string, number>,
     deliveredFollowUpCounts: (deliveredFollowUpCounts ?? {}) as Record<string, number>,
-    deliveredBySource: (deliveredBySourceResult ?? {}) as Record<string, number>,
+    deliveredBySource: (deliveredBySourceResult ?? { delivered: {}, remitted: {} }) as { delivered: Record<string, number>; remitted: Record<string, number> },
   };
 }
 
