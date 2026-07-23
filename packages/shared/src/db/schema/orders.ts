@@ -111,6 +111,10 @@ export const orders = pgTable('orders', {
   isDeliveredFollowUp: boolean('is_delivered_follow_up').default(false).notNull(),
   /** Links a follow-up copy back to the original order. NULL for normal orders. */
   followUpSourceOrderId: uuid('follow_up_source_order_id'),
+  /** Back-link to the follow_up_orders row this order graduated from. NULL for non-follow-up orders. Migration 0263. */
+  sourceFollowUpOrderId: uuid('source_follow_up_order_id'),
+  /** Back-link to the cart_orders row this order graduated from. NULL for non-cart orders. Migration 0263. */
+  sourceCartOrderId: uuid('source_cart_order_id'),
   /** When true, order is frozen — no further status transitions, assignments, or edits allowed.
    *  Set by the follow-up config sync when the order is pulled into follow_up_orders. */
   frozenForFollowUp: boolean('frozen_for_follow_up').default(false).notNull(),

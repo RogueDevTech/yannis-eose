@@ -43,7 +43,7 @@ import { FilterPrefsContext } from '~/hooks/useFilterPreferences';
 
 export type CompactTableAlign = 'left' | 'right' | 'center';
 
-export type CompactTableLoadingVariant = 'replace' | 'overlay';
+export type CompactTableLoadingVariant = 'replace' | 'overlay' | 'skeleton';
 
 export interface CompactTableColumn<T> {
   /** Stable key — used as React key for cells/headers */
@@ -529,6 +529,50 @@ export function CompactTable<T>({
       <>
         <div className="flex items-center justify-center py-16">
           <Spinner size="lg" />
+        </div>
+        {paginationEl}
+      </>
+    );
+  }
+
+  if (loading && loadingVariant === 'skeleton') {
+    const skeletonCount = Math.min(rows.length || 8, 12);
+    return (
+      <>
+        {/* Desktop skeleton */}
+        <div className={['hidden md:block overflow-x-auto', className].filter(Boolean).join(' ')}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-app-border bg-app-hover">
+                {desktopColumns.map((col) => (
+                  <th key={col.key} className="px-3 py-2 text-left text-xs font-medium text-app-fg-muted">
+                    {typeof col.header === 'string' ? col.header : col.key}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: skeletonCount }, (_, i) => (
+                <tr key={i} className="border-b border-app-border/50">
+                  {desktopColumns.map((col) => (
+                    <td key={col.key} className="px-3 py-2.5">
+                      <div className="h-4 w-3/4 rounded bg-app-hover animate-pulse" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Mobile skeleton */}
+        <div className="md:hidden space-y-2 px-1">
+          {Array.from({ length: Math.min(skeletonCount, 6) }, (_, i) => (
+            <div key={i} className="rounded-lg border border-app-border bg-app-bg p-3 space-y-2.5">
+              <div className="h-4 w-2/3 rounded bg-app-hover animate-pulse" />
+              <div className="h-3.5 w-1/2 rounded bg-app-hover animate-pulse" />
+              <div className="h-3.5 w-1/3 rounded bg-app-hover animate-pulse" />
+            </div>
+          ))}
         </div>
         {paginationEl}
       </>

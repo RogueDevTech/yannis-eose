@@ -221,6 +221,8 @@ export const listDeliveryRemittancesSchema = z.object({
   sortDir: z.enum(['asc', 'desc']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
+  /** When true, skip paginated records and only return summary stats + empty records array. */
+  summaryOnly: z.boolean().optional().default(false),
 });
 export type ListDeliveryRemittancesInput = z.infer<typeof listDeliveryRemittancesSchema>;
 

@@ -5158,6 +5158,32 @@ export class MarketingService {
     if (periodEnd) confirmedConditions.push(lte(schema.orders.createdAt, periodEnd));
     const confirmedWhere = and(...confirmedConditions);
 
+    // Cart graduated (DELIVERED/REMITTED from cart_orders table) — marketing scope only.
+    // Matches getPerformanceMetricsBatched so CPA/CR/DR are consistent with leaderboard.
+    const cartQuery = !isServicingScope
+      ? (() => {
+          const cartConds: SQL[] = [
+            isNull(schema.cartOrders.deletedAt),
+            inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+          ];
+          const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
+          if (bCond) cartConds.push(bCond);
+          if (mediaBuyerId && mediaBuyerId !== '__system__') cartConds.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+          if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
+            cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
+          }
+          if (periodStart) cartConds.push(gte(schema.cartOrders.createdAt, periodStart));
+          if (periodEnd) cartConds.push(lte(schema.cartOrders.createdAt, periodEnd));
+          return this.db
+            .select({
+              deliveredCount: count(),
+              deliveredRevenue: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}), 0)`.mapWith(Number),
+            })
+            .from(schema.cartOrders)
+            .where(and(...cartConds));
+        })()
+      : Promise.resolve([{ deliveredCount: 0, deliveredRevenue: 0 }] as { deliveredCount: number; deliveredRevenue: number }[]);
+
     const [
       totalSpendRows,
       pendingSpendRows,
@@ -5166,6 +5192,7 @@ export class MarketingService {
       deliveredOrdersRows,
       deliveredRevenueRows,
       confirmedOrdersRows,
+      cartDeliveredRows,
     ] = await Promise.all([
       this.db
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
@@ -5186,16 +5213,19 @@ export class MarketingService {
         .from(schema.orders)
         .where(deliveredWhere),
       this.db.select({ count: count() }).from(schema.orders).where(confirmedWhere),
+      cartQuery,
     ]);
 
     const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
     const pendingSpend = Number(pendingSpendRows[0]?.total ?? 0);
     const otherExpenses = Number(otherExpenseRows[0]?.total ?? 0);
     const totalSpend = approvedSpend + pendingSpend;
-    const totalOrders = totalOrdersRows[0]?.count ?? 0;
-    const deliveredOrders = deliveredOrdersRows[0]?.count ?? 0;
-    const deliveredRevenue = Number(deliveredRevenueRows[0]?.total ?? 0);
-    const confirmedOrders = confirmedOrdersRows[0]?.count ?? 0;
+    const cartDelivered = cartDeliveredRows[0]?.deliveredCount ?? 0;
+    const cartRevenue = cartDeliveredRows[0]?.deliveredRevenue ?? 0;
+    const totalOrders = (totalOrdersRows[0]?.count ?? 0) + cartDelivered;
+    const deliveredOrders = (deliveredOrdersRows[0]?.count ?? 0) + cartDelivered;
+    const deliveredRevenue = Number(deliveredRevenueRows[0]?.total ?? 0) + cartRevenue;
+    const confirmedOrders = (confirmedOrdersRows[0]?.count ?? 0) + cartDelivered;
     const confirmationRate = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
 
     return {

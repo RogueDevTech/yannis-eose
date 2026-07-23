@@ -7165,7 +7165,7 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
-  ): Promise<Record<string, number>> {
+  ): Promise<{ delivered: Record<string, number>; remitted: Record<string, number> }> {
     const conditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       isNull(schema.orders.deletedAt),
@@ -7175,20 +7175,41 @@ export class OrdersService {
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
 
+    // Classify graduated follow-up orders (is_follow_up=true, order_source != 'delivered_follow_up')
+    // as 'follow-up' instead of their inherited source (e.g. 'edge-form').
+    // Cart-graduated orders already have order_source='online'.
+    // Delivered follow-up copies keep order_source='delivered_follow_up'.
     const rows = await this.db
       .select({
-        source: sql<string>`COALESCE(${schema.orders.orderSource}, 'edge-form')`,
+        source: sql<string>`CASE
+          WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+          WHEN ${schema.orders.isFollowUp} = true THEN 'follow-up'
+          ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
+        END`,
+        status: schema.orders.status,
         count: sql<number>`COUNT(*)::int`,
       })
       .from(schema.orders)
       .where(and(...conditions))
-      .groupBy(sql`COALESCE(${schema.orders.orderSource}, 'edge-form')`);
+      .groupBy(
+        sql`CASE
+          WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+          WHEN ${schema.orders.isFollowUp} = true THEN 'follow-up'
+          ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
+        END`,
+        schema.orders.status,
+      );
 
-    const result: Record<string, number> = {};
+    const delivered: Record<string, number> = {};
+    const remitted: Record<string, number> = {};
     for (const row of rows) {
-      result[row.source] = row.count;
+      if (row.status === 'DELIVERED') {
+        delivered[row.source] = row.count;
+      } else {
+        remitted[row.source] = row.count;
+      }
     }
-    return result;
+    return { delivered, remitted };
   }
 
   async getDeliveriesByProduct(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<

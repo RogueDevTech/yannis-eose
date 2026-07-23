@@ -1868,6 +1868,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .limit(1);
     if (!fuOrder) return;
 
+    // Graduation guard: if already graduated, skip (prevents double-graduation).
+    if (fuOrder.graduatedOrderId) {
+      this.logger.warn(`Follow-up order ${followUpOrderId} already graduated to ${fuOrder.graduatedOrderId}, skipping.`);
+      return;
+    }
+
     const fuItems = await this.db
       .select()
       .from(schema.followUpOrderItems)
@@ -1977,12 +1983,21 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           isFollowUp: true,
           isDeliveredFollowUp,
           followUpSourceOrderId: fuOrder.sourceOrderId,
+          sourceFollowUpOrderId: followUpOrderId,
           confirmedAt: fuOrder.confirmedAt,
           allocatedAt: fuOrder.allocatedAt,
           dispatchedAt: fuOrder.dispatchedAt,
           deliveredAt: fuOrder.deliveredAt,
         })
         .returning({ id: schema.orders.id });
+
+      // Link back: set graduatedOrderId on the source follow-up order.
+      if (graduated) {
+        await tx
+          .update(schema.followUpOrders)
+          .set({ graduatedOrderId: graduated.id, updatedAt: new Date() })
+          .where(eq(schema.followUpOrders.id, followUpOrderId));
+      }
 
       if (graduated && fuItems.length > 0) {
         await tx.insert(schema.orderItems).values(

@@ -65,6 +65,8 @@ export const cartOrders = pgTable('cart_orders', {
   routingRuleId: uuid('routing_rule_id'),
   /** Target team for auto-assignment. NULL = any closer in the branch. */
   routingTeamId: uuid('routing_team_id'),
+  /** Back-link to the graduated orders row. NULL until graduation. Set once, prevents double-graduation. Migration 0263. */
+  graduatedOrderId: uuid('graduated_order_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

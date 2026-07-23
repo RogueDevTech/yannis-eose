@@ -107,6 +107,8 @@ export const followUpOrders = pgTable('follow_up_orders', {
   /** Target team for auto-assignment. NULL = any closer in the branch. */
   routingTeamId: uuid('routing_team_id'),
   cartId: uuid('cart_id'),
+  /** Back-link to the graduated orders row. NULL until graduation. Set once, prevents double-graduation. Migration 0263. */
+  graduatedOrderId: uuid('graduated_order_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

@@ -354,7 +354,9 @@ export function DeliveryRemittancesPage({
   };
 
   const s = summary as Record<string, unknown>;
-  const receivedOrderCount = Number(s.receivedOrderCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
+  // Use remittedOnlyCount (orders with status=REMITTED in the orders table) as the
+  // canonical count for both the tab pill and stat strip so the numbers always match.
+  const receivedOrderCount = Number(s.remittedOnlyCount ?? s.receivedOrderCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
   const disputedOrderCount = Number(s.disputedOrderCount ?? summary.disputedCount ?? 0);
   const remittedOrderCount = Number(summary.batchedOrderCount ?? 0) || (receivedOrderCount + Number(summary.pendingCount ?? 0) + disputedOrderCount);
   const hasFilters = !!filters.location || !!filters.sentBy;
@@ -1000,28 +1002,29 @@ export function DeliveryRemittancesPage({
         const netRemittable = grossVal - deliveryFees - commitmentFees - posFees - failedDelivery - discounts - waybillCosts;
         return (
         <>
-        {/* Main stats — Delivered = Awaiting + Remitted + Pending + Disputed */}
+        {/* Info row — awaiting all time (view-only, not filterable) */}
+        {Number(summary.awaitingCount) > 0 && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg-muted">
+            <span>
+              Awaiting remittance (all time): <span className="font-medium tabular-nums text-info-600 dark:text-info-400">{Number(summary.awaitingCount).toLocaleString()}</span> orders
+              {' '}(<NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} className="inline font-medium tabular-nums text-info-600 dark:text-info-400" />)
+            </span>
+          </div>
+        )}
+
+        {/* Main stats — Total Delivered + Awaiting Period + Remitted + Pending + Disputed */}
         {(() => {
           const pendingGross = Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0);
           const disputedGross = Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0);
           const s = summary as unknown as Record<string, unknown>;
-          // Use per-status counts from orders table (same dateScope) so the
-          // Remitted tile matches the dashboard exactly.
           const remittedGross = Number(s.remittedOnlyAmount ?? summary.grossOrderValue ?? 0);
           const remittedCount = Number(s.remittedOnlyCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
+          const awaitingPeriodCount = Number(s.deliveredOnlyCount ?? s.awaitingPeriodCount ?? 0);
           return (
             <OverviewStatStrip
               mobileGrid
               mobileGridCols={1}
               items={[
-                {
-                  label: <span className="flex items-center">Awaiting · All time ({Number(summary.awaitingCount)})<RemittanceInfoIcon onClick={() => setInfoModal('awaiting')} /></span>,
-                  value: <NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} />,
-                  valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
-                  title: 'Not yet on any remittance batch (all time)',
-                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
-                  active: viewTab === 'eligible' && !pendingStatus,
-                },
                 {
                   label: `Total Delivered (${Number(summary.deliveredCount ?? 0)})`,
                   value: <NairaPrice amount={summary.deliveredAmount ?? '0'} />,
@@ -1029,10 +1032,12 @@ export function DeliveryRemittancesPage({
                   title: 'All delivered orders in the selected period (DELIVERED + REMITTED)',
                 },
                 {
-                  label: `Awaiting · Period (${Number(s.deliveredOnlyCount ?? (summary as unknown as Record<string, unknown>).awaitingPeriodCount ?? 0)})`,
-                  value: <NairaPrice amount={s.deliveredOnlyAmount as string ?? (summary as unknown as Record<string, unknown>).awaitingPeriodGrossAmount as string ?? '0'} />,
+                  label: `Awaiting · Period (${awaitingPeriodCount})`,
+                  value: <NairaPrice amount={s.deliveredOnlyAmount as string ?? s.awaitingPeriodGrossAmount as string ?? '0'} />,
                   valueClassName: 'text-blue-600 dark:text-blue-400 tabular-nums',
                   title: 'Orders with status DELIVERED in selected period (not yet remitted)',
+                  onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
+                  active: viewTab === 'eligible' && !pendingStatus,
                 },
                 {
                   label: <span className="flex items-center">Remitted ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
@@ -1582,7 +1587,7 @@ export function DeliveryRemittancesPage({
               rowKey={(r) => r.id}
               rowClassName={(r) => r.isDuplicate ? 'bg-warning-50/50 dark:bg-warning-950/20' : ''}
               loading={isLoaderRefetchBusy}
-              loadingVariant="overlay"
+              loadingVariant="skeleton"
               emptyTitle="No remitted orders found"
               emptyDescription={hasFilters ? 'Try adjusting your filters' : 'Orders will appear here once remittances are created'}
               pagination={{
@@ -1648,7 +1653,7 @@ export function DeliveryRemittancesPage({
             rows={remittances}
             rowKey={(r) => r.id}
             loading={isLoaderRefetchBusy}
-            loadingVariant="overlay"
+            loadingVariant="skeleton"
             emptyTitle="No cash remittances found"
             emptyDescription={
               hasFilters
@@ -1826,7 +1831,7 @@ export function DeliveryRemittancesPage({
             rowKey={(o) => o.id}
             rowClassName={(o) => o.isDuplicate ? 'bg-warning-50/50 dark:bg-warning-950/20' : ''}
             loading={isLoaderRefetchBusy}
-            loadingVariant="overlay"
+            loadingVariant="skeleton"
             selection={{
               selectedIds: eligibleSelectedIds,
               onToggle: onEligibleToggle,
