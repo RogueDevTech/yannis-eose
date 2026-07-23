@@ -1,13 +1,16 @@
 -- Add direct FK links between graduated orders and their source tables.
 -- Prevents double-graduation and enables reliable status sync.
 
--- 1. orders table: back-links to source follow_up_orders / cart_orders rows
+-- 1. orders table + history: back-links to source follow_up_orders / cart_orders rows
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS source_follow_up_order_id UUID;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS source_cart_order_id UUID;
+ALTER TABLE orders_history ADD COLUMN IF NOT EXISTS source_follow_up_order_id UUID;
+ALTER TABLE orders_history ADD COLUMN IF NOT EXISTS source_cart_order_id UUID;
 
--- 2. follow_up_orders / cart_orders: forward-link to graduated order
+-- 2. follow_up_orders / cart_orders + history: forward-link to graduated order
 ALTER TABLE follow_up_orders ADD COLUMN IF NOT EXISTS graduated_order_id UUID;
 ALTER TABLE cart_orders ADD COLUMN IF NOT EXISTS graduated_order_id UUID;
+ALTER TABLE cart_orders_history ADD COLUMN IF NOT EXISTS graduated_order_id UUID;
 
 -- 3. Backfill: link existing graduated orders to their source rows.
 
