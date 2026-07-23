@@ -1516,6 +1516,11 @@ export class OrdersService {
       this.logger.warn(`GL reversal on delivered-order delete for ${orderId} failed: ${err instanceof Error ? err.message : err}`);
     }
 
+    // Sync DELETED status back to source cart_orders / follow_up_orders row.
+    if (order.sourceCartOrderId || order.sourceFollowUpOrderId) {
+      await this.syncGraduatedStatusToSource(order, 'DELETED');
+    }
+
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     return { success: true };
@@ -5298,6 +5303,12 @@ export class OrdersService {
     // Execute side effects (stock reservation, deduction, etc.)
     await this.executeTransitionSideEffects(newStatus, order, updated, actor, input.metadata);
 
+    // Sync status back to the source cart_orders / follow_up_orders row so both
+    // tables always reflect the same status after graduation. Non-fatal.
+    if (updated.sourceCartOrderId || updated.sourceFollowUpOrderId) {
+      await this.syncGraduatedStatusToSource(updated, newStatus);
+    }
+
     // Auto-generate a draft invoice the first time an order is CONFIRMED. Idempotent
     // (skips if an invoice for this orderId already exists). Failures don't block the
     // status transition — they're logged so an admin can manually create the invoice.
@@ -8555,6 +8566,57 @@ export class OrdersService {
         status: 'DRAFT',
       });
     });
+  }
+
+  /**
+   * Sync status changes on graduated orders back to their source table
+   * (cart_orders or follow_up_orders). After graduation, the source row
+   * should always mirror the graduated order's status so dashboard counts
+   * stay consistent across tables.
+   *
+   * Non-fatal: logs warnings on failure so the primary transition is never blocked.
+   */
+  private async syncGraduatedStatusToSource(
+    order: typeof schema.orders.$inferSelect,
+    newStatus: string,
+  ) {
+    try {
+      const updatePayload = {
+        status: newStatus,
+        updatedAt: new Date(),
+        ...(newStatus === 'DELETED' ? { deletedAt: new Date() } : {}),
+      };
+
+      // Cart-graduated orders: sync via sourceCartOrderId FK
+      if (order.sourceCartOrderId) {
+        await this.db
+          .update(schema.cartOrders)
+          .set(updatePayload)
+          .where(
+            and(
+              eq(schema.cartOrders.id, order.sourceCartOrderId),
+              isNull(schema.cartOrders.deletedAt),
+            ),
+          );
+      }
+
+      // Follow-up graduated orders: sync via sourceFollowUpOrderId FK
+      if (order.sourceFollowUpOrderId) {
+        await this.db
+          .update(schema.followUpOrders)
+          .set(updatePayload)
+          .where(
+            and(
+              eq(schema.followUpOrders.id, order.sourceFollowUpOrderId),
+              isNull(schema.followUpOrders.deletedAt),
+            ),
+          );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `syncGraduatedStatusToSource for order ${order.id} → ${newStatus} failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   private async executeTransitionSideEffects(

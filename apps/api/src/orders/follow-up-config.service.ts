@@ -18,6 +18,24 @@ import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { randomUUID } from 'node:crypto';
 
+/** Valid values for the order_timeline_events.event_type enum.
+ *  Follow-up order timeline uses plain text — filter before copying to orders. */
+const VALID_TIMELINE_EVENT_TYPES = new Set([
+  'ORDER_RECEIVED', 'ORDER_AUTO_ASSIGNED', 'ORDER_MANUALLY_ASSIGNED',
+  'ORDER_REASSIGNED', 'ORDER_CLAIMED', 'ORDER_VIEWED',
+  'CALL_INITIATED', 'CALL_COMPLETED', 'CALL_NO_ANSWER', 'CALL_FAILED',
+  'MANUAL_CALL_LOGGED', 'SMS_SENT', 'WHATSAPP_SENT',
+  'ORDER_CONFIRMED', 'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED',
+  'CALLBACK_SCHEDULED', 'ORDER_ALLOCATED', 'ORDER_DISPATCHED',
+  'ORDER_IN_TRANSIT', 'ORDER_DELIVERED', 'ORDER_PARTIALLY_DELIVERED',
+  'ORDER_RETURNED', 'ORDER_RESTOCKED', 'ORDER_WRITTEN_OFF',
+  'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED', 'ORDER_DELETED',
+  'LINE_PRICE_CHANGE_REQUESTED', 'LINE_PRICE_CHANGE_APPROVED', 'LINE_PRICE_CHANGE_REJECTED',
+  'CS_ORDER_COMMENT', 'ORDER_RESTORED', 'ORDER_RETRACKED',
+  'ORDER_CS_TRANSFERRED_POST_STATUS', 'ORDER_DUPLICATE_FLAGGED', 'ORDER_UNFROZEN',
+  'ORDER_FROZEN', 'ORDER_REMITTED',
+]);
+
 const MAX_PER_RULE = 10_000;
 const SYNC_PROGRESS_KEY = 'cache:followup:sync_progress';
 const SYNC_PROGRESS_TTL = 300; // 5 minutes
@@ -2013,16 +2031,21 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
 
       if (graduated) {
-        // Copy the full follow-up journey timeline into the graduated order
+        // Copy the full follow-up journey timeline into the graduated order.
+        // follow_up_order_timeline_events uses a plain text column, but
+        // order_timeline_events uses a strict enum — filter out any
+        // event types that don't exist in the enum (e.g. CS_COMMENT,
+        // ORDER_DETAILS_UPDATED stored by older code paths).
         const fuTimeline = await tx
           .select()
           .from(schema.followUpOrderTimelineEvents)
           .where(eq(schema.followUpOrderTimelineEvents.followUpOrderId, followUpOrderId))
           .orderBy(asc(schema.followUpOrderTimelineEvents.createdAt));
 
-        if (fuTimeline.length > 0) {
+        const validTimeline = fuTimeline.filter((t) => VALID_TIMELINE_EVENT_TYPES.has(t.eventType));
+        if (validTimeline.length > 0) {
           await tx.insert(schema.orderTimelineEvents).values(
-            fuTimeline.map((t) => ({
+            validTimeline.map((t) => ({
               orderId: graduated.id,
               eventType: t.eventType as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
               actorId: t.actorId,
