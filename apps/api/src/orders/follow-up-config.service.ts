@@ -1768,12 +1768,18 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
 
     // Graduation: when DELIVERED, copy into orders table.
-    // Must succeed — if graduation fails, the DELIVERED status is already committed
-    // but the pre-delivery dedup guard (above) should have caught any duplicates.
-    // If graduation still fails for an unexpected reason, log it for manual review
-    // but do NOT silently swallow — surface the error.
+    // Runs in its own transaction (SYSTEM actor) after the status update commits.
+    // If graduation fails, log the error and return success — the DELIVERED status
+    // is already committed and retryFailedGraduations() on next boot will retry.
+    // Surfacing the error would confuse the user (order IS delivered, just not graduated yet).
     if (newStatus === 'DELIVERED') {
-      await this.graduateToOrders(orderId);
+      try {
+        await this.graduateToOrders(orderId);
+      } catch (err) {
+        this.logger.error(
+          `Graduation failed for follow-up order ${orderId} (will retry on next boot): ${err instanceof Error ? err.stack ?? err.message : err}`,
+        );
+      }
     }
 
     return { success: true };
