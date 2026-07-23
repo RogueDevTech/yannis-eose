@@ -106,6 +106,15 @@ Every stat strip on every page MUST show numbers that match the table/list below
 - Follow-up orders in TOTAL: only add DELIVERED/REMITTED from `follow_up_orders` table. Never add the full follow-up pipeline total.
 - Delivered follow-up copies (`order_source='delivered_follow_up'` in orders table) are separate from follow_up_orders table rows. Don't conflate.
 
+### Single source of truth for combined strips
+- When a strip shows a TOTAL across all order types, derive every number from **one query** against the orders table (e.g. `onlyGraduateNonMarketing`). Never mix queries with different branch scopes or different tables.
+- For per-source breakdowns (Delivered/Remitted modals), use `getDeliveredBySource` which classifies within the orders table via `order_source` / `is_follow_up`. Never subtract separate-table counts from orders-table counts.
+- Never combine marketing-scoped (`branch_id`) and servicing-scoped (`servicing_branch_id`) query results in the same strip or breakdown.
+
+### Graduation date alignment
+- When a follow-up or cart order graduates (creates a copy in `orders` table), the graduated copy MUST use the **follow-up/cart order's `created_at`**, not the original source order's `created_at`.
+- This ensures date-filtered counts between pipeline tables (`follow_up_orders`, `cart_orders`) and the `orders` table stay consistent for the same period.
+
 ### Cart abandonment vs cart orders
 - "Cart Abandonment" counts from `cart_abandonments` table (all abandoned forms).
 - "Cart Orders" counts from `cart_orders` table (recovered carts in the CS pipeline).
@@ -120,8 +129,7 @@ Every stat strip on every page MUST show numbers that match the table/list below
 
 #### SuperAdmin / SUPPORT → CEO Dashboard (`/admin`)
 - **ORDER FUNNEL**: `getStatusCounts` with `branchScope='marketing'`, `isFollowUp=false`, `excludeOffline='include-imports'`, `excludeGraduated=true`, `excludeCartGraduated=true`.
-- **CS ORDER FUNNEL**: same but `branchScope='servicing'`.
-- **TOTAL ORDERS**: `getStatusCounts` with `onlyGraduateNonMarketing=true` — marketing orders at all statuses + non-marketing only at DELIVERED/REMITTED.
+- **TOTAL ORDERS**: `getStatusCounts` with `onlyGraduateNonMarketing=true` — all tiles + total from this single query. `onlyGraduateNonMarketing` excludes `is_follow_up=true` from the marketing bucket. Delivered/Remitted breakdowns use `getDeliveredBySource` (orders table, per-source). Must match Cash Remittances.
 - **OFFLINE ORDERS**: `getStatusCounts` with `onlyOffline=true`.
 - **FOLLOW-UP ORDERS**: `getFollowUpConfigService().getFollowUpOrderStatusCounts()` — from `follow_up_orders` table.
 - **CART ORDERS**: `getCartOrdersService().getStatusCounts()` — from `cart_orders` table.

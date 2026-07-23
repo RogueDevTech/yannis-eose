@@ -1594,6 +1594,10 @@ function TotalOrdersStrip({
     return orders + fu + cart + dfu;
   };
 
+  // Per-category breakdown — defined first so `total` can use it
+  const sumExcludeDeleted = (sc: Record<string, number>) =>
+    Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
+
   const unassigned = sumStatus('UNPROCESSED');
   const assigned = sumStatus('CS_ASSIGNED');
   const engaged = sumStatus('CS_ENGAGED');
@@ -1606,14 +1610,11 @@ function TotalOrdersStrip({
   const remitted = sumStatus('REMITTED');
   const delivered = deliveredOnly + remitted;
   const deleted = sumStatus('DELETED');
-  const total = unassigned + assigned + engaged + confirmed + delivered;
+  // Total = all non-DELETED statuses across all sources (orderCounts + FU + cart + DFU)
+  const total = sumExcludeDeleted(orderCounts) + sumExcludeDeleted(fuSc) + sumExcludeDeleted(cartSc) + sumExcludeDeleted(dfuSc);
   const confirmedAndBeyond = confirmed + delivered;
   const cr = total > 0 ? (confirmedAndBeyond / total) * 100 : 0;
   const dr = total > 0 ? (delivered / total) * 100 : 0;
-
-  // Per-category breakdown
-  const sumExcludeDeleted = (sc: Record<string, number>) =>
-    Object.entries(sc).filter(([k]) => k !== 'DELETED' && k !== 'CANCELLED').reduce((s, [, n]) => s + (n || 0), 0);
   const funnelSc: Record<string, number> = {};
   for (const k of Object.keys(orderCounts)) {
     funnelSc[k] = (orderCounts[k] ?? 0) - (offSc[k] ?? 0);

@@ -6608,11 +6608,11 @@ export class OrdersService {
     ];
 
     if (onlyGraduateNonMarketing) {
-      // Marketing orders (edge-form or legacy NULL): full funnel.
+      // Marketing orders (edge-form or legacy NULL, NOT follow-ups): full funnel.
       // Everything else (offline, follow-up, cart, delivered_follow_up): only DELIVERED/REMITTED.
       conditions.push(
         sql`(
-          (${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form')
+          ((${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form') AND ${schema.orders.isFollowUp} = false)
           OR
           (${schema.orders.status} IN ('DELIVERED', 'REMITTED'))
         )`,

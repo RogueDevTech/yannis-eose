@@ -198,6 +198,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const sumStatus = (sc: Record<string, number>, ...keys: string[]) =>
           keys.reduce((s, k) => s + (sc[k] ?? 0), 0);
 
+        // Everything from tSc (orders table, onlyGraduateNonMarketing).
+        // Graduated follow-up/cart orders are already in the orders table,
+        // so this single source matches Cash Remittances exactly.
         const tTotal = sumExcludeDeleted(tSc);
         const tUnprocessed = tSc['UNPROCESSED'] ?? 0;
         const tCsAssigned = tSc['CS_ASSIGNED'] ?? 0;
@@ -211,36 +214,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const tRemitted = tSc['REMITTED'] ?? 0;
         const tDelivered = tDeliveredOnly + tRemitted;
         const tDeleted = tSc['DELETED'] ?? 0;
-        const tCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
-        const tDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
 
-        // Per-category totals for breakdown
-        const catFunnel = sumExcludeDeleted(mktSc);
-        const catOffline = sumExcludeDeleted(offSc);
-        const catFollowUp = sumExcludeDeleted(followUpSc);
-        const catCart = sumExcludeDeleted(cartSc);
-        const catDfu = sumExcludeDeleted(dfuSc);
-
-        // Per-category delivered for breakdown — derived from per-table sources
-        // so the breakdown lines always add up to the displayed total.
-        const delFunnel = sumStatus(mktSc, 'DELIVERED', 'REMITTED');
-        const delOffline = sumStatus(offSc, 'DELIVERED', 'REMITTED');
-        const delFollowUp = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
-        const delCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
-        const delDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
-
-        // Compute totals from breakdown lines so they always tally.
-        // Total = funnel full pipeline + offline/followup/cart/dfu delivered only.
-        const brkOffline = delOffline;
-        const brkFollowUp = delFollowUp;
-        const brkCart = delCart;
-        const brkDfu = delDfu;
-        const computedTotal = catFunnel + brkOffline + brkFollowUp + brkCart + brkDfu;
-        // Use tDelivered (from deduplicated tSc query against orders table)
-        // instead of summing across source tables which double-counts graduated orders.
-        const computedDelivered = tDelivered;
-        const computedCR = computedTotal > 0 ? ((tConfirmed + computedDelivered) / computedTotal) * 100 : 0;
-        const computedDR = computedTotal > 0 ? (computedDelivered / computedTotal) * 100 : 0;
+        const computedCR = tTotal > 0 ? ((tConfirmed + tDelivered) / tTotal) * 100 : 0;
+        const computedDR = tTotal > 0 ? (tDelivered / tTotal) * 100 : 0;
 
         return (
           <div>
@@ -253,7 +229,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               items={[
                 {
                   label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('totalBreakdown')} /></span>,
-                  value: computedTotal,
+                  value: tTotal,
                   valueClassName: 'text-app-fg',
                 },
                 { label: 'Unassigned', value: tUnprocessed, valueClassName: 'text-warning-600 dark:text-warning-400' },
@@ -279,19 +255,25 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               open={breakdownModal === 'totalBreakdown'}
               onClose={() => setBreakdownModal(null)}
               title="Total Orders: Breakdown"
-              description="Funnel shows full pipeline. All other categories count delivered orders only toward the total."
+              description="Funnel orders at all statuses. All other categories count delivered orders only."
               lines={(() => {
-                const brkOffline = sumStatus(offSc, 'DELIVERED', 'REMITTED');
-                const brkFollowUp = sumStatus(followUpSc, 'DELIVERED', 'REMITTED');
-                const brkCart = sumStatus(cartSc, 'DELIVERED', 'REMITTED');
-                const brkDfu = sumStatus(dfuSc, 'DELIVERED', 'REMITTED');
+                // tTotal from tSc (onlyGraduateNonMarketing): marketing orders at all statuses,
+                // everything else only at DELIVERED/REMITTED. Use deliveredBySource to break
+                // down the non-funnel portion by source.
+                const d = deliveredBySource.delivered;
+                const r = deliveredBySource.remitted;
+                const offDelivered = (d['offline'] ?? 0) + (r['offline'] ?? 0);
+                const fuDelivered = (d['follow-up'] ?? 0) + (r['follow-up'] ?? 0);
+                const cartDelivered = (d['online'] ?? 0) + (r['online'] ?? 0);
+                const dfuDelivered = (d['delivered_follow_up'] ?? 0) + (r['delivered_follow_up'] ?? 0);
+                const brkFunnel = tTotal - offDelivered - fuDelivered - cartDelivered - dfuDelivered;
                 return [
-                  { label: 'Funnel Orders', value: catFunnel },
-                  { label: 'Offline Orders (delivered only)', value: brkOffline, muted: true },
-                  { label: 'Follow-Up Orders (delivered only)', value: brkFollowUp, muted: true },
-                  { label: 'Cart Orders (delivered only)', value: brkCart, muted: true },
-                  { label: 'Delivered Follow-Up (delivered only)', value: brkDfu, muted: true },
-                  { label: 'Total', value: catFunnel + brkOffline + brkFollowUp + brkCart + brkDfu, bold: true },
+                  { label: 'Funnel Orders', value: Math.max(0, brkFunnel) },
+                  { label: 'Offline Orders (delivered only)', value: offDelivered, muted: true },
+                  { label: 'Follow-Up Orders (delivered only)', value: fuDelivered, muted: true },
+                  { label: 'Cart Orders (delivered only)', value: cartDelivered, muted: true },
+                  { label: 'Delivered Follow-Up (delivered only)', value: dfuDelivered, muted: true },
+                  { label: 'Total', value: tTotal, bold: true },
                 ];
               })()}
             />
@@ -301,20 +283,14 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               title="Delivered: Breakdown"
               description="Orders at Delivered status, by source category."
               lines={(() => {
-                // Use per-table sources so the breakdown matches every strip exactly.
-                // Funnel + Offline from orders table; Follow-Up, Cart, DFU from their own tables.
-                const dOffline = offSc['DELIVERED'] ?? 0;
-                const dFollowUp = followUpSc['DELIVERED'] ?? 0;
-                const dCart = cartSc['DELIVERED'] ?? 0;
-                const dDfu = dfuSc['DELIVERED'] ?? 0;
-                // Funnel = tile total minus all other categories
-                const dFunnel = tDeliveredOnly - dOffline - dFollowUp - dCart - dDfu;
+                // From getDeliveredBySource — orders table only, broken down by order_source.
+                const d = deliveredBySource.delivered;
                 return [
-                  { label: 'Funnel (marketing forms)', value: Math.max(0, dFunnel) },
-                  { label: 'Offline (manually created)', value: dOffline },
-                  { label: 'Follow-Up', value: dFollowUp },
-                  { label: 'Cart (recovered)', value: dCart },
-                  { label: 'Delivered Follow-Up', value: dDfu },
+                  { label: 'Funnel Orders', value: d['edge-form'] ?? 0 },
+                  { label: 'Offline Orders', value: d['offline'] ?? 0 },
+                  { label: 'Follow-Up Orders', value: d['follow-up'] ?? 0 },
+                  { label: 'Cart Orders', value: d['online'] ?? 0 },
+                  { label: 'Delivered Follow-Up', value: d['delivered_follow_up'] ?? 0 },
                   { label: 'Total', value: tDeliveredOnly, bold: true },
                 ];
               })()}
@@ -325,19 +301,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               title="Remitted: Breakdown"
               description="Orders where cash has been collected and confirmed."
               lines={(() => {
-                // Use per-table sources so the breakdown matches every strip exactly.
-                const remOffline = offSc['REMITTED'] ?? 0;
-                const remFollowUp = followUpSc['REMITTED'] ?? 0;
-                const remCart = cartSc['REMITTED'] ?? 0;
-                const remDfu = dfuSc['REMITTED'] ?? 0;
-                // Funnel = tile total minus all other categories
-                const remFunnel = tRemitted - remOffline - remFollowUp - remCart - remDfu;
+                const r = deliveredBySource.remitted;
                 return [
-                  { label: 'Funnel Orders', value: Math.max(0, remFunnel) },
-                  { label: 'Offline Orders', value: remOffline },
-                  { label: 'Follow-Up Orders', value: remFollowUp },
-                  { label: 'Cart Orders', value: remCart },
-                  { label: 'Delivered Follow-Up', value: remDfu },
+                  { label: 'Funnel Orders', value: r['edge-form'] ?? 0 },
+                  { label: 'Offline Orders', value: r['offline'] ?? 0 },
+                  { label: 'Follow-Up Orders', value: r['follow-up'] ?? 0 },
+                  { label: 'Cart Orders', value: r['online'] ?? 0 },
+                  { label: 'Delivered Follow-Up', value: r['delivered_follow_up'] ?? 0 },
                   { label: 'Total', value: tRemitted, bold: true },
                 ];
               })()}
@@ -482,117 +452,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       { label: 'CR', value: pct(cartCR), valueClassName: confirmationRateColorClass(cartCR) },
                       { label: 'DR', value: pct(cartDR), valueClassName: deliveryRateColorClass(cartDR) },
                       { label: 'Deleted', value: cartSc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: cartOrdersLink({ status: 'DELETED' }) },
-                    ]}
-                  />
-                </div>
-              );
-            })()}
-
-            {(() => {
-              const csSc = orderPipeline.csStatusCounts;
-              // CS funnel query already excludes offline, follow-up, and cart orders.
-              const csTotal = Object.entries(csSc).filter(([k]) => k !== 'DELETED' && k !== 'CART').reduce((sum, [, n]) => sum + (n || 0), 0);
-              const csUnassigned = csSc['UNPROCESSED'] ?? 0;
-              const csAssigned = csSc['CS_ASSIGNED'] ?? 0;
-              const csUnconfirmed = csSc['CS_ENGAGED'] ?? 0;
-              const csConfirmed =
-                (csSc['CONFIRMED'] ?? 0) +
-                (csSc['AGENT_ASSIGNED'] ?? 0) +
-                (csSc['DISPATCHED'] ?? 0) +
-                (csSc['IN_TRANSIT'] ?? 0);
-              const csDeliveredOnly = csSc['DELIVERED'] ?? 0;
-              const csRemitted = csSc['REMITTED'] ?? 0;
-              const csDelivered = csDeliveredOnly + csRemitted;
-              const csDeleted = csSc['DELETED'] ?? 0;
-              const csConfirmedAndBeyond = csConfirmed + csDelivered;
-              const csCR = csTotal > 0 ? (csConfirmedAndBeyond / csTotal) * 100 : 0;
-              const csDR = csTotal > 0 ? (csDelivered / csTotal) * 100 : 0;
-              return (
-                <div>
-                  <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-                    CS Order Funnel
-                  </h2>
-                  <OverviewStatStrip
-                    mobileGrid
-                    tileClassName="!py-2.5"
-                    items={[
-                      {
-                        label: <span className="flex items-center">Total<FunnelInfoIcon onClick={() => setBreakdownModal('csTotal')} /></span>,
-                        value: csTotal,
-                        valueClassName: 'text-app-fg',
-                        to: salesLink(),
-                      },
-                      {
-                        label: 'Unassigned',
-                        value: csUnassigned,
-                        valueClassName: csUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-                        to: salesLink({ status: 'UNPROCESSED' }),
-                      },
-                      {
-                        label: 'Assigned',
-                        value: csAssigned,
-                        valueClassName: 'text-info-600 dark:text-info-400',
-                        to: salesLink({ status: 'CS_ASSIGNED' }),
-                      },
-                      {
-                        label: 'Unconfirmed',
-                        value: csUnconfirmed,
-                        valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                        to: salesLink({ status: 'CS_ENGAGED' }),
-                      },
-                      {
-                        label: 'Confirmed',
-                        value: csConfirmed,
-                        valueClassName: 'text-brand-600 dark:text-brand-400',
-                        to: salesLink({ status: 'CONFIRMED' }),
-                      },
-                      {
-                        label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('csDelivered')} /></span>,
-                        value: csDeliveredOnly,
-                        valueClassName: 'text-success-600 dark:text-success-400',
-                        to: salesLink({ status: 'DELIVERED' }),
-                      },
-                      {
-                        label: 'Remitted',
-                        value: csRemitted,
-                        valueClassName: 'text-green-600 dark:text-green-400',
-                      },
-                      {
-                        label: 'CR',
-                        value: pct(csCR),
-                        valueClassName: confirmationRateColorClass(csCR),
-                        title: 'Confirmation Rate — confirmed-or-beyond / total (excludes offline)',
-                      },
-                      {
-                        label: 'DR',
-                        value: pct(csDR),
-                        valueClassName: deliveryRateColorClass(csDR),
-                        title: 'Delivery Rate — delivered / total (excludes offline)',
-                      },
-                      {
-                        label: 'Deleted',
-                        value: csDeleted,
-                        valueClassName: 'text-danger-600 dark:text-danger-400',
-                        to: salesLink({ status: 'DELETED' }),
-                      },
-                    ]}
-                  />
-                  <FunnelBreakdownModal
-                    open={breakdownModal === 'csTotal'}
-                    onClose={() => setBreakdownModal(null)}
-                    title="CS Total: Breakdown"
-                    description="Form orders only. Excludes offline, graduated follow-up, and cart orders (they have their own strips)."
-                    lines={[
-                      { label: 'Form orders', value: csTotal },
-                    ]}
-                  />
-                  <FunnelBreakdownModal
-                    open={breakdownModal === 'csDelivered'}
-                    onClose={() => setBreakdownModal(null)}
-                    title="CS Delivered: Breakdown"
-                    description="Orders at Delivered status in the CS funnel (form orders only)."
-                    lines={[
-                      { label: 'Form orders (delivered)', value: csDeliveredOnly },
                     ]}
                   />
                 </div>

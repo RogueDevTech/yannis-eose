@@ -1933,26 +1933,19 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // the follow-up order at pull time — preserve that through graduation.
     const isDeliveredFollowUp = fuOrder.orderSource === 'delivered_follow_up';
     let resolvedOrderSource: string = isDeliveredFollowUp ? 'delivered_follow_up' : 'follow-up';
-    let resolvedCreatedAt: Date = fuOrder.createdAt;
+    // Always use the follow-up order's own createdAt so the graduated copy
+    // appears in the same date range as the follow-up, keeping date-filtered
+    // counts consistent between follow_up_orders and orders tables.
+    const resolvedCreatedAt: Date = fuOrder.createdAt;
     if (isCartOrigin && !isDeliveredFollowUp) {
       resolvedOrderSource = 'online';
-      // Cart-origin: follow-up's own createdAt is the best origin date
     } else if (fuOrder.sourceOrderId && !isDeliveredFollowUp) {
       const [src] = await this.db
-        .select({ orderSource: schema.orders.orderSource, createdAt: schema.orders.createdAt })
+        .select({ orderSource: schema.orders.orderSource })
         .from(schema.orders)
         .where(eq(schema.orders.id, fuOrder.sourceOrderId))
         .limit(1);
       resolvedOrderSource = src?.orderSource ?? 'follow-up';
-      if (src?.createdAt) resolvedCreatedAt = src.createdAt;
-    } else if (fuOrder.sourceOrderId && isDeliveredFollowUp) {
-      // Still resolve createdAt from source for delivered follow-ups
-      const [src] = await this.db
-        .select({ createdAt: schema.orders.createdAt })
-        .from(schema.orders)
-        .where(eq(schema.orders.id, fuOrder.sourceOrderId))
-        .limit(1);
-      if (src?.createdAt) resolvedCreatedAt = src.createdAt;
     }
 
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
