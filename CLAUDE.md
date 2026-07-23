@@ -199,6 +199,7 @@ Every stat strip on every page MUST show numbers that match the table/list below
 5. Check the role-specific data flow above — never break an existing role's numbers.
 
 ## Git Workflow
+- **Never push without explicit user confirmation.** Always ask "Ready to push?" and wait for a yes before running `git push`.
 - Default push target is `dev` branch. When the user says "push" or "push to GitHub", push to `dev`.
 - Always create PRs against `dev`, never `main`.
 - Never push directly to `main`.

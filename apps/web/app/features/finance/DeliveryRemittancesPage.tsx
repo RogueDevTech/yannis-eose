@@ -213,6 +213,12 @@ export function DeliveryRemittancesPage({
   const location = useLocation();
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
+  // Also treat same-page navigation as loading so skeleton stays visible
+  // while deferred data resolves (prevents empty-state flash on filter change).
+  const isNavigatingOnPage =
+    navigation.state === 'loading' &&
+    navigation.location?.pathname === location.pathname;
+  const isPageLoading = isLoaderRefetchBusy || isNavigatingOnPage;
   const { totalPages, page, pageSize, pageSizeOptions } = pagination;
   const {
     totalPages: eligibleTotalPages,
@@ -1024,6 +1030,7 @@ export function DeliveryRemittancesPage({
             <OverviewStatStrip
               mobileGrid
               mobileGridCols={1}
+              loading={isPageLoading}
               items={[
                 {
                   label: `Total Delivered (${Number(summary.deliveredCount ?? 0)})`,
@@ -1073,6 +1080,7 @@ export function DeliveryRemittancesPage({
           <OverviewStatStrip
             mobileGrid
             mobileGridCols={1}
+            loading={isPageLoading}
             tileClassName="!py-2"
             items={[
               {
@@ -1455,10 +1463,12 @@ export function DeliveryRemittancesPage({
           {viewMode === 'orders' ? (
             <CompactTable<RemittanceOrderRow>
               className="[&_td]:py-[3px] [&_th]:py-[3px]"
+              columnVisibilityKey="admin.finance.delivery-remittances.orders"
               columns={[
                 {
                   key: 'sn',
                   header: 'S/N',
+                  hideable: false,
                   render: (_r, i) => (
                     <span className="text-xs font-mono text-app-fg-muted">
                       {(page - 1) * pageSize + i + 1}
@@ -1561,6 +1571,7 @@ export function DeliveryRemittancesPage({
                 {
                   key: 'actions',
                   header: '',
+                  hideable: false,
                   align: 'right',
                   tight: true,
                   render: (r) => (
@@ -1586,7 +1597,7 @@ export function DeliveryRemittancesPage({
               rows={remittanceOrders}
               rowKey={(r) => r.id}
               rowClassName={(r) => r.isDuplicate ? 'bg-warning-50/50 dark:bg-warning-950/20' : ''}
-              loading={isLoaderRefetchBusy}
+              loading={isPageLoading}
               loadingVariant="skeleton"
               emptyTitle="No remitted orders found"
               emptyDescription={hasFilters ? 'Try adjusting your filters' : 'Orders will appear here once remittances are created'}
@@ -1652,7 +1663,7 @@ export function DeliveryRemittancesPage({
             columns={remittanceColumns}
             rows={remittances}
             rowKey={(r) => r.id}
-            loading={isLoaderRefetchBusy}
+            loading={isPageLoading}
             loadingVariant="skeleton"
             emptyTitle="No cash remittances found"
             emptyDescription={
@@ -1830,7 +1841,7 @@ export function DeliveryRemittancesPage({
             rows={eligibleOrders}
             rowKey={(o) => o.id}
             rowClassName={(o) => o.isDuplicate ? 'bg-warning-50/50 dark:bg-warning-950/20' : ''}
-            loading={isLoaderRefetchBusy}
+            loading={isPageLoading}
             loadingVariant="skeleton"
             selection={{
               selectedIds: eligibleSelectedIds,
