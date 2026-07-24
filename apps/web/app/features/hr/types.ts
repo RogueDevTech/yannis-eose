@@ -129,6 +129,4 @@ export interface HRStreamData {
   monthlyPayrolls: MonthlyPayrollGroup[];
   branches: BranchOption[];
   viewer: ViewerInfo;
-  /** When set, batch detail panel opens for this batch on mount. */
-  initialBatchId: string | null;
 }

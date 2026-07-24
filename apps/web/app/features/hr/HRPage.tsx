@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { formatRoleLabel } from '~/components/ui/role-badge';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -29,6 +29,7 @@ import { TextInput } from '~/components/ui/text-input';
 import type { Adjustment, HRUser, HRStreamData } from './types';
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
+import { ADMIN_ROLES, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
 
 const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 
@@ -52,7 +53,6 @@ export function HRPage({
   monthlyPayrolls,
   branches,
   viewer,
-  initialBatchId,
 }: HRStreamData) {
   const fetcher = useFetcher();
   const hrSurface = useFetcherActionSurface(fetcher);
@@ -288,12 +288,6 @@ export function HRPage({
           monthlyPayrolls={monthlyPayrolls}
           branches={branches}
           viewer={viewer}
-          initialBatchId={initialBatchId}
-          fetchBatchDetail={async (id) => {
-            const res = await fetch(`/hr/payroll-batch/${id}`);
-            if (!res.ok) return null;
-            return res.json();
-          }}
         />
       )}
 
