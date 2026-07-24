@@ -41,7 +41,7 @@ function parseBonusLines(breakdown: unknown): Array<{ label: string; amount: num
 
 function PayslipDetailLine({ label, amount, bold }: { label: string; amount: number; bold?: boolean }) {
   return (
-    <div className={`flex justify-between py-1.5 ${bold ? 'font-semibold text-app-fg' : 'text-sm text-app-fg-muted'}`}>
+    <div className={`flex justify-between py-2 ${bold ? 'font-semibold text-app-fg' : 'text-sm text-app-fg-muted'}`}>
       <span>{label}</span>
       <NairaPrice amount={amount} />
     </div>
@@ -88,12 +88,15 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
         header: 'Employee',
         hideable: false,
         render: (row) => (
-          <div>
-            <span className="font-medium text-app-fg">{row.staffName ?? 'Unknown'}</span>
-            {row.payout.payRoleName ? (
-              <p className="text-xs text-app-fg-muted">{row.payout.payRoleName}</p>
-            ) : null}
-          </div>
+          <span className="font-medium text-app-fg">{row.staffName ?? 'Unknown'}</span>
+        ),
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        nowrap: true,
+        render: (row) => (
+          <span className="text-sm text-app-fg-muted">{row.payout.payRoleName ?? '—'}</span>
         ),
       },
       {
@@ -184,19 +187,19 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
       )}
 
       {/* ── Payslip Detail Modal ── */}
-      <Modal open={!!vp} onClose={() => setViewingPayslip(null)} maxWidth="max-w-md">
+      <Modal open={!!vp} onClose={() => setViewingPayslip(null)} maxWidth="max-w-md" contentClassName="p-5 space-y-5">
         {vp && (
-          <div className="space-y-4">
+          <>
             <div>
               <h2 className="text-lg font-semibold text-app-fg">{vp.staffName ?? 'Staff'}</h2>
-              <p className="text-sm text-app-fg-muted">
-                {vp.payout.payRoleName ? `${vp.payout.payRoleName} · ` : ''}{formatPeriod(vp.batch.periodMonth)} · {vp.batch.department}
+              <p className="text-sm text-app-fg-muted mt-0.5">
+                {vp.payout.payRoleName ? `${vp.payout.payRoleName} \u00b7 ` : ''}{formatPeriod(vp.batch.periodMonth)} \u00b7 {vp.batch.department}
               </p>
             </div>
 
             {/* Earnings */}
             <div>
-              <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-1">Earnings</h3>
+              <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-2">Earnings</h3>
               <div className="divide-y divide-app-border">
                 <PayslipDetailLine label="Base Salary" amount={Number(vp.payout.baseSalary)} />
                 {Number(vp.payout.performanceBonus) > 0 && (
@@ -217,7 +220,7 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
 
             {/* Deductions */}
             <div>
-              <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-1">Deductions</h3>
+              <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-2">Deductions</h3>
               <div className="divide-y divide-app-border">
                 {Number(vp.payout.payeTax) > 0 && (
                   <PayslipDetailLine label="PAYE Tax" amount={Number(vp.payout.payeTax)} />
@@ -230,14 +233,14 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
             </div>
 
             {/* Net Pay */}
-            <div className="rounded-lg bg-app-hover p-3 flex justify-between items-center">
+            <div className="rounded-lg bg-app-hover px-4 py-3 flex justify-between items-center">
               <span className="font-semibold text-app-fg">Net Pay</span>
               <span className="text-lg font-bold text-success-600 dark:text-success-400">
                 <NairaPrice amount={Number(vp.payout.netPay)} />
               </span>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-1 border-t border-app-border">
               <button
                 type="button"
                 className="rounded-lg px-4 py-2 text-sm font-medium text-app-fg-muted hover:bg-app-hover transition-colors"
@@ -251,10 +254,10 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
                 disabled={downloadingId === vp.payout.id}
                 onClick={() => void handleDownload(vp)}
               >
-                {downloadingId === vp.payout.id ? 'Generating…' : 'Download PDF'}
+                {downloadingId === vp.payout.id ? 'Generating\u2026' : 'Download PDF'}
               </button>
             </div>
-          </div>
+          </>
         )}
       </Modal>
     </div>
