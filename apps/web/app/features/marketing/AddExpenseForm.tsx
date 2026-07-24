@@ -291,7 +291,7 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
         setSubmitting(false);
         return;
       }
-      navigate('/admin/marketing/expenses');
+      navigate('/admin/marketing/expenses?category=NOT_AD_SPEND');
       return;
     }
 

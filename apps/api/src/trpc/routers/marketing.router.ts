@@ -2111,4 +2111,11 @@ export const marketingRouter = router({
     .query(async ({ input, ctx }) => {
       return getMarketingService().listMbFundTransfers(input, ctx.user.id, ctx.user.role, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
+
+  /** All active branch members for the fund transfer recipient selector. */
+  listBranchMembersForTransfer: authedProcedure
+    .query(async ({ ctx }) => {
+      if (!ctx.currentBranchId) return [];
+      return getMarketingService().listBranchMembersForTransfer(ctx.currentBranchId);
+    }),
 });

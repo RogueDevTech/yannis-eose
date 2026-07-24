@@ -750,8 +750,9 @@ function MarketingDashboard({
 
         <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
           {(teamMetrics, personalMetrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => {
-            const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
-            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} mediaBuyerId={viewTab === 'personal' ? userId : undefined} />;
+            const isPersonal = viewTab === 'personal';
+            const active = isPersonal ? (personalMetrics ?? teamMetrics) : teamMetrics;
+            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={isPersonal ? 0 : abandonedCartCount} cartOrdersCounts={isPersonal ? undefined : cartOrdersCounts} marketingStatusCounts={isPersonal ? undefined : marketingStatusCounts} mediaBuyerId={isPersonal ? userId : undefined} />;
           }}
         </DashboardSupervisorMetricsSection>
 
@@ -771,10 +772,11 @@ function MarketingDashboard({
 
         <DashboardSupervisorMetricsSection fallback={<DualCardSkeleton />}>
           {(teamMetrics, personalMetrics, _abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => {
-            const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
+            const isPersonal = viewTab === 'personal';
+            const active = isPersonal ? (personalMetrics ?? teamMetrics) : teamMetrics;
             return (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />
+                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} cartOrdersCounts={isPersonal ? undefined : cartOrdersCounts} marketingStatusCounts={isPersonal ? undefined : marketingStatusCounts} />
                 <QuickActionsCard role={role} unprocessed={0} />
               </div>
             );

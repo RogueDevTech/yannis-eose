@@ -474,14 +474,14 @@ function CreateTransferModal({
   return (
     <Modal open={open} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <h3 className="text-lg font-semibold text-app-fg">Send Funds to MB</h3>
+        <h3 className="text-lg font-semibold text-app-fg">Send Funds</h3>
         <div>
           <label className="block text-sm font-medium text-app-fg mb-1">Recipient</label>
           <SearchableSelect
             options={recipientOptions}
             value={receiverId}
             onChange={setReceiverId}
-            placeholder="Select media buyer..."
+            placeholder="Select recipient..."
           />
         </div>
         <div>

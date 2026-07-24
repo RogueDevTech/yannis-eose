@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
+import { Link, useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -864,6 +864,17 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           >
             + Send Funding
           </Button>
+        )}
+        {isMediaBuyer && (
+          <Link to="/admin/marketing/funding/mb-transfers" onClick={() => closeMobileSheet()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
+            >
+              Send Fund
+            </Button>
+          </Link>
         )}
       </>
     );
@@ -2071,7 +2082,16 @@ function FundingMetricsStrip({
             active: isActive('distributing', 'transfer'),
           },
         ]
-      : []),
+      : Number(fundingBalance?.totalDistributed ?? '0') > 0
+        ? [
+            {
+              label: summary.distributedCount ? `Total Sent (${summary.distributedCount})` : 'Total Sent',
+              value: <NairaPrice amount={Number(fundingBalance!.totalDistributed)} />,
+              valueClassName: 'text-orange-600 dark:text-orange-400',
+              title: `Funds sent to other media buyers: ${summary.distributedCount} transfer${summary.distributedCount !== 1 ? 's' : ''}. Deducted from your balance.`,
+            },
+          ]
+        : []),
     {
       label: `Pending Mark-Received (${summary.pendingMarkReceived})`,
       value: <NairaPrice amount={Number(summary.pendingMarkReceivedAmount ?? '0')} />,

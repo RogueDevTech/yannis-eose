@@ -618,21 +618,7 @@ export function DeliveryRemittancesLoadingShell({
     setEligibleDraft(filters.eligibleQ);
   }, [filters.eligibleQ]);
 
-  const setViewTab = useCallback(
-    (tab: 'remittances' | 'eligible') => {
-      setSearchParams(
-        (p) => {
-          const next = new URLSearchParams(p);
-          next.set('page', '1');
-          if (tab === 'remittances') next.set('tab', 'remittances');
-          else next.delete('tab');
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
+  // setViewTab removed — tab switching handled inline by <Tabs onChange>
 
   const handleLocationChange = useCallback(
     (locationId: string) => {
@@ -742,22 +728,59 @@ export function DeliveryRemittancesLoadingShell({
 
       <OverviewStatStrip
         mobileGrid
+        mobileGridCols={1}
         items={[
-          { label: 'Expected (awaiting)', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-          { label: 'Total on batches', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-          { label: 'Pending', value: <StatValuePulse className="min-w-[3rem]" /> },
-          { label: 'Received', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'Total Delivered', value: <StatValuePulse className="min-w-[3.5rem]" /> },
+          { label: 'Awaiting · Period', value: <StatValuePulse className="min-w-[3.5rem]" /> },
+          { label: 'Remitted', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'Pending Confirmation', value: <StatValuePulse className="min-w-[3rem]" /> },
           { label: 'Disputed', value: <StatValuePulse className="min-w-[3rem]" /> },
+        ]}
+      />
+
+      <OverviewStatStrip
+        mobileGrid
+        mobileGridCols={1}
+        tileClassName="!py-2"
+        items={[
+          { label: 'Gross Order Value', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'Delivery Fees', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Commitment Fees', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'POS Fees', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Failed Delivery', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Discount', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Waybill', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Expected Net', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
 
       <Tabs
         variant="underline"
-        value={viewTab}
-        onChange={(v) => setViewTab(v as 'remittances' | 'eligible')}
+        value={viewTab === 'eligible' ? 'eligible' : 'RECEIVED'}
+        onChange={(v) => {
+          if (v === 'eligible') {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.delete('tab');
+              next.delete('status');
+              next.set('page', '1');
+              return next;
+            }, { replace: true });
+          } else {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.set('tab', 'remittances');
+              next.set('status', v);
+              next.set('page', '1');
+              return next;
+            }, { replace: true });
+          }
+        }}
         tabs={[
           { value: 'eligible', label: 'Awaiting remittance' },
-          { value: 'remittances', label: 'Remitted' },
+          { value: 'RECEIVED', label: 'Remitted' },
+          { value: 'SENT', label: 'Pending Confirmation' },
+          { value: 'DISPUTED', label: 'Disputed' },
         ]}
       />
 
@@ -820,8 +843,6 @@ export function DeliveryRemittancesLoadingShell({
               }
             />
           </div>
-          {/* Status dropdown skeleton */}
-          <div className="h-10 md:h-9 w-full sm:w-56 rounded-md border border-app-border bg-app-hover/40 animate-pulse" />
           <CompactTable<{ id: string }>
             caption="Cash remittance batches"
             columns={listShellColumns}

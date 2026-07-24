@@ -60,6 +60,8 @@ export function DailySpendLogPage() {
 
   // Navigate to list on success — bust the ad-spend list cache so the new row
   // appears immediately instead of showing stale cached data.
+  // Track which category was submitted so the redirect lands on the right tab.
+  const submittedCategoryRef = useRef<ExpenseCategory>('AD_SPEND');
   useEffect(() => {
     if (fetcher.data?.success) {
       invalidateCachedLoader('/admin/marketing/expenses');
@@ -68,6 +70,9 @@ export function DailySpendLogPage() {
       const params = new URLSearchParams();
       params.set('startDate', spendDate);
       params.set('endDate', spendDate);
+      if (submittedCategoryRef.current !== 'AD_SPEND') {
+        params.set('category', 'NOT_AD_SPEND');
+      }
       const t = setTimeout(() => navigate(`/admin/marketing/expenses?${params}`), 600);
       return () => clearTimeout(t);
     }
@@ -83,6 +88,7 @@ export function DailySpendLogPage() {
 
   function handleSubmit() {
     if (!canSubmit) return;
+    submittedCategoryRef.current = category;
     const fd = new FormData();
     if (category !== 'AD_SPEND') {
       fd.set('intent', 'createSimpleExpense');

@@ -343,6 +343,7 @@ export const updateAdSpendSchema = z.object({
   spendDate: pastOrTodayDate.optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
+  category: expenseCategorySchema.optional(),
 });
 export type UpdateAdSpendInput = z.infer<typeof updateAdSpendSchema>;
 

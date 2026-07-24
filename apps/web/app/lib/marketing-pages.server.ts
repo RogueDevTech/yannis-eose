@@ -723,6 +723,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         spendDate: formData.get('spendDate')?.toString() ?? '',
         productId: formData.get('productId')?.toString() || undefined,
         campaignId: formData.get('campaignId')?.toString() || undefined,
+        category: formData.get('category')?.toString() || undefined,
       },
     });
     if (!res.ok) {

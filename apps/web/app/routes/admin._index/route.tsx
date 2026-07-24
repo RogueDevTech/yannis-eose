@@ -55,13 +55,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Finance sees ALL deliveries (follow-up + cart included) so
   // their dashboard "Delivered" stat matches Cash Remittances.
   // Stock Manager uses onlyGraduateNonMarketing (same as SuperAdmin TOTAL ORDERS).
+  // HoCS / CS_CLOSER: exclude graduated follow-up + cart orders from primary counts
+  // because TotalOrdersStrip adds them separately from the secondary bundle.
   const includeAllDeliveries = role === 'FINANCE_OFFICER';
+  const needsGraduationExclusion = role === 'HEAD_OF_CS' || role === 'CS_CLOSER';
   const ordersCountsInput = JSON.stringify({
     startDate, endDate,
     ...mediaBuyerIdParam,
     ...assignedCsParam,
     isFollowUp: false,
     ...(includeAllDeliveries ? { excludeGraduated: false } : {}),
+    ...(needsGraduationExclusion ? { excludeGraduated: true, excludeCartGraduated: true } : {}),
     ...(teamIdParam && { teamId: teamIdParam }),
   });
 

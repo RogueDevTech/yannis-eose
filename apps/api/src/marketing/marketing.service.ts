@@ -3418,6 +3418,7 @@ export class MarketingService {
           spendAmount: sql`${input.spendAmount}::numeric`,
           screenshotUrl: input.screenshotUrl,
           spendDate: input.spendDate ? new Date(input.spendDate) : existing.spendDate,
+          ...(input.category ? { category: input.category } : {}),
           ...(orderCountSnapshot !== undefined ? { orderCountSnapshot } : {}),
           ...(needsStatusReset
             ? {
@@ -3456,16 +3457,16 @@ export class MarketingService {
     }
 
     return withActor(this.db, actor, async (tx) => {
-      // Validate both are MEDIA_BUYER
+      // Validate sender + receiver exist
       const [sender, receiver] = await Promise.all([
         tx.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, actor.id)).limit(1),
         tx.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, input.receiverMbId)).limit(1),
       ]);
-      if (!sender[0] || sender[0].role !== 'MEDIA_BUYER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only media buyers can send funds' });
+      if (!sender[0]) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Sender not found' });
       }
-      if (!receiver[0] || receiver[0].role !== 'MEDIA_BUYER') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Recipient must be a media buyer' });
+      if (!receiver[0]) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Recipient not found' });
       }
 
       // Validate same branch
@@ -3475,7 +3476,7 @@ export class MarketingService {
           tx.select({ branchId: schema.userBranches.branchId }).from(schema.userBranches).where(and(eq(schema.userBranches.userId, input.receiverMbId), eq(schema.userBranches.branchId, branchId))).limit(1),
         ]);
         if (!senderBranch[0] || !receiverBranch[0]) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Both media buyers must be in the same branch' });
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Both sender and recipient must be in the same branch' });
         }
       }
 
@@ -3740,6 +3741,24 @@ export class MarketingService {
     };
   }
 
+  /** List all active users in a branch (for fund transfer recipient selector). */
+  async listBranchMembersForTransfer(
+    branchId: string,
+  ): Promise<Array<{ id: string; name: string }>> {
+    const rows = await this.db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.userBranches)
+      .innerJoin(schema.users, eq(schema.userBranches.userId, schema.users.id))
+      .where(
+        and(
+          eq(schema.userBranches.branchId, branchId),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .orderBy(asc(schema.users.name));
+    return rows;
+  }
+
   // ── Daily Ad Spend (Simplified Flow — 2026-05) ─────────────────────────────
 
   /** Count non-DELETED orders created on a single Nigeria-timezone day for this MB. */
@@ -3793,6 +3812,7 @@ export class MarketingService {
           gte(schema.adSpendLogs.spendDate, dayStart),
           lte(schema.adSpendLogs.spendDate, dayEnd),
           isNull(schema.adSpendLogs.productId),
+          eq(schema.adSpendLogs.category, 'AD_SPEND'),
         ),
       )
       .limit(1);
@@ -3825,6 +3845,7 @@ export class MarketingService {
           gte(schema.adSpendLogs.spendDate, dayStart),
           lte(schema.adSpendLogs.spendDate, dayEnd),
           isNull(schema.adSpendLogs.productId),
+          eq(schema.adSpendLogs.category, 'AD_SPEND'),
         ),
       )
       .limit(1);

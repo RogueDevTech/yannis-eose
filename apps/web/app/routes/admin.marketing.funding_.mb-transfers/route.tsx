@@ -36,14 +36,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (endDate) listInput.endDate = endDate;
   }
 
-  // Fetch transfers + media buyers in parallel
-  const [transfersRes, balancesRes] = await Promise.all([
+  // Fetch transfers + branch members in parallel
+  const [transfersRes, membersRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/marketing.listMbFundTransfers?input=${encodeURIComponent(JSON.stringify(listInput))}`,
       { method: 'GET', cookie },
     ),
-    // Get MB list from funding balances (same pattern as ledger page)
-    apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
+    // Get all active branch members for recipient selector
+    apiRequest<unknown>('/trpc/marketing.listBranchMembersForTransfer', { method: 'GET', cookie }),
   ]);
 
   type TransfersResponse = {
@@ -58,12 +58,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })
     : { transfers: [], pagination: { page: 1, limit: perPage, total: 0, totalPages: 1 } };
 
-  // Parse media buyers for recipient selector
+  // Parse branch members for recipient selector (all roles in branch)
   const mediaBuyers: Array<{ id: string; name: string }> = [];
-  if (balancesRes.ok) {
-    const rows = (balancesRes.data as { result?: { data?: Array<{ userId: string; name: string; role: string }> } })?.result?.data ?? [];
+  if (membersRes.ok) {
+    const rows = (membersRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? [];
     for (const r of rows) {
-      if (r.role === 'MEDIA_BUYER') mediaBuyers.push({ id: r.userId, name: r.name });
+      if (r.id !== user.id) mediaBuyers.push({ id: r.id, name: r.name });
     }
   }
 
