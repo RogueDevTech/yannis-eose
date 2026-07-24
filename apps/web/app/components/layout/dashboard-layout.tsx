@@ -100,18 +100,16 @@ interface NavItemDef {
    * needing the permission.
    */
   roles?: string[];
-  /** Dev-only item: hidden unless NODE_ENV=development. Route loader should also 404 via requireAccountingEnabled(). */
+  /** Roles that should NOT see this item even if they pass other checks. */
+  excludeRoles?: string[];
+  /** Dev-only item: hidden unless NODE_ENV=development. */
   devOnly?: boolean;
 }
 
 interface NavGroupDef {
   group: string | null;
   items: NavItemDef[];
-  /**
-   * Dev-only group: hidden unless `NODE_ENV=development` (`window.__ENV.IS_DEV`).
-   * Used to ship in-test sections (Accounting ledger) dark to prod. The
-   * matching route loaders also 404 when the flag is off (defense in depth).
-   */
+  /** Dev-only group: hidden unless `IS_DEV` is true (e.g. experimental tooling). */
   devOnly?: boolean;
 }
 
@@ -359,9 +357,8 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.disburse',
       },
       {
-        // Renamed from "Ledger" — this is a synthetic activity feed (revenue,
-        // remittances, ad spend, payroll), NOT the double-entry ledger. The
-        // real ledger lives under the "Accounting" group below.
+        // Renamed from "Ledger" — synthetic activity feed (revenue, remittances,
+        // ad spend, payroll). Double-entry GL lives in the Accounting group.
         label: 'Financial Activity',
         href: '/admin/finance/ledger',
         icon: SidebarIcons.remittances,
@@ -381,60 +378,119 @@ const navStructure: NavGroupDef[] = [
         roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
       },
       {
+        label: 'Profit by shipment',
+        href: '/admin/finance/profit-by-shipment',
+        icon: SidebarIcons.finance,
+        permission: 'finance.read',
+      },
+    ],
+  },
+  {
+    group: 'Accounting',
+    items: [
+      {
         label: 'Chart of Accounts',
         href: '/admin/finance/accounts',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Opening Balances',
+        href: '/admin/finance/opening-balances',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.write',
       },
       {
         label: 'Journal Entries',
         href: '/admin/finance/journal-entries',
         icon: SidebarIcons.remittances,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
       },
       {
         label: 'General Ledger',
         href: '/admin/finance/general-ledger',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
       },
       {
         label: 'Trial Balance',
         href: '/admin/finance/trial-balance',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
       },
       {
         label: 'Profit & Loss',
         href: '/admin/finance/profit-loss',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
       },
       {
         label: 'Balance Sheet',
         href: '/admin/finance/balance-sheet',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
       },
       {
         label: 'Cash Flow',
         href: '/admin/finance/cash-flow',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Expenses',
+        href: '/admin/finance/expenses',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
       },
       {
         label: 'Asset Register',
         href: '/admin/finance/assets',
         icon: SidebarIcons.inventory,
         permission: 'finance.ledger.read',
-        devOnly: true,
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Bank Reconciliation',
+        href: '/admin/finance/bank-reconciliation',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Tax Returns',
+        href: '/admin/finance/tax-returns',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'WHT Certificates',
+        href: '/admin/finance/wht-certificates',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Aging',
+        href: '/admin/finance/aging',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Budget Report',
+        href: '/admin/finance/budget-report',
+        icon: SidebarIcons.finance,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
       },
     ],
   },
@@ -451,16 +507,45 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
       },
-      // Commission Plans: separate page so HoCS / HoLogistics can manage their own dept's plans
-      // (CEO directive 2026-04-26, refined later — HEAD_OF_MARKETING was removed; Marketing
-      // commission plans are managed by HR / admin only). Backend `hr.listPlans` /
-      // `hr.createPlan` / `hr.updatePlan` auto-scope per viewer.
+      {
+        label: 'Payslips',
+        href: '/hr/payroll/payslips',
+        icon: SidebarIcons.finance,
+        permission: 'hr.read',
+      },
+      {
+        label: 'Payroll Reports',
+        href: '/hr/payroll/reports',
+        icon: SidebarIcons.finance,
+        permission: 'hr.read',
+      },
+      {
+        label: 'Payroll Config',
+        href: '/hr/payroll/config/roles',
+        icon: SidebarIcons.settings,
+        permission: 'payroll.config.read',
+      },
+      {
+        label: 'Onboarding Queue',
+        href: '/hr/payroll/onboarding',
+        icon: SidebarIcons.orders,
+        permission: 'hr.write',
+      },
+      {
+        label: 'Contractors',
+        href: '/hr/payroll/contractors',
+        icon: SidebarIcons.users,
+        permission: 'payroll.config.read',
+      },
+      // Commission Plans: friendlier label for HoCS / HoLogistics who don't see "Payroll Config"
+      // (CEO directive 2026-04-26). Admin-level roles already see the page via "Payroll Config".
       {
         label: 'Commission Plans',
-        href: '/hr/plans',
+        href: '/hr/payroll/config/roles',
         icon: SidebarIcons.leaderboards,
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
+        excludeRoles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'],
       },
       // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
@@ -624,20 +709,16 @@ function getNavGroupsForUser(
   const forMobile = options?.forMobile === true;
 
   const isLogisticsOnly = role === 'TPL_MANAGER';
-  const logisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Finance'];
+  const logisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Finance', 'Accounting'];
   /** Head of Logistics sees Finance overview but not the full logistics-hidden set. */
   const isHoLogistics = role === 'HEAD_OF_LOGISTICS';
   const hoLogisticsHiddenGroups = ['Catalog', 'HR', 'Analytics'];
 
   for (const groupDef of navStructure) {
-    // Dev-only groups (e.g. Accounting) are hidden unless the env flag is on.
-    // `window.__ENV` is undefined during SSR — treat that as "off" so the group
-    // never flashes before hydration in prod.
-    if (
-      groupDef.devOnly &&
-      !(typeof window !== 'undefined' && window.__ENV?.IS_DEV === true)
-    )
-      continue;
+    // Dev-only groups are hidden unless IS_DEV is true.
+    if (groupDef.devOnly) {
+      if (!(typeof window !== 'undefined' && window.__ENV?.IS_DEV === true)) continue;
+    }
     // Head of Logistics has their own Logistics Orders page; hide Sales & CS group.
     // Finance Officer has no business in CS; hide Sales & CS group.
     if (
@@ -655,7 +736,8 @@ function getNavGroupsForUser(
     const visibleItems = groupDef.items
       .filter((item) => {
         // Per-item dev-only gate (same logic as group-level devOnly).
-        if (item.devOnly && !(typeof window !== 'undefined' && window.__ENV?.IS_DEV === true)) return false;
+        if (item.devOnly && !(typeof window !== 'undefined' && window.__ENV?.IS_DEV === true))
+          return false;
         if (item.href === '/admin/analytics/audit') {
           return canAccessGlobalAuditLog(user);
         }
@@ -687,6 +769,8 @@ function getNavGroupsForUser(
         // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
         if (item.href === '/admin/finance/disbursements' && role === 'HEAD_OF_MARKETING')
           return false;
+        // excludeRoles takes priority — hide from these roles even if they'd otherwise pass.
+        if (item.excludeRoles?.includes(user?.role ?? '')) return false;
         // No permission AND no roles allowlist → visible to all authed users.
         // When `roles` is set without `permission`, the item is restricted to those roles.
         if (!item.permission && !item.roles) return true;
@@ -806,6 +890,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin',
     '/admin/finance/overview',
     '/admin/finance/ledger',
+    '/admin/finance/trial-balance',
     '/admin/analytics/audit',
   ],
 };
@@ -832,6 +917,7 @@ function getBottomNavItemsForUser(
       if (result.length >= 5) break;
       const item = hrefToItem.get(href);
       if (!item) continue;
+      if (item.excludeRoles?.includes(role)) continue;
       const allowed =
         // No permission AND no roles allowlist → visible to all authed users.
         // When `roles` is set without `permission`, restrict to those roles.
