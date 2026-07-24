@@ -3,12 +3,15 @@ import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Button } from '~/components/ui/button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RoleBadge } from '~/components/ui/role-badge';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { exportToCsv } from '~/lib/csv-export';
 import type { PayrollRegisterRow } from './payroll-prd-types';
@@ -31,10 +34,13 @@ interface PayrollReportsPageProps {
     totalNet: number;
     staffCount: number;
   }>;
+  branches: Array<{ id: string; name: string }>;
   filters: {
     fromMonth: string;
     toMonth: string;
     status: string;
+    department: string;
+    branchId: string;
   };
 }
 
@@ -44,11 +50,35 @@ function formatMonth(month: string): string {
   return d.toLocaleDateString('en-NG', { month: 'short', year: 'numeric' });
 }
 
-export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filters }: PayrollReportsPageProps) {
+const STATUS_OPTIONS = [
+  { value: 'ALL', label: 'All statuses' },
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'PENDING_HR', label: 'Pending HR' },
+  { value: 'PENDING_FINANCE', label: 'Pending Finance' },
+  { value: 'PAID', label: 'Paid' },
+];
+
+const DEPARTMENT_OPTIONS = [
+  { value: '', label: 'All departments' },
+  { value: 'CS', label: 'CS' },
+  { value: 'MARKETING', label: 'Marketing' },
+  { value: 'LOGISTICS', label: 'Logistics' },
+  { value: 'HR', label: 'HR' },
+  { value: 'OPERATIONS', label: 'Operations' },
+];
+
+export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, branches, filters }: PayrollReportsPageProps) {
   const [, setSearchParams] = useSearchParams();
   const [fromMonth, setFromMonth] = useState(filters.fromMonth);
   const [toMonth, setToMonth] = useState(filters.toMonth);
   const [status, setStatus] = useState(filters.status);
+  const [department, setDepartment] = useState(filters.department);
+  const [branchId, setBranchId] = useState(filters.branchId);
+
+  const branchOptions = useMemo(
+    () => [{ value: '', label: 'All branches' }, ...branches.map((b) => ({ value: b.id, label: b.name }))],
+    [branches],
+  );
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -64,6 +94,18 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filt
     );
   }, [rows]);
 
+  const applyFilters = () => {
+    const params = new URLSearchParams();
+    if (fromMonth) params.set('fromMonth', fromMonth.length === 7 ? `${fromMonth}-01` : fromMonth);
+    if (toMonth) params.set('toMonth', toMonth.length === 7 ? `${toMonth}-01` : toMonth);
+    if (status && status !== 'ALL') params.set('status', status);
+    if (department) params.set('department', department);
+    if (branchId) params.set('branchId', branchId);
+    setSearchParams(params);
+  };
+
+  const activeFilterCount = [fromMonth, toMonth, status !== 'ALL' ? status : '', department, branchId].filter(Boolean).length;
+
   const columns: CompactTableColumn<PayrollRegisterRow>[] = useMemo(
     () => [
       {
@@ -71,15 +113,14 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filt
         header: 'Employee',
         hideable: false,
         render: (row) => (
-          <div>
-            <span className="font-medium text-app-fg">{row.staffName ?? 'Contractor / unknown'}</span>
-            {row.staffRole ? (
-              <div className="mt-0.5">
-                <RoleBadge role={row.staffRole} size="sm" />
-              </div>
-            ) : null}
-          </div>
+          <span className="font-medium text-app-fg">{row.staffName ?? 'Contractor / unknown'}</span>
         ),
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        nowrap: true,
+        render: (row) => row.staffRole ? <RoleBadge role={row.staffRole} size="sm" /> : <span className="text-sm text-app-fg-muted">—</span>,
       },
       {
         key: 'period',
@@ -121,9 +162,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filt
       {
         key: 'status',
         header: 'Batch',
-        render: (row) => (
-          <span className="badge-neutral text-2xs">{row.batch.status.replace(/_/g, ' ')}</span>
-        ),
+        render: (row) => <StatusBadge status={row.batch.status} />,
       },
     ],
     [],
@@ -164,6 +203,46 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filt
     );
   };
 
+  const filterFields = (
+    <>
+      <TextInput
+        label="From month"
+        type="month"
+        value={fromMonth.slice(0, 7)}
+        onChange={(e) => setFromMonth(e.target.value ? `${e.target.value}-01` : '')}
+      />
+      <TextInput
+        label="To month"
+        type="month"
+        value={toMonth.slice(0, 7)}
+        onChange={(e) => setToMonth(e.target.value ? `${e.target.value}-01` : '')}
+      />
+      <FormSelect
+        label="Batch status"
+        value={status}
+        onChange={(e) => setStatus(e.target.value)}
+        options={STATUS_OPTIONS}
+        className="sm:w-44"
+      />
+      <FormSelect
+        label="Department"
+        value={department}
+        onChange={(e) => setDepartment(e.target.value)}
+        options={DEPARTMENT_OPTIONS}
+        className="sm:w-44"
+      />
+      {branches.length > 1 && (
+        <FormSelect
+          label="Branch"
+          value={branchId}
+          onChange={(e) => setBranchId(e.target.value)}
+          options={branchOptions}
+          className="sm:w-44"
+        />
+      )}
+    </>
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -200,55 +279,37 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filt
         }
       />
 
-      <form
-        className="card flex flex-col sm:flex-row gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const params = new URLSearchParams();
-          if (fromMonth) params.set('fromMonth', fromMonth.length === 7 ? `${fromMonth}-01` : fromMonth);
-          if (toMonth) params.set('toMonth', toMonth.length === 7 ? `${toMonth}-01` : toMonth);
-          if (status && status !== 'ALL') params.set('status', status);
-          setSearchParams(params);
-        }}
-      >
-        <TextInput
-          label="From month"
-          type="month"
-          value={fromMonth.slice(0, 7)}
-          onChange={(e) => setFromMonth(e.target.value ? `${e.target.value}-01` : '')}
-        />
-        <TextInput
-          label="To month"
-          type="month"
-          value={toMonth.slice(0, 7)}
-          onChange={(e) => setToMonth(e.target.value ? `${e.target.value}-01` : '')}
-        />
-        <FormSelect
-          label="Batch status"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          options={[
-            { value: 'ALL', label: 'All statuses' },
-            { value: 'DRAFT', label: 'Draft' },
-            { value: 'PENDING_HR', label: 'Pending HR' },
-            { value: 'PENDING_FINANCE', label: 'Pending Finance' },
-            { value: 'PAID', label: 'Paid' },
-          ]}
-          className="sm:w-48"
-        />
-        <div className="flex items-end">
-          <Button type="submit" variant="primary" size="sm">
-            Apply filters
-          </Button>
-        </div>
-      </form>
+      <ToolbarFiltersCollapsible
+        badgeCount={activeFilterCount}
+        desktopInlineFilters={
+          <>
+            {filterFields}
+            <div className="flex items-end">
+              <Button type="button" variant="primary" size="sm" onClick={applyFilters}>
+                Apply filters
+              </Button>
+            </div>
+          </>
+        }
+        sheetFilterBody={
+          <div className="space-y-3">
+            {filterFields}
+            <Button type="button" variant="primary" size="sm" className="w-full justify-center h-12" onClick={applyFilters}>
+              Apply filters
+            </Button>
+          </div>
+        }
+      />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <StatCard label="Rows" value={String(rows.length)} />
-        <StatCard label="Total gross" value={<NairaPrice amount={totals.gross} />} />
-        <StatCard label="Total PAYE" value={<NairaPrice amount={totals.paye} />} />
-        <StatCard label="Total net" value={<NairaPrice amount={totals.net} />} />
-      </div>
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          { label: 'Rows', value: rows.length },
+          { label: 'Total gross', value: <NairaPrice amount={totals.gross} /> },
+          { label: 'Total PAYE', value: <NairaPrice amount={totals.paye} /> },
+          { label: 'Total net', value: <NairaPrice amount={totals.net} /> },
+        ]}
+      />
 
       {(costByBranch.length > 0 || costByRole.length > 0 || trend.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -303,24 +364,18 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, filt
           description="Adjust the month range or batch status filter, or generate payroll batches first."
         />
       ) : (
-        <CompactTable<PayrollRegisterRow>
-          columnVisibilityKey="hr.payroll.reports"
-          columns={columns}
-          rows={rows}
-          rowKey={(r) => r.payout.id}
-          emptyTitle="No rows"
-          emptyDescription=""
-        />
+        <div className="list-panel">
+          <CompactTable<PayrollRegisterRow>
+            withCard={false}
+            columnVisibilityKey="hr.payroll.reports"
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.payout.id}
+            emptyTitle="No rows"
+            emptyDescription=""
+          />
+        </div>
       )}
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="card px-3 py-2">
-      <p className="text-2xs text-app-fg-muted uppercase tracking-wide">{label}</p>
-      <p className="text-sm font-semibold text-app-fg mt-0.5">{value}</p>
     </div>
   );
 }
