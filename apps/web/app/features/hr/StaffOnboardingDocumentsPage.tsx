@@ -1,11 +1,11 @@
 import { Link, useSearchParams } from '@remix-run/react';
-import { useEffect, useState } from 'react';
-import { TableActionButton } from '~/components/ui/table-action-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { InlineFilter } from '~/components/ui/inline-filter';
 import { FormSelect } from '~/components/ui/form-select';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -18,6 +18,8 @@ export type StaffOnboardingDocumentRow = {
   status: string;
   primaryBranchId: string | null;
   primaryBranchName: string | null;
+  payRoleId: string | null;
+  onboardingPayrollStatus: string | null;
   onboardingStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
   submittedAt: string | null;
   approvedAt: string | null;
@@ -78,11 +80,6 @@ export function StaffOnboardingDocumentsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy().busy;
 
-  const [searchDraft, setSearchDraft] = useState(searchParam);
-  useEffect(() => {
-    setSearchDraft(searchParam);
-  }, [searchParam]);
-
   const patchParams = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams(searchParams);
     for (const [k, v] of Object.entries(patch)) {
@@ -108,25 +105,34 @@ export function StaffOnboardingDocumentsPage({
   const columns: CompactTableColumn<StaffOnboardingDocumentRow>[] = [
     {
       key: 'name',
-      header: 'Staff',
+      header: 'Name',
       hideable: false,
       render: (row) => (
-        <div className="min-w-0">
-          <Link
-            to={`/hr/users/${row.userId}`}
-            prefetch="intent"
-            className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline underline-offset-2"
-          >
-            {row.name}
-          </Link>
-        </div>
+        <Link
+          to={`/hr/users/${row.userId}`}
+          prefetch="intent"
+          className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+        >
+          {row.name}
+        </Link>
       ),
     },
     {
       key: 'onboardingStatus',
       header: 'Onboarding',
       render: (row) => (
-        <StatusBadge status={row.onboardingStatus} showDot size="sm" />
+        <StatusBadge status={row.onboardingStatus} size="sm" />
+      ),
+    },
+    {
+      key: 'payrollStatus',
+      header: 'Payroll',
+      render: (row) => (
+        <StatusBadge
+          status={row.payRoleId ? 'Set up' : 'Not set up'}
+          variant={row.payRoleId ? 'success' : 'warning'}
+          size="sm"
+        />
       ),
     },
     {
@@ -152,9 +158,9 @@ export function StaffOnboardingDocumentsPage({
       tight: true,
       hideable: false,
       render: (row) => (
-        <TableActionButton to={`/hr/users/${row.userId}/onboarding`} variant="primary">
+        <CompactTableActionButton to={`/hr/users/${row.userId}/onboarding`} tone="brand">
           Open
-        </TableActionButton>
+        </CompactTableActionButton>
       ),
     },
   ];
@@ -222,88 +228,105 @@ export function StaffOnboardingDocumentsPage({
         />
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-        <div className="flex-1 min-w-[12rem]">
-          <label className="block text-xs font-medium text-app-muted mb-1">Search</label>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              patchParams({ search: searchDraft.trim() || undefined });
-            }}
-          >
-            <SearchInput
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0 !px-0 md:!px-4"
+          hideMobileSheet
+          badgeCount={
+            [onboardingParam !== 'ALL' ? onboardingParam : '', sortByParam !== 'name' ? sortByParam : '', sortOrderParam !== 'asc' ? sortOrderParam : ''].filter(Boolean).length
+          }
+          searchRow={
+            <PageSearchControl
+              value={searchParam}
               placeholder="Name or email…"
-              value={searchDraft}
-              onChange={(q) => {
-                setSearchDraft(q);
-                if (q.trim() === '') patchParams({ search: undefined });
-              }}
-              withSubmitButton
-              wrapperClassName="w-full"
+              title="Search staff"
+              onApply={(query) => patchParams({ search: query || undefined })}
             />
-          </form>
-        </div>
-        <div className="w-full sm:w-52">
-          <label className="block text-xs font-medium text-app-muted mb-1">Onboarding</label>
-          <FormSelect
-            value={onboardingParam}
-            onChange={(e) =>
-              patchParams({ onboarding: e.target.value === 'ALL' ? undefined : e.target.value })
-            }
-            options={[...ONBOARDING_OPTIONS]}
-          />
-        </div>
-        <div className="w-full sm:w-52">
-          <label className="block text-xs font-medium text-app-muted mb-1">Sort</label>
-          <FormSelect
-            value={sortByParam}
-            onChange={(e) => patchParams({ sortBy: e.target.value })}
-            options={[...SORT_OPTIONS]}
-          />
-        </div>
-        <div className="w-full sm:w-36">
-          <label className="block text-xs font-medium text-app-muted mb-1">Order</label>
-          <FormSelect
-            value={sortOrderParam}
-            onChange={(e) => patchParams({ sortOrder: e.target.value })}
-            options={[
-              { value: 'asc', label: 'Ascending' },
-              { value: 'desc', label: 'Descending' },
-            ]}
-          />
-        </div>
-      </div>
+          }
+          desktopInlineFilters={
+            <>
+              <InlineFilter
+                type="select"
+                value={onboardingParam}
+                defaultValue="ALL"
+                onChange={(v) => patchParams({ onboarding: v === 'ALL' ? undefined : v })}
+                options={[...ONBOARDING_OPTIONS]}
+                width="status"
+              />
+              <InlineFilter
+                type="select"
+                value={sortByParam}
+                defaultValue="name"
+                onChange={(v) => patchParams({ sortBy: v })}
+                options={[...SORT_OPTIONS]}
+                width="sort"
+              />
+              <InlineFilter
+                type="select"
+                value={sortOrderParam}
+                defaultValue="asc"
+                onChange={(v) => patchParams({ sortOrder: v })}
+                options={[
+                  { value: 'asc', label: 'Ascending' },
+                  { value: 'desc', label: 'Descending' },
+                ]}
+                width="sort"
+              />
+            </>
+          }
+          sheetFilterBody={
+            <div className="space-y-3">
+              <FormSelect
+                label="Onboarding"
+                value={onboardingParam}
+                onChange={(e) => patchParams({ onboarding: e.target.value === 'ALL' ? undefined : e.target.value })}
+                options={[...ONBOARDING_OPTIONS]}
+              />
+              <FormSelect
+                label="Sort"
+                value={sortByParam}
+                onChange={(e) => patchParams({ sortBy: e.target.value })}
+                options={[...SORT_OPTIONS]}
+              />
+              <FormSelect
+                label="Order"
+                value={sortOrderParam}
+                onChange={(e) => patchParams({ sortOrder: e.target.value })}
+                options={[
+                  { value: 'asc', label: 'Ascending' },
+                  { value: 'desc', label: 'Descending' },
+                ]}
+              />
+            </div>
+          }
+        />
 
-      <CompactTable<StaffOnboardingDocumentRow>
-        columnVisibilityKey="hr.staff-onboarding"
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.userId}
-        loading={isFilterLoading}
-        loadingVariant="overlay"
-        caption="Staff onboarding document status"
-        emptyTitle="No staff match these filters"
-        emptyDescription="Try clearing search or widening the onboarding status filter."
-        withCard={false}
-        pagination={
-          totalCount > 0
-            ? {
-                page,
-                totalPages,
-                showWhenSinglePage: true,
-                summary: (
-                  <p className="text-sm text-app-fg-muted">
-                    Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount}
-                    <span className="text-app-fg-muted/90"> · {pageSize} per page</span>
-                  </p>
-                ),
-                wrapperClassName:
-                  'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4',
-                controlsClassName: 'sm:justify-end',
-              }
-            : undefined
-        }
-      />
+        <CompactTable<StaffOnboardingDocumentRow>
+          columnVisibilityKey="hr.staff-onboarding"
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.userId}
+          loading={isFilterLoading}
+          loadingVariant="overlay"
+          withCard={false}
+          emptyTitle="No staff match these filters"
+          emptyDescription="Try clearing search or widening the onboarding status filter."
+          pagination={
+            totalCount > 0
+              ? {
+                  page,
+                  totalPages,
+                  showWhenSinglePage: true,
+                  summary: (
+                    <p className="text-sm text-app-fg-muted">
+                      Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount}
+                    </p>
+                  ),
+                }
+              : undefined
+          }
+        />
+      </div>
     </div>
   );
 }

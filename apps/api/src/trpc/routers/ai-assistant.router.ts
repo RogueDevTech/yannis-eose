@@ -123,7 +123,7 @@ export const aiAssistantRouter = router({
 
   deleteOrgApiKey: permissionProcedure('settings.system.manage')
     .mutation(async ({ ctx }) => {
-      await getAiAssistantService().deleteOrgApiKey(ctx.activeGroupId ?? null);
+      await getAiAssistantService().deleteOrgApiKey(ctx.activeGroupId ?? null, ctx.user.id);
       return { success: true };
     }),
 

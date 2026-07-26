@@ -1,7 +1,14 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requireAccountingEnabled, requirePermissionOrRoles, parsePerPage } from '~/lib/api.server';
+import {
+  apiRequest,
+  getSessionCookie,
+  requirePermissionOrRoles,
+  parsePerPage,
+  getCurrentUser,
+} from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -25,8 +32,7 @@ const EMPTY: ListResponse = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  requireAccountingEnabled();
-  await requirePermissionOrRoles(request, {
+  const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
   });
@@ -40,8 +46,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const startDate = url.searchParams.get('startDate') || undefined;
   const endDate = url.searchParams.get('endDate') || undefined;
 
+  const canApprove =
+    isAdminLevel(user) || user.role === 'FINANCE_OFFICER';
+
   const shell = {
     canWrite: true,
+    canApprove,
     filters: { status: status ?? '', search: search ?? '', startDate: startDate ?? '', endDate: endDate ?? '' },
   };
 
@@ -68,9 +78,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  requireAccountingEnabled();
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
+
+  const user = await getCurrentUser(request);
+  const canApprove =
+    user != null && (isAdminLevel(user) || user.role === 'FINANCE_OFFICER');
 
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
@@ -90,6 +103,45 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'approveEntry') {
+    if (!canApprove) {
+      return json({ error: 'Not authorized to approve journal entries' }, { status: 403 });
+    }
+    const res = await apiRequest<unknown>('/trpc/generalLedger.approveJournalEntry', {
+      method: 'POST',
+      cookie,
+      body: {
+        journalEntryId: formData.get('journalEntryId')?.toString() ?? '',
+      },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Approval failed') }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'rejectEntry') {
+    if (!canApprove) {
+      return json({ error: 'Not authorized to reject journal entries' }, { status: 403 });
+    }
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    if (!reason) {
+      return json({ error: 'Rejection reason is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/generalLedger.rejectJournalEntry', {
+      method: 'POST',
+      cookie,
+      body: {
+        journalEntryId: formData.get('journalEntryId')?.toString() ?? '',
+        reason,
+      },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Rejection failed') }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -98,13 +150,22 @@ export default function JournalEntriesRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={<JournalEntriesPage records={[]} pagination={EMPTY.pagination} canWrite={shell.canWrite} filters={shell.filters} />}
+      fallback={
+        <JournalEntriesPage
+          records={[]}
+          pagination={EMPTY.pagination}
+          canWrite={shell.canWrite}
+          canApprove={shell.canApprove}
+          filters={shell.filters}
+        />
+      }
     >
       {(data) => (
         <JournalEntriesPage
           records={data.records}
           pagination={data.pagination}
           canWrite={shell.canWrite}
+          canApprove={shell.canApprove}
           filters={shell.filters}
         />
       )}

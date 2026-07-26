@@ -5,16 +5,19 @@ import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { Pagination } from '~/components/ui/pagination';
 import { useToast } from '~/components/ui/toast';
 import type {
   MonthlyPayrollGroup,
   PayrollBatch,
-  PayrollDepartment,
   BranchOption,
-  ViewerInfo,
 } from './types';
-import { ADMIN_ROLES, DEPT_LABEL, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
+import { DEPT_LABEL } from './payroll-constants';
 
 function formatMonth(periodMonth: string): string {
   const [yyyy, mm] = periodMonth.split('-');
@@ -25,13 +28,11 @@ function formatMonth(periodMonth: string): string {
 interface MonthlyPayrollsProps {
   monthlyPayrolls: MonthlyPayrollGroup[];
   branches: BranchOption[];
-  viewer: ViewerInfo;
 }
 
 export function MonthlyPayrolls({
   monthlyPayrolls,
   branches,
-  viewer,
 }: MonthlyPayrollsProps) {
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -61,24 +62,6 @@ export function MonthlyPayrolls({
     }
   }, [initialBatchId, navigate]);
 
-  // Available departments to GENERATE
-  const generatableDepartments: PayrollDepartment[] = useMemo(() => {
-    if (ADMIN_ROLES.has(viewer.role)) return ALL_DEPARTMENTS;
-    if (viewer.prepareDepartments?.length) return viewer.prepareDepartments;
-    if (viewer.role === 'HR_MANAGER') return ['LOGISTICS', 'HR'];
-    const matching = ALL_DEPARTMENTS.find((d) => DEPT_OWNER_ROLE[d] === viewer.role);
-    return matching ? [matching] : [];
-  }, [viewer.role, viewer.prepareDepartments]);
-
-  const generatableBranches: BranchOption[] = useMemo(() => {
-    if (ADMIN_ROLES.has(viewer.role)) return branches;
-    if (viewer.prepareBranchIds?.length) {
-      return branches.filter((b) => viewer.prepareBranchIds?.includes(b.id));
-    }
-    const own = branches.find((b) => b.id === viewer.currentBranchId);
-    return own ? [own] : [];
-  }, [viewer, branches]);
-
   /** One-shot toast after bulk generate redirect from `/hr/payroll/generate`. */
   const generateSummaryFlash = searchParams.get('generateSummary');
   useEffect(() => {
@@ -94,19 +77,13 @@ export function MonthlyPayrolls({
     );
   }, [generateSummaryFlash, setSearchParams, toast]);
 
-  const showGenerateButton = generatableDepartments.length > 0 && generatableBranches.length > 0;
-
   return (
     <div className="space-y-4">
       <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
       {monthlyPayrolls.length === 0 && (
         <EmptyState
           title="No payroll batches yet"
-          description={
-            generatableDepartments.length > 0
-              ? 'Click Generate Monthly Batch to create the first one for your department.'
-              : 'No batches in your scope yet. Department heads will create them here at month-end.'
-          }
+          description="Click Generate Monthly Batch in the toolbar to create one."
         />
       )}
 
@@ -139,6 +116,8 @@ export function MonthlyPayrolls({
 
 // ── Month group ─────────────────────────────────────────────────
 
+type BatchRow = PayrollBatch & { _branchName: string };
+
 function MonthGroup({
   group,
   branchById,
@@ -147,17 +126,79 @@ function MonthGroup({
   branchById: Map<string, string>;
 }) {
   const [open, setOpen] = useState(true);
+  const rows: BatchRow[] = group.items.map((b) => ({
+    ...b,
+    _branchName: branchById.get(b.branchId) ?? b.branchId.slice(0, 8),
+  }));
+
+  const columns: CompactTableColumn<BatchRow>[] = [
+    {
+      key: 'department',
+      header: 'Department',
+      hideable: false,
+      render: (row) => <span className="text-sm font-medium text-app-fg">{DEPT_LABEL[row.department]}</span>,
+    },
+    {
+      key: 'branch',
+      header: 'Branch',
+      render: (row) => <span className="text-sm text-app-fg-muted">{row._branchName}</span>,
+    },
+    {
+      key: 'staff',
+      header: 'Staff',
+      align: 'right',
+      render: (row) => <span className="text-sm text-app-fg-muted">{row.staffCount}</span>,
+    },
+    {
+      key: 'prepared',
+      header: 'Prepared',
+      render: (row) => (
+        <span className="text-sm text-app-fg-muted">
+          {row.preparedAt
+            ? new Date(row.preparedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })
+            : '\u2014'}
+        </span>
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (row) => (
+        <span className="text-sm font-semibold text-app-fg">
+          <NairaPrice amount={Number(row.totalAmount)} />
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'right',
+      render: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: 'actions',
+      header: '',
+      mobileLabel: 'Actions',
+      align: 'right',
+      tight: true,
+      hideable: false,
+      render: (row) => (
+        <CompactTableActionButton to={`/hr/payroll-batch/${row.id}`}>View</CompactTableActionButton>
+      ),
+    },
+  ];
 
   return (
-    <div className="card p-0">
+    <div className="list-panel p-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-app-hover transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-app-hover transition-colors"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <svg
-            className={`w-4 h-4 text-app-fg-muted transition-transform ${open ? 'rotate-90' : ''}`}
+            className={`w-3.5 h-3.5 text-app-fg-muted transition-transform ${open ? 'rotate-90' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -165,7 +206,7 @@ function MonthGroup({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
-          <h3 className="text-base font-semibold text-app-fg">{formatMonth(group.month)}</h3>
+          <h3 className="text-sm font-semibold text-app-fg">{formatMonth(group.month)}</h3>
           <span className="text-xs text-app-fg-muted">{group.staffCount} staff</span>
         </div>
         <div className="text-sm font-semibold text-app-fg">
@@ -175,45 +216,36 @@ function MonthGroup({
 
       {open && (
         <div className="border-t border-app-border">
-          {group.items.map((batch) => (
-            <BatchRow
-              key={batch.id}
-              batch={batch}
-              branchName={branchById.get(batch.branchId) ?? batch.branchId.slice(0, 8)}
-            />
-          ))}
+          <CompactTable<BatchRow>
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.id}
+            withCard={false}
+            emptyTitle="No batches"
+            emptyDescription=""
+            renderMobileCard={(row) => (
+              <Link
+                to={`/hr/payroll-batch/${row.id}`}
+                className="block rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 hover:bg-app-hover transition-colors"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-app-fg text-sm">{DEPT_LABEL[row.department]}</p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">{row._branchName}</p>
+                  </div>
+                  <StatusBadge status={row.status} />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-app-fg-muted">{row.staffCount} staff</span>
+                  <span className="font-semibold text-app-fg">
+                    <NairaPrice amount={Number(row.totalAmount)} />
+                  </span>
+                </div>
+              </Link>
+            )}
+          />
         </div>
       )}
     </div>
-  );
-}
-
-// ── Single batch row ────────────────────────────────────────────
-
-function BatchRow({
-  batch,
-  branchName,
-}: {
-  batch: PayrollBatch;
-  branchName: string;
-}) {
-  return (
-    <Link
-      to={`/hr/payroll-batch/${batch.id}`}
-      className="w-full flex items-center gap-4 px-4 py-3 hover:bg-app-hover transition-colors text-left border-t border-app-border first:border-t-0"
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-app-fg">{DEPT_LABEL[batch.department]}</p>
-        <p className="text-xs text-app-fg-muted">
-          {branchName} {'\u00b7'} {batch.staffCount} staff {'\u00b7'} {batch.preparedAt
-            ? `prepared ${new Date(batch.preparedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`
-            : 'not yet generated'}
-        </p>
-      </div>
-      <div className="text-sm font-semibold text-app-fg whitespace-nowrap">
-        <NairaPrice amount={Number(batch.totalAmount)} />
-      </div>
-      <StatusBadge status={batch.status} />
-    </Link>
   );
 }

@@ -766,6 +766,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         .select({
           id: schema.payrollBatches.id,
           totalAmount: schema.payrollBatches.totalAmount,
+          totalGross: schema.payrollBatches.totalGross,
+          totalTax: schema.payrollBatches.totalTax,
+          totalNet: schema.payrollBatches.totalNet,
           periodMonth: schema.payrollBatches.periodMonth,
           branchId: schema.payrollBatches.branchId,
           department: schema.payrollBatches.department,
@@ -776,7 +779,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         .limit(1);
       if (!batch) return { posted: false, reason: 'batch-not-found' };
 
-      const amount = Number(batch.totalAmount ?? 0);
+      const gross = Number(batch.totalGross ?? batch.totalAmount ?? 0);
+      const tax = Number(batch.totalTax ?? 0);
+      const net = Number(batch.totalNet ?? batch.totalAmount ?? 0);
+      const amount = gross > 0 ? gross : Number(batch.totalAmount ?? 0);
       if (amount <= 0) return { posted: false, reason: 'zero-amount' };
 
       // Resolve company groupId from batch branch
@@ -799,19 +805,57 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const postingDate = (batch.financeProcessedAt ?? new Date()).toISOString().slice(0, 10);
       const dept = batch.department ?? 'General';
 
+      const lines: Array<{ accountId: string; debit: number; credit: number; remarks: string }> = [
+        { accountId: salary.id, debit: amount, credit: 0, remarks: `${dept} payroll gross` },
+      ];
+
+      if (tax > 0) {
+        const payePayable = await this.resolveAccountByCode(tx, groupId, ACCT.PAYE_PAYABLE);
+        if (payePayable) {
+          lines.push({ accountId: payePayable.id, debit: 0, credit: tax, remarks: `${dept} PAYE withheld` });
+          lines.push({
+            accountId: payrollPayable.id,
+            debit: 0,
+            credit: net > 0 ? net : amount - tax,
+            remarks: `${dept} payroll net payable`,
+          });
+        } else {
+          lines.push({ accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` });
+        }
+      } else {
+        lines.push({ accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` });
+      }
+
       await this.postVoucher(tx, {
         groupId,
         postingDate,
         voucherType: 'PAYROLL',
         voucherId: batchId,
-        lines: [
-          { accountId: salary.id, debit: amount, credit: 0, remarks: `${dept} payroll` },
-          { accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` },
-        ],
+        lines,
       });
 
       return { posted: true };
     });
+  }
+
+  /** Backfill GL for all PAID payroll batches missing a PAYROLL voucher (repair tool). */
+  async backfillPaidPayrollGlPosts(actor: Actor) {
+    const paid = await this.db
+      .select({ id: schema.payrollBatches.id })
+      .from(schema.payrollBatches)
+      .where(eq(schema.payrollBatches.status, 'PAID'));
+
+    const results: Array<{ batchId: string; posted: boolean; reason?: string }> = [];
+    for (const row of paid) {
+      const res = await this.postPayrollBatch(row.id, actor);
+      results.push({ batchId: row.id, ...res });
+    }
+    return {
+      processed: results.length,
+      posted: results.filter((r) => r.posted).length,
+      skipped: results.filter((r) => !r.posted).length,
+      results,
+    };
   }
 
   // ─── Phase 2C: Marketing funding → ad spend expense ─────────────────────────
@@ -2402,20 +2446,21 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     groupId: string | null,
     asOfDate?: string,
   ): Promise<{
-    currentRatio: number;
-    quickRatio: number;
-    cashRatio: number;
-    grossProfitMargin: number;
-    operatingProfitMargin: number;
-    netProfitMargin: number;
-    returnOnAssets: number;
-    returnOnEquity: number;
-    debtToEquity: number;
-    daysSalesOutstanding: number;
-    inventoryTurnover: number;
-    daysInventoryOutstanding: number;
-    interestCoverage: number;
-    cashConversionCycle: number;
+    currentRatio: number | null;
+    quickRatio: number | null;
+    cashRatio: number | null;
+    grossProfitMargin: number | null;
+    operatingProfitMargin: number | null;
+    netProfitMargin: number | null;
+    returnOnAssets: number | null;
+    returnOnEquity: number | null;
+    debtToEquity: number | null;
+    daysSalesOutstanding: number | null;
+    inventoryTurnover: number | null;
+    daysInventoryOutstanding: number | null;
+    /** null = no interest expense (infinite coverage). */
+    interestCoverage: number | null;
+    cashConversionCycle: number | null;
   }> {
     // Fetch all account balances with their type metadata in one query.
     const conds: SQL[] = [this.groupEqOn(schema.glEntries.groupId, groupId)];
@@ -2541,21 +2586,31 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     const apDays = cogs === 0 ? 0 : (accountsPayable / cogs) * 365;
     const cashConversionCycle = daysInventoryOutstanding + daysSalesOutstanding - apDays;
 
+    // JSON cannot encode ±Infinity (becomes null and crashes the Health KPIs UI).
+    // Round finite values; keep null for undefined / infinite ratios so the client
+    // can show "--" or "No debt" without calling Number methods on null.
+    const roundOrNull = (v: number, decimals: number): number | null => {
+      if (!Number.isFinite(v)) return null;
+      const factor = 10 ** decimals;
+      return Math.round(v * factor) / factor;
+    };
+
     return {
-      currentRatio: Math.round(currentRatio * 100) / 100,
-      quickRatio: Math.round(quickRatio * 100) / 100,
-      cashRatio: Math.round(cashRatio * 100) / 100,
-      grossProfitMargin: Math.round(grossProfitMargin * 100) / 100,
-      operatingProfitMargin: Math.round(operatingProfitMargin * 100) / 100,
-      netProfitMargin: Math.round(netProfitMargin * 100) / 100,
-      returnOnAssets: Math.round(returnOnAssets * 100) / 100,
-      returnOnEquity: Math.round(returnOnEquity * 100) / 100,
-      debtToEquity: Math.round(debtToEquity * 100) / 100,
-      daysSalesOutstanding: Math.round(daysSalesOutstanding * 10) / 10,
-      inventoryTurnover: Math.round(inventoryTurnover * 100) / 100,
-      daysInventoryOutstanding: Math.round(daysInventoryOutstanding * 10) / 10,
-      interestCoverage: Math.round(interestCoverage * 100) / 100,
-      cashConversionCycle: Math.round(cashConversionCycle * 10) / 10,
+      currentRatio: roundOrNull(currentRatio, 2),
+      quickRatio: roundOrNull(quickRatio, 2),
+      cashRatio: roundOrNull(cashRatio, 2),
+      grossProfitMargin: roundOrNull(grossProfitMargin, 2),
+      operatingProfitMargin: roundOrNull(operatingProfitMargin, 2),
+      netProfitMargin: roundOrNull(netProfitMargin, 2),
+      returnOnAssets: roundOrNull(returnOnAssets, 2),
+      returnOnEquity: roundOrNull(returnOnEquity, 2),
+      debtToEquity: roundOrNull(debtToEquity, 2),
+      daysSalesOutstanding: roundOrNull(daysSalesOutstanding, 1),
+      inventoryTurnover: roundOrNull(inventoryTurnover, 2),
+      daysInventoryOutstanding: roundOrNull(daysInventoryOutstanding, 1),
+      // null = no interest expense (infinite coverage)
+      interestCoverage: interestExpense === 0 ? null : roundOrNull(interestCoverage, 2),
+      cashConversionCycle: roundOrNull(cashConversionCycle, 1),
     };
   }
 

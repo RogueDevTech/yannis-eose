@@ -44,7 +44,7 @@ declare global {
       OBJECT_STORAGE_PUBLIC_BASE_URL?: string;
       ASSET_ENV_PREFIX: string;
       VAPID_PUBLIC_KEY?: string;
-      /** True when NODE_ENV=development. Gates dev-only features (accounting, AI assistant). */
+      /** True when NODE_ENV=development. Gates dev-only features (AI assistant). */
       IS_DEV?: boolean;
     };
   }
@@ -85,7 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         process.env.OBJECT_STORAGE_PUBLIC_BASE_URL ?? process.env.GCS_PUBLIC_BASE_URL ?? '',
       ASSET_ENV_PREFIX: process.env.ASSET_ENV_PREFIX ?? 'dev',
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
-      // Dev-only features (accounting, AI assistant) are visible only in development.
+      // Dev-only features (AI assistant) are visible only in development.
       IS_DEV: process.env.NODE_ENV === 'development',
     },
   });

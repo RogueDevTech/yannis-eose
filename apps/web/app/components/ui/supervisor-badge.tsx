@@ -28,9 +28,15 @@ interface SupervisorBadgeProps {
 }
 
 const SIZE_CLASSES = {
-  sm: 'text-2xs px-1.5 py-0.5 gap-1',
-  md: 'text-xs px-2 py-0.5 gap-1.5',
-  lg: 'text-sm px-2.5 py-1 gap-1.5',
+  sm: 'text-2xs gap-1',
+  md: 'text-xs gap-1.5',
+  lg: 'text-sm gap-1.5',
+} as const;
+
+const DOT_SIZE_CLASSES = {
+  sm: 'w-1 h-1',
+  md: 'w-1.5 h-1.5',
+  lg: 'w-2 h-2',
 } as const;
 
 export function SupervisorBadge({
@@ -42,11 +48,11 @@ export function SupervisorBadge({
 }: SupervisorBadgeProps) {
   return (
     <span
-      className={`inline-flex items-center rounded-full font-medium border bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 ${SIZE_CLASSES[size]} ${className}`}
+      className={`inline-flex items-center font-medium text-purple-700 dark:text-purple-300 ${SIZE_CLASSES[size]} ${className}`}
       style={style}
       title={title}
     >
-      <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-purple-500" />
+      <span className={`rounded-full shrink-0 bg-purple-500 ${DOT_SIZE_CLASSES[size]}`} />
       {label}
     </span>
   );

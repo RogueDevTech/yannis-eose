@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { useFetcher } from '@remix-run/react';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
-import { formatRoleLabel } from '~/components/ui/role-badge';
+import { RoleBadge } from '~/components/ui/role-badge';
 import { PageHeader } from '~/components/ui/page-header';
-import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -69,6 +69,8 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
   const [branchSel, setBranchSel] = useState('');
   const [deptSel, setDeptSel] = useState('');
   const [preview, setPreview] = useState<PayrollPreview | null>(null);
+  const [includeContractors, setIncludeContractors] = useState(false);
+  const [runLabel, setRunLabel] = useState('');
   const [dismissedPreviewError, setDismissedPreviewError] = useState(false);
   const [dismissedGenerateError, setDismissedGenerateError] = useState(false);
 
@@ -165,7 +167,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
       render: (r) => (
         <div>
           <p className="font-medium text-app-fg">{r.staffName}</p>
-          <p className="text-xs text-app-fg-muted">{formatRoleLabel(r.staffRole)}</p>
+          <RoleBadge role={r.staffRole} size="sm" />
         </div>
       ),
     },
@@ -203,7 +205,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
             −<NairaPrice amount={Number(r.deductionsTotal)} />
           </>
         ) : (
-          '—'
+          'N/A'
         ),
     },
     {
@@ -227,22 +229,32 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
     }));
   }, []);
 
+  const generating =
+    fetcher.state === 'submitting' &&
+    (fetcher.formData?.get('intent') === 'generateBatch' ||
+      fetcher.formData?.get('intent') === 'generateBatchesBulk');
+  const canGenerate = !!branchSel && !!deptSel && !generating;
+
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6">
       <PageHeader
-        title="Generate Payroll Batch"
+        title="Generate payroll"
+        description="Pick month and scope, then generate a draft batch."
         backTo="/hr/payroll"
-        description="Generate payroll for a selected month and scope."
       />
 
       {(previewError ?? previewActionError) && (
         <PageNotification
           variant="error"
           title="Preview failed"
-          message={typeof previewError === 'string' ? previewError : typeof previewActionError === 'string' ? previewActionError : ''}
-          onDismiss={() => {
-            setDismissedPreviewError(true);
-          }}
+          message={
+            typeof previewError === 'string'
+              ? previewError
+              : typeof previewActionError === 'string'
+                ? previewActionError
+                : ''
+          }
+          onDismiss={() => setDismissedPreviewError(true)}
         />
       )}
 
@@ -252,20 +264,26 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
           title="Could not generate"
           message={(() => {
             const e = surface.errorMatchingIntent(['generateBatch', 'generateBatchesBulk']);
-            return typeof e === 'string' ? e : typeof generateActionError === 'string' ? generateActionError : '';
+            return typeof e === 'string'
+              ? e
+              : typeof generateActionError === 'string'
+                ? generateActionError
+                : '';
           })()}
           onDismiss={() => setDismissedGenerateError(true)}
         />
       )}
 
-      <div className="card p-5 space-y-4">
-        <fetcher.Form method="post" id="payroll-generate-form" className="space-y-4">
+      <div className="card space-y-5">
+        <fetcher.Form method="post" id="payroll-generate-form" className="space-y-5">
           {isBulkBranch || isBulkDept ? (
             <input type="hidden" name="intent" value="generateBatchesBulk" />
           ) : (
             <input type="hidden" name="intent" value="generateBatch" />
           )}
           <input type="hidden" name="periodMonth" value={periodMonth} />
+          {includeContractors ? <input type="hidden" name="includeContractors" value="on" /> : null}
+          {runLabel ? <input type="hidden" name="runLabel" value={runLabel} /> : null}
 
           {isBulkBranch
             ? generatableBranches.map((b) => (
@@ -283,32 +301,32 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                 <input type="hidden" name="department" value={deptSel} />
               ) : null}
 
-          <SearchableSelect
-            id="payroll-gen-branch"
-            label="Branch"
-            required
-            value={branchSel}
-            onChange={(v) => {
-              setBranchSel(v);
-              setPreview(null);
-            }}
-            options={branchOptions}
-            searchPlaceholder="Search branches..."
-          />
-
-          <FormSelect
-            label="Department"
-            name="_departmentUi"
-            required
-            options={deptOptions}
-            value={deptSel}
-            onChange={(e) => {
-              setDeptSel(e.target.value);
-              setPreview(null);
-            }}
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
+            <div className="sm:col-span-1 xl:col-span-2">
+              <SearchableSelect
+                id="payroll-gen-branch"
+                label="Branch"
+                required
+                value={branchSel}
+                onChange={(v) => {
+                  setBranchSel(v);
+                  setPreview(null);
+                }}
+                options={branchOptions}
+                searchPlaceholder="Search branches..."
+              />
+            </div>
+            <FormSelect
+              label="Department"
+              name="_departmentUi"
+              required
+              options={deptOptions}
+              value={deptSel}
+              onChange={(e) => {
+                setDeptSel(e.target.value);
+                setPreview(null);
+              }}
+            />
             <FormSelect
               label="Month"
               name="_monthUi"
@@ -331,90 +349,100 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                 setPreview(null);
               }}
             />
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!canGenerate}
+              loading={generating}
+              loadingText="…"
+              className="h-10 md:h-9 w-full mt-2 sm:mt-0"
+            >
+              Generate
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+            <TextInput
+              label="Run label (optional)"
+              name="_runLabelUi"
+              value={runLabel}
+              onChange={(e) => setRunLabel(e.target.value)}
+              placeholder="e.g. April 2026 CS run"
+            />
+            <label className="flex items-center gap-2 text-sm text-app-fg cursor-pointer h-10 md:h-9">
+              <input
+                type="checkbox"
+                checked={includeContractors}
+                onChange={(e) => setIncludeContractors(e.target.checked)}
+              />
+              <span>Include agency contractors</span>
+            </label>
           </div>
 
           {showScopeHint && (
             <p className="text-xs text-app-fg-muted rounded-md border border-app-border bg-app-hover px-3 py-2">
               Will check up to <span className="font-medium text-app-fg">{slotCount}</span> batch slot
-              {slotCount === 1 ? '' : 's'} ({resolvedBranchCount} branch{resolvedBranchCount === 1 ? '' : 'es'} ×{' '}
-              {resolvedDeptCount} department{resolvedDeptCount === 1 ? '' : 's'}) for{' '}
-              <span className="font-medium text-app-fg">{formatMonthLabel}</span>. Existing batches are skipped.
+              {slotCount === 1 ? '' : 's'} ({resolvedBranchCount} branch
+              {resolvedBranchCount === 1 ? '' : 'es'} × {resolvedDeptCount} department
+              {resolvedDeptCount === 1 ? '' : 's'}) for{' '}
+              <span className="font-medium text-app-fg">{formatMonthLabel}</span>. Existing batches are
+              skipped.
             </p>
           )}
 
           {showPreview && (
-            <div className="rounded-md border border-app-border bg-app-hover p-3 space-y-3">
-              <ModalFetcherInlineError message={previewSurface.errorMatchingIntent('previewBatch')} />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!branchSel || !deptSel || previewFetcher.state === 'submitting'}
-                loading={previewFetcher.state === 'submitting'}
-                loadingText="Previewing…"
-                onClick={() => {
-                  previewFetcher.submit(
-                    {
-                      intent: 'previewBatch',
-                      branchId: branchSel,
-                      department: deptSel,
-                      periodMonth: periodMonth.slice(0, 10),
-                    },
-                    { method: 'post', action: '/hr/payroll/generate' },
-                  );
-                }}
-              >
-                Preview roster &amp; expected pay
-              </Button>
-              {preview && (
-                <div className="space-y-2">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!branchSel || !deptSel || previewFetcher.state === 'submitting'}
+                  loading={previewFetcher.state === 'submitting'}
+                  loadingText="Previewing…"
+                  onClick={() => {
+                    previewFetcher.submit(
+                      {
+                        intent: 'previewBatch',
+                        branchId: branchSel,
+                        department: deptSel,
+                        periodMonth: periodMonth.slice(0, 10),
+                      },
+                      { method: 'post', action: '/hr/payroll/generate' },
+                    );
+                  }}
+                >
+                  Preview roster
+                </Button>
+                {preview ? (
                   <p className="text-xs text-app-fg-muted">
                     Staff:{' '}
-                    <span className="font-medium text-app-fg">{preview.staffCount}</span> · Expected total:{' '}
+                    <span className="font-medium text-app-fg">{preview.staffCount}</span>
+                    {' · '}
+                    Expected:{' '}
                     <span className="font-medium text-app-fg">
                       <NairaPrice amount={preview.totalAmount} />
                     </span>
                   </p>
-                  {preview.rows.length > 0 ? (
-                    <CompactTable
-                      withCard={false}
-                      columns={previewColumns}
-                      rows={preview.rows}
-                      rowKey={(r) => r.staffId}
-                    />
-                  ) : (
-                    <p className="text-xs text-app-fg-muted">No staff in scope for this branch and department.</p>
-                  )}
-                </div>
-              )}
+                ) : null}
+              </div>
+              <ModalFetcherInlineError message={previewSurface.errorMatchingIntent('previewBatch')} />
+              {preview ? (
+                preview.rows.length > 0 ? (
+                  <CompactTable
+                    withCard={false}
+                    columns={previewColumns}
+                    rows={preview.rows}
+                    rowKey={(r) => r.staffId}
+                  />
+                ) : (
+                  <p className="text-xs text-app-fg-muted">
+                    No staff in scope for this branch and department.
+                  </p>
+                )
+              ) : null}
             </div>
           )}
-
-          <div className="flex flex-wrap gap-2 pt-2">
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              disabled={
-                !branchSel ||
-                !deptSel ||
-                (fetcher.state === 'submitting' &&
-                  (fetcher.formData?.get('intent') === 'generateBatch' ||
-                    fetcher.formData?.get('intent') === 'generateBatchesBulk'))
-              }
-              loading={
-                fetcher.state === 'submitting' &&
-                (fetcher.formData?.get('intent') === 'generateBatch' ||
-                  fetcher.formData?.get('intent') === 'generateBatchesBulk')
-              }
-              loadingText="Generating…"
-            >
-              Generate
-            </Button>
-            <Link to="/hr/payroll" className="btn-secondary btn-sm inline-flex items-center justify-center">
-              Cancel
-            </Link>
-          </div>
         </fetcher.Form>
       </div>
     </div>

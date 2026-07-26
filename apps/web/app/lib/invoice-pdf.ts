@@ -114,7 +114,8 @@ let paidStampPdfInflight: Promise<PaidStampForPdf | null> | null = null;
  * Loads the PNG logo in the browser for embedding in jsPDF. Returns null on
  * failure or when not in a browser (SSR).
  */
-function loadInvoiceLogoForPdf(): Promise<LogoForPdf | null> {
+/** Shared company logo loader for invoice / payslip PDF embedding. */
+export function loadInvoiceLogoForPdf(): Promise<LogoForPdf | null> {
   if (typeof window === 'undefined' || typeof Image === 'undefined') {
     return Promise.resolve(null);
   }

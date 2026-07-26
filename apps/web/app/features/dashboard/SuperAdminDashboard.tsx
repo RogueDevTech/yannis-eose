@@ -148,40 +148,36 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 
 
       {/* ── HERO: ROAS on Ad Spend ────────────────────────── */}
-      <div className="card relative overflow-hidden !py-3 !px-4 max-w-[400px]">
-        {/* Decorative brand watermark */}
-        <img
-          src="/assets/yannis-logo.png"
-          alt=""
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 h-24 w-24 object-contain opacity-[0.06] dark:opacity-[0.08]"
-        />
-        <div className="relative">
-          <p className="text-xs font-medium text-app-fg-muted tracking-wide">
-            ROAS on Ad Spend
-          </p>
-          <p className={`text-3xl sm:text-4xl font-bold tabular-nums leading-tight ${
-            marketingSafe.roas >= 2
+      <OverviewStatStrip
+        mobileGrid
+        mobileGridCols={3}
+        items={[
+          {
+            label: 'ROAS',
+            value: `${marketingSafe.roas.toFixed(2)}x`,
+            valueClassName: marketingSafe.roas >= 2
               ? 'text-success-600 dark:text-success-400'
               : marketingSafe.roas >= 1
                 ? 'text-warning-600 dark:text-warning-400'
-                : 'text-danger-600 dark:text-danger-400'
-          }`}>
-            {marketingSafe.roas.toFixed(2)}x
-          </p>
-          <div className="text-xs text-app-fg-muted mt-0.5 flex gap-3">
-            <p>Delivered Revenue: <span className="font-semibold text-success-600 dark:text-success-400">{fmt(marketingSafe.deliveredRevenue)}</span></p>
-            <p>Ad Spend: <span className="font-semibold text-danger-600 dark:text-danger-400">{fmt(marketingSafe.totalSpend)}</span></p>
-          </div>
-          <Link
-            to="/admin/ceo"
-            className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-semibold text-app-fg-muted hover:text-app-fg"
-          >
-            Deep analysis
-            <span aria-hidden>→</span>
-          </Link>
-        </div>
-      </div>
+                : 'text-danger-600 dark:text-danger-400',
+          },
+          {
+            label: 'Delivered revenue',
+            value: fmt(marketingSafe.deliveredRevenue),
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Ad spend',
+            value: fmt(marketingSafe.totalSpend),
+            valueClassName: 'text-danger-600 dark:text-danger-400',
+          },
+          {
+            label: 'Deep analysis',
+            value: '→',
+            to: '/admin/ceo',
+          },
+        ]}
+      />
 
       {/* ── Total Orders: all categories combined ── */}
       {(() => {

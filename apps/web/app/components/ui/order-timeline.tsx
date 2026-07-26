@@ -28,7 +28,7 @@ function TimelineLink({ to, children }: { to: string; children: ReactNode }) {
   return (
     <Link
       to={to}
-      className="font-medium text-brand-600 dark:text-brand-400 underline-offset-2 decoration-from-font hover:underline"
+      className="font-medium text-app-fg underline-offset-2 decoration-from-font hover:underline"
     >
       {children}
     </Link>

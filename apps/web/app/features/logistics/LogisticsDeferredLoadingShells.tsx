@@ -16,11 +16,12 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { TransfersShellDateFilters } from '~/lib/transfers-shell-filters';
 
 export function logisticsOrdersShellColumns(): CompactTableColumn<{ id: string }>[] {
@@ -258,7 +259,6 @@ export function LogisticsPartnersLoadingShell() {
         }
       />
       <OverviewStatStrip
-        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Logistics companies', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -274,29 +274,39 @@ export function LogisticsPartnersLoadingShell() {
           { value: 'providers', label: 'Companies' },
         ]}
       />
-      {/* Search + filter row — mirrors the live partners search + location filters */}
-      <div className="flex flex-wrap items-end gap-2">
-        <span
-          className="block h-9 w-full flex-1 min-w-0 md:min-w-[12rem] md:max-w-md animate-pulse rounded-md border border-app-border bg-app-hover"
-          aria-hidden
-        />
-        <SearchableSelect
-          value=""
-          onChange={() => {}}
-          placeholder="All companies"
-          searchPlaceholder="Search companies..."
-          options={[{ value: '', label: 'All companies' }]}
-          wrapperClassName="w-40 sm:w-48"
-        />
-        <SearchableSelect
-          value=""
-          onChange={() => {}}
-          placeholder="All states"
-          searchPlaceholder="Search states..."
-          options={[{ value: '', label: 'All states' }]}
-          wrapperClassName="w-36 sm:w-44"
-        />
-      </div>
+      {/* Search + filter row — mirrors LogisticsPage ToolbarFiltersCollapsible. */}
+      <ToolbarFiltersCollapsible
+        hideMobileSheet
+        searchRow={
+          <PageSearchControl
+            value=""
+            onApply={() => {}}
+            placeholder="Search by name, contact, or coverage…"
+            title="Search partners"
+          />
+        }
+        desktopInlineFilters={
+          <>
+            <SearchableSelect
+              value=""
+              onChange={() => {}}
+              placeholder="All companies"
+              searchPlaceholder="Search companies..."
+              options={[{ value: '', label: 'All companies' }]}
+              wrapperClassName="w-40 sm:w-48"
+            />
+            <SearchableSelect
+              value=""
+              onChange={() => {}}
+              placeholder="All states"
+              searchPlaceholder="Search states..."
+              options={[{ value: '', label: 'All states' }]}
+              wrapperClassName="w-36 sm:w-44"
+            />
+          </>
+        }
+        sheetFilterBody={<div className="space-y-3" />}
+      />
 
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
@@ -367,11 +377,6 @@ export function LogisticsRemittancesLoadingShell() {
   const sender = searchParams.get('sender') ?? '';
   const minQty = searchParams.get('minQty') ?? '';
   const maxQty = searchParams.get('maxQty') ?? '';
-
-  const [searchDraft, setSearchDraft] = useState(search);
-  useEffect(() => {
-    setSearchDraft(search);
-  }, [search]);
 
   const setFilterParam = useCallback(
     (key: string, value: string) => {
@@ -523,7 +528,6 @@ export function LogisticsRemittancesLoadingShell() {
       <MobileDateFilterRow startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} />
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total transfers', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -535,48 +539,24 @@ export function LogisticsRemittancesLoadingShell() {
       />
 
       {/* Mobile-only search — matches loaded page's md:hidden search form. */}
-      <form
-        className="w-full md:hidden"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setFilterParam('search', searchDraft);
-        }}
-      >
-        <SearchInput
-          controlSize="sm"
-          wrapperClassName="w-full"
+      <div className="w-full md:hidden">
+        <PageSearchControl
+          value={search}
           placeholder="Search by ID or product"
-          value={searchDraft}
-          onChange={(value) => {
-            setSearchDraft(value);
-            if (value === '') setFilterParam('search', '');
-          }}
-          withSubmitButton
+          title="Search transfers"
+          onApply={(query) => setFilterParam('search', query)}
         />
-      </form>
+      </div>
 
       {/* Desktop-only filter card — mirrors loaded `hidden md:block card p-4`. */}
       <div className="hidden md:block card p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <form
-            className="w-64"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setFilterParam('search', searchDraft);
-            }}
-          >
-            <SearchInput
-              controlSize="sm"
-              wrapperClassName="w-full"
-              placeholder="Search by ID or product"
-              value={searchDraft}
-              onChange={(value) => {
-                setSearchDraft(value);
-                if (value === '') setFilterParam('search', '');
-              }}
-              withSubmitButton
-            />
-          </form>
+          <PageSearchControl
+            value={search}
+            placeholder="Search by ID or product"
+            title="Search transfers"
+            onApply={(query) => setFilterParam('search', query)}
+          />
           <FormSelect
             controlSize="sm"
             wrapperClassName="w-44"
@@ -679,7 +659,6 @@ export function LogisticsTeamLoadingShell({
         }
       />
       <OverviewStatStrip
-        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Active providers', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -755,7 +734,6 @@ export function LogisticsProviderDetailLoadingShell() {
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
         <OverviewStatStrip
-          mobileGrid
           wrap
           tileClassName="!py-3.5 !px-4 min-w-[9rem]"
           items={[
@@ -885,7 +863,6 @@ function TransfersWorkspaceLoadingShell({
       />
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Transfer records', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },

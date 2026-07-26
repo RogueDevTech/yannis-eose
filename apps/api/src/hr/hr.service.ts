@@ -402,13 +402,15 @@ export class HrService {
             .limit(1)
         : [undefined];
 
-      this.notifications.enqueueCreate({
-        userId: payout.staffId,
-        type: 'hr:payout_approved',
-        title: 'Payout approved',
-        body: `Your payout for the period has been approved.`,
-        data: { payoutId: payout.id, totalPayout: payout.totalPayout, branchId: batchRow?.branchId ?? null },
-      });
+      if (payout.staffId) {
+        this.notifications.enqueueCreate({
+          userId: payout.staffId,
+          type: 'hr:payout_approved',
+          title: 'Payout approved',
+          body: `Your payout for the period has been approved.`,
+          data: { payoutId: payout.id, totalPayout: payout.totalPayout, branchId: batchRow?.branchId ?? null },
+        });
+      }
     }
 
     return payout;

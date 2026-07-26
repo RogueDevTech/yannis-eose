@@ -70,6 +70,29 @@ export interface FinanceOverviewPulse {
   approvalsPendingCount: number;
 }
 
+/** Payroll slice for finance overview (from `finance.overviewPageBundle`). */
+export interface FinancePayrollTotals {
+  batchCount: number;
+  staffCount: number;
+  totalGross: number;
+  totalNet: number;
+  totalTax: number;
+}
+
+export interface FinancePayrollPayRoleRow {
+  label: string;
+  totalGross: number;
+  totalNet: number;
+  headcount: number;
+}
+
+export interface FinancePayrollOverview {
+  pendingFinance: FinancePayrollTotals;
+  periodCost: FinancePayrollTotals;
+  paidInPeriod: FinancePayrollTotals;
+  byPayRole: FinancePayrollPayRoleRow[];
+}
+
 export interface RemittanceBreakdownRow {
   productId?: string;
   locationId?: string;
@@ -155,26 +178,28 @@ export interface GeneralLedgerLoaderData {
 
 /** Financial KPIs from GL data. */
 export interface FinancialKPIs {
-  currentRatio: number;
-  quickRatio: number;
-  cashRatio: number;
-  grossProfitMargin: number;
-  operatingProfitMargin: number;
-  netProfitMargin: number;
-  returnOnAssets: number;
-  returnOnEquity: number;
-  debtToEquity: number;
-  daysSalesOutstanding: number;
-  inventoryTurnover: number;
-  daysInventoryOutstanding: number;
-  interestCoverage: number;
-  cashConversionCycle: number;
+  currentRatio: number | null;
+  quickRatio: number | null;
+  cashRatio: number | null;
+  grossProfitMargin: number | null;
+  operatingProfitMargin: number | null;
+  netProfitMargin: number | null;
+  returnOnAssets: number | null;
+  returnOnEquity: number | null;
+  debtToEquity: number | null;
+  daysSalesOutstanding: number | null;
+  inventoryTurnover: number | null;
+  daysInventoryOutstanding: number | null;
+  /** null = no interest expense (infinite coverage / "No debt"). */
+  interestCoverage: number | null;
+  cashConversionCycle: number | null;
 }
 
 /** `/admin/finance/overview` loader shape */
 export interface FinanceOverviewLoaderData {
   profit: ProfitReport;
   pulse: FinanceOverviewPulse;
+  payrollOverview: FinancePayrollOverview;
   filters: {
     startDate: string;
     endDate: string;

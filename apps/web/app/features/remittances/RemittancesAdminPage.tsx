@@ -17,7 +17,7 @@ import { NumberInput } from '~/components/ui/number-input';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { type FilterPillOption } from '~/components/ui/filter-pills';
@@ -113,10 +113,6 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
     setProcessedIds(new Set());
   }, [remittances]);
 
-  const [searchDraft, setSearchDraft] = useState(filters.search);
-  useEffect(() => {
-    setSearchDraft(filters.search);
-  }, [filters.search]);
 
   const alreadyProcessedError = (() => {
     const errMsg =
@@ -638,49 +634,25 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
       />
 
       {/* Search — mobile only; on desktop it sits inline in the filter bar below. */}
-      <form
-        className="w-full md:hidden"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setFilterParam('search', searchDraft);
-        }}
-      >
-        <SearchInput
-          controlSize="sm"
-          wrapperClassName="w-full"
+      <div className="w-full md:hidden">
+        <PageSearchControl
+          value={filters.search}
           placeholder="Search by ID or product"
-          value={searchDraft}
-          onChange={(value) => {
-            setSearchDraft(value);
-            if (value === '') setFilterParam('search', '');
-          }}
-          withSubmitButton
+          title="Search transfers"
+          onApply={(query) => setFilterParam('search', query)}
         />
-      </form>
+      </div>
 
       {/* Desktop-only filter bar — search + filters on one line. On mobile these
           live in the PageHeaderMobileTools sheet (search renders separately above). */}
       <div className="hidden md:block card p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <form
-            className="w-full md:w-64"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setFilterParam('search', searchDraft);
-            }}
-          >
-            <SearchInput
-              controlSize="sm"
-              wrapperClassName="w-full"
-              placeholder="Search by ID or product"
-              value={searchDraft}
-              onChange={(value) => {
-                setSearchDraft(value);
-                if (value === '') setFilterParam('search', '');
-              }}
-              withSubmitButton
-            />
-          </form>
+          <PageSearchControl
+            value={filters.search}
+            placeholder="Search by ID or product"
+            title="Search transfers"
+            onApply={(query) => setFilterParam('search', query)}
+          />
           <FormSelect
             controlSize="sm"
             wrapperClassName="w-44"

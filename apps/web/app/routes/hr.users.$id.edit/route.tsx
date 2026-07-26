@@ -71,6 +71,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const templatesResP = apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie });
   const permissionCatalogResP = apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie });
   const templateBaselinesResP = apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie });
+  const payRolesResP = apiRequest<unknown>('/trpc/hr.listPayRoles', { method: 'GET', cookie });
   const matrixResP = apiRequest<unknown>(`/trpc/permissions.getUserMatrix?input=${matrixInput}`, { method: 'GET', cookie });
 
   // App Shell pattern — defer the editingUser fetch + auth gate too so the
@@ -138,6 +139,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       branchIds: (user.branchMemberships ?? []).map((m) => m.branchId),
       roleTemplateId: user.roleTemplateId ?? null,
       permissionOverrides,
+      payRoleId: user.payRoleId ?? null,
+      employmentType: user.employmentType ?? 'STAFF',
+      salaryBasis: user.salaryBasis ?? 'FORMULA_BASED',
+      taxStatus: user.taxStatus ?? 'STANDARD_PAYE',
+      reportsToUserId: user.reportsToUserId ?? null,
+      crmLinked: user.crmLinked ?? true,
     };
     return { kind: 'ok', editingUser };
   })();
@@ -145,7 +152,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Deferred picklists — the form chrome (current values + auth gate) renders
   // immediately above; only the dropdowns/sections driven by this data wait.
   const picklistsPromise: Promise<UserCreateLoaderData> = (async () => {
-    const [productsRes, locationsRes, plansRes, branchesRes, branchGroupsRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
+    const [productsRes, locationsRes, plansRes, branchesRes, branchGroupsRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes, payRolesRes] =
       await Promise.all([
         productsResP,
         locationsResP,
@@ -156,6 +163,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         templatesResP,
         permissionCatalogResP,
         templateBaselinesResP,
+        payRolesResP,
       ]);
 
     const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
@@ -222,6 +230,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       roleTemplates,
       permissionCatalog,
       templatePermissionsById,
+      payRoles: payRolesRes.ok
+        ? (((payRolesRes.data as { result?: { data?: UserCreateLoaderData['payRoles'] } })?.result?.data) ?? [])
+        : [],
       // Editing — no auto-fill default needed.
       defaultMembershipBranchId: null,
       viewerRole: viewer.role,
@@ -249,6 +260,31 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (!userId) {
     return json({ error: 'User ID required' }, { status: 400 });
+  }
+
+  if (intent === 'updatePayrollProfile') {
+    const payRoleRaw = formData.get('payRoleId')?.toString() ?? '';
+    const reportsRaw = formData.get('reportsToUserId')?.toString() ?? '';
+    const res = await apiRequest<unknown>('/trpc/hr.updatePayrollProfile', {
+      method: 'POST',
+      cookie,
+      body: {
+        userId,
+        payRoleId: payRoleRaw || null,
+        employmentType: formData.get('employmentType')?.toString() ?? 'STAFF',
+        salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
+        taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
+        reportsToUserId: reportsRaw || null,
+        crmLinked: formData.get('crmLinked')?.toString() === 'true',
+      },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update payroll profile') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
   }
 
   // Re-stamp permissions — mirrors the same intent on the user-detail route so

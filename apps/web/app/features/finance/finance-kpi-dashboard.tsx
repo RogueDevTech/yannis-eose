@@ -5,17 +5,25 @@ interface KPIConfig {
   label: string;
   unit: '%' | 'x' | 'days' | 'ratio';
   /** Format the raw number for display. */
-  format: (v: number) => string;
+  format: (v: number | null) => string;
   /** [green-min, green-max, amber-min, amber-max] — outside amber = red. */
   thresholds: { green: [number, number]; amber: [number, number] };
   /** Description shown on hover/tap. */
   description: string;
 }
 
-const pct = (v: number) => (isFinite(v) ? `${v.toFixed(1)}%` : '--');
-const ratio = (v: number) => (isFinite(v) ? v.toFixed(2) : '--');
-const days = (v: number) => (isFinite(v) ? `${v.toFixed(0)}d` : '--');
-const times = (v: number) => (isFinite(v) ? `${v.toFixed(1)}x` : '--');
+/** Coerce API / JSON values; null stays null (used for infinite interest coverage). */
+function asFiniteNumber(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+const pct = (v: number | null) => (v == null ? '--' : `${v.toFixed(1)}%`);
+const ratio = (v: number | null) => (v == null ? '--' : v.toFixed(2));
+const days = (v: number | null) => (v == null ? '--' : `${v.toFixed(0)}d`);
+const times = (v: number | null) => (v == null ? '--' : `${v.toFixed(1)}x`);
 
 const KPI_CONFIGS: KPIConfig[] = [
   // ── Liquidity ──
@@ -129,8 +137,8 @@ const KPI_CONFIGS: KPIConfig[] = [
     key: 'interestCoverage',
     label: 'Interest Coverage',
     unit: 'x',
-    format: (v) => (v === Infinity ? 'No debt' : times(v)),
-    thresholds: { green: [3, Infinity], amber: [1.5, 3] },
+    format: (v) => (v == null ? 'No debt' : times(v)),
+    thresholds: { green: [3, Number.POSITIVE_INFINITY], amber: [1.5, 3] },
     description: 'EBIT / Interest Expense. Ability to service debt.',
   },
 
@@ -140,15 +148,15 @@ const KPI_CONFIGS: KPIConfig[] = [
     label: 'Cash Conversion Cycle',
     unit: 'days',
     format: days,
-    thresholds: { green: [-Infinity, 30], amber: [30, 60] },
+    thresholds: { green: [Number.NEGATIVE_INFINITY, 30], amber: [30, 60] },
     description: 'DIO + DSO - AP Days. Time between paying for stock and collecting cash.',
   },
 ];
 
-function getHealthColor(value: number, config: KPIConfig): 'green' | 'amber' | 'red' {
-  if (!isFinite(value)) {
-    // Infinity interest coverage = no debt = green. Others = red.
-    if (config.key === 'interestCoverage' && value === Infinity) return 'green';
+function getHealthColor(value: number | null, config: KPIConfig): 'green' | 'amber' | 'red' {
+  // null interest coverage = no interest expense = healthy
+  if (value == null) {
+    if (config.key === 'interestCoverage') return 'green';
     return 'red';
   }
 
@@ -180,16 +188,16 @@ const SECTION_LABELS: Array<{ label: string; start: number; count: number }> = [
 export function FinanceKPIDashboard({ kpis }: { kpis: FinancialKPIs }) {
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold text-app-muted uppercase tracking-wide">
+      <h3 className="text-sm font-semibold text-app-fg-muted uppercase tracking-wide">
         Financial Health KPIs
       </h3>
 
       {SECTION_LABELS.map((section) => (
         <div key={section.label}>
-          <p className="text-xs font-medium text-app-muted mb-2">{section.label}</p>
+          <p className="text-xs font-medium text-app-fg-muted mb-2">{section.label}</p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
             {KPI_CONFIGS.slice(section.start, section.start + section.count).map((config) => {
-              const value = kpis[config.key];
+              const value = asFiniteNumber(kpis[config.key]);
               const health = getHealthColor(value, config);
               const colors = COLOR_CLASSES[health];
               return (
@@ -200,11 +208,11 @@ export function FinanceKPIDashboard({ kpis }: { kpis: FinancialKPIs }) {
                 >
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className={`inline-block h-2 w-2 rounded-full ${colors.dot}`} />
-                    <span className="text-xs font-medium text-app-muted truncate">
+                    <span className="text-xs font-medium text-app-fg-muted truncate">
                       {config.label}
                     </span>
                   </div>
-                  <p className="text-lg font-semibold text-app-primary tabular-nums">
+                  <p className="text-lg font-semibold text-app-fg tabular-nums">
                     {config.format(value)}
                   </p>
                 </div>

@@ -21,7 +21,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { withActorAndBranch } from '../common/db/with-actor';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
-import { isOrgWideDepartmentHead } from '../common/authz';
+import { canAccessStaffHrUserDetail, isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
@@ -41,10 +41,13 @@ import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
  * same dept↔role mapping to scope what each Head can see + edit.
  */
 export const DEPARTMENT_ROLES: Record<PayrollDepartment, readonly string[]> = {
-  CS: ['CS_CLOSER'],
-  MARKETING: ['MEDIA_BUYER'],
-  LOGISTICS: ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'],
-  HR: ['HR_MANAGER', 'HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'BRANCH_ADMIN', 'FINANCE_OFFICER'],
+  CS: ['CS_CLOSER', 'HEAD_OF_CS'],
+  MARKETING: ['MEDIA_BUYER', 'HEAD_OF_MARKETING'],
+  LOGISTICS: ['HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'],
+  HR: ['HR_MANAGER', 'BRANCH_ADMIN'],
+  OPERATIONS: ['SUPER_ADMIN', 'ADMIN'],
+  FINANCE: ['FINANCE_OFFICER', 'AUDITOR'],
+  SUPPORT: ['SUPPORT'],
 } as const;
 
 export const DEPARTMENT_OWNER_ROLE: Record<PayrollDepartment, string> = {
@@ -52,6 +55,9 @@ export const DEPARTMENT_OWNER_ROLE: Record<PayrollDepartment, string> = {
   MARKETING: 'HEAD_OF_MARKETING',
   LOGISTICS: 'HEAD_OF_LOGISTICS',
   HR: 'HR_MANAGER',
+  OPERATIONS: 'SUPER_ADMIN',
+  FINANCE: 'FINANCE_OFFICER',
+  SUPPORT: 'SUPER_ADMIN',
 };
 
 /**
@@ -208,7 +214,8 @@ export class PayrollBatchService {
       });
     }
 
-    const periodStart = nigeriaDayStart(`${input.periodMonth}-01`);
+    // periodMonth is validated as YYYY-MM-01 — do not append another `-01`.
+    const periodStart = nigeriaDayStart(input.periodMonth);
     const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
     const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
 
@@ -308,7 +315,7 @@ export class PayrollBatchService {
    * Existing slots (any status, including DRAFT) are skipped — use `generateBatch` to refresh a single DRAFT.
    */
   async generateBatchesBulk(input: GenerateBatchesBulkInput, actor: SessionUser) {
-    const periodStart = nigeriaDayStart(`${input.periodMonth}-01`);
+    const periodStart = nigeriaDayStart(input.periodMonth);
     const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
     const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
 
@@ -561,7 +568,7 @@ export class PayrollBatchService {
         message: `You cannot preview payroll for ${input.department} on this branch.`,
       });
     }
-    const periodStart = nigeriaDayStart(`${input.periodMonth}-01`);
+    const periodStart = nigeriaDayStart(input.periodMonth);
     const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
     const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
 
@@ -1016,9 +1023,9 @@ export class PayrollBatchService {
             status: 'PAID',
             financeProcessedAt: new Date(),
             financeProcessedBy: actor.id,
-            financeReference: input.financeReference,
+            financeReference: input.financeReference?.trim() || null,
             disbursementDate: input.disbursementDate ?? null,
-            proofOfPaymentUrl: input.proofOfPaymentUrl ?? null,
+            proofOfPaymentUrl: input.proofOfPaymentUrl?.trim() || null,
             updatedAt: new Date(),
           })
           .where(eq(schema.payrollBatches.id, input.batchId))
@@ -1047,7 +1054,7 @@ export class PayrollBatchService {
     await this.notifyByRoleOnBranch('HR_MANAGER', batch.branchId, {
       type: 'hr:batch_paid',
       title: 'Payroll batch paid',
-      body: `${this.formatDepartment(batch.department)} batch for ${this.formatPeriod(batch.periodMonth)} marked paid (ref: ${input.financeReference}).`,
+      body: `${this.formatDepartment(batch.department)} batch for ${this.formatPeriod(batch.periodMonth)} marked paid.`,
       batchId: batch.id,
     });
     const ownerRole = DEPARTMENT_OWNER_ROLE[batch.department as PayrollDepartment];
@@ -1192,7 +1199,7 @@ export class PayrollBatchService {
 
     if (input.staffId) conditions.push(eq(schema.payoutRecords.staffId, input.staffId));
     if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
-    if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR'));
+    if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
@@ -1205,6 +1212,7 @@ export class PayrollBatchService {
         payout: schema.payoutRecords,
         batch: schema.payrollBatches,
         staffName: schema.users.name,
+        staffRole: schema.users.role,
       })
       .from(schema.payoutRecords)
       .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
@@ -1232,7 +1240,7 @@ export class PayrollBatchService {
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
-    if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department));
+    if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
 
     const rows = await this.db
       .select({
@@ -1248,6 +1256,172 @@ export class PayrollBatchService {
       .orderBy(desc(schema.payrollBatches.periodMonth));
 
     return rows;
+  }
+
+  /**
+   * Finance overview Payroll tab — pending queue + period costs + pay-role rollup.
+   * Groups by snapshot `payRoleName` on payout lines (falls back to live pay-role
+   * category / system role) so totals match what Finance marks paid.
+   */
+  async getFinanceOverviewPayroll(
+    input: { fromMonth?: string; toMonth?: string; branchId?: string },
+    _viewer: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const branchScope: SQL[] = [];
+    if (effectiveBranchIds?.length) {
+      branchScope.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+    }
+    if (input.branchId) {
+      branchScope.push(eq(schema.payrollBatches.branchId, input.branchId));
+    }
+
+    // Same period/branch filters as Paid / Period cards — otherwise an older
+    // PENDING_FINANCE batch outside the selected month still looks "stuck".
+    const pendingConds: SQL[] = [
+      eq(schema.payrollBatches.status, 'PENDING_FINANCE'),
+      ...branchScope,
+    ];
+    if (input.fromMonth) pendingConds.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
+    if (input.toMonth) pendingConds.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+
+    const [pendingRow] = await this.db
+      .select({
+        batchCount: count(),
+        staffCount: sum(schema.payrollBatches.staffCount),
+        totalGross: sum(
+          sql`COALESCE(NULLIF(${schema.payrollBatches.totalGross}, 0), ${schema.payrollBatches.totalAmount})`,
+        ),
+        totalNet: sum(
+          sql`COALESCE(NULLIF(${schema.payrollBatches.totalNet}, 0), ${schema.payrollBatches.totalAmount})`,
+        ),
+        totalTax: sum(schema.payrollBatches.totalTax),
+      })
+      .from(schema.payrollBatches)
+      .where(and(...pendingConds));
+
+    const periodBatchConds: SQL[] = [
+      inArray(schema.payrollBatches.status, ['PENDING_FINANCE', 'PAID']),
+      ...branchScope,
+    ];
+    if (input.fromMonth) periodBatchConds.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
+    if (input.toMonth) periodBatchConds.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+
+    const [periodRow] = await this.db
+      .select({
+        batchCount: count(),
+        staffCount: sum(schema.payrollBatches.staffCount),
+        totalGross: sum(
+          sql`COALESCE(NULLIF(${schema.payrollBatches.totalGross}, 0), ${schema.payrollBatches.totalAmount})`,
+        ),
+        totalNet: sum(
+          sql`COALESCE(NULLIF(${schema.payrollBatches.totalNet}, 0), ${schema.payrollBatches.totalAmount})`,
+        ),
+        totalTax: sum(schema.payrollBatches.totalTax),
+      })
+      .from(schema.payrollBatches)
+      .where(and(...periodBatchConds));
+
+    const paidConds: SQL[] = [eq(schema.payrollBatches.status, 'PAID'), ...branchScope];
+    if (input.fromMonth) paidConds.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
+    if (input.toMonth) paidConds.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+
+    const [paidRow] = await this.db
+      .select({
+        batchCount: count(),
+        staffCount: sum(schema.payrollBatches.staffCount),
+        totalGross: sum(
+          sql`COALESCE(NULLIF(${schema.payrollBatches.totalGross}, 0), ${schema.payrollBatches.totalAmount})`,
+        ),
+        totalNet: sum(
+          sql`COALESCE(NULLIF(${schema.payrollBatches.totalNet}, 0), ${schema.payrollBatches.totalAmount})`,
+        ),
+        totalTax: sum(schema.payrollBatches.totalTax),
+      })
+      .from(schema.payrollBatches)
+      .where(and(...paidConds));
+
+    const roleConds: SQL[] = [
+      inArray(schema.payrollBatches.status, ['PENDING_FINANCE', 'PAID']),
+      ...branchScope,
+    ];
+    if (input.fromMonth) roleConds.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
+    if (input.toMonth) roleConds.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+
+    const roleRows = await this.db
+      .select({
+        payRoleName: schema.payoutRecords.payRoleName,
+        payRoleCategory: schema.payrollPayRoles.category,
+        staffRole: schema.users.role,
+        totalGross: sum(
+          sql`COALESCE(NULLIF(${schema.payoutRecords.grossPay}, 0), ${schema.payoutRecords.totalPayout})`,
+        ),
+        totalNet: sum(
+          sql`COALESCE(NULLIF(${schema.payoutRecords.netPay}, 0), ${schema.payoutRecords.totalPayout})`,
+        ),
+        headcount: count(),
+      })
+      .from(schema.payoutRecords)
+      .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+      .leftJoin(schema.users, eq(schema.users.id, schema.payoutRecords.staffId))
+      .leftJoin(schema.payrollPayRoles, eq(schema.payrollPayRoles.id, schema.users.payRoleId))
+      .where(and(...roleConds))
+      .groupBy(
+        schema.payoutRecords.payRoleName,
+        schema.payrollPayRoles.category,
+        schema.users.role,
+      );
+
+    const byPayRoleMap = new Map<
+      string,
+      { label: string; totalGross: number; totalNet: number; headcount: number }
+    >();
+    for (const row of roleRows) {
+      const label =
+        row.payRoleName?.trim() ||
+        row.payRoleCategory?.trim() ||
+        row.staffRole?.trim() ||
+        'Unassigned';
+      const bucket = byPayRoleMap.get(label) ?? {
+        label,
+        totalGross: 0,
+        totalNet: 0,
+        headcount: 0,
+      };
+      bucket.totalGross += Number(row.totalGross ?? 0);
+      bucket.totalNet += Number(row.totalNet ?? 0);
+      bucket.headcount += Number(row.headcount ?? 0);
+      byPayRoleMap.set(label, bucket);
+    }
+
+    const byPayRole = Array.from(byPayRoleMap.values()).sort((a, b) => b.totalNet - a.totalNet);
+
+    const num = (v: unknown) => Number(v ?? 0);
+
+    return {
+      pendingFinance: {
+        batchCount: num(pendingRow?.batchCount),
+        staffCount: num(pendingRow?.staffCount),
+        totalGross: num(pendingRow?.totalGross),
+        totalNet: num(pendingRow?.totalNet),
+        totalTax: num(pendingRow?.totalTax),
+      },
+      periodCost: {
+        batchCount: num(periodRow?.batchCount),
+        staffCount: num(periodRow?.staffCount),
+        totalGross: num(periodRow?.totalGross),
+        totalNet: num(periodRow?.totalNet),
+        totalTax: num(periodRow?.totalTax),
+      },
+      paidInPeriod: {
+        batchCount: num(paidRow?.batchCount),
+        staffCount: num(paidRow?.staffCount),
+        totalGross: num(paidRow?.totalGross),
+        totalNet: num(paidRow?.totalNet),
+        totalTax: num(paidRow?.totalTax),
+      },
+      byPayRole,
+    };
   }
 
   async payrollCostByBranch(input: { fromMonth?: string; toMonth?: string; branchId?: string }) {
@@ -1382,44 +1556,62 @@ export class PayrollBatchService {
     };
   }
 
-  async exportBankUpload(batchId: string, viewer: SessionUser) {
-    const batch = await this.requireBatch(batchId);
+  async exportBankUpload(
+    input: { batchId?: string; batchIds?: string[] },
+    viewer: SessionUser,
+  ) {
     if (!canProcessBatch(viewer)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Finance can export bank upload files.' });
     }
-    if (batch.status !== 'PENDING_FINANCE' && batch.status !== 'PAID') {
-      throw new TRPCError({ code: 'CONFLICT', message: 'Bank upload export requires an approved or paid batch.' });
+
+    const ids = [...new Set([...(input.batchIds ?? []), ...(input.batchId ? [input.batchId] : [])])];
+    if (!ids.length) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Provide batchId or batchIds.' });
     }
 
-    const detail = await this.getBatchDetail(batchId, viewer);
-    const branchRow = (
-      await this.db
-        .select({ name: schema.branches.name })
-        .from(schema.branches)
-        .where(eq(schema.branches.id, batch.branchId))
-        .limit(1)
-    )[0];
+    const batches = [];
+    for (const batchId of ids) {
+      const batch = await this.requireBatch(batchId);
+      if (batch.status !== 'PENDING_FINANCE' && batch.status !== 'PAID') {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `Batch ${batchId.slice(0, 8)} is ${batch.status} — bank export requires Pending Finance or Paid.`,
+        });
+      }
 
-    const rows = detail.payouts
-      .filter((p) => Number(p.netPay ?? p.totalPayout) > 0)
-      .map((p) => ({
-        beneficiaryName: p.payoutAccountName ?? p.staffName ?? p.payRoleName ?? 'Unknown',
-        accountNumber: p.payoutAccountNumber ?? '',
-        bankCode: p.payoutBankCode ?? '',
-        bankName: p.payoutBankName ?? '',
-        amount: Number(p.netPay ?? p.totalPayout),
-        reference: `${batch.periodMonth}-${batch.department}-${p.staffName ?? p.payRoleName ?? 'line'}`,
-        staffName: p.staffName,
-        payRoleName: p.payRoleName,
-      }));
+      const detail = await this.getBatchDetail(batchId, viewer);
+      const branchRow = (
+        await this.db
+          .select({ name: schema.branches.name })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, batch.branchId))
+          .limit(1)
+      )[0];
 
-    return {
-      batchId,
-      branchName: branchRow?.name ?? batch.branchId,
-      periodMonth: batch.periodMonth,
-      department: batch.department,
-      rows,
-    };
+      const rows = detail.payouts
+        .filter((p) => Number(p.netPay ?? p.totalPayout) > 0)
+        .map((p) => ({
+          beneficiaryName: p.payoutAccountName ?? p.staffName ?? p.payRoleName ?? 'Unknown',
+          accountNumber: p.payoutAccountNumber ?? '',
+          bankCode: p.payoutBankCode ?? '',
+          bankName: p.payoutBankName ?? '',
+          amount: Number(p.netPay ?? p.totalPayout),
+          reference: `${batch.periodMonth}-${batch.department}-${p.staffName ?? p.payRoleName ?? 'line'}`,
+          staffName: p.staffName,
+          payRoleName: p.payRoleName,
+        }));
+
+      batches.push({
+        batchId,
+        branchName: branchRow?.name ?? batch.branchId,
+        periodMonth: batch.periodMonth,
+        department: batch.department,
+        status: batch.status,
+        rows,
+      });
+    }
+
+    return { batches };
   }
 
   async getPayslip(payoutId: string, viewer: SessionUser) {
@@ -1443,7 +1635,50 @@ export class PayrollBatchService {
     const row = payoutRows[0];
     if (!row?.payout.batchId) throw new TRPCError({ code: 'NOT_FOUND', message: 'Payslip not found' });
 
-    await this.getBatchDetail(row.payout.batchId, viewer);
+    const paid =
+      row.payout.status === 'PAID' || row.batch.status === 'PAID';
+    const isOwnPaid = paid && row.payout.staffId != null && row.payout.staffId === viewer.id;
+
+    if (!isOwnPaid) {
+      // HR / Finance / department heads: full batch access.
+      let batchAllowed = false;
+      try {
+        await this.getBatchDetail(row.payout.batchId, viewer);
+        batchAllowed = true;
+      } catch (err) {
+        if (!(err instanceof TRPCError) || err.code !== 'FORBIDDEN') throw err;
+      }
+
+      // Staff-directory viewers (self already handled; heads / supervisors / HR
+      // viewers who can open the profile) may open paid payslips without batch access.
+      if (!batchAllowed) {
+        if (!paid || !row.payout.staffId || !row.staffRole) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to view this payslip.' });
+        }
+        const memberships = await this.db
+          .select({ branchId: schema.userBranches.branchId })
+          .from(schema.userBranches)
+          .where(eq(schema.userBranches.userId, row.payout.staffId));
+        if (
+          !canAccessStaffHrUserDetail(
+            {
+              id: viewer.id,
+              role: viewer.role,
+              permissions: viewer.permissions ?? [],
+              branchIds: viewer.branchIds ?? [],
+              currentBranchId: viewer.currentBranchId ?? null,
+            },
+            {
+              id: row.payout.staffId,
+              role: row.staffRole,
+              branchIds: memberships.map((m) => m.branchId),
+            },
+          )
+        ) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to view this payslip.' });
+        }
+      }
+    }
 
     return {
       payout: row.payout,
@@ -1690,7 +1925,7 @@ export class PayrollBatchService {
     if (input.branchId && (cross || orgWideHeadNullSession)) {
       conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
     }
-    if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department));
+    if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
     if (input.status) conditions.push(eq(schema.payrollBatches.status, input.status));
 
     const where = conditions.length ? and(...(conditions as Parameters<typeof and>)) : undefined;

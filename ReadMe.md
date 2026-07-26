@@ -9,8 +9,6 @@ pnpm turbo dev
 
 docker restart yannis-eose-api-1
 
-8100373262 - opay
-
 journalctl -u yannis-api --since "2026-07-13 00:00" --until "2026-07-14 00:00" | grep -i "8036762291" | tail -20
 
 <!-- cd infrastructure/terraform/gcp && terraform plan -state=prod.tfstate -var-file=terraform.tfvars.prod -out=bump-medium.tfplan && terraform apply -state=prod.tfstate "bump-medium.tfplan"

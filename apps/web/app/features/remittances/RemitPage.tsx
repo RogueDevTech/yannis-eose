@@ -50,6 +50,7 @@ export interface DeliveryRemittanceRecord {
 
 export interface DeliveryRemittanceEligibleOrder {
   id: string;
+  orderNumber: number | null;
   customerName: string;
   totalAmount: string | null;
   deliveryFee: string | null;

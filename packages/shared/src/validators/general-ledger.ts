@@ -223,20 +223,21 @@ export const financialKPIsSchema = z.object({
 export type FinancialKPIsInput = z.infer<typeof financialKPIsSchema>;
 
 export interface FinancialKPIs {
-  currentRatio: number;
-  quickRatio: number;
-  cashRatio: number;
-  grossProfitMargin: number;
-  operatingProfitMargin: number;
-  netProfitMargin: number;
-  returnOnAssets: number;
-  returnOnEquity: number;
-  debtToEquity: number;
-  daysSalesOutstanding: number;
-  inventoryTurnover: number;
-  daysInventoryOutstanding: number;
-  interestCoverage: number;
-  cashConversionCycle: number;
+  currentRatio: number | null;
+  quickRatio: number | null;
+  cashRatio: number | null;
+  grossProfitMargin: number | null;
+  operatingProfitMargin: number | null;
+  netProfitMargin: number | null;
+  returnOnAssets: number | null;
+  returnOnEquity: number | null;
+  debtToEquity: number | null;
+  daysSalesOutstanding: number | null;
+  inventoryTurnover: number | null;
+  daysInventoryOutstanding: number | null;
+  /** null = no interest expense (infinite coverage). */
+  interestCoverage: number | null;
+  cashConversionCycle: number | null;
 }
 
 // ─── Opening balances / cutover (Phase 6) ───────────────────────────────────────
@@ -258,3 +259,9 @@ export const postOpeningBalancesSchema = z.object({
   lines: z.array(openingBalanceLineSchema).min(1),
 });
 export type PostOpeningBalancesInput = z.infer<typeof postOpeningBalancesSchema>;
+
+/** Idempotent repair: post GL for a paid payroll batch that missed auto-post. */
+export const repostPayrollBatchSchema = z.object({
+  batchId: z.string().uuid(),
+});
+export type RepostPayrollBatchInput = z.infer<typeof repostPayrollBatchSchema>;

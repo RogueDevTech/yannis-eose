@@ -17,6 +17,30 @@ import {
   listMonthlyPayrollsSchema,
   getBatchSchema,
   addBatchAdjustmentSchema,
+  createPayRoleSchema,
+  updatePayRoleSchema,
+  saveProductTierConfigSchema,
+  saveTaxBandConfigSchema,
+  createContractorSchema,
+  updateContractorSchema,
+  getContractorSchema,
+  listContractorPayoutsSchema,
+  overridePayslipLineSchema,
+  previewPayeSchema,
+  payrollOnboardingActionSchema,
+  updatePayrollProfileSchema,
+  bulkAssignPayRoleSchema,
+  listPayslipsSchema,
+  payrollRegisterSchema,
+  payrollReportRangeSchema,
+  getPayrollMetricsBulkSchema,
+  saveFormulaConfigSchema,
+  previewPayrollFormulaSchema,
+  archivePayRoleSchema,
+  getPayslipSchema,
+  bulkPayslipPdfSchema,
+  exportPayRunDraftSchema,
+  exportBankUploadSchema,
   canonicalPermissionCode,
   legacyAliasesForCanonical,
 } from '@yannis/shared';
@@ -31,6 +55,8 @@ import { resolveRoleTemplateBaselineCodes } from '../../permissions/role-templat
 import { computeEffectivePermissionsLegacyUnion } from '../../permissions/permissions.service';
 import { HrService } from '../../hr/hr.service';
 import { PayrollBatchService } from '../../hr/payroll-batch.service';
+import { PayrollConfigService } from '../../hr/payroll-config.service';
+import { PayrollMetricsService } from '../../hr/payroll-metrics.service';
 import { getUsersService } from './users.router';
 import { getProductsService } from './products.router';
 import { getLogisticsService } from './logistics.router';
@@ -46,6 +72,8 @@ import {
 
 let hrServiceInstance: HrService | null = null;
 let payrollBatchServiceInstance: PayrollBatchService | null = null;
+let payrollConfigServiceInstance: PayrollConfigService | null = null;
+let payrollMetricsServiceInstance: PayrollMetricsService | null = null;
 
 export function setHrService(service: HrService) {
   hrServiceInstance = service;
@@ -53,6 +81,14 @@ export function setHrService(service: HrService) {
 
 export function setPayrollBatchService(service: PayrollBatchService) {
   payrollBatchServiceInstance = service;
+}
+
+export function setPayrollConfigService(service: PayrollConfigService) {
+  payrollConfigServiceInstance = service;
+}
+
+export function setPayrollMetricsService(service: PayrollMetricsService) {
+  payrollMetricsServiceInstance = service;
 }
 
 /** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
@@ -69,6 +105,20 @@ export function getPayrollBatchService(): PayrollBatchService {
     throw new Error('PayrollBatchService not initialized. Call setPayrollBatchService() first.');
   }
   return payrollBatchServiceInstance;
+}
+
+function getPayrollConfigService(): PayrollConfigService {
+  if (!payrollConfigServiceInstance) {
+    throw new Error('PayrollConfigService not initialized. Call setPayrollConfigService() first.');
+  }
+  return payrollConfigServiceInstance;
+}
+
+function getPayrollMetricsService(): PayrollMetricsService {
+  if (!payrollMetricsServiceInstance) {
+    throw new Error('PayrollMetricsService not initialized. Call setPayrollMetricsService() first.');
+  }
+  return payrollMetricsServiceInstance;
 }
 
 function assertHasHrRead(user: NonNullable<TrpcContext['user']>) {
@@ -294,6 +344,255 @@ export const hrRouter = router({
     .input(addBatchAdjustmentSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollBatchService().addBatchAdjustment(input, ctx.user);
+    }),
+
+  recalculateBatch: authedProcedure
+    .input(getBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().recalculateBatch(input.batchId, ctx.user);
+    }),
+
+  overridePayslipLine: authedProcedure
+    .input(overridePayslipLineSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().overridePayslipLine(input, ctx.user);
+    }),
+
+  listPayslips: permissionProcedure('hr.read')
+    .input(listPayslipsSchema)
+    .query(async ({ input }) => {
+      return getPayrollBatchService().listPayslips(input);
+    }),
+
+  payrollRegister: permissionProcedure('hr.read')
+    .input(payrollRegisterSchema)
+    .query(async ({ input }) => {
+      return getPayrollBatchService().payrollRegister(input);
+    }),
+
+  payrollCostByBranch: permissionProcedure('hr.read')
+    .input(payrollReportRangeSchema)
+    .query(async ({ input }) => {
+      return getPayrollBatchService().payrollCostByBranch(input);
+    }),
+
+  payrollCostByRoleCategory: permissionProcedure('hr.read')
+    .input(payrollReportRangeSchema)
+    .query(async ({ input }) => {
+      return getPayrollBatchService().payrollCostByRoleCategory(input);
+    }),
+
+  payrollTrend: permissionProcedure('hr.read')
+    .input(payrollReportRangeSchema)
+    .query(async ({ input }) => {
+      return getPayrollBatchService().payrollTrend(input);
+    }),
+
+  exportPayRunDraft: permissionProcedure('hr.read')
+    .input(exportPayRunDraftSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().exportPayRunDraft(input.batchId, ctx.user);
+    }),
+
+  exportBankUpload: permissionProcedure('finance.disburse')
+    .input(exportBankUploadSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().exportBankUpload(input, ctx.user);
+    }),
+
+  getPayslip: authedProcedure
+    .input(getPayslipSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().getPayslip(input.payoutId, ctx.user);
+    }),
+
+  bulkPayslipPdf: permissionProcedure('hr.read')
+    .input(bulkPayslipPdfSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().bulkPayslipPdf(input, ctx.user);
+    }),
+
+  getPayrollMetrics: authedProcedure
+    .input(z.object({ staffId: z.string().uuid(), periodStart: z.string(), periodEnd: z.string() }))
+    .query(async ({ input }) => {
+      const userRows = await getUsersService().getById(input.staffId, null);
+      return getPayrollMetricsService().getStaffMetrics({
+        staffId: input.staffId,
+        staffRole: userRows.role,
+        periodStart: new Date(input.periodStart),
+        periodEnd: new Date(input.periodEnd),
+        crmLinked: userRows.crmLinked,
+      });
+    }),
+
+  getPayrollMetricsBulk: permissionProcedure('hr.read')
+    .input(getPayrollMetricsBulkSchema)
+    .query(async ({ input }) => {
+      const staffRows = await Promise.all(
+        input.staffIds.map(async (id) => {
+          const user = await getUsersService().getById(id, null);
+          return {
+            id: user.id,
+            role: user.role,
+            crmLinked: user.crmLinked,
+            reportsToUserId: user.reportsToUserId,
+          };
+        }),
+      );
+      const metricsMap = await getPayrollMetricsService().getStaffMetricsBulk(
+        staffRows,
+        new Date(input.periodStart),
+        new Date(input.periodEnd),
+      );
+      return Object.fromEntries(metricsMap.entries());
+    }),
+
+  listPayRoles: permissionProcedure('payroll.config.read')
+    .query(async ({ ctx }) => {
+      return getPayrollConfigService().listPayRoles(ctx.activeGroupId);
+    }),
+
+  createPayRole: permissionProcedure('payroll.config.write')
+    .input(createPayRoleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().createPayRole(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  updatePayRole: permissionProcedure('payroll.config.write')
+    .input(updatePayRoleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().updatePayRole(input, ctx.user);
+    }),
+
+  archivePayRole: permissionProcedure('payroll.config.write')
+    .input(archivePayRoleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().archivePayRole(input.id, ctx.user);
+    }),
+
+  saveFormulaConfig: permissionProcedure('payroll.config.write')
+    .input(saveFormulaConfigSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().saveFormulaConfig(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  previewPayrollFormula: permissionProcedure('payroll.config.read')
+    .input(previewPayrollFormulaSchema)
+    .query(async ({ input }) => {
+      return getPayrollConfigService().previewPayrollFormula(input);
+    }),
+
+  listProductTierConfigs: permissionProcedure('payroll.config.read')
+    .query(async ({ ctx }) => {
+      return getPayrollConfigService().listProductTierConfigs(ctx.activeGroupId);
+    }),
+
+  saveProductTierConfig: permissionProcedure('payroll.config.write')
+    .input(saveProductTierConfigSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().saveProductTierConfig(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  listTaxBandConfigs: permissionProcedure('payroll.config.read')
+    .query(async ({ ctx }) => {
+      return getPayrollConfigService().listTaxBandConfigs(ctx.activeGroupId);
+    }),
+
+  saveTaxBandConfig: permissionProcedure('payroll.config.write')
+    .input(saveTaxBandConfigSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().saveTaxBandConfig(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  previewPaye: permissionProcedure('payroll.config.read')
+    .input(previewPayeSchema)
+    .query(async ({ input }) => {
+      return getPayrollConfigService().previewPaye(input);
+    }),
+
+  listContractors: permissionProcedure('hr.read')
+    .query(async ({ ctx }) => {
+      return getPayrollConfigService().listContractors(ctx.activeGroupId);
+    }),
+
+  getContractor: permissionProcedure('hr.read')
+    .input(getContractorSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollConfigService().getContractor(input.id, ctx.activeGroupId);
+    }),
+
+  listContractorPayouts: permissionProcedure('hr.read')
+    .input(listContractorPayoutsSchema)
+    .query(async ({ input }) => {
+      return getPayrollConfigService().listContractorPayouts(input);
+    }),
+
+  createContractor: permissionProcedure('payroll.config.write')
+    .input(createContractorSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().createContractor(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  updateContractor: permissionProcedure('payroll.config.write')
+    .input(updateContractorSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().updateContractor(input, ctx.user);
+    }),
+
+  listPayrollOnboardingQueue: permissionProcedure('hr.read')
+    .query(async ({ ctx }) => {
+      return getPayrollConfigService().listOnboardingQueue(ctx.effectiveBranchIds);
+    }),
+
+  approvePayrollOnboarding: permissionProcedure('hr.write')
+    .input(payrollOnboardingActionSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().approvePayrollOnboarding(input.userId, ctx.user);
+    }),
+
+  rejectPayrollOnboarding: permissionProcedure('hr.write')
+    .input(payrollOnboardingActionSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().rejectPayrollOnboarding(input.userId, ctx.user);
+    }),
+
+  updatePayrollProfile: permissionProcedure('hr.write')
+    .input(updatePayrollProfileSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().updatePayrollProfile(input, ctx.user);
+    }),
+
+  bulkAssignPayRole: permissionProcedure('hr.write')
+    .input(bulkAssignPayRoleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().bulkAssignPayRole(input, ctx.user);
+    }),
+
+  payrollPageBundle: authedProcedure
+    .input(listMonthlyPayrollsSchema.optional())
+    .query(async ({ input, ctx }) => {
+      const filters = input ?? {};
+      const [payrolls, adjustments, payRoles, contractors, prepareAccess, usersResult] = await Promise.all([
+        getPayrollBatchService().listMonthlyPayrolls(filters, ctx.user, ctx.effectiveBranchIds),
+        getHrService().listAdjustments(undefined, ctx.effectiveBranchIds),
+        getPayrollConfigService().listPayRoles(ctx.activeGroupId),
+        getPayrollConfigService().listContractors(ctx.activeGroupId),
+        getPayrollBatchService().getPrepareAccess(ctx.user),
+        getUsersService().list(
+          { page: 1, limit: 500, sortBy: 'name', sortOrder: 'asc' },
+          ctx.user,
+          ctx.user.currentBranchId ?? undefined,
+          ctx.effectiveBranchIds,
+        ),
+      ]);
+      return {
+        payrolls,
+        adjustments,
+        payRoles,
+        contractors,
+        branches: prepareAccess.branches,
+        users: usersResult.users,
+      };
     }),
 
   // ============================================

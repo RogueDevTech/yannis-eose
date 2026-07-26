@@ -21,6 +21,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
 import { Collapsible } from '~/components/ui/collapsible';
+import { StatusBadge } from '~/components/ui/status-badge';
 
 interface SettingsUser {
   id: string;
@@ -1043,15 +1044,7 @@ export function SettingsPage({
                         <p className="text-sm font-semibold text-app-fg">
                           VOIP Calling{voipState ? ` (${voipState.active.providerDisplayName})` : ''}
                         </p>
-                        {localVoipEnabled ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> Enabled
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-app-hover px-2.5 py-0.5 text-xs font-medium text-app-fg-muted">
-                            <span className="w-1.5 h-1.5 rounded-full bg-surface-400" /> Disabled
-                          </span>
-                        )}
+                        <StatusBadge status={localVoipEnabled ? 'Enabled' : 'Disabled'} />
                       </div>
                       <p className="text-xs text-app-fg-muted leading-relaxed">
                         {localVoipEnabled
@@ -1384,15 +1377,7 @@ export function SettingsPage({
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
                         <p className="text-sm font-semibold text-app-fg">Enforce ad spend logging</p>
-                        {localStrictAdSpend ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> Enabled
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-app-hover px-2.5 py-0.5 text-xs font-medium text-app-fg-muted">
-                            <span className="w-1.5 h-1.5 rounded-full bg-surface-400" /> Disabled
-                          </span>
-                        )}
+                        <StatusBadge status={localStrictAdSpend ? 'Enabled' : 'Disabled'} />
                       </div>
                       <p className="text-xs text-app-fg-muted leading-relaxed">
                         {localStrictAdSpend

@@ -14,7 +14,7 @@ export function ToolbarFiltersFunnelIcon({ className = 'h-4 w-4 shrink-0' }: { c
 export type ToolbarFiltersBreakpoint = 'md' | 'lg';
 
 export interface ToolbarFiltersCollapsibleProps {
-  /** Search row — typically `<form>` + `SearchInput` + submit (single instance in DOM). Omit or pass `null` when only inline/sheet filters apply. */
+  /** Search row — prefer `<PageSearchControl>` (icon → modal). Omit or pass `null` when only inline/sheet filters apply. */
   searchRow?: ReactNode;
   /** Selects / chips shown inline at `breakpoint` and up (same row as search). */
   desktopInlineFilters: ReactNode;
@@ -44,8 +44,8 @@ export interface ToolbarFiltersCollapsibleProps {
 
 function rowClasses(bp: ToolbarFiltersBreakpoint): string {
   return bp === 'lg'
-    ? 'flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3'
-    : 'flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3';
+    ? 'flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2'
+    : 'flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-2';
 }
 
 function hideFiltersBtn(bp: ToolbarFiltersBreakpoint): string {
@@ -87,7 +87,7 @@ export function ToolbarFiltersCollapsible({
 
   return (
     <>
-      <div className={['relative border-b border-app-border py-3 md:px-4', className].filter(Boolean).join(' ')}>
+      <div className={['relative border-b border-app-border py-2 md:px-4', className].filter(Boolean).join(' ')}>
         {/* Floating clear-all badge at top-right edge of the toolbar */}
         {badgeCount > 0 && onClearAll && (
           <button

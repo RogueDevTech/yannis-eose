@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { Button } from '~/components/ui/button';
@@ -16,7 +16,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { Tabs } from '~/components/ui/tabs';
@@ -263,11 +263,7 @@ export function MarketingFundingLoadingShell({
   canSendFunding: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') ?? '');
-
-  useEffect(() => {
-    setSearchQuery(searchParams.get('search') ?? '');
-  }, [searchParams]);
+  const appliedSearch = searchParams.get('search') ?? '';
 
   const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
   const sectionParam = searchParams.get('section');
@@ -288,9 +284,9 @@ export function MarketingFundingLoadingShell({
     let n = 0;
     if (entryType !== 'all') n += 1;
     if (entryStatus !== '') n += 1;
-    if (searchQuery.trim()) n += 1;
+    if (appliedSearch.trim()) n += 1;
     return n;
-  }, [entryType, entryStatus, searchQuery]);
+  }, [entryType, entryStatus, appliedSearch]);
 
   const navigateSection = (v: string) => {
     setSearchParams((p) => {
@@ -318,18 +314,6 @@ export function MarketingFundingLoadingShell({
       next.set('page', '1');
       if (!v) next.delete('entryStatus');
       else next.set('entryStatus', v);
-      return next;
-    });
-  };
-
-  const handleSearchSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    setSearchParams((p) => {
-      const next = new URLSearchParams(p);
-      next.set('page', '1');
-      const q = searchQuery.trim();
-      if (q) next.set('search', q);
-      else next.delete('search');
       return next;
     });
   };
@@ -390,7 +374,7 @@ export function MarketingFundingLoadingShell({
         periodAllTime={filters.periodAllTime}
       />
 
-      <OverviewStatStrip mobileGrid items={statItems} />
+      <OverviewStatStrip items={statItems} />
 
       <div className="list-panel scroll-mt-4" id="funding-ledger">
         {canDistribute && !isAdminViewer ? (
@@ -418,9 +402,14 @@ export function MarketingFundingLoadingShell({
 
         {activeSection === 'balances' ? (
           <>
-            {/* Balances skeleton — search + rows */}
-            <div className="p-3">
-              <div className="h-10 w-full rounded-md bg-app-hover animate-pulse" />
+            {/* Balances skeleton — PageSearchControl + rows */}
+            <div className="px-3 py-2">
+              <PageSearchControl
+                value=""
+                onApply={() => {}}
+                placeholder="Search recipient name…"
+                title="Search balances"
+              />
             </div>
             <div className="space-y-0">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -440,15 +429,20 @@ export function MarketingFundingLoadingShell({
             <ToolbarFiltersCollapsible
               badgeCount={badgeCount}
               searchRow={
-                <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-                  <SearchInput
-                    placeholder="Search ledger…"
-                    value={searchQuery}
-                    onChange={(val) => setSearchQuery(val)}
-                    withSubmitButton
-                    wrapperClassName="min-w-0 flex-1"
-                  />
-                </form>
+                <PageSearchControl
+                  value={searchParams.get('search') ?? ''}
+                  placeholder="Search ledger…"
+                  title="Search ledger"
+                  onApply={(query) => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (query) next.set('search', query);
+                      else next.delete('search');
+                      return next;
+                    });
+                  }}
+                />
               }
               desktopInlineFilters={
                 <>
@@ -554,11 +548,6 @@ export function MarketingAdSpendLoadingShell({
 }) {
   const isMb = viewMode === 'media_buyer';
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') ?? '');
-
-  useEffect(() => {
-    setSearchQuery(searchParams.get('search') ?? '');
-  }, [searchParams]);
 
   const selectedStatus = searchParams.get('status') || 'ALL';
   const selectedProductId = searchParams.get('productId') || 'ALL';
@@ -642,19 +631,6 @@ export function MarketingAdSpendLoadingShell({
     });
   };
 
-  const handleSearchSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    setSearchParams((p) => {
-      const next = new URLSearchParams(p);
-      next.set('page', '1');
-      next.set('gpage', '1');
-      const q = searchQuery.trim();
-      if (q) next.set('search', q);
-      else next.delete('search');
-      return next;
-    });
-  };
-
   const productDisabled = productOptions.length <= 1;
   const campaignDisabled = campaignOptions.length <= 1;
   const buyerDisabled = isMb || mediaBuyerOptions.length <= 1;
@@ -716,7 +692,6 @@ export function MarketingAdSpendLoadingShell({
       ) : null}
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total spend', value: <StatValuePulse className="min-w-[5rem]" /> },
           { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
@@ -732,15 +707,21 @@ export function MarketingAdSpendLoadingShell({
           hideMobileSheet
           badgeCount={badgeCount}
           searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                placeholder="Search ads…"
-                value={searchQuery}
-                onChange={(val) => setSearchQuery(val)}
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-              />
-            </form>
+            <PageSearchControl
+              value={searchParams.get('search') ?? ''}
+              placeholder="Search ads…"
+              title="Search ads"
+              onApply={(query) => {
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  next.set('page', '1');
+                  next.set('gpage', '1');
+                  if (query) next.set('search', query);
+                  else next.delete('search');
+                  return next;
+                });
+              }}
+            />
           }
           desktopInlineFilters={
             <>
@@ -839,11 +820,6 @@ export function MarketingTeamLoadingShell({
 }) {
   const profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 };
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') ?? '');
-
-  useEffect(() => {
-    setSearchQuery(searchParams.get('q') ?? '');
-  }, [searchParams]);
 
   const sortByFromLoader = searchParams.get('sortBy') ?? 'name';
   const sortDirFromLoader = searchParams.get('sortDir') ?? 'asc';
@@ -869,10 +845,6 @@ export function MarketingTeamLoadingShell({
     setSearchParams(params);
   };
 
-  const handleSearchSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    mergeListParams({ q: searchQuery, page: 1 });
-  };
 
   const badgeCount = useMemo(() => {
     let n = 0;
@@ -921,7 +893,6 @@ export function MarketingTeamLoadingShell({
       />
 
       <OverviewStatStrip
-        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Team members', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -940,17 +911,12 @@ export function MarketingTeamLoadingShell({
           hideMobileSheet
           badgeCount={badgeCount}
           searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                placeholder="Search by name or role…"
-                value={searchQuery}
-                onChange={(v) => setSearchQuery(v)}
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-                name="q"
-                autoComplete="off"
-              />
-            </form>
+            <PageSearchControl
+              value={searchParams.get('q') ?? ''}
+              placeholder="Search by name or role…"
+              title="Search team"
+              onApply={(query) => mergeListParams({ q: query, page: 1 })}
+            />
           }
           desktopInlineFilters={
             <>
@@ -1196,13 +1162,6 @@ export function MarketingCrossFunnelLoadingShell({
   const campaignIdParam = searchParams.get('campaignId') || filters.campaignId || 'ALL';
   const mediaBuyerIdParam = searchParams.get('mediaBuyerId') || filters.mediaBuyerId || 'ALL';
   const searchValue = searchParams.get('search') ?? filters.search ?? '';
-  const [searchDraft, setSearchDraft] = useState(searchValue);
-
-  // Echo the URL into the input so jumping between deferred and resolved
-  // states doesn't blank the closer's typed query.
-  useEffect(() => {
-    setSearchDraft(searchValue);
-  }, [searchValue]);
 
   const placeholderOptions = (selected: string, allLabel: string, selectedLabel: string) => {
     const base: { value: string; label: string }[] = [{ value: 'ALL', label: allLabel }];
@@ -1229,18 +1188,6 @@ export function MarketingCrossFunnelLoadingShell({
       next.set('page', '1');
       if (!value || value === 'ALL') next.delete(key);
       else next.set(key, value);
-      return next;
-    });
-  };
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchParams((p) => {
-      const next = new URLSearchParams(p);
-      const trimmed = searchDraft.trim();
-      if (trimmed) next.set('search', trimmed);
-      else next.delete('search');
-      next.set('page', '1');
       return next;
     });
   };
@@ -1315,7 +1262,6 @@ export function MarketingCrossFunnelLoadingShell({
 
       {/* Mirrors the 5-tile stats strip the page renders inside its Suspense fallback. */}
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Resubmissions', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -1329,15 +1275,20 @@ export function MarketingCrossFunnelLoadingShell({
         hideMobileSheet
         badgeCount={filterBadgeCount}
         searchRow={
-          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-            <SearchInput
-              placeholder="Search by name, phone, or product..."
-              value={searchDraft}
-              onChange={(val) => setSearchDraft(val)}
-              withSubmitButton
-              wrapperClassName="min-w-0 flex-1"
-            />
-          </form>
+          <PageSearchControl
+            value={searchValue}
+            placeholder="Search by name, phone, or product..."
+            title="Search attempts"
+            onApply={(query) => {
+              setSearchParams((p) => {
+                const next = new URLSearchParams(p);
+                if (query) next.set('search', query);
+                else next.delete('search');
+                next.set('page', '1');
+                return next;
+              });
+            }}
+          />
         }
         desktopInlineFilters={
           <>
@@ -1452,7 +1403,6 @@ export function MarketingFormsLoadingShell({
       />
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total Forms', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Active Forms', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -1606,11 +1556,9 @@ export function MarketingOrdersLoadingShell({
   showMediaBuyerColumn?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') ?? '');
   const [selectedStatus, setSelectedStatus] = useState(() => searchParams.get('status') || 'ALL');
 
   useEffect(() => {
-    setSearchQuery(searchParams.get('search') ?? '');
     setSelectedStatus(searchParams.get('status') || 'ALL');
   }, [searchParams]);
 
@@ -1649,11 +1597,6 @@ export function MarketingOrdersLoadingShell({
     if ((searchParams.get('campaignId') || '').length > 0) n += 1;
     return n;
   }, [selectedStatus, showMediaBuyerColumn, searchParams]);
-
-  const handleSearchSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    applyListParams({ search: searchQuery, page: 1 });
-  };
 
   const handleStatusChange = (v: string) => {
     setSelectedStatus(v);
@@ -1697,7 +1640,6 @@ export function MarketingOrdersLoadingShell({
       />
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total Orders', value: <StatValuePulse className="min-w-[2.25rem]" /> },
           { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -1708,64 +1650,58 @@ export function MarketingOrdersLoadingShell({
         ]}
       />
 
-      <div className="list-panel">
-        <ToolbarFiltersCollapsible
-          className="!border-0"
-          badgeCount={ordersToolbarFilterBadge}
-          searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                placeholder="Search by customer or order ID..."
-                value={searchQuery}
-                onChange={(val) => {
-                  setSearchQuery(val);
-                  if (val === '' && (searchParams.get('search') ?? '').length > 0) {
-                    applyListParams({ search: '', page: 1 });
-                  }
-                }}
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
+      {/* Filters sit outside list-panel; table is wrapped — matches MarketingOrdersPage. */}
+      <ToolbarFiltersCollapsible
+        hideMobileSheet
+        badgeCount={ordersToolbarFilterBadge}
+        searchRow={
+          <PageSearchControl
+            value={searchParams.get('search') ?? ''}
+            placeholder="Search by customer or order ID..."
+            title="Search orders"
+            onApply={(query) => applyListParams({ search: query, page: 1 })}
+          />
+        }
+        desktopInlineFilters={
+          <>
+            <FormSelect
+              value={selectedStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              options={MARKETING_ORDERS_SHELL_STATUS_OPTIONS}
+              wrapperClassName="w-auto min-w-[11rem]"
+            />
+            {showMediaBuyerColumn ? (
+              <div
+                className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
+                aria-hidden
               />
-            </form>
-          }
-          desktopInlineFilters={
-            <>
-              <FormSelect
-                value={selectedStatus}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                options={MARKETING_ORDERS_SHELL_STATUS_OPTIONS}
-                wrapperClassName="w-auto min-w-[11rem]"
-              />
-              {showMediaBuyerColumn ? (
-                <div
-                  className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
-                  aria-hidden
-                />
-              ) : null}
-            </>
-          }
-          sheetFilterBody={
-            <div className="space-y-1.5">
-              <span className="text-xs font-medium text-app-fg-muted">Status</span>
-              <FormSelect
-                value={selectedStatus}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                options={MARKETING_ORDERS_SHELL_STATUS_OPTIONS}
-                wrapperClassName="w-full"
-              />
-            </div>
-          }
+            ) : null}
+          </>
+        }
+        sheetFilterBody={
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-app-fg-muted">Status</span>
+            <FormSelect
+              value={selectedStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              options={MARKETING_ORDERS_SHELL_STATUS_OPTIONS}
+              wrapperClassName="w-full"
+            />
+          </div>
+        }
+      />
+
+      <div className="list-panel scroll-mt-4">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          rows={MARKETING_ORDERS_SHELL_ROW_DATA}
+          rowKey={(r) => r.id}
+          columns={marketingOrdersShellTableColumns(showMediaBuyerColumn)}
+          renderMobileCard={() => renderMarketingOrdersMobileCardShell()}
+          emptyTitle="Loading…"
+          emptyDescription=""
         />
       </div>
-
-      <CompactTable<{ id: string }>
-        rows={MARKETING_ORDERS_SHELL_ROW_DATA}
-        rowKey={(r) => r.id}
-        columns={marketingOrdersShellTableColumns(showMediaBuyerColumn)}
-        renderMobileCard={() => renderMarketingOrdersMobileCardShell()}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
     </div>
   );
 }

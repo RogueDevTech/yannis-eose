@@ -506,7 +506,7 @@ function AuditDescription({
         {prefix}
         <Link
           to={href}
-          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
+          className="font-medium text-app-fg hover:underline underline-offset-2"
         >
           {entityLabel}
         </Link>
@@ -792,7 +792,7 @@ function DetailModal({
               {actorKnown && entry.changedBy ? (
                 <Link
                   to={`/hr/users/${entry.changedBy}`}
-                  className="block font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 text-xs mt-0.5 underline underline-offset-2"
+                  className="block font-medium text-app-fg hover:underline text-xs mt-0.5 underline-offset-2"
                 >
                   {actorDisplay}
                 </Link>
@@ -1417,7 +1417,7 @@ export function AuditPage({
                     return (
                       <Link
                         to={`/hr/users/${entry.changedBy}`}
-                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
+                        className="font-medium text-app-fg hover:underline underline-offset-2"
                       >
                         {display}
                       </Link>

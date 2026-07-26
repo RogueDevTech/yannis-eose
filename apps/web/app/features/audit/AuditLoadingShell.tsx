@@ -66,17 +66,22 @@ export function AuditLoadingShell({
         endDate={filters.endDate}
         periodAllTime={filters.periodAllTime}
       />
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="h-10 w-40 rounded-md bg-app-hover animate-pulse" aria-hidden />
-        <div className="h-10 w-40 rounded-md bg-app-hover animate-pulse" aria-hidden />
+      <div className="list-panel">
+        <div className="flex flex-wrap items-center gap-3 px-3 py-3 md:px-4">
+          <div className="h-9 w-40 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+          <div className="h-9 w-40 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+        </div>
       </div>
-      <CompactTable<{ id: string }>
-        columns={AUDIT_SHELL_COLS}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      <div className="list-panel">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={AUDIT_SHELL_COLS}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }

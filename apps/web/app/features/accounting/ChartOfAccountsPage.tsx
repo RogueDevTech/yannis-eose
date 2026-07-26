@@ -8,7 +8,7 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -293,7 +293,12 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SearchInput value={search} onChange={setSearch} placeholder="Search by code or name" className="max-w-xs" />
+        <PageSearchControl
+          value={search}
+          onApply={setSearch}
+          placeholder="Search by code or name"
+          title="Search accounts"
+        />
         <FormSelect
           value={rootTypeFilter}
           onChange={(e) => setRootTypeFilter(e.target.value)}

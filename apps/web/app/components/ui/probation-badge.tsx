@@ -24,9 +24,15 @@ interface ProbationBadgeProps {
 }
 
 const SIZE_CLASSES = {
-  sm: 'text-2xs px-1.5 py-0.5 gap-1',
-  md: 'text-xs px-2 py-0.5 gap-1.5',
-  lg: 'text-sm px-2.5 py-1 gap-1.5',
+  sm: 'text-2xs gap-1',
+  md: 'text-xs gap-1.5',
+  lg: 'text-sm gap-1.5',
+} as const;
+
+const DOT_SIZE_CLASSES = {
+  sm: 'w-1 h-1',
+  md: 'w-1.5 h-1.5',
+  lg: 'w-2 h-2',
 } as const;
 
 function daysUntil(iso: string | Date | null | undefined): number | null {
@@ -54,15 +60,16 @@ export function ProbationBadge({
           ? 'Probation · ends today'
           : `Probation · ${days}d left`;
 
-  // Overdue review uses a stronger danger tint so HR notices.
-  const palette =
-    days !== null && days < 0
-      ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'
-      : 'bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-800';
+  // Overdue review uses danger color so HR notices.
+  const isOverdue = days !== null && days < 0;
+  const textColor = isOverdue
+    ? 'text-red-700 dark:text-red-300'
+    : 'text-amber-800 dark:text-amber-200';
+  const dotColor = isOverdue ? 'bg-red-500' : 'bg-amber-500';
 
   return (
     <span
-      className={`inline-flex items-center rounded-full font-medium border ${palette} ${SIZE_CLASSES[size]} ${className}`}
+      className={`inline-flex items-center font-medium ${textColor} ${SIZE_CLASSES[size]} ${className}`}
       style={style}
       title={
         until
@@ -72,11 +79,7 @@ export function ProbationBadge({
           : 'On probation.'
       }
     >
-      <span
-        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-          days !== null && days < 0 ? 'bg-red-500' : 'bg-amber-500'
-        }`}
-      />
+      <span className={`rounded-full shrink-0 ${dotColor} ${DOT_SIZE_CLASSES[size]}`} />
       {label}
     </span>
   );

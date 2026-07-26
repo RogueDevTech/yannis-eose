@@ -14,7 +14,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 
 interface Category {
   id: string;
@@ -302,16 +302,9 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
   const search = searchParams.get('search') || '';
 
-  const [draftSearch, setDraftSearch] = useState(search);
-  useEffect(() => {
-    setDraftSearch(search);
-  }, [search]);
-
-  const applySearch = (e: React.FormEvent) => {
-    e.preventDefault();
+  const applySearch = (query: string) => {
     const params = new URLSearchParams(searchParams);
-    const t = draftSearch.trim();
-    if (t) params.set('search', t);
+    if (query) params.set('search', query);
     else params.delete('search');
     setSearchParams(params);
   };
@@ -444,25 +437,12 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         ]}
       />
 
-      {/* Search — bare (no card chrome) so it runs full-width on mobile, matching
-          other list pages. The input carries its own border/background. */}
-      <form onSubmit={applySearch} className="flex items-center gap-2">
-        <SearchInput
-          value={draftSearch}
-          onChange={(v) => {
-            setDraftSearch(v);
-            if (v === '') {
-              const params = new URLSearchParams(searchParams);
-              params.delete('search');
-              setSearchParams(params);
-            }
-          }}
-          placeholder="Search categories or brand names..."
-          withSubmitButton
-          wrapperClassName="flex-1 min-w-0"
-          className="bg-white dark:bg-app-elevated"
-        />
-      </form>
+      <PageSearchControl
+        value={search}
+        placeholder="Search categories or brand names..."
+        title="Search categories"
+        onApply={applySearch}
+      />
 
       {/* Card chrome is desktop-only — on mobile each row renders as its own
           elevated card, so an outer card would double the chrome and waste width. */}

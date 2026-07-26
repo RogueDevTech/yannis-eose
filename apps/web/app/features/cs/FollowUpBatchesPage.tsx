@@ -83,7 +83,7 @@ export function FollowUpBatchesPage({
           : (b) => (
               <Link
                 to={buildOrdersLink(b.branchId)}
-                className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                className="text-sm font-medium text-app-fg hover:underline"
               >
                 {b.branchName ?? 'Unassigned'}
               </Link>

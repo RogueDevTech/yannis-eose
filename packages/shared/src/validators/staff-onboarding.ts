@@ -68,8 +68,8 @@ export const updateOnboardingProfileSchema = z.object({
    * onboarding writes them through to the user row in the same transaction so
    * `/admin/finance/staff-accounts` and payout exports stay aligned with what
    * staff filled in here. `payoutBankCode` is auto-filled from `payoutBankName`
-   * by the UI bank picker (NIGERIAN_BANKS) — server doesn't enforce that pair
-   * so legacy free-text rows still round-trip.
+   * by the UI bank picker (NIGERIAN_BANKS); staff may override. Submit requires
+   * bank name + code + account name + number (see onboarding.service submit).
    */
   payoutBankName: z.string().max(120).nullish(),
   payoutAccountName: z.string().max(120).nullish(),

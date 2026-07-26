@@ -25,6 +25,12 @@ const VIEWER_ROLES = [
   'HEAD_OF_LOGISTICS',
 ];
 
+/** Map a calendar day to payroll period month (`YYYY-MM-01`). */
+function periodMonthFromYmd(ymd: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  return `${ymd.slice(0, 7)}-01`;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, { roles: VIEWER_ROLES, permission: 'hr.read' });
   const user = await getCurrentUser(request);
@@ -32,16 +38,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
-  const fromMonth = url.searchParams.get('fromMonth') ?? '';
-  const toMonth = url.searchParams.get('toMonth') ?? '';
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  const startDate = url.searchParams.get('startDate') ?? '';
+  const endDate = url.searchParams.get('endDate') ?? '';
+  // Legacy month params still accepted for old bookmarks.
+  const legacyFrom = url.searchParams.get('fromMonth') ?? '';
+  const legacyTo = url.searchParams.get('toMonth') ?? '';
   const statusParam = url.searchParams.get('status') ?? 'ALL';
   const departmentParam = url.searchParams.get('department') ?? '';
   const branchIdParam = url.searchParams.get('branchId') ?? '';
 
+  const fromMonth = periodAllTime
+    ? ''
+    : periodMonthFromYmd(startDate) ?? (/^\d{4}-\d{2}-01$/.test(legacyFrom) ? legacyFrom : '');
+  const toMonth = periodAllTime
+    ? ''
+    : periodMonthFromYmd(endDate) ?? (/^\d{4}-\d{2}-01$/.test(legacyTo) ? legacyTo : '');
+
   const pageData = (async () => {
     const input: Record<string, string> = {};
-    if (/^\d{4}-\d{2}-01$/.test(fromMonth)) input.fromMonth = fromMonth;
-    if (/^\d{4}-\d{2}-01$/.test(toMonth)) input.toMonth = toMonth;
+    if (fromMonth) input.fromMonth = fromMonth;
+    if (toMonth) input.toMonth = toMonth;
     if (statusParam && statusParam !== 'ALL') input.status = statusParam;
     if (departmentParam) input.department = departmentParam;
     if (branchIdParam && /^[0-9a-f-]{36}$/i.test(branchIdParam)) input.branchId = branchIdParam;
@@ -82,8 +99,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ? ((branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? [])
         : []),
       filters: {
-        fromMonth: fromMonth || '',
-        toMonth: toMonth || '',
+        startDate,
+        endDate,
+        periodAllTime,
         status: statusParam,
         department: departmentParam,
         branchId: branchIdParam,

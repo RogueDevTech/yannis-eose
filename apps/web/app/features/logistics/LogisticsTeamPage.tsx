@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DotSeparator, DualValue } from '~/components/ui/dot-separator';
@@ -13,7 +13,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Pagination } from '~/components/ui/pagination';
 import {
   deliveryRateColorClass,
@@ -363,7 +363,6 @@ export function LogisticsTeamPage({
     const qs = searchParams.toString();
     return qs ? `?${qs}` : '';
   }, [searchParams]);
-  const [searchQuery, setSearchQuery] = useState(q);
   const [peekProvider, setPeekProvider] = useState<LogisticsProviderRow | null>(null);
   const [reportProvider, setReportProvider] = useState<LogisticsProviderRow | null>(null);
   const [reportView, setReportView] = useState<'summary' | 'breakdown'>('summary');
@@ -377,10 +376,6 @@ export function LogisticsTeamPage({
     const lower = q.trim().toLowerCase();
     return locationRows.filter((l) => l.locationName.toLowerCase().includes(lower) || l.providerName.toLowerCase().includes(lower));
   }, [locationRows, q]);
-
-  useEffect(() => {
-    setSearchQuery(q);
-  }, [q]);
 
   const mergeListParams = (overrides: {
     q?: string;
@@ -401,11 +396,6 @@ export function LogisticsTeamPage({
       else params.set('page', String(overrides.page));
     }
     setSearchParams(params);
-  };
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    mergeListParams({ q: searchQuery, page: 1 });
   };
 
   const logisticsTeamToolbarFilterBadge = useMemo(() => {
@@ -793,17 +783,12 @@ export function LogisticsTeamPage({
           badgeCount={logisticsTeamToolbarFilterBadge}
           searchRow={
             <div className="flex min-w-0 gap-2 flex-1 flex-wrap sm:flex-nowrap">
-              <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 flex-1">
-                <SearchInput
-                  value={searchQuery}
-                  onChange={(v) => setSearchQuery(v)}
-                  placeholder={viewType === 'company' ? 'Search by provider name…' : 'Search by location name…'}
-                  withSubmitButton
-                  wrapperClassName="min-w-0 flex-1"
-                  name="q"
-                  autoComplete="off"
-                />
-              </form>
+              <PageSearchControl
+                value={q}
+                placeholder={viewType === 'company' ? 'Search by provider name…' : 'Search by location name…'}
+                title={viewType === 'company' ? 'Search companies' : 'Search locations'}
+                onApply={(query) => mergeListParams({ q: query, page: 1 })}
+              />
               <FormSelect
                 value={viewType}
                 onChange={(e) => setViewType(e.target.value as 'company' | 'location')}

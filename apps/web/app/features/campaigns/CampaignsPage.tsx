@@ -12,7 +12,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
@@ -367,18 +367,12 @@ export function FormsPage({
               : undefined
           }
           searchRow={
-            <form
-              className="min-w-0 flex-1"
-              onSubmit={(e) => e.preventDefault()}
-            >
-              <SearchInput
-                value={searchQuery}
-                onChange={applySearch}
-                placeholder="Search by name or ID…"
-                withSubmitButton
-                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-              />
-            </form>
+            <PageSearchControl
+              value={searchQuery}
+              placeholder="Search by name or ID…"
+              title="Search forms"
+              onApply={applySearch}
+            />
           }
           desktopInlineFilters={
             products.length > 0 ? (
@@ -488,7 +482,7 @@ export function FormsPage({
                 <>
                   <Link
                     to={`/hr/users/${c.mediaBuyerId}`}
-                    className="text-brand-600 dark:text-brand-400 hover:underline font-medium"
+                    className="font-medium text-app-fg hover:underline"
                   >
                     {c.mediaBuyerName ?? 'View user'}
                   </Link>

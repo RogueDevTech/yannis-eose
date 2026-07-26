@@ -26,7 +26,7 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { DeferredError } from '~/components/ui/deferred-section';
 import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Spinner } from '~/components/ui/spinner';
@@ -242,7 +242,6 @@ function LogisticsOrdersPageImpl({
     error: string | null;
   }>();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
-  const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedLocation, setSelectedLocation] = useState(locationFilterProp || '');
   const [selectedBranch, setSelectedBranch] = useState(branchFilterProp || '');
 
@@ -327,8 +326,7 @@ function LogisticsOrdersPageImpl({
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
-    setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter]);
+  }, [statusFilter]);
 
   const trendQueryString = useMemo(() => {
     const p = new URLSearchParams();
@@ -975,31 +973,20 @@ function LogisticsOrdersPageImpl({
         badgeCount={logisticsOrdersToolbarFilterBadge}
         searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
-              <form
-                method="get"
-                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
+              <PageSearchControl
+                value={searchFilter || ''}
+                placeholder="Search by customer name..."
+                title="Search orders"
+                onApply={(query) => {
                   setSearchParams((p) => {
                     const next = new URLSearchParams(p);
                     next.set('page', '1');
-                    const q = searchQuery.trim();
-                    if (q) next.set('search', q);
+                    if (query) next.set('search', query);
                     else next.delete('search');
                     return next;
                   });
                 }}
-              >
-                <SearchInput
-                  name="search"
-                  placeholder="Search by customer name..."
-                  value={searchQuery}
-                  onChange={(val) => setSearchQuery(val)}
-                  withSubmitButton
-                  wrapperClassName="w-full md:flex-1"
-                  className="bg-white dark:bg-app-elevated"
-                />
-              </form>
+              />
               <div className="hidden shrink-0 items-center gap-3 md:flex">
                 <div className="relative w-full min-w-0 sm:w-48">
                   {selectedStatus !== 'ALL' && (

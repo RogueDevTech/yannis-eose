@@ -1,7 +1,7 @@
 import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 
-import { Await, Form, Link, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Await, Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -13,7 +13,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { Card, CardBody } from '~/components/ui/card';
@@ -240,18 +240,19 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
       <Card variant="default" padding="md">
         <ToolbarFiltersCollapsible
           searchRow={
-            <Form method="get" replace className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <SearchInput
-                name="search"
-                defaultValue={data.search}
-                placeholder="Search shipments…"
-                className="sm:max-w-sm"
-                aria-label="Search shipments"
-                withSubmitButton
-                wrapperClassName="w-full sm:max-w-sm"
-              />
-              <input type="hidden" name="page" value="1" />
-            </Form>
+            <PageSearchControl
+              value={data.search}
+              placeholder="Search shipments…"
+              title="Search shipments"
+              aria-label="Search shipments"
+              onApply={(query) => {
+                const sp = new URLSearchParams(searchParams);
+                if (query) sp.set('search', query);
+                else sp.delete('search');
+                sp.set('page', '1');
+                setSearchParams(sp, { replace: true });
+              }}
+            />
           }
           desktopInlineFilters={
             <FormSelect

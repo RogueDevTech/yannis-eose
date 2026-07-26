@@ -22,6 +22,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { uuidv7 } from 'uuidv7';
 
 @Injectable()
 export class FinanceService {
@@ -217,7 +218,7 @@ export class FinanceService {
       }>(sql`
         INSERT INTO invoices (id, reference_number, order_id, recipient_info, line_items, tax_rate, total_amount, status, due_date)
         VALUES (
-          gen_random_uuid(),
+          ${uuidv7()}::uuid,
           COALESCE((SELECT MAX(reference_number) FROM invoices), 0) + 1,
           ${params.order.id},
           ${JSON.stringify({ name: params.order.customerName, address: params.order.customerAddress ?? undefined })}::jsonb,

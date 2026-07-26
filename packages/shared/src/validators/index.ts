@@ -404,6 +404,7 @@ export {
   agingSchema,
   openingBalanceLineSchema,
   postOpeningBalancesSchema,
+  repostPayrollBatchSchema,
   financialKPIsSchema,
 } from './general-ledger';
 
@@ -537,6 +538,39 @@ export {
   addBatchAdjustmentSchema,
 } from './hr';
 
+export {
+  payrollFormulaSchema,
+  payrollMetricsSchema,
+  saveProductTierConfigSchema,
+  saveTaxBandConfigSchema,
+  payeBandConfigSchema,
+  createPayRoleSchema,
+  updatePayRoleSchema,
+  createContractorSchema,
+  updateContractorSchema,
+  getContractorSchema,
+  listContractorPayoutsSchema,
+  overridePayslipLineSchema,
+  previewPayeSchema,
+  payrollOnboardingActionSchema,
+  updatePayrollProfileSchema,
+  bulkAssignPayRoleSchema,
+  markBatchPaidExtendedSchema,
+  generateBatchExtendedSchema,
+  listPayslipsSchema,
+  payrollRegisterSchema,
+  payrollReportRangeSchema,
+  getPayrollMetricsBulkSchema,
+  saveFormulaConfigSchema,
+  previewPayrollFormulaSchema,
+  archivePayRoleSchema,
+  getPayslipSchema,
+  bulkPayslipPdfSchema,
+  exportPayRunDraftSchema,
+  exportBankUploadSchema,
+  productTierRowSchema,
+} from './payroll';
+
 export type {
   CommissionRules,
   CreateCommissionPlanInput,
@@ -560,6 +594,20 @@ export type {
   GetBatchInput,
   AddBatchAdjustmentInput,
 } from './hr';
+
+export type {
+  PayrollFormula,
+  PayrollMetrics,
+  PayeBandConfig,
+  CreatePayRoleInput,
+  UpdatePayRoleInput,
+  SaveProductTierConfigInput,
+  SaveTaxBandConfigInput,
+  CreateContractorInput,
+  UpdateContractorInput,
+  GetContractorInput,
+  ListContractorPayoutsInput,
+} from './payroll';
 
 // Staff Onboarding validators
 export {

@@ -9,6 +9,7 @@ import type {
   ProfitReport,
   FinanceOverviewLoaderData,
   FinanceOverviewPulse,
+  FinancePayrollOverview,
   FinancialKPIs,
 } from '~/features/finance/types';
 
@@ -52,6 +53,21 @@ const emptyPulse: FinanceOverviewPulse = {
   failedDeliveryCount: 0,
   payrollPendingFinanceCount: 0,
   approvalsPendingCount: 0,
+};
+
+const emptyPayrollTotals = {
+  batchCount: 0,
+  staffCount: 0,
+  totalGross: 0,
+  totalNet: 0,
+  totalTax: 0,
+};
+
+const emptyPayrollOverview: FinancePayrollOverview = {
+  pendingFinance: emptyPayrollTotals,
+  periodCost: emptyPayrollTotals,
+  paidInPeriod: emptyPayrollTotals,
+  byPayRole: [],
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -125,6 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     type BundleData = {
       profit: ProfitReport | null;
       remittanceSummary: Record<string, string | number> | null;
+      payroll?: FinancePayrollOverview;
       payrollBatchCount: number;
       approvalsPendingCount: number;
       branches: Array<{ id: string; name: string }>;
@@ -163,9 +180,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       posFeeCount: Number(remSummary?.posFeeCount ?? 0),
       totalFailedDeliveryCosts: Number(remSummary?.totalFailedDeliveryCosts ?? 0),
       failedDeliveryCount: Number(remSummary?.failedDeliveryCount ?? 0),
-      payrollPendingFinanceCount: bundle?.payrollBatchCount ?? 0,
+      payrollPendingFinanceCount:
+        bundle?.payroll?.pendingFinance.batchCount ?? bundle?.payrollBatchCount ?? 0,
       approvalsPendingCount: bundle?.approvalsPendingCount ?? 0,
     };
+
+    const payrollOverview: FinancePayrollOverview = bundle?.payroll ?? emptyPayrollOverview;
 
     // Extract KPIs from the GL response.
     const kpis: FinancialKPIs | null = kpiRes.ok
@@ -175,6 +195,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return {
       profit: bundle?.profit ?? emptyProfit,
       pulse,
+      payrollOverview,
       filters: financeShell.filters,
       branches: bundle?.branches ?? [],
       mediaBuyers: bundle?.mediaBuyers ?? [],
