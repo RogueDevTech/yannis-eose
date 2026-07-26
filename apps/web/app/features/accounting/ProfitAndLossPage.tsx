@@ -8,7 +8,6 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
-import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface PLRow {
   code: string;
@@ -33,9 +32,8 @@ export function ProfitAndLossPage({
   totalIncome,
   totalExpense,
   netProfit,
-  consolidated,
   filters,
-}: ProfitAndLossPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
+}: ProfitAndLossPageProps & { filters?: { startDate: string; endDate: string } }) {
   const columns: CompactTableColumn<PLRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span> },
     { key: 'amount', header: 'Amount', align: 'right', render: (r) => <NairaPrice amount={r.amount} /> },
@@ -46,7 +44,7 @@ export function ProfitAndLossPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title={consolidated ? 'Consolidated Profit & Loss' : 'Profit & Loss'}
+        title="Profit & Loss"
         description="Income less expenses over the period, straight from the ledger."
         mobileInlineActions
         actions={
@@ -61,10 +59,8 @@ export function ProfitAndLossPage({
                   endDate={filters?.endDate}
                   chrome="pill"
                 />
-                <ConsolidatedToggle active={consolidated} />
               </>
             }
-            sheet={<ConsolidatedToggle active={consolidated} />}
           />
         }
       />

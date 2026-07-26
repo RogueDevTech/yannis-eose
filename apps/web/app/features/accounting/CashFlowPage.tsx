@@ -8,7 +8,6 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
-import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface CashFlowRow {
   code: string;
@@ -27,7 +26,7 @@ export interface CashFlowPageProps {
   period: { startDate: string | null; endDate: string | null };
 }
 
-export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFlowPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
+export function CashFlowPage({ accounts, totals, filters }: CashFlowPageProps & { filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
   const columns: CompactTableColumn<CashFlowRow>[] = [
     { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span> },
     { key: 'opening', header: 'Opening', align: 'right', render: (r) => <NairaPrice amount={r.opening} zeroAsDash /> },
@@ -39,7 +38,7 @@ export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFl
   return (
     <div className="space-y-4">
       <PageHeader
-        title={consolidated ? 'Consolidated Cash Flow' : 'Cash Flow'}
+        title="Cash Flow"
         description="Movement across bank and cash accounts over the period."
         mobileInlineActions
         actions={
@@ -55,10 +54,8 @@ export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFl
                   periodAllTime={filters?.periodAllTime}
                   chrome="pill"
                 />
-                <ConsolidatedToggle active={consolidated} />
               </>
             }
-            sheet={<ConsolidatedToggle active={consolidated} />}
           />
         }
       />

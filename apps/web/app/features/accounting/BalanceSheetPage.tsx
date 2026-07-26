@@ -8,7 +8,6 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
-import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface BSRow {
   code: string;
@@ -30,8 +29,8 @@ export interface BalanceSheetPageProps {
   asOfDate: string | null;
 }
 
-export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
-  const { assets, liabilities, equity, retainedEarnings, totalAssets, totalLiabilities, totalEquity, balanced, consolidated, filters } = props;
+export function BalanceSheetPage(props: BalanceSheetPageProps & { filters?: { startDate: string; endDate: string } }) {
+  const { assets, liabilities, equity, retainedEarnings, totalAssets, totalLiabilities, totalEquity, balanced, filters } = props;
 
   const balancedBadge = (
     <span
@@ -82,17 +81,15 @@ export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?:
   return (
     <div className="space-y-4">
       <PageHeader
-        title={consolidated ? 'Consolidated Balance Sheet' : 'Balance Sheet'}
+        title="Balance Sheet"
         description="Assets versus liabilities and equity, as of a date."
         mobileInlineActions
         actions={
           <div className="flex items-center gap-2">
-            <ConsolidatedToggle active={consolidated} />
             {balancedBadge}
             <PageHeaderMobileTools
               sheetTitle="Filters"
               triggerAriaLabel="Balance sheet toolbar"
-              sheet={<ConsolidatedToggle active={consolidated} />}
               desktop={
                 <>
                   <PageRefreshButton />
