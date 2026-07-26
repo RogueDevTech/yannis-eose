@@ -29,6 +29,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { TextInput } from '~/components/ui/text-input';
+import { DateTimeText } from '~/components/ui/date-time-text';
 import type { Adjustment, HRUser, HRStreamData } from './types';
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
@@ -432,11 +433,7 @@ export function HRPage({
                   {
                     key: 'date',
                     header: 'Date',
-                    render: (adj) => (
-                      <span className="text-app-fg-muted text-sm">
-                        {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                      </span>
-                    ),
+                    render: (adj) => <DateTimeText at={adj.createdAt} className="text-sm" />,
                   },
                   {
                     key: 'action',

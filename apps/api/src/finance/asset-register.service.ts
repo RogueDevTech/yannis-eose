@@ -4,7 +4,6 @@ import { eq, and, desc, sql, ilike, isNull, type SQL, type AnyColumn } from 'dri
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
-  ACCT,
   type CreateAssetInput,
   type ListAssetsInput,
   type GetAssetInput,
@@ -171,8 +170,8 @@ export class AssetRegisterService {
 
       // Post the GL entry for disposal.
       const groupId = asset.groupId ?? null;
-      const bankAcct = await this.resolveAccountByCode(tx, groupId, ACCT.BANK_PRIMARY);
-      const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEPRECIATION);
+      const bankAcct = await this.generalLedger.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
+      const accDepAcct = await this.generalLedger.resolveAccountForPosting(tx, groupId, 'ACC_DEPRECIATION');
       // The cost side: debit the fixed asset cost account. Pick the first
       // FIXED_ASSET leaf for the company (the specific sub-account doesn't
       // matter for the total — all roll up to Fixed Assets on the balance sheet).
@@ -201,7 +200,7 @@ export class AssetRegisterService {
       if (gainLoss !== 0) {
         // Use the Depreciation expense account for disposal loss, or Indirect Income for gain.
         // Simple approach: use the Depreciation account for both (loss on disposal).
-        const gainLossAcct = await this.resolveAccountByCode(tx, groupId, ACCT.DISPOSAL_GAIN_LOSS);
+        const gainLossAcct = await this.generalLedger.resolveAccountForPosting(tx, groupId, 'DISPOSAL_GAIN_LOSS');
         if (gainLossAcct) {
           if (gainLoss < 0) {
             // Loss: Dr Depreciation (expense)
@@ -326,8 +325,8 @@ export class AssetRegisterService {
         let glVoucherId: string | null = null;
 
         // Resolve GL accounts.
-        const depExpenseAcct = await this.resolveAccountByCode(tx, groupId, ACCT.DEPRECIATION_FIXED);
-        const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEPRECIATION);
+        const depExpenseAcct = await this.generalLedger.resolveAccountForPosting(tx, groupId, 'DEPRECIATION_FIXED');
+        const accDepAcct = await this.generalLedger.resolveAccountForPosting(tx, groupId, 'ACC_DEPRECIATION');
 
         if (depExpenseAcct && accDepAcct) {
           // Create a journal entry header.
@@ -437,26 +436,6 @@ export class AssetRegisterService {
       default:
         return 0;
     }
-  }
-
-  /** Resolve a postable leaf account by exact code. */
-  private async resolveAccountByCode(
-    tx: Tx,
-    groupId: string | null,
-    code: string,
-  ): Promise<{ id: string } | null> {
-    const [row] = await tx
-      .select({ id: schema.accounts.id })
-      .from(schema.accounts)
-      .where(
-        and(
-          this.groupEqOn(schema.accounts.groupId, groupId),
-          eq(schema.accounts.code, code),
-          eq(schema.accounts.isGroup, false),
-        ),
-      )
-      .limit(1);
-    return row ? { id: row.id } : null;
   }
 
   /** Resolve a postable leaf account by its semantic type tag. */

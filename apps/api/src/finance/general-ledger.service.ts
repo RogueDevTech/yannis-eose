@@ -11,6 +11,8 @@ import {
   db as schema,
   ACCT,
   DEFAULT_CHART_OF_ACCOUNTS,
+  GL_MAPPING_KEYS,
+  type GlMappingKey,
   type CreateJournalEntryInput,
   type PostOpeningBalancesInput,
   type ListJournalEntriesInput,
@@ -37,6 +39,8 @@ import {
   type VatReturnSummary,
   type VatTransaction,
   type GetAccountLedgerInput,
+  type UpdateAccountMappingInput,
+  type ResetAccountMappingInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -408,6 +412,68 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     return row ? { id: row.id } : null;
   }
 
+  // ─── GL Account Mapping Override Resolution ──────────────────────────────────
+
+  /**
+   * Per-transaction cache for gl_account_mappings lookups.
+   * Key = `${groupId ?? 'NULL'}::${mappingKey}`, value = account ID or null (no override).
+   * WeakMap keyed by the transaction object avoids leaks across requests.
+   */
+  private readonly mappingCache = new WeakMap<object, Map<string, { id: string } | null>>();
+
+  /**
+   * Resolve the posting account for a given GL_MAPPING_KEY, respecting
+   * company-level overrides in `gl_account_mappings`.
+   *
+   * 1. Check `gl_account_mappings` for (groupId, mappingKey) → use that account_id.
+   * 2. Fallback: resolveAccountByCode with the key's defaultCode.
+   *
+   * Results are cached per-transaction to avoid repeated DB hits within the same
+   * posting operation.
+   */
+  async resolveAccountForPosting(
+    tx: Tx,
+    groupId: string | null,
+    mappingKey: GlMappingKey,
+  ): Promise<{ id: string } | null> {
+    const cacheKey = `${groupId ?? 'NULL'}::${mappingKey}`;
+
+    // Get or create per-tx cache.
+    let txCache = this.mappingCache.get(tx);
+    if (!txCache) {
+      txCache = new Map();
+      this.mappingCache.set(tx, txCache);
+    }
+
+    if (txCache.has(cacheKey)) {
+      return txCache.get(cacheKey)!;
+    }
+
+    // Check for company-specific override.
+    const [override] = await tx
+      .select({ accountId: schema.glAccountMappings.accountId })
+      .from(schema.glAccountMappings)
+      .where(
+        and(
+          this.groupEqOn(schema.glAccountMappings.groupId, groupId),
+          eq(schema.glAccountMappings.mappingKey, mappingKey),
+        ),
+      )
+      .limit(1);
+
+    let result: { id: string } | null;
+    if (override) {
+      result = { id: override.accountId };
+    } else {
+      // Fallback to default code lookup.
+      const defaultCode = GL_MAPPING_KEYS[mappingKey].defaultCode;
+      result = await this.resolveAccountByCode(tx, groupId, defaultCode);
+    }
+
+    txCache.set(cacheKey, result);
+    return result;
+  }
+
   /** True if a voucher has already posted GL lines (idempotency guard). */
   private async alreadyPosted(
     tx: Tx,
@@ -472,7 +538,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       // Resolve posting accounts.
       const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', ACCT.AR_CUSTOMERS);
-      const sale = await this.resolveAccountByCode(tx, groupId, ACCT.PRODUCT_SALES);
+      const sale = await this.resolveAccountForPosting(tx, groupId, 'PRODUCT_SALES');
       if (!debtors || !sale) {
         return { posted: false, reason: 'missing-ar-or-sale-account' };
       }
@@ -485,7 +551,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       ];
 
       // VAT-inclusive split when VAT Output exists; otherwise full amount is sales.
-      const vatAccount = await this.resolveAccountByCode(tx, groupId, ACCT.VAT_OUTPUT);
+      const vatAccount = await this.resolveAccountForPosting(tx, groupId, 'VAT_OUTPUT');
       if (vatAccount) {
         const netSales = Math.round((invoiceTotal / 1.075) * 100) / 100;
         const vatAmount = Math.round((invoiceTotal - netSales) * 100) / 100;
@@ -609,10 +675,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!debtors || !bank) return { posted: false, reason: 'missing-debtors-or-bank-account' };
       const deliveryFeeAcct =
         totalDeliveryFee > 0
-          ? await this.resolveAccountByCode(tx, groupId, ACCT.OUTBOUND_DELIVERY)
+          ? await this.resolveAccountForPosting(tx, groupId, 'OUTBOUND_DELIVERY')
           : null;
       const discountAcct =
-        otherFees > 0 ? await this.resolveAccountByCode(tx, groupId, ACCT.BANK_CHARGES) : null;
+        otherFees > 0 ? await this.resolveAccountForPosting(tx, groupId, 'BANK_CHARGES') : null;
 
       // Fees we can't route to a resolved account fall back into the cash figure
       // so the entry still balances (never silently drop money).
@@ -711,7 +777,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const groupId = await this.resolveGroupIdForLocation(tx, ship.destinationLocationId);
       const stock = await this.resolveAccountByType(tx, groupId, 'STOCK', ACCT.STOCK_FINISHED_GOODS);
       const creditors = await this.resolveAccountByType(tx, groupId, 'PAYABLE', ACCT.AP_SUPPLIERS);
-      const vatInput = await this.resolveAccountByCode(tx, groupId, ACCT.VAT_INPUT_CREDIT);
+      const vatInput = await this.resolveAccountForPosting(tx, groupId, 'VAT_INPUT_CREDIT');
       if (!stock || !creditors) {
         return { posted: false, reason: 'missing-stock-or-creditors-account' };
       }
@@ -809,8 +875,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         groupId = branch?.groupId ?? null;
       }
 
-      const salary = await this.resolveAccountByCode(tx, groupId, ACCT.STAFF_SALARIES);
-      const payrollPayable = await this.resolveAccountByCode(tx, groupId, ACCT.ACCRUED_SALARIES);
+      const salary = await this.resolveAccountForPosting(tx, groupId, 'STAFF_SALARIES');
+      const payrollPayable = await this.resolveAccountForPosting(tx, groupId, 'ACCRUED_SALARIES');
       if (!salary || !payrollPayable) {
         return { posted: false, reason: 'missing-salary-or-payroll-payable-account' };
       }
@@ -823,7 +889,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       ];
 
       if (tax > 0) {
-        const payePayable = await this.resolveAccountByCode(tx, groupId, ACCT.PAYE_PAYABLE);
+        const payePayable = await this.resolveAccountForPosting(tx, groupId, 'PAYE_PAYABLE');
         if (!payePayable) {
           return { posted: false, reason: 'missing-paye-payable-account' };
         }
@@ -905,7 +971,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         groupId = branch?.groupId ?? null;
       }
 
-      const marketing = await this.resolveAccountByCode(tx, groupId, ACCT.AD_SPEND_DIGITAL);
+      const marketing = await this.resolveAccountForPosting(tx, groupId, 'AD_SPEND_DIGITAL');
       const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
       if (!marketing || !bank) {
         return { posted: false, reason: 'missing-marketing-or-bank-account' };
@@ -948,7 +1014,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (await this.alreadyPosted(tx, 'PAYMENT', paymentId)) {
         return { posted: false, reason: 'already-posted' };
       }
-      const ap = await this.resolveAccountByCode(tx, groupId, ACCT.AP_SUPPLIERS);
+      const ap = await this.resolveAccountForPosting(tx, groupId, 'AP_SUPPLIERS');
       const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
       if (!ap || !bank) return { posted: false, reason: 'missing-accounts' };
 
@@ -957,7 +1023,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       if (whtRate > 0) {
         // WHT auto-deduction: DR AP full, CR Bank net, CR WHT Payable withheld
-        const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
+        const whtPayable = await this.resolveAccountForPosting(tx, groupId, 'WHT_PAYABLE');
         if (!whtPayable) return { posted: false, reason: 'missing-accounts' };
 
         const whtWithheld = Math.round(amount * (whtRate / 100) * 100) / 100;
@@ -1032,8 +1098,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (await this.alreadyPosted(tx, 'EXPENSE', voucherId)) {
         return { posted: false, reason: 'already-posted' };
       }
-      const commExp = await this.resolveAccountByCode(tx, groupId, ACCT.AGENT_DELIVERY_COMM);
-      const apAgent = await this.resolveAccountByCode(tx, groupId, ACCT.AP_AGENT_COMMISSIONS);
+      const commExp = await this.resolveAccountForPosting(tx, groupId, 'AGENT_DELIVERY_COMM');
+      const apAgent = await this.resolveAccountForPosting(tx, groupId, 'AP_AGENT_COMMISSIONS');
       if (!commExp || !apAgent) return { posted: false, reason: 'missing-accounts' };
 
       await this.postVoucher(tx, {
@@ -1068,7 +1134,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (await this.alreadyPosted(tx, 'PAYMENT', paymentId)) {
         return { posted: false, reason: 'already-posted' };
       }
-      const apAgent = await this.resolveAccountByCode(tx, groupId, ACCT.AP_AGENT_COMMISSIONS);
+      const apAgent = await this.resolveAccountForPosting(tx, groupId, 'AP_AGENT_COMMISSIONS');
       const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
       if (!apAgent || !bank) return { posted: false, reason: 'missing-accounts' };
 
@@ -1076,7 +1142,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       let whtDeductionId: string | undefined;
 
       if (whtRate > 0) {
-        const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
+        const whtPayable = await this.resolveAccountForPosting(tx, groupId, 'WHT_PAYABLE');
         if (!whtPayable) return { posted: false, reason: 'missing-accounts' };
 
         const whtWithheld = Math.round(amount * (whtRate / 100) * 100) / 100;
@@ -1152,7 +1218,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       }
       const creditAcct = paidByBank
         ? await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY)
-        : await this.resolveAccountByCode(tx, groupId, ACCT.AP_SUPPLIERS);
+        : await this.resolveAccountForPosting(tx, groupId, 'AP_SUPPLIERS');
       if (!creditAcct) return { posted: false, reason: 'missing-credit-account' };
 
       await this.postVoucher(tx, {
@@ -1189,7 +1255,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         return { posted: false, reason: 'already-posted' };
       }
       const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
-      const deposits = await this.resolveAccountByCode(tx, groupId, ACCT.CUSTOMER_DEPOSITS);
+      const deposits = await this.resolveAccountForPosting(tx, groupId, 'CUSTOMER_DEPOSITS');
       if (!bank || !deposits) return { posted: false, reason: 'missing-accounts' };
 
       await this.postVoucher(tx, {
@@ -1224,8 +1290,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (await this.alreadyPosted(tx, 'SALES_INVOICE', voucherId)) {
         return { posted: false, reason: 'already-posted' };
       }
-      const deposits = await this.resolveAccountByCode(tx, groupId, ACCT.CUSTOMER_DEPOSITS);
-      const revenue = await this.resolveAccountByCode(tx, groupId, ACCT.PRODUCT_SALES);
+      const deposits = await this.resolveAccountForPosting(tx, groupId, 'CUSTOMER_DEPOSITS');
+      const revenue = await this.resolveAccountForPosting(tx, groupId, 'PRODUCT_SALES');
       if (!deposits || !revenue) return { posted: false, reason: 'missing-accounts' };
 
       await this.postVoucher(tx, {
@@ -1451,7 +1517,6 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       }
 
       let lines: PostVoucherLine[];
-      let draftCreatedBy: string | null = null;
       try {
         const parsed = JSON.parse(header.idempotencyKey) as
           | PostVoucherLine[]
@@ -1460,7 +1525,6 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           lines = parsed;
         } else {
           lines = parsed.lines;
-          draftCreatedBy = parsed.createdBy ?? null;
         }
         if (!Array.isArray(lines) || lines.length === 0) {
           throw new Error('empty lines');
@@ -1472,12 +1536,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         });
       }
 
-      if (draftCreatedBy && draftCreatedBy === actor.id) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'You cannot approve a journal entry you created. Ask another finance approver.',
-        });
-      }
+      // Self-approval allowed — single-accountant companies need the same
+      // person to create and approve entries. Audit trail still records who
+      // created vs who approved via separate columns.
 
       const { fiscalYearId } = await this.postVoucher(tx, {
         groupId: header.groupId,
@@ -1590,7 +1651,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // Balancing line to Opening Balance Equity for any residual.
       const residualMinor = totalDebitMinor - totalCreditMinor;
       if (residualMinor !== 0) {
-        const equity = await this.resolveAccountByCode(tx, groupId, ACCT.OPENING_BALANCE_EQUITY);
+        const equity = await this.resolveAccountForPosting(tx, groupId, 'OPENING_BALANCE_EQUITY');
         if (!equity) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -2781,10 +2842,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       // Attempt GL posting (non-fatal — missing accounts should not block recording).
       try {
-        const expense = await this.resolveAccountByCode(tx, groupId, ACCT.AD_SPEND_DIGITAL);
+        const expense = await this.resolveAccountForPosting(tx, groupId, 'AD_SPEND_DIGITAL');
         const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
         // WHT Payable — look for an account with code matching ACCT.WHT_PAYABLE; fall back to any PAYABLE.
-        const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
+        const whtPayable = await this.resolveAccountForPosting(tx, groupId, 'WHT_PAYABLE');
 
         if (expense && bank && whtPayable) {
           await this.postVoucher(tx, {
@@ -2890,8 +2951,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
     // Resolve both VAT accounts: output (2141) and input credit (1151).
     const [vatOutputAccount, vatInputAccount] = await Promise.all([
-      this.resolveAccountByCode(txDb, groupId, ACCT.VAT_OUTPUT),
-      this.resolveAccountByCode(txDb, groupId, ACCT.VAT_INPUT_CREDIT),
+      this.resolveAccountForPosting(txDb, groupId, 'VAT_OUTPUT'),
+      this.resolveAccountForPosting(txDb, groupId, 'VAT_INPUT_CREDIT'),
     ]);
 
     if (!vatOutputAccount && !vatInputAccount) {
@@ -2927,6 +2988,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         .select({
           id: schema.glEntries.id,
           postingDate: schema.glEntries.postingDate,
+          createdAt: schema.glEntries.createdAt,
           voucherType: schema.glEntries.voucherType,
           voucherId: schema.glEntries.voucherId,
           debit: schema.glEntries.debit,
@@ -2935,7 +2997,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         })
         .from(schema.glEntries)
         .where(and(eq(schema.glEntries.accountId, accountId), ...dateConds))
-        .orderBy(desc(schema.glEntries.postingDate));
+        .orderBy(desc(schema.glEntries.postingDate), desc(schema.glEntries.createdAt));
 
     // Run all queries in parallel.
     const [outputSummary, inputSummary, outputTxRows, inputTxRows] = await Promise.all([
@@ -2963,6 +3025,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     const transactions: VatTransaction[] = allTxRows.map((r) => ({
       id: r.id,
       postingDate: r.postingDate,
+      createdAt: r.createdAt,
       voucherType: r.voucherType,
       voucherId: r.voucherId,
       debit: Number(r.debit),
@@ -3208,6 +3271,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         createdAt: schema.glEntries.createdAt,
         journalEntryNumber: schema.journalEntries.entryNumber,
         journalDescription: schema.journalEntries.description,
+        journalStatus: schema.journalEntries.status,
       })
       .from(schema.glEntries)
       .leftJoin(
@@ -3252,6 +3316,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       return {
         id: e.id,
         postingDate: e.postingDate,
+        createdAt: e.createdAt,
         journalEntryNumber: e.journalEntryNumber,
         description: e.journalDescription ?? e.remarks ?? '',
         debit: e.debit,
@@ -3277,6 +3342,165 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         entryCount,
       },
     };
+  }
+
+  // ─── GL Account Mappings ─────────────────────────────────────────────────────
+
+  /**
+   * List all mapping keys with their current account (from DB override or
+   * default). Returns one row per GL_MAPPING_KEYS entry, enriched with the
+   * resolved account details.
+   */
+  async listAccountMappings(groupId: string | null | undefined) {
+    // Fetch all overrides for this company
+    const overrides = await this.db
+      .select()
+      .from(schema.glAccountMappings)
+      .where(this.groupEqOn(schema.glAccountMappings.groupId, groupId));
+
+    const overrideMap = new Map(overrides.map((o) => [o.mappingKey, o]));
+
+    // Fetch all leaf accounts for this company (for resolving default codes)
+    const allAccounts = await this.db
+      .select({
+        id: schema.accounts.id,
+        code: schema.accounts.code,
+        name: schema.accounts.name,
+        rootType: schema.accounts.rootType,
+        isGroup: schema.accounts.isGroup,
+      })
+      .from(schema.accounts)
+      .where(
+        and(
+          this.groupEq(groupId),
+          eq(schema.accounts.isActive, true),
+          eq(schema.accounts.isGroup, false),
+        ),
+      );
+
+    const accountByCode = new Map(allAccounts.map((a) => [a.code, a]));
+    const accountById = new Map(allAccounts.map((a) => [a.id, a]));
+
+    const entries = Object.values(GL_MAPPING_KEYS).map((def) => {
+      const override = overrideMap.get(def.key);
+      const defaultAccount = accountByCode.get(def.defaultCode);
+
+      let resolvedAccount: { id: string; code: string; name: string } | null = null;
+      let isCustom = false;
+
+      if (override) {
+        const acct = accountById.get(override.accountId);
+        if (acct) {
+          resolvedAccount = { id: acct.id, code: acct.code, name: acct.name };
+          isCustom = true;
+        }
+      }
+
+      if (!resolvedAccount && defaultAccount) {
+        resolvedAccount = {
+          id: defaultAccount.id,
+          code: defaultAccount.code,
+          name: defaultAccount.name,
+        };
+      }
+
+      return {
+        mappingKey: def.key as GlMappingKey,
+        label: def.label,
+        category: def.category,
+        defaultCode: def.defaultCode,
+        isCustom,
+        account: resolvedAccount,
+      };
+    });
+
+    return entries;
+  }
+
+  /**
+   * Upsert a GL account mapping override.
+   */
+  async updateAccountMapping(
+    input: UpdateAccountMappingInput & { groupId: string | null | undefined },
+    actor: Actor,
+  ) {
+    // Validate the mapping key exists
+    if (!(input.mappingKey in GL_MAPPING_KEYS)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Unknown mapping key: ${input.mappingKey}`,
+      });
+    }
+
+    // Validate the target account exists and is a leaf
+    const [targetAccount] = await this.db
+      .select({ id: schema.accounts.id, isGroup: schema.accounts.isGroup })
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, input.accountId))
+      .limit(1);
+
+    if (!targetAccount) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
+    }
+    if (targetAccount.isGroup) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Cannot map to a group account. Select a leaf account.',
+      });
+    }
+
+    const groupId = input.groupId ?? null;
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .insert(schema.glAccountMappings)
+        .values({
+          groupId,
+          mappingKey: input.mappingKey,
+          accountId: input.accountId,
+        })
+        .onConflictDoUpdate({
+          target: [schema.glAccountMappings.groupId, schema.glAccountMappings.mappingKey],
+          set: {
+            accountId: input.accountId,
+            updatedAt: sql`now()`,
+          },
+        });
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Reset a mapping back to its default (delete the override row).
+   */
+  async resetAccountMapping(
+    input: ResetAccountMappingInput & { groupId: string | null | undefined },
+    actor: Actor,
+  ) {
+    if (!(input.mappingKey in GL_MAPPING_KEYS)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Unknown mapping key: ${input.mappingKey}`,
+      });
+    }
+
+    const groupId = input.groupId ?? null;
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .delete(schema.glAccountMappings)
+        .where(
+          and(
+            groupId
+              ? eq(schema.glAccountMappings.groupId, groupId)
+              : isNull(schema.glAccountMappings.groupId),
+            eq(schema.glAccountMappings.mappingKey, input.mappingKey),
+          ),
+        );
+    });
+
+    return { success: true };
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

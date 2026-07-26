@@ -276,3 +276,23 @@ export const getAccountLedgerSchema = z.object({
   endDate: z.string().optional(),
 });
 export type GetAccountLedgerInput = z.infer<typeof getAccountLedgerSchema>;
+
+// ─── GL Account Mappings ─────────────────────────────────────────────────────
+
+export const listAccountMappingsSchema = z.object({
+  groupId: z.string().uuid().nullish(),
+});
+export type ListAccountMappingsInput = z.infer<typeof listAccountMappingsSchema>;
+
+export const updateAccountMappingSchema = z.object({
+  groupId: z.string().uuid().nullish(),
+  mappingKey: z.string().min(1).max(60),
+  accountId: z.string().uuid(),
+});
+export type UpdateAccountMappingInput = z.infer<typeof updateAccountMappingSchema>;
+
+export const resetAccountMappingSchema = z.object({
+  groupId: z.string().uuid().nullish(),
+  mappingKey: z.string().min(1).max(60),
+});
+export type ResetAccountMappingInput = z.infer<typeof resetAccountMappingSchema>;

@@ -203,6 +203,37 @@ export const ACCT = {
   DEFERRED_TAX:           '8120',
 } as const;
 
+// ─── GL Mapping Keys ────────────────────────────────────────────────────────
+// Each key corresponds to a semantic posting target used by the auto-posting
+// engine. Companies can override these defaults via `gl_account_mappings`.
+
+export const GL_MAPPING_KEYS = {
+  BANK_PRIMARY: { key: 'BANK_PRIMARY', label: 'Primary Bank Account', defaultCode: '1112', category: 'Assets' },
+  AR_CUSTOMERS: { key: 'AR_CUSTOMERS', label: 'Accounts Receivable', defaultCode: '1121', category: 'Assets' },
+  STOCK_FINISHED_GOODS: { key: 'STOCK_FINISHED_GOODS', label: 'Finished Goods Stock', defaultCode: '1131', category: 'Assets' },
+  VAT_INPUT_CREDIT: { key: 'VAT_INPUT_CREDIT', label: 'VAT Input Credit', defaultCode: '1151', category: 'Assets' },
+  ACC_DEPRECIATION: { key: 'ACC_DEPRECIATION', label: 'Accumulated Depreciation', defaultCode: '1221', category: 'Assets' },
+  AP_SUPPLIERS: { key: 'AP_SUPPLIERS', label: 'Accounts Payable (Suppliers)', defaultCode: '2111', category: 'Liabilities' },
+  AP_AGENT_COMMISSIONS: { key: 'AP_AGENT_COMMISSIONS', label: 'Agent Commissions Payable', defaultCode: '2112', category: 'Liabilities' },
+  ACCRUED_SALARIES: { key: 'ACCRUED_SALARIES', label: 'Accrued Salaries', defaultCode: '2121', category: 'Liabilities' },
+  VAT_OUTPUT: { key: 'VAT_OUTPUT', label: 'VAT Payable', defaultCode: '2141', category: 'Liabilities' },
+  WHT_PAYABLE: { key: 'WHT_PAYABLE', label: 'Withholding Tax Payable', defaultCode: '2142', category: 'Liabilities' },
+  PAYE_PAYABLE: { key: 'PAYE_PAYABLE', label: 'PAYE Tax Payable', defaultCode: '2143', category: 'Liabilities' },
+  CUSTOMER_DEPOSITS: { key: 'CUSTOMER_DEPOSITS', label: 'Customer Deposits', defaultCode: '2150', category: 'Liabilities' },
+  OPENING_BALANCE_EQUITY: { key: 'OPENING_BALANCE_EQUITY', label: 'Opening Balance Equity', defaultCode: '3900', category: 'Equity' },
+  PRODUCT_SALES: { key: 'PRODUCT_SALES', label: 'Product Sales Revenue', defaultCode: '4110', category: 'Revenue' },
+  COGS_PURCHASE: { key: 'COGS_PURCHASE', label: 'Cost of Goods Sold', defaultCode: '5110', category: 'Cost of Sales' },
+  AGENT_DELIVERY_COMM: { key: 'AGENT_DELIVERY_COMM', label: 'Agent Delivery Commission', defaultCode: '5220', category: 'Cost of Sales' },
+  STAFF_SALARIES: { key: 'STAFF_SALARIES', label: 'Staff Salaries', defaultCode: '6110', category: 'Expenses' },
+  AD_SPEND_DIGITAL: { key: 'AD_SPEND_DIGITAL', label: 'Digital Advertising Spend', defaultCode: '6210', category: 'Expenses' },
+  OUTBOUND_DELIVERY: { key: 'OUTBOUND_DELIVERY', label: 'Outbound Delivery Costs', defaultCode: '6310', category: 'Expenses' },
+  DEPRECIATION_FIXED: { key: 'DEPRECIATION_FIXED', label: 'Depreciation Expense', defaultCode: '6510', category: 'Expenses' },
+  BANK_CHARGES: { key: 'BANK_CHARGES', label: 'Bank Charges', defaultCode: '6630', category: 'Expenses' },
+  DISPOSAL_GAIN_LOSS: { key: 'DISPOSAL_GAIN_LOSS', label: 'Gain/Loss on Disposal', defaultCode: '7230', category: 'Other' },
+} as const;
+
+export type GlMappingKey = keyof typeof GL_MAPPING_KEYS;
+
 /**
  * Mapping from legacy ERPNext account codes to new 4-digit IFRS codes.
  * Used by the migration to update existing gl_entries and account references.

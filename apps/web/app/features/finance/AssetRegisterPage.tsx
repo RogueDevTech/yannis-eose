@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -21,6 +21,12 @@ import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import {
+  applyOptimisticPatches,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+import { optimisticId } from '~/lib/optimistic';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -115,6 +121,68 @@ export function AssetRegisterPage({
   useCloseOnFetcherSuccess(createFetcher, () => setShowAddModal(false));
   useCloseOnFetcherSuccess(disposeFetcher, () => setDisposeTarget(null));
   useCloseOnFetcherSuccess(depreciationFetcher, () => setShowDepreciationModal(false));
+
+  const buildCreateRows = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'createAsset') return null;
+    const assetName = fd.get('assetName')?.toString()?.trim();
+    const assetCategory = fd.get('assetCategory')?.toString()?.trim();
+    const acquisitionDate = fd.get('acquisitionDate')?.toString()?.trim();
+    const cost = fd.get('cost')?.toString()?.trim() ?? '0';
+    if (!assetName || !assetCategory || !acquisitionDate) return null;
+    const residualValue = fd.get('residualValue')?.toString()?.trim() || '0';
+    const depreciationMethod = (fd.get('depreciationMethod')?.toString() ||
+      'STRAIGHT_LINE') as AssetRow['depreciationMethod'];
+    const usefulLifeRaw = fd.get('usefulLifeMonths')?.toString();
+    const rateRaw = fd.get('depreciationRate')?.toString();
+    return [
+      {
+        id: optimisticId('asset'),
+        assetName,
+        assetCategory,
+        acquisitionDate,
+        cost,
+        residualValue,
+        accumulatedDepreciation: '0',
+        nbv: cost,
+        depreciationMethod,
+        usefulLifeMonths: usefulLifeRaw ? parseInt(usefulLifeRaw, 10) : null,
+        depreciationRate: rateRaw ? parseFloat(rateRaw) : null,
+        status: 'ACTIVE' as const,
+        location: fd.get('location')?.toString()?.trim() || null,
+        serialNumber: fd.get('serialNumber')?.toString()?.trim() || null,
+        notes: fd.get('notes')?.toString()?.trim() || null,
+        disposalDate: null,
+        disposalProceeds: null,
+      } satisfies AssetRow,
+    ];
+  }, []);
+
+  const buildDisposePatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'disposeAsset') return null;
+    const id = fd.get('assetId')?.toString();
+    if (!id) return null;
+    const disposalDate = fd.get('disposalDate')?.toString() || null;
+    const disposalProceeds = fd.get('proceeds')?.toString() || '0';
+    return [
+      {
+        id,
+        patch: {
+          status: 'DISPOSED' as const,
+          disposalDate,
+          disposalProceeds,
+        },
+      },
+    ];
+  }, []);
+
+  const optimisticCreated = useOptimisticListMerge<AssetRow>(createFetcher, buildCreateRows);
+  const disposePatches = useOptimisticListPatches<AssetRow>(disposeFetcher, buildDisposePatches);
+  const displayRecords = useMemo(() => {
+    const merged = [...optimisticCreated, ...records];
+    const patched = applyOptimisticPatches(merged, disposePatches);
+    if (activeTab === 'all') return patched;
+    return patched.filter((r) => r.status === activeTab);
+  }, [optimisticCreated, records, disposePatches, activeTab]);
 
   // Add asset form state
   const [depMethod, setDepMethod] = useState('STRAIGHT_LINE');
@@ -324,7 +392,7 @@ export function AssetRegisterPage({
         ]}
       />
 
-      {records.length === 0 ? (
+      {displayRecords.length === 0 ? (
         <EmptyState
           title="No assets found"
           description="Add your first fixed asset to start tracking depreciation."
@@ -340,7 +408,7 @@ export function AssetRegisterPage({
         <>
           <CompactTable
             columns={columns}
-            rows={records}
+            rows={displayRecords}
             rowKey={(r) => r.id}
             renderMobileCard={renderMobileCard}
           />

@@ -17,6 +17,7 @@ import type {
   PayrollBatch,
   BranchOption,
 } from './types';
+import { DateTimeText } from '~/components/ui/date-time-text';
 import { DEPT_LABEL } from './payroll-constants';
 
 function formatMonth(periodMonth: string): string {
@@ -152,13 +153,12 @@ function MonthGroup({
     {
       key: 'prepared',
       header: 'Prepared',
-      render: (row) => (
-        <span className="text-sm text-app-fg-muted">
-          {row.preparedAt
-            ? new Date(row.preparedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })
-            : '\u2014'}
-        </span>
-      ),
+      render: (row) =>
+        row.preparedAt ? (
+          <DateTimeText at={row.preparedAt} className="text-sm" />
+        ) : (
+          <span className="text-sm text-app-fg-muted">{'\u2014'}</span>
+        ),
     },
     {
       key: 'amount',

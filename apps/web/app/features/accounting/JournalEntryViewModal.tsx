@@ -5,11 +5,14 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
+import { DateTimeText } from '~/components/ui/date-time-text';
+import { formatDateOnly } from '~/lib/format-date';
 
 export interface JournalEntryViewSummary {
   id: string;
   entryNumber: number;
   postingDate: string;
+  createdAt?: string | null;
   description: string;
   totalDebit: string;
   status: string;
@@ -101,10 +104,16 @@ export function JournalEntryViewModal({
           <StatusBadge status={entry.status} />
         </div>
 
-        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-app-fg-muted">Posting date</dt>
-            <dd className="font-medium text-app-fg">{entry.postingDate}</dd>
+            <dd className="font-medium text-app-fg">{formatDateOnly(entry.postingDate)}</dd>
+          </div>
+          <div>
+            <dt className="text-app-fg-muted">Recorded</dt>
+            <dd className="font-medium">
+              <DateTimeText at={entry.createdAt ?? detail?.createdAt} />
+            </dd>
           </div>
           <div>
             <dt className="text-app-fg-muted">Amount</dt>

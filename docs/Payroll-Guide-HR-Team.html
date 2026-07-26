@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Payroll on Yannis: Quick Guide for HR &amp; Team</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: #1a1a1a;
+      font-size: 10.5pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1 {
+      font-size: 18pt;
+      margin: 0 0 6px;
+      color: #111;
+    }
+    .subtitle {
+      color: #555;
+      margin: 0 0 18px;
+      font-size: 10.5pt;
+    }
+    h2 {
+      font-size: 12.5pt;
+      margin: 22px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1.5px solid #222;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11pt;
+      margin: 14px 0 6px;
+      page-break-after: avoid;
+    }
+    p { margin: 0 0 8px; }
+    ul, ol { margin: 0 0 10px; padding-left: 20px; }
+    li { margin-bottom: 3px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0 0 12px;
+      font-size: 10pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f3f3f3;
+      font-weight: 600;
+    }
+    .tip {
+      background: #f7f7f7;
+      border-left: 3px solid #444;
+      padding: 8px 10px;
+      margin: 8px 0 12px;
+    }
+    .flow {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      padding: 12px 14px;
+      margin: 8px 0 12px;
+      white-space: pre;
+      font-size: 9.5pt;
+      line-height: 1.35;
+      page-break-inside: avoid;
+    }
+    .checklist li { list-style: none; margin-left: -8px; }
+    .checklist li::before { content: "☐  "; }
+    .muted { color: #555; }
+    strong { font-weight: 600; }
+    .footer-note {
+      margin-top: 24px;
+      font-size: 9pt;
+      color: #777;
+      border-top: 1px solid #ddd;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Payroll on Yannis: Quick Guide for HR &amp; Team</h1>
+  <p class="subtitle">
+    Welcome. This guide shows where things live and how monthly payroll works.
+    Most of what you need is under <strong>HR</strong> in the left sidebar.
+  </p>
+
+  <h2>1. Where to find things</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>What you need</th>
+        <th>Where in the left menu</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Monthly payroll runs (main page)</td>
+        <td><strong>HR → Payroll</strong></td>
+      </tr>
+      <tr>
+        <td>Create a new month’s payroll</td>
+        <td><strong>HR → Payroll</strong> → click <strong>Generate Monthly Batch</strong></td>
+      </tr>
+      <tr>
+        <td>Pay roles, formulas, bonuses, tax</td>
+        <td><strong>HR → Payroll Config</strong></td>
+      </tr>
+      <tr>
+        <td>Staff onboarding / account details</td>
+        <td>
+          <strong>HR → Staff Onboarding</strong> (HR review).
+          Staff update their own details after login / onboarding.
+        </td>
+      </tr>
+      <tr>
+        <td>Outside contractors (fixed fee)</td>
+        <td><strong>HR → Contractors</strong></td>
+      </tr>
+      <tr>
+        <td>Paid payslip PDFs</td>
+        <td><strong>HR → Payslips</strong></td>
+      </tr>
+      <tr>
+        <td>Reports / payroll register</td>
+        <td><strong>HR → Payroll Reports</strong></td>
+      </tr>
+      <tr>
+        <td>Your own bank / payout details</td>
+        <td><strong>Config → My Profile</strong> (or during staff onboarding)</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="tip">
+    <strong>Tip:</strong> if you do not see a menu item, your account may not have access.
+    Ask an admin to grant the right HR / payroll permission.
+  </p>
+
+  <h2>2. Who does what</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Main job in payroll</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Head of CS / Marketing / Logistics</strong></td>
+        <td>Create the draft for their department, check the numbers, submit to HR</td>
+      </tr>
+      <tr>
+        <td><strong>HR</strong></td>
+        <td>
+          Set up pay roles and formulas, confirm staff completed onboarding with account details,
+          review the batch, approve and send to Finance (or reject with a reason)
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Finance</strong></td>
+        <td>Pay the batch, mark it paid, export bank pay file</td>
+      </tr>
+      <tr>
+        <td><strong>All staff</strong></td>
+        <td>Complete onboarding and keep bank / account details up to date</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Payroll is <strong>monthly</strong>.
+    One batch = one <strong>branch</strong> + one <strong>department</strong> + one <strong>month</strong>.
+  </p>
+
+  <h2>3. One-time setup (do this before the first run)</h2>
+  <p>Do these in order.</p>
+
+  <h3>Step 1: Create pay roles and formulas (HR first)</h3>
+  <p>Go to <strong>HR → Payroll Config</strong>.</p>
+  <ul>
+    <li>Create each <strong>pay role</strong></li>
+    <li>Set the <strong>formula</strong> (salary, commission, tiers, and so on)</li>
+    <li>Set <strong>product bonus tiers</strong> and <strong>tax bands</strong> if you use them</li>
+    <li>Assign people to the right pay role from here</li>
+  </ul>
+  <p>
+    Until this is done, generating payroll will be empty or wrong.
+    This is always the first setup step.
+  </p>
+
+  <h3>Step 2: Make sure everyone finished onboarding with their account details</h3>
+  <p>
+    Every staff member should update their <strong>onboarding</strong> with their account / bank details
+    (and any other required fields).
+  </p>
+  <ul>
+    <li>Staff: complete onboarding after login, or update details under <strong>Config → My Profile</strong></li>
+    <li>HR: check progress under <strong>HR → Staff Onboarding</strong> and confirm people are ready before the first payroll run</li>
+  </ul>
+  <p>Do not run payroll until people have their account details filled in. Finance needs this to pay.</p>
+
+  <h3>Step 3: Add contractors (only if you have them)</h3>
+  <p>Go to <strong>HR → Contractors</strong>.</p>
+  <ul>
+    <li>Add name, monthly fee, and bank details</li>
+    <li>These are fixed-fee people, not normal PAYE staff</li>
+  </ul>
+
+  <h2>4. Monthly payroll flow (the main path)</h2>
+  <div class="flow">1. Generate draft
+     ↓
+2. Check &amp; adjust (Draft)
+     ↓
+3. Submit to HR
+     ↓
+4. HR approves → Finance
+     ↓
+5. Finance pays → Mark paid
+     ↓
+6. Payslips &amp; reports ready</div>
+
+  <h3>Step 1: Generate the month</h3>
+  <ol>
+    <li>Open <strong>HR → Payroll</strong></li>
+    <li>Click <strong>Generate Monthly Batch</strong></li>
+    <li>Choose <strong>month</strong>, <strong>branch</strong>, and <strong>department</strong></li>
+    <li>Use <strong>Preview</strong> if available, then <strong>Generate</strong></li>
+  </ol>
+  <p>You land back on the Payroll list. Batches are grouped by month.</p>
+
+  <h3>Step 2: Open the batch and check it</h3>
+  <ol>
+    <li>On <strong>HR → Payroll</strong>, find the month</li>
+    <li>Click <strong>View</strong> on the batch (or tap the card on phone)</li>
+    <li>Review staff payouts, totals, and bank info on each line</li>
+  </ol>
+  <p>While status is <strong>Draft</strong>:</p>
+  <ul>
+    <li>You can <strong>Re-generate from latest data</strong> if numbers look wrong</li>
+    <li>Heads prepare and check their department</li>
+    <li>HR can add line adjustments when the batch is with HR (bonus, deduction, etc.)</li>
+  </ul>
+
+  <h3>Step 3: Submit to HR</h3>
+  <p>
+    On the batch page, click <strong>Submit to HR</strong>.<br />
+    Status moves: <strong>Draft → Submitted to HR</strong>.
+  </p>
+
+  <h3>Step 4: HR review</h3>
+  <p>HR opens the same batch from <strong>HR → Payroll</strong>.</p>
+  <ul>
+    <li>If good: <strong>Approve &amp; send to Finance</strong></li>
+    <li>If not: <strong>Reject</strong> and write a clear reason (batch goes back one step; it is not deleted)</li>
+  </ul>
+  <p>Status moves: <strong>Submitted to HR → Approved by HR</strong> (waiting for Finance).</p>
+
+  <h3>Step 5: Finance pays</h3>
+  <p>
+    Finance reviews batches waiting for payment, exports bank pay if needed
+    (<strong>Export bank pay</strong> on <strong>HR → Payroll</strong>), then
+    <strong>Mark batch paid</strong> with a payment reference.
+  </p>
+  <p>Status moves: <strong>Approved by HR → Paid</strong>.</p>
+  <p>After paid, every payout in that batch is paid, and payslips become available.</p>
+
+  <h3>Step 6: Payslips and reports</h3>
+  <ul>
+    <li><strong>HR → Payslips</strong>: download PDFs for paid lines</li>
+    <li><strong>HR → Payroll Reports</strong>: register, cost by branch/role, trends</li>
+  </ul>
+
+  <h2>5. Status meanings (simple)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Status you see</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Draft</strong></td>
+        <td>Created, still being checked. Not with HR yet.</td>
+      </tr>
+      <tr>
+        <td><strong>Submitted to HR</strong> / Pending HR</td>
+        <td>Waiting for HR to approve or reject.</td>
+      </tr>
+      <tr>
+        <td><strong>Approved by HR</strong> / Pending Finance</td>
+        <td>Waiting for Finance to pay.</td>
+      </tr>
+      <tr>
+        <td><strong>Paid</strong></td>
+        <td>Money marked as paid. Payslips ready.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Reject always goes <strong>one step back</strong>, with a reason. The batch stays in the system.</p>
+
+  <h2>6. Adjustments (extra pay or deductions)</h2>
+  <p>
+    On <strong>HR → Payroll</strong>, HR / Finance can use the <strong>Adjustments</strong> tab and
+    <strong>Add-on</strong> for extras outside the normal formula (bonus, extra shift, etc.).
+  </p>
+  <p>
+    On a batch waiting for HR, you can also adjust a single person’s line from the batch detail page.
+  </p>
+
+  <h2>7. Short checklist for each month</h2>
+  <ul class="checklist">
+    <li>Pay roles and formulas are correct in <strong>Payroll Config</strong></li>
+    <li>Staff have updated onboarding with their account / bank details</li>
+    <li>Each Head (or HR) generates their department batch on <strong>Payroll</strong></li>
+    <li>Draft checked → <strong>Submit to HR</strong></li>
+    <li>HR approves → Finance</li>
+    <li>Finance pays → <strong>Mark paid</strong></li>
+    <li>Download payslips / reports if needed</li>
+  </ul>
+
+  <p class="footer-note">Yannis EOSE · Payroll guide for HR &amp; team</p>
+</body>
+</html>
