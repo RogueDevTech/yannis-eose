@@ -6,6 +6,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageNotification } from '~/components/ui/page-notification';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { formatNaira } from '~/lib/format-amount';
@@ -19,6 +20,7 @@ import { CompactTable, CompactTableActionButton, type CompactTableColumn } from 
 import { TextInput } from '~/components/ui/text-input';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { Spinner } from '~/components/ui/spinner';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type {
   ActorMap,
   AuditActorFilterOption,
@@ -944,7 +946,7 @@ function TimeTravelPanel({
   onPreviewImage?: (url: string) => void;
 }) {
   const fetcher = useFetcher();
-  const [ttTable, setTtTable] = useState(AUDITABLE_TABLES[0]);
+  const [ttTable, setTtTable] = useState(AUDITABLE_TABLES[0] ?? '');
   const [ttRecordId, setTtRecordId] = useState('');
   const [ttTimestamp, setTtTimestamp] = useState('');
   // Time-travel resolves names/roles AS OF the user-selected timestamp. Fall back to "now" while
@@ -1161,6 +1163,16 @@ export function AuditPage({
 
   const totalPages = Math.ceil(total / filters.limit);
 
+  const statStrip = useMemo<OverviewStatStripItem[]>(() => {
+    const uniqueActors = new Set(rows.map((r) => r.changedBy ?? '__system__')).size;
+    const uniqueTables = new Set(rows.map((r) => r.tableName)).size;
+    return [
+      { label: 'Total entries', value: total.toLocaleString('en-NG') },
+      { label: 'Actors (this page)', value: uniqueActors.toLocaleString('en-NG') },
+      { label: 'Tables (this page)', value: uniqueTables.toLocaleString('en-NG') },
+    ];
+  }, [total, rows]);
+
   // Polling interval — trigger revalidate every POLL_INTERVAL_MS
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1226,6 +1238,18 @@ export function AuditPage({
             sheetTitle="Actions"
             triggerAriaLabel="Audit toolbar and date range"
             saveFilterKey
+            filtersBadgeCount={(filters.tableName ? 1 : 0) + (filters.actorId ? 1 : 0)}
+            onClearFilters={
+              filters.tableName || filters.actorId
+                ? () => {
+                    const params = new URLSearchParams(searchParams);
+                    params.delete('tableName');
+                    params.delete('actorId');
+                    params.set('page', '1');
+                    setSearchParams(params);
+                  }
+                : undefined
+            }
             desktop={
               <>
                 <PageRefreshButton />
@@ -1240,6 +1264,54 @@ export function AuditPage({
                   </Button>
                 )}
               </>
+            }
+            filters={
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Table</span>
+                  <SearchableSelect
+                    value={filters.tableName}
+                    onChange={(v) => updateFilter('tableName', v)}
+                    placeholder="All Tables"
+                    searchPlaceholder="Search tables..."
+                    options={[
+                      { value: '', label: 'All Tables' },
+                      ...AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) })),
+                    ]}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">User</span>
+                  {actorPickerOptions.length > 0 ? (
+                    <SearchableSelect
+                      id="audit-actor-filter-mobile"
+                      value={filters.actorId}
+                      onChange={(v) => updateFilter('actorId', v)}
+                      placeholder="All Users"
+                      searchPlaceholder="Search users…"
+                      options={actorPickerOptions}
+                      wrapperClassName="w-full"
+                    />
+                  ) : actorFilterOptions.length === 0 && actorIds.length > 0 && actorNamesLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-app-fg-muted py-1">
+                      <Spinner className="w-4 h-4" />
+                      <span>Loading users…</span>
+                    </div>
+                  ) : (
+                    <TextInput
+                      type="text"
+                      placeholder="User UUID…"
+                      value={filters.actorId}
+                      onChange={(e) => updateFilter('actorId', e.target.value)}
+                      wrapperClassName="w-full"
+                    />
+                  )}
+                </div>
+                {actorNamesError ? (
+                  <p className="text-xs text-danger-600 dark:text-danger-400">{actorNamesError}</p>
+                ) : null}
+              </div>
             }
             sheet={({ closeSheet }) => (
               <>
@@ -1271,6 +1343,8 @@ export function AuditPage({
         periodAllTime={filters.periodAllTime ?? false}
       />
 
+      <OverviewStatStrip items={statStrip} />
+
       {error && !dismissedError && (
         <PageNotification
           variant="error"
@@ -1282,48 +1356,63 @@ export function AuditPage({
 
       {/* Filters — Actor list is SSR-preloaded (`audit.actorFilterOptions`); names on the page
           are merged in client-side after `audit.actorNames`. */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <SearchableSelect
-            value={filters.tableName}
-            onChange={(v) => updateFilter('tableName', v)}
-            placeholder="All Tables"
-            searchPlaceholder="Search tables..."
-            options={[
-              { value: '', label: 'All Tables' },
-              ...AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) })),
-            ]}
-            wrapperClassName="w-full sm:w-56"
-          />
-          {actorPickerOptions.length > 0 ? (
+      <ToolbarFiltersCollapsible
+        hideMobileSheet
+        badgeCount={(filters.tableName ? 1 : 0) + (filters.actorId ? 1 : 0)}
+        onClearAll={
+          filters.tableName || filters.actorId
+            ? () => {
+                const params = new URLSearchParams(searchParams);
+                params.delete('tableName');
+                params.delete('actorId');
+                params.set('page', '1');
+                setSearchParams(params);
+              }
+            : undefined
+        }
+        desktopInlineFilters={
+          <>
             <SearchableSelect
-              id="audit-actor-filter"
-              value={filters.actorId}
-              onChange={(v) => updateFilter('actorId', v)}
-              placeholder="All Users"
-              searchPlaceholder="Search users…"
-              options={actorPickerOptions}
-              wrapperClassName="w-full sm:w-72"
+              value={filters.tableName}
+              onChange={(v) => updateFilter('tableName', v)}
+              placeholder="All Tables"
+              searchPlaceholder="Search tables..."
+              options={[
+                { value: '', label: 'All Tables' },
+                ...AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) })),
+              ]}
+              wrapperClassName="w-full sm:w-56"
             />
-          ) : actorFilterOptions.length === 0 && actorIds.length > 0 && actorNamesLoading ? (
-            <div className="flex items-center gap-2 text-xs text-app-fg-muted w-full sm:w-72 py-1">
-              <Spinner className="w-4 h-4" />
-              <span>Loading users…</span>
-            </div>
-          ) : (
-            <TextInput
-              type="text"
-              placeholder="User UUID…"
-              value={filters.actorId}
-              onChange={(e) => updateFilter('actorId', e.target.value)}
-              wrapperClassName="w-full sm:w-72"
-            />
-          )}
-        </div>
-        {actorNamesError ? (
-          <p className="text-xs text-danger-600 dark:text-danger-400 mt-2">{actorNamesError}</p>
-        ) : null}
-      </div>
+            {actorPickerOptions.length > 0 ? (
+              <SearchableSelect
+                id="audit-actor-filter"
+                value={filters.actorId}
+                onChange={(v) => updateFilter('actorId', v)}
+                placeholder="All Users"
+                searchPlaceholder="Search users…"
+                options={actorPickerOptions}
+                wrapperClassName="w-full sm:w-72"
+              />
+            ) : actorFilterOptions.length === 0 && actorIds.length > 0 && actorNamesLoading ? (
+              <div className="flex items-center gap-2 text-xs text-app-fg-muted w-full sm:w-72 py-1">
+                <Spinner className="w-4 h-4" />
+                <span>Loading users…</span>
+              </div>
+            ) : (
+              <TextInput
+                type="text"
+                placeholder="User UUID…"
+                value={filters.actorId}
+                onChange={(e) => updateFilter('actorId', e.target.value)}
+                wrapperClassName="w-full sm:w-72"
+              />
+            )}
+          </>
+        }
+      />
+      {actorNamesError ? (
+        <p className="text-xs text-danger-600 dark:text-danger-400 -mt-2">{actorNamesError}</p>
+      ) : null}
 
       <LocalExportModal
         open={showExportModal}
@@ -1349,11 +1438,6 @@ export function AuditPage({
         ]}
         defaultColumns={['timestamp', 'table', 'description', 'actor', 'recordId', 'validTo']}
       />
-
-      {/* Results count */}
-      <p className="text-sm text-app-fg-muted">
-        {total} {total === 1 ? 'entry' : 'entries'} found
-      </p>
 
       {/* Audit log table — rows render immediately, actor names stream in */}
       <TableLoadingOverlay show={isFilterLoading}>

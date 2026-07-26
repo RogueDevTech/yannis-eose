@@ -1,24 +1,29 @@
-import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { RealMoneyTag } from '~/components/ui/real-money-tag';
 
 export interface TrialBalanceRow {
   accountId: string;
   code: string;
   name: string;
   rootType: string;
+  accountType?: string | null;
   debit: number;
   credit: number;
 }
 
+
 export interface TrialBalancePageProps {
   accounts: TrialBalanceRow[];
   totals: { totalDebit: number; totalCredit: number; balanced: boolean };
-  filters: { asOfDate: string };
+  filters: { startDate: string; endDate: string; periodAllTime: boolean };
 }
 
 const ROOT_LABELS: Record<string, string> = {
@@ -32,18 +37,22 @@ const ROOT_LABELS: Record<string, string> = {
 const ROOT_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'];
 
 export function TrialBalancePage({ accounts, totals, filters }: TrialBalancePageProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const onAsOfChange = (value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set('asOfDate', value);
-    else next.delete('asOfDate');
-    setSearchParams(next);
-  };
+  const balancedBadge = (
+    <span
+      className={[
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
+        totals.balanced
+          ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+          : 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
+      ].join(' ')}
+    >
+      {totals.balanced ? '✓ Balanced' : '⚠ Out of balance'}
+    </span>
+  );
 
   const columns: CompactTableColumn<TrialBalanceRow>[] = [
     { key: 'code', header: 'Code', render: (r) => <span className="font-mono text-xs text-app-fg-muted">{r.code}</span> },
-    { key: 'name', header: 'Account', render: (r) => <span className="font-medium text-app-fg">{r.name}</span> },
+    { key: 'name', header: 'Account', render: (r) => <span className="font-medium text-app-fg">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span> },
     {
       key: 'debit',
       header: 'Debit',
@@ -65,35 +74,39 @@ export function TrialBalancePage({ accounts, totals, filters }: TrialBalancePage
   })).filter((g) => g.rows.length > 0);
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Trial Balance"
-        description="Every account's net balance, straight from the ledger. Debits must equal credits."
+        description="Every account's net balance. Debits must equal credits."
+        mobileInlineActions
         actions={
-          <span
-            className={[
-              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
-              totals.balanced
-                ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                : 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
-            ].join(' ')}
-          >
-            {totals.balanced ? '✓ Balanced' : '⚠ Out of balance'}
-          </span>
+          <div className="flex items-center gap-2">
+            {balancedBadge}
+            <PageHeaderMobileTools
+              sheetTitle="Actions"
+              triggerAriaLabel="Trial balance toolbar"
+              desktop={
+                <div className="flex items-center gap-2">
+                  <PageRefreshButton />
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                    chrome="pill"
+                  />
+                </div>
+              }
+              sheet={() => null}
+            />
+          </div>
         }
       />
 
-      <div className="flex items-center gap-2">
-        <label htmlFor="tb-asof" className="text-sm text-app-fg-muted">
-          As of
-        </label>
-        <DateInput
-          id="tb-asof"
-          value={filters.asOfDate}
-          onChange={(e) => onAsOfChange(e.target.value)}
-          wrapperClassName="w-44"
-        />
-      </div>
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+      />
 
       <OverviewStatStrip
         items={[
@@ -141,6 +154,6 @@ export function TrialBalancePage({ accounts, totals, filters }: TrialBalancePage
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

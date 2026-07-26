@@ -59,33 +59,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     periodAllTime,
   };
 
-  const userId = url.searchParams.get('userId') || '';
   const entryTypeFilter = url.searchParams.get('entryType') || 'all';
   const searchFilter = url.searchParams.get('search') || '';
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
 
-  const shell = { filters, selectedUserId: userId, entryTypeFilter, searchFilter };
+  const shell = { filters, entryTypeFilter, searchFilter };
 
   const pageData = (async (): Promise<GeneralLedgerLoaderData> => {
-    // Fetch users list in parallel with ledger
-    const usersRes = await apiRequest<unknown>(
-      `/trpc/finance.generalLedgerUsers`,
-      { method: 'GET', cookie },
-    );
-    const users: Array<{ id: string; name: string; role: string }> = usersRes.ok
-      ? ((usersRes.data as { result?: { data?: Array<{ id: string; name: string; role: string }> } })?.result?.data ?? [])
-      : [];
-
-    const selectedUserName = userId ? (users.find((u) => u.id === userId)?.name ?? '') : '';
-
-    // Build ledger input
     const ledgerInput: Record<string, unknown> = {
       entryType: entryTypeFilter,
       page,
       limit: perPage,
     };
-    if (userId) ledgerInput.userId = userId;
     if (searchFilter) ledgerInput.search = searchFilter;
     if (!periodAllTime) {
       if (startDate) ledgerInput.startDate = startDate;
@@ -104,9 +90,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return {
       ...ledger,
       limit: perPage,
-      users,
-      selectedUserId: userId,
-      selectedUserName,
       filters,
       entryTypeFilter,
       searchFilter,

@@ -15,7 +15,7 @@ import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
-import { isAdminLevel } from '~/lib/rbac';
+import { isAdminLevel, hasFinanceAccess } from '~/lib/rbac';
 import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
 import {
   DashboardCartOrdersSection,
@@ -153,7 +153,7 @@ export function DashboardPage({
           isMarketingTeamSupervisor={isMarketingTeamSupervisor}
         />
       )}
-      {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
+      {hasFinanceAccess({ role: role ?? '' }) && !isAdminLevel({ role: role ?? '' }) && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
       {(role === 'HR_MANAGER') && <HRDashboard naira={naira} />}

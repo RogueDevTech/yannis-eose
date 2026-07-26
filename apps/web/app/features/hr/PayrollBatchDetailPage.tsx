@@ -23,6 +23,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { DescriptionList, type DescriptionItem } from '~/components/ui/description-list';
+import { SearchInput } from '~/components/ui/search-input';
 import { useFetcherToast } from '~/components/ui/toast';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { formatRole } from '~/features/users/types';
@@ -225,7 +226,7 @@ function buildBatchPayoutColumns(args: {
       nowrap: true,
       render: (p) => (
         <span className="font-semibold">
-          <NairaPrice amount={Number(p.netPay ?? p.totalPayout)} />
+          <NairaPrice amount={Number(p.totalPayout ?? p.netPay)} />
         </span>
       ),
     },
@@ -503,6 +504,8 @@ export function PayrollBatchDetailPage({
   const [showMarkPaid, setShowMarkPaid] = useState(false);
   const [showApprove, setShowApprove] = useState(false);
   const [showRegenerate, setShowRegenerate] = useState(false);
+  const [showSubmit, setShowSubmit] = useState(false);
+  const [payoutSearch, setPayoutSearch] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Payroll updated' });
 
@@ -512,13 +515,19 @@ export function PayrollBatchDetailPage({
     setShowReject(false);
     setShowMarkPaid(false);
     setShowRegenerate(false);
+    setShowSubmit(false);
     // Finance overview / payroll list use cached loaders; clear so Paid vs Awaiting isn't stale.
     invalidateCachedLoader('/admin/finance/overview');
     invalidateCachedLoader('/hr/payroll');
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleSuccess);
 
-  const { batch, payouts, adjustments, allowedTransitions } = detail;
+  const { batch, payouts: allPayouts, adjustments, allowedTransitions } = detail;
+  const payouts = useMemo(() => {
+    const q = payoutSearch.toLowerCase().trim();
+    if (!q) return allPayouts;
+    return allPayouts.filter((p) => (p.staffName ?? '').toLowerCase().includes(q));
+  }, [allPayouts, payoutSearch]);
 
   const submitRegenerate = useCallback(() => {
     const fd = new FormData();
@@ -566,13 +575,15 @@ export function PayrollBatchDetailPage({
   const headerWorkflowActions = (
     <>
       {allowedTransitions.includes('SUBMIT') && (
-        <fetcher.Form method="post" className="inline">
-          <input type="hidden" name="intent" value="submitBatch" />
-          <input type="hidden" name="batchId" value={batch.id} />
-          <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'}>
-            Submit to HR
-          </Button>
-        </fetcher.Form>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          loading={fetcher.state === 'submitting' && showSubmit}
+          onClick={() => setShowSubmit(true)}
+        >
+          Submit to HR
+        </Button>
       )}
       {canRegenerateDraft && (
         <Button
@@ -591,13 +602,15 @@ export function PayrollBatchDetailPage({
   const footerWorkflowActions = (
     <>
       {allowedTransitions.includes('SUBMIT') && (
-        <fetcher.Form method="post" className="inline">
-          <input type="hidden" name="intent" value="submitBatch" />
-          <input type="hidden" name="batchId" value={batch.id} />
-          <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'}>
-            Submit to HR
-          </Button>
-        </fetcher.Form>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          loading={fetcher.state === 'submitting' && showSubmit}
+          onClick={() => setShowSubmit(true)}
+        >
+          Submit to HR
+        </Button>
       )}
       {allowedTransitions.includes('APPROVE') && (
         <Button variant="primary" size="sm" onClick={() => setShowApprove(true)}>
@@ -651,13 +664,19 @@ export function PayrollBatchDetailPage({
                 {showHeaderWorkflowActions ? (
                   <div className="space-y-2 [&_form]:block [&_form]:w-full [&_button]:w-full [&_button]:justify-center [&_button]:h-12">
                     {allowedTransitions.includes('SUBMIT') && (
-                      <fetcher.Form method="post" className="block" onSubmit={closeSheet}>
-                        <input type="hidden" name="intent" value="submitBatch" />
-                        <input type="hidden" name="batchId" value={batch.id} />
-                        <Button type="submit" variant="primary" size="sm" className="w-full justify-center h-12" loading={fetcher.state === 'submitting'}>
-                          Submit to HR
-                        </Button>
-                      </fetcher.Form>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="w-full justify-center h-12"
+                        loading={fetcher.state === 'submitting' && showSubmit}
+                        onClick={() => {
+                          closeSheet();
+                          setShowSubmit(true);
+                        }}
+                      >
+                        Submit to HR
+                      </Button>
                     )}
                     {canRegenerateDraft && (
                       <Button
@@ -704,7 +723,7 @@ export function PayrollBatchDetailPage({
           { label: 'Staff payouts', value: batch.staffCount },
           {
             label: 'Total gross',
-            value: <NairaPrice amount={totalGross || Number(batch.totalAmount)} />,
+            value: <NairaPrice amount={totalGross} />,
           },
           { label: 'Total PAYE', value: <NairaPrice amount={totalPaye} /> },
           {
@@ -731,8 +750,11 @@ export function PayrollBatchDetailPage({
 
       {/* Payouts table */}
       <div className="list-panel p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h4 className="text-sm font-semibold text-app-fg">Staff payouts</h4>
+        <div className="px-4 py-3 border-b border-app-border flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-app-fg">Staff payouts ({allPayouts.length})</h4>
+          {allPayouts.length > 5 && (
+            <SearchInput value={payoutSearch} onChange={setPayoutSearch} placeholder="Search by name" className="w-48" />
+          )}
           {batch.status === 'PAID' && (
             <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
               Finance marked this batch paid. Every payout below is now PAID.
@@ -770,7 +792,7 @@ export function PayrollBatchDetailPage({
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-app-fg-muted">Net</span>
                   <span className="font-semibold text-app-fg">
-                    <NairaPrice amount={Number(p.netPay ?? p.totalPayout)} />
+                    <NairaPrice amount={Number(p.totalPayout ?? p.netPay)} />
                   </span>
                 </div>
               </button>
@@ -876,6 +898,44 @@ export function PayrollBatchDetailPage({
             </div>
           </fetcher.Form>
         </Modal>
+      )}
+
+      {showSubmit && (
+        <ConfirmActionModal
+          open
+          onClose={() => setShowSubmit(false)}
+          error={payrollSurface.errorMatchingIntent('submitBatch')}
+          title="Submit batch to HR"
+          description={
+            <>
+              <p>
+                Submit this {DEPT_LABEL[batch.department]} draft for{' '}
+                <strong>{formatMonth(batch.periodMonth)}</strong> ({branchName}) to HR for review?
+              </p>
+              <p className="mt-2">
+                {batch.staffCount} staff · Total{' '}
+                <strong>
+                  <NairaPrice amount={Number(batch.totalAmount)} />
+                </strong>
+              </p>
+            </>
+          }
+          details={
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>HR can approve to Finance or send it back</li>
+              <li>You will not be able to edit payouts while it is pending HR</li>
+            </ul>
+          }
+          confirmLabel="Submit to HR"
+          variant="warning"
+          loading={fetcher.state === 'submitting'}
+          onConfirm={() => {
+            fetcher.submit(
+              { intent: 'submitBatch', batchId: batch.id },
+              { method: 'post' },
+            );
+          }}
+        />
       )}
 
       {showRegenerate && (

@@ -196,7 +196,7 @@ export interface OrdersListPageProps {
   totalPages: number;
   page: number;
   limit: number;
-  statusCounts: Record<string, number>;
+  statusCounts?: Record<string, number>;
   statusFilter?: string;
   /**
    * Statuses to omit from the status filter dropdown for this surface.
@@ -336,7 +336,7 @@ function OrdersListPageImpl({
   totalPages,
   page,
   limit,
-  statusCounts,
+  statusCounts = {},
   statusFilter,
   excludeStatuses,
   searchFilter,
@@ -434,9 +434,7 @@ function OrdersListPageImpl({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders deleted',
     successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Delete failed',
   });
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
@@ -1243,7 +1241,7 @@ function OrdersListPageImpl({
             <div className="group/cust relative flex min-w-0 items-center gap-2">
               <span className={`min-w-0 truncate font-medium ${isFrozen ? 'text-app-fg/60' : 'text-app-fg'}`}>
                 {clipName(order.customerName)}
-                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
               </span>
@@ -1455,7 +1453,7 @@ function OrdersListPageImpl({
           <div className="flex items-center justify-between gap-2">
             <span className={`min-w-0 truncate text-sm font-medium ${mobileFrozen ? 'text-app-fg/60' : 'text-app-fg'}`} title={order.customerName ?? undefined}>
               {clipName(order.customerName)}
-              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+              {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
               {(order as { isFollowUp?: boolean }).isFollowUp && !isCSCloser && (

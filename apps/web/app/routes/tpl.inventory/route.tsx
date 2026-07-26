@@ -116,7 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return {
       levels: bundle?.levels?.levels ?? [],
-      levelsTotals: bundle?.levels?.totals ?? { totalStock: 0, totalReserved: 0, totalDelivered: 0 },
+      levelsTotals: { totalLocations: 0, ...bundle?.levels?.totals } as { totalStock: number; totalReserved: number; totalDelivered: number; totalLocations: number },
       totalLevels,
       levelsPage,
       levelsTotalPages: Math.max(1, Math.ceil(totalLevels / levelsLimit)),

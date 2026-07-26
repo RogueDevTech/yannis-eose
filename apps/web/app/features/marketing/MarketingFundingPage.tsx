@@ -26,6 +26,7 @@ import {
 } from '~/components/ui/compact-table';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -37,7 +38,6 @@ import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { NairaPrice } from '~/components/ui/naira-price';
 import { Textarea } from '~/components/ui/textarea';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { isAdminLevel } from '~/lib/rbac';
@@ -1213,11 +1213,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                     ? 'Team supervisor'
                     : r.isFinance
                       ? 'Finance'
-                      : r.role === 'SUPER_ADMIN'
-                        ? 'Super Admin'
-                        : r.role === 'ADMIN'
-                          ? 'Admin'
-                          : 'Head of Marketing';
+                      : isAdminLevel(r)
+                        ? 'Admin'
+                        : 'Head of Marketing';
                   return {
                     value: r.id,
                     label: `${r.name}: ${roleLabel}${r.isPreferred ? ' (default)' : ''}`,
@@ -1475,7 +1473,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             <input type="hidden" name="requestId" value={approvingRequest.id} />
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Amount ({'₦'})<span className="text-app-fg-muted/70">. Requested {'₦'}{Number(approvingRequest.amount).toLocaleString()}</span>
+                Amount ({'₦'})<span className="text-app-fg-muted/70">. Requested <NairaPrice amount={Number(approvingRequest.amount)} /></span>
               </label>
               <AmountInput
                 name="amount"
@@ -3017,7 +3015,7 @@ function UnifiedReceivedTable({
                   kind: 'button',
                   label: 'Received',
                   tone: 'success',
-                  onClick: () => onOpenMarkReceived(transferToFundingRecord(entry)),
+                  onClick: () => onOpenMarkReceived(transferToFundingRecord(entry as DistributingFundingTransferEntry)),
                   show: canMarkReceived,
                 },
                 {
@@ -3025,7 +3023,7 @@ function UnifiedReceivedTable({
                   kind: 'button',
                   label: 'Dispute',
                   tone: 'danger',
-                  onClick: () => onOpenNotReceived(transferToFundingRecord(entry)),
+                  onClick: () => onOpenNotReceived(transferToFundingRecord(entry as DistributingFundingTransferEntry)),
                   show: canMarkReceived,
                 },
                 {

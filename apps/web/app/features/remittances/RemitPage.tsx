@@ -18,6 +18,7 @@ import {
 } from '~/components/ui/compact-table';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type { OrderInvoice } from '~/features/orders/types';
+import { NairaPrice } from '~/components/ui/naira-price';
 
 export interface RemittanceRecord {
   id: string;
@@ -350,7 +351,7 @@ export function RemitPage({
                     </span>
                     {order.totalAmount != null && (
                       <span className="text-xs font-medium text-app-fg-muted shrink-0">
-                        ₦{Number(order.totalAmount).toLocaleString()}
+                        <NairaPrice amount={Number(order.totalAmount)} />
                       </span>
                     )}
                   </label>

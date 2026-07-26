@@ -361,13 +361,17 @@ function ColumnVisibilityPopover<T>({
  */
 export interface CompactTableActionButtonProps {
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: (e?: React.MouseEvent) => void;
   to?: string;
   /** Passed through to Remix `<Link state>` when `to` is set (e.g. return URL for detail pages). */
   state?: LinkProps['state'];
   disabled?: boolean;
   tone?: 'brand' | 'danger' | 'success';
   className?: string;
+  /** HTML button type — defaults to `'button'`. */
+  type?: 'button' | 'submit' | 'reset';
+  /** Tooltip / accessible label. */
+  title?: string;
 }
 
 const TONE_CLASSES: Record<'brand' | 'danger' | 'success', string> = {
@@ -387,13 +391,15 @@ export function CompactTableActionButton({
   disabled = false,
   tone = 'brand',
   className = '',
+  type = 'button',
+  title,
 }: CompactTableActionButtonProps) {
   const toneClass = TONE_CLASSES[tone];
   const sharedClass = `${toneClass} font-medium min-h-10 px-4 py-2 text-sm md:h-auto md:min-h-0 md:px-0 md:py-0 md:text-xs ${className}`;
 
   if (to && !disabled) {
     return (
-      <Link to={to} state={state} className={`btn-ghost btn-sm ${sharedClass}`}>
+      <Link to={to} state={state} className={`btn-ghost btn-sm ${sharedClass}`} title={title}>
         {children}
       </Link>
     );
@@ -401,11 +407,13 @@ export function CompactTableActionButton({
 
   return (
     <Button
+      type={type}
       variant="ghost"
       size="sm"
       onClick={onClick}
       disabled={disabled}
       className={sharedClass}
+      title={title}
     >
       {children}
     </Button>

@@ -10,6 +10,7 @@ import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Pagination } from '~/components/ui/pagination';
 import {
   CompactTable,
@@ -173,6 +174,23 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const hasActiveFilters = !!(filters.department || filters.branchId || filters.search || filters.startDate || filters.endDate);
 
+  const totalNetPay = useMemo(
+    () => items.reduce((sum, r) => sum + Number(r.payout.netPay), 0),
+    [items],
+  );
+
+  const payslipStatStrip = useMemo(
+    () => [
+      { label: 'Payslips', value: total },
+      {
+        label: 'Total net pay',
+        value: <NairaPrice amount={totalNetPay} />,
+        plainValue: true,
+      },
+    ],
+    [total, totalNetPay],
+  );
+
   const viewingPdf = viewingPayslip ? toPayslipPdfInput(viewingPayslip) : null;
 
   return (
@@ -183,8 +201,25 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
         description="Paid payout lines with downloadable PDF payslips."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Actions"
+            sheetTitle="Filters"
             triggerAriaLabel="Payslips toolbar"
+            filtersBadgeCount={[filters.department, filters.branchId].filter(Boolean).length}
+            onClearFilters={
+              filters.department || filters.branchId
+                ? () => {
+                    setSearchParams(
+                      (prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.delete('department');
+                        next.delete('branchId');
+                        next.delete('page');
+                        return next;
+                      },
+                      { replace: true },
+                    );
+                  }
+                : undefined
+            }
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
@@ -196,7 +231,26 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
                 />
               </div>
             }
-            sheet={() => null}
+            filters={
+              <div className="space-y-3">
+                <FormSelect
+                  label="Department"
+                  name="department"
+                  options={DEPARTMENT_OPTIONS}
+                  value={filters.department ?? ''}
+                  onChange={(e) => setFilter('department', e.target.value)}
+                />
+                {branches.length > 1 && (
+                  <FormSelect
+                    label="Branch"
+                    name="branchId"
+                    options={branchOptions}
+                    value={filters.branchId ?? ''}
+                    onChange={(e) => setFilter('branchId', e.target.value)}
+                  />
+                )}
+              </div>
+            }
           />
         }
       />
@@ -207,7 +261,10 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
         periodAllTime={filters.periodAllTime}
       />
 
+      <OverviewStatStrip items={payslipStatStrip} />
+
       <ToolbarFiltersCollapsible
+        hideMobileSheet
         badgeCount={[filters.department, filters.branchId].filter(Boolean).length}
         searchRow={
           <PageSearchControl
@@ -238,26 +295,6 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
               />
             )}
           </>
-        }
-        sheetFilterBody={
-          <div className="space-y-3">
-            <FormSelect
-              label="Department"
-              name="department"
-              options={DEPARTMENT_OPTIONS}
-              value={filters.department ?? ''}
-              onChange={(e) => setFilter('department', e.target.value)}
-            />
-            {branches.length > 1 && (
-              <FormSelect
-                label="Branch"
-                name="branchId"
-                options={branchOptions}
-                value={filters.branchId ?? ''}
-                onChange={(e) => setFilter('branchId', e.target.value)}
-              />
-            )}
-          </div>
         }
       />
 

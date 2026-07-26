@@ -10,7 +10,6 @@ import type {
   FinanceOverviewLoaderData,
   FinanceOverviewPulse,
   FinancePayrollOverview,
-  FinancialKPIs,
 } from '~/features/finance/types';
 
 export const meta: MetaFunction = () => [{ title: 'Finance — Yannis EOSE' }];
@@ -123,19 +122,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     );
 
-    // KPI query — as-of today (point-in-time balance sheet KPIs).
-    const kpiInput = encodeURIComponent(JSON.stringify({}));
-
-    const [bundleRes, kpiRes] = await Promise.all([
-      apiRequest<unknown>(
-        `/trpc/finance.overviewPageBundle?input=${bundleInput}`,
-        { method: 'GET', cookie },
-      ),
-      apiRequest<unknown>(
-        `/trpc/generalLedger.financialKPIs?input=${kpiInput}`,
-        { method: 'GET', cookie },
-      ),
-    ]);
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/finance.overviewPageBundle?input=${bundleInput}`,
+      { method: 'GET', cookie },
+    );
 
     type BreakdownRow = { productId?: string; locationId?: string | null; productName?: string; locationName?: string; totalAmount: string; orderCount: number };
     type BundleData = {
@@ -187,11 +177,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const payrollOverview: FinancePayrollOverview = bundle?.payroll ?? emptyPayrollOverview;
 
-    // Extract KPIs from the GL response.
-    const kpis: FinancialKPIs | null = kpiRes.ok
-      ? ((kpiRes.data as { result?: { data?: FinancialKPIs } })?.result?.data ?? null)
-      : null;
-
     return {
       profit: bundle?.profit ?? emptyProfit,
       pulse,
@@ -212,7 +197,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         totalAmount: r.totalAmount,
         orderCount: r.orderCount,
       })),
-      kpis,
     };
   })();
 

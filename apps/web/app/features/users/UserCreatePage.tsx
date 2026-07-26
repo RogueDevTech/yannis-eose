@@ -1362,7 +1362,7 @@ export function UserCreatePage({
           </div>
         )}
 
-        {isEditMode && payRoles.length > 0 ? (
+        {isEditMode && (payRoles ?? []).length > 0 ? (
           <payrollProfileFetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="updatePayrollProfile" />
             <input type="hidden" name="userId" value={editingUser!.id} />
@@ -1374,7 +1374,7 @@ export function UserCreatePage({
             <input type="hidden" name="crmLinked" value={payrollProfile.crmLinked ? 'true' : 'false'} />
             <PayrollUserProfileSection
               values={payrollProfile}
-              payRoles={payRoles}
+              payRoles={(payRoles ?? []) as import('~/features/hr/payroll-prd-types').PayRole[]}
               managerOptions={activeHeads.map((h) => ({ value: h.id, label: h.name }))}
               onChange={(patch) => setPayrollProfile((prev) => ({ ...prev, ...patch }))}
             />

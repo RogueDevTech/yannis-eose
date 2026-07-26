@@ -147,6 +147,8 @@ export interface InventoryStreamData {
   lowStockThreshold?: number;
   /** When true, the threshold control is editable (SuperAdmin / Admin). Otherwise read-only. */
   canEditLowStock?: boolean;
+  /** When true, the global (org-wide) threshold is editable. */
+  canEditGlobalThreshold?: boolean;
   /** Low-stock items currently below threshold — drives the inline banner. Streamed. */
   lowStockAlerts?: Promise<LowStockAlertsResult> | LowStockAlertsResult;
   /**
@@ -224,6 +226,7 @@ export interface Transfer {
 
 export interface ReturnedOrder {
   id: string;
+  orderNumber?: number | null;
   customerName: string;
   status: string;
   items: unknown;

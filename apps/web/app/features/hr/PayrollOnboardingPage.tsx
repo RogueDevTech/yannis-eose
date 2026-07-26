@@ -21,6 +21,7 @@ import {
 } from '~/components/ui/compact-table';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import type { PayrollOnboardingQueueItem } from './payroll-prd-types';
 
 interface PayrollOnboardingPageProps {
@@ -78,6 +79,18 @@ export function PayrollOnboardingPage({ queue, canWrite }: PayrollOnboardingPage
   }, [queue, search, roleFilter, statusFilter]);
 
   const activeFilterCount = [roleFilter, statusFilter, search].filter(Boolean).length;
+
+  const statStrip = useMemo<OverviewStatStripItem[]>(() => {
+    const pending = queue.filter((r) => r.onboardingPayrollStatus === 'PENDING_APPROVAL').length;
+    const approved = queue.filter((r) => r.onboardingPayrollStatus === 'ACTIVE').length;
+    const notApplicable = queue.filter((r) => r.onboardingPayrollStatus === 'NOT_APPLICABLE').length;
+    return [
+      { label: 'Total', value: queue.length },
+      { label: 'Pending', value: pending },
+      { label: 'Approved', value: approved },
+      { label: 'Not applicable', value: notApplicable },
+    ];
+  }, [queue]);
 
   const columns: CompactTableColumn<PayrollOnboardingQueueItem>[] = useMemo(
     () => [
@@ -145,7 +158,7 @@ export function PayrollOnboardingPage({ queue, canWrite }: PayrollOnboardingPage
       <PageHeader
         title="Payroll onboarding queue"
         mobileInlineActions
-        description="Staff awaiting payroll profile approval before inclusion in monthly runs."
+        description="Approve staff for inclusion in monthly payroll."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Filters"
@@ -177,6 +190,8 @@ export function PayrollOnboardingPage({ queue, canWrite }: PayrollOnboardingPage
           />
         }
       />
+
+      <OverviewStatStrip items={statStrip} />
 
       <ToolbarFiltersCollapsible
         hideMobileSheet
@@ -221,6 +236,27 @@ export function PayrollOnboardingPage({ queue, canWrite }: PayrollOnboardingPage
           rowKey={(r) => r.id}
           emptyTitle="Queue is empty"
           emptyDescription=""
+          renderMobileCard={(row) => (
+            <div className="flex flex-col gap-2 py-3 px-4">
+              <div className="flex items-start justify-between gap-2">
+                <span className="font-medium text-app-fg leading-snug">{row.name}</span>
+                <StatusBadge status={row.onboardingPayrollStatus} />
+              </div>
+              <div className="flex items-center gap-2">
+                <RoleBadge role={row.role} size="sm" />
+              </div>
+              {canWrite && (
+                <div className="flex gap-2 pt-1">
+                  <CompactTableActionButton tone="success" onClick={() => setApproveUser(row)}>
+                    Approve
+                  </CompactTableActionButton>
+                  <CompactTableActionButton tone="danger" onClick={() => setRejectUser(row)}>
+                    Reject
+                  </CompactTableActionButton>
+                </div>
+              )}
+            </div>
+          )}
         />
       )}
 

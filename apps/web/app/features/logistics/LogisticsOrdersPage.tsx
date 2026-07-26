@@ -547,7 +547,7 @@ function LogisticsOrdersPageImpl({
                     wrapperClassName="w-36"
                     controlSize="sm"
                   />
-                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')} loading={isSubmitting}>
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')} loading={isSubmitting} loadingText="Assigning...">
                     Assign
                   </Button>
                 </fetcher.Form>
@@ -602,7 +602,7 @@ function LogisticsOrdersPageImpl({
                   <input type="hidden" name="intent" value="transition" />
                   <input type="hidden" name="orderId" value={order.id} />
                   <input type="hidden" name="newStatus" value="IN_TRANSIT" />
-                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting}>
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting} loadingText="Dispatching...">
                     {markInTransitLabel}
                   </Button>
                 </fetcher.Form>

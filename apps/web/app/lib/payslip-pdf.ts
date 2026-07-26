@@ -148,12 +148,22 @@ export function buildPayslipLines(input: PayslipPdfInput): {
     earningLines.push({ label: 'Add-ons', amount: input.addOnsTotal });
   }
 
+  // Gross may already net return penalties. Show them once under earnings (negative)
+  // and exclude that portion from "Other deductions" so NET is not double-penalized.
+  const componentSum =
+    input.baseSalary + input.performanceBonus + input.allowancesTotal + input.addOnsTotal;
+  const penaltiesEmbedded = Math.max(0, Math.round((componentSum - input.grossPay) * 100) / 100);
+  if (penaltiesEmbedded > 0.009) {
+    earningLines.push({ label: 'Return penalties', amount: -penaltiesEmbedded });
+  }
+  const otherDeductions = Math.max(0, Math.round((input.deductionsTotal - penaltiesEmbedded) * 100) / 100);
+
   const deductionLines: PayslipPdfLine[] = [];
   if (input.payeTax > 0) {
     deductionLines.push({ label: 'PAYE tax', amount: input.payeTax, deduction: true });
   }
-  if (input.deductionsTotal > 0) {
-    deductionLines.push({ label: 'Other deductions', amount: input.deductionsTotal, deduction: true });
+  if (otherDeductions > 0) {
+    deductionLines.push({ label: 'Other deductions', amount: otherDeductions, deduction: true });
   }
 
   return { earningLines, deductionLines };

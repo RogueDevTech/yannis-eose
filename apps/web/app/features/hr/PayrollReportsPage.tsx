@@ -22,7 +22,7 @@ import {
 import { exportToCsv } from '~/lib/csv-export';
 import type { PayrollRegisterRow } from './payroll-prd-types';
 
-interface PayrollReportsPageProps {
+export interface PayrollReportsPageProps {
   rows: PayrollRegisterRow[];
   costByBranch: Array<{
     branchId: string;
@@ -149,7 +149,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
         key: 'role',
         header: 'Role',
         nowrap: true,
-        render: (row) => row.staffRole ? <RoleBadge role={row.staffRole} size="sm" /> : <span className="text-sm text-app-fg-muted">—</span>,
+        render: (row) => row.staffRole ? <RoleBadge role={row.staffRole} size="sm" /> : <span className="text-sm text-app-fg-muted">N/A</span>,
       },
       {
         key: 'period',

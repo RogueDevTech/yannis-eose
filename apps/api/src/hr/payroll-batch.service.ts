@@ -99,9 +99,33 @@ function canReviewBatch(user: SessionUser): boolean {
   return (user.permissions ?? []).includes('hr.write');
 }
 
-/** Finance disbursement stage gate — Finance Officer + Finance hat + admin-class. */
+/** Finance disbursement stage — requires finance.disburse (not merely cost-view / auditor). */
 function canProcessBatch(user: SessionUser): boolean {
-  return hasFinanceAccess(user);
+  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return true;
+  return (user.permissions ?? []).includes('finance.disburse');
+}
+
+function assertBatchInScope(
+  batch: { branchId: string },
+  viewer: SessionUser,
+  effectiveBranchIds?: string[] | null,
+) {
+  if (viewer.role === 'SUPER_ADMIN' || viewer.role === 'SUPPORT') return;
+  if (effectiveBranchIds?.length) {
+    if (!effectiveBranchIds.includes(batch.branchId)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Batch is outside your company or branch scope.',
+      });
+    }
+    return;
+  }
+  if (viewer.currentBranchId && viewer.currentBranchId !== batch.branchId) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Batch is outside your branch scope.',
+    });
+  }
 }
 
 interface PayoutRow {
@@ -143,7 +167,9 @@ function effectivePayoutAmounts(p: {
     Number(p.allowancesTotal ?? 0);
   const gross = grossRaw > 0 ? grossRaw : total > 0 ? total : componentGross;
   const net = netRaw > 0 ? netRaw : total;
-  return { gross, net, paye: Number(p.payeTax ?? 0), total };
+  // Cash to bank / payslip NET = totalPayout when set.
+  const cash = total > 0 ? total : net;
+  return { gross, net, paye: Number(p.payeTax ?? 0), total, cash };
 }
 
 @Injectable()
@@ -495,12 +521,10 @@ export class PayrollBatchService {
               eq(schema.payrollContractors.branchId, branchId),
               isNull(schema.payrollContractors.branchId),
             ),
+            // Exact company only — never include null-scoped shared contractors.
             branchRow?.groupId
-              ? or(
-                  eq(schema.payrollContractors.groupId, branchRow.groupId),
-                  isNull(schema.payrollContractors.groupId),
-                )
-              : undefined,
+              ? eq(schema.payrollContractors.groupId, branchRow.groupId)
+              : sql`false`,
           ),
         );
 
@@ -902,8 +926,13 @@ export class PayrollBatchService {
     return updated;
   }
 
-  async approveBatch(input: ApproveBatchInput, actor: SessionUser) {
+  async approveBatch(
+    input: ApproveBatchInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (!canReviewBatch(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only HR Manager or admins can approve batches.' });
     }
@@ -927,8 +956,19 @@ export class PayrollBatchService {
             rejectedBy: null,
             updatedAt: new Date(),
           })
-          .where(eq(schema.payrollBatches.id, input.batchId))
+          .where(
+            and(
+              eq(schema.payrollBatches.id, input.batchId),
+              eq(schema.payrollBatches.status, 'PENDING_HR'),
+            ),
+          )
           .returning();
+        if (!rows[0]) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Batch status changed concurrently — refresh and try again.',
+          });
+        }
         return rows[0];
       },
     );
@@ -944,12 +984,18 @@ export class PayrollBatchService {
     return updated;
   }
 
-  async rejectBatch(input: RejectBatchInput, actor: SessionUser) {
+  async rejectBatch(
+    input: RejectBatchInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
 
     let nextStatus: PayrollBatchStatus;
     let notifyType: string;
     let notifyRole: string;
+    const expectedStatus = batch.status;
 
     if (batch.status === 'PENDING_HR') {
       // HR rejects back to the head — must be HR/admin
@@ -962,7 +1008,7 @@ export class PayrollBatchService {
     } else if (batch.status === 'PENDING_FINANCE') {
       // Finance rejects back to HR — must be Finance/admin
       if (!canProcessBatch(actor)) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Finance or admins can reject from Finance review.' });
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Finance with disburse permission can reject from Finance review.' });
       }
       nextStatus = 'PENDING_HR';
       notifyType = 'hr:batch_rejected';
@@ -988,8 +1034,19 @@ export class PayrollBatchService {
               : { hrReviewedAt: null, hrReviewedBy: null }),
             updatedAt: new Date(),
           })
-          .where(eq(schema.payrollBatches.id, input.batchId))
+          .where(
+            and(
+              eq(schema.payrollBatches.id, input.batchId),
+              eq(schema.payrollBatches.status, expectedStatus),
+            ),
+          )
           .returning();
+        if (!rows[0]) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Batch status changed concurrently — refresh and try again.',
+          });
+        }
         return rows[0];
       },
     );
@@ -1004,10 +1061,18 @@ export class PayrollBatchService {
     return updated;
   }
 
-  async markBatchPaid(input: MarkBatchPaidInput, actor: SessionUser) {
+  async markBatchPaid(
+    input: MarkBatchPaidInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (!canProcessBatch(actor)) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Finance Officer, Finance hat, or admins can mark batches paid.' });
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only users with finance.disburse (or SuperAdmin) can mark batches paid.',
+      });
     }
     if (batch.status !== 'PENDING_FINANCE') {
       throw new TRPCError({ code: 'CONFLICT', message: `Cannot pay a ${batch.status} batch.` });
@@ -1028,8 +1093,19 @@ export class PayrollBatchService {
             proofOfPaymentUrl: input.proofOfPaymentUrl?.trim() || null,
             updatedAt: new Date(),
           })
-          .where(eq(schema.payrollBatches.id, input.batchId))
+          .where(
+            and(
+              eq(schema.payrollBatches.id, input.batchId),
+              eq(schema.payrollBatches.status, 'PENDING_FINANCE'),
+            ),
+          )
           .returning();
+        if (!rows[0]) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Batch status changed concurrently — refresh and try again.',
+          });
+        }
 
         // Cascade: mark every payout in the batch PAID
         await tx
@@ -1153,9 +1229,11 @@ export class PayrollBatchService {
 
     const base = input.baseSalary ?? Number(payout.baseSalary);
     const bonus = input.performanceBonus ?? Number(payout.performanceBonus);
-    const gross = base + bonus + Number(payout.addOnsTotal) + Number(payout.allowancesTotal ?? 0) - Number(payout.deductionsTotal);
+    const deductions = Number(payout.deductionsTotal ?? 0);
+    const gross = base + bonus + Number(payout.addOnsTotal) + Number(payout.allowancesTotal ?? 0);
     const tax = input.payeTax ?? Number(payout.payeTax ?? 0);
     const net = Math.max(0, gross - tax);
+    const cash = Math.max(0, net - deductions);
 
     return withActorAndBranch(
       this.db,
@@ -1169,7 +1247,7 @@ export class PayrollBatchService {
             grossPay: sql`${gross.toFixed(2)}::numeric`,
             payeTax: sql`${tax.toFixed(2)}::numeric`,
             netPay: sql`${net.toFixed(2)}::numeric`,
-            totalPayout: sql`${net.toFixed(2)}::numeric`,
+            totalPayout: sql`${cash.toFixed(2)}::numeric`,
             lineStatus: 'MANUALLY_OVERRIDDEN',
             overrideReason: input.reason,
           })
@@ -1181,17 +1259,20 @@ export class PayrollBatchService {
     );
   }
 
-  async listPayslips(input: {
-    staffId?: string;
-    batchId?: string;
-    department?: string;
-    fromMonth?: string;
-    toMonth?: string;
-    branchId?: string;
-    search?: string;
-    page?: number;
-    limit?: number;
-  }) {
+  async listPayslips(
+    input: {
+      staffId?: string;
+      batchId?: string;
+      department?: string;
+      fromMonth?: string;
+      toMonth?: string;
+      branchId?: string;
+      search?: string;
+      page?: number;
+      limit?: number;
+    },
+    effectiveBranchIds?: string[] | null,
+  ) {
     const page = input.page ?? 1;
     const limit = input.limit ?? 20;
     const offset = (page - 1) * limit;
@@ -1200,11 +1281,19 @@ export class PayrollBatchService {
     if (input.staffId) conditions.push(eq(schema.payoutRecords.staffId, input.staffId));
     if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
     if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
+    if (effectiveBranchIds?.length) {
+      conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+    }
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
     if (input.search) {
-      conditions.push(ilike(schema.users.name, `%${input.search}%`));
+      conditions.push(
+        or(
+          ilike(schema.users.name, `%${input.search}%`),
+          ilike(schema.payoutRecords.payRoleName, `%${input.search}%`),
+        )!,
+      );
     }
 
     const rows = await this.db
@@ -1233,14 +1322,20 @@ export class PayrollBatchService {
     return { items: rows, page, limit, total };
   }
 
-  async payrollRegister(input: { batchId?: string; fromMonth?: string; toMonth?: string; branchId?: string; department?: string; status?: PayrollBatchStatus }) {
+  async payrollRegister(
+    input: { batchId?: string; fromMonth?: string; toMonth?: string; branchId?: string; department?: string; status?: PayrollBatchStatus },
+    effectiveBranchIds?: string[] | null,
+  ) {
     const conditions: SQL[] = [];
     if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
     if (input.status) conditions.push(eq(schema.payrollBatches.status, input.status));
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+    if (effectiveBranchIds?.length) conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
     if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
+
+    const whereClause = conditions.length ? and(...conditions) : undefined;
 
     const rows = await this.db
       .select({
@@ -1252,8 +1347,9 @@ export class PayrollBatchService {
       .from(schema.payoutRecords)
       .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
       .leftJoin(schema.users, eq(schema.users.id, schema.payoutRecords.staffId))
-      .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(desc(schema.payrollBatches.periodMonth));
+      .where(whereClause)
+      .orderBy(desc(schema.payrollBatches.periodMonth))
+      .limit(500);
 
     return rows;
   }
@@ -1424,10 +1520,14 @@ export class PayrollBatchService {
     };
   }
 
-  async payrollCostByBranch(input: { fromMonth?: string; toMonth?: string; branchId?: string }) {
+  async payrollCostByBranch(
+    input: { fromMonth?: string; toMonth?: string; branchId?: string },
+    effectiveBranchIds?: string[] | null,
+  ) {
     const conditions: SQL[] = [inArray(schema.payrollBatches.status, ['PENDING_FINANCE', 'PAID'])];
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+    if (effectiveBranchIds?.length) conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
 
     const rows = await this.db
@@ -1461,10 +1561,14 @@ export class PayrollBatchService {
     }));
   }
 
-  async payrollCostByRoleCategory(input: { fromMonth?: string; toMonth?: string; branchId?: string }) {
-    const conditions: SQL[] = [];
+  async payrollCostByRoleCategory(
+    input: { fromMonth?: string; toMonth?: string; branchId?: string },
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const conditions: SQL[] = [inArray(schema.payrollBatches.status, ['PENDING_FINANCE', 'PAID'])];
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+    if (effectiveBranchIds?.length) conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
 
     const rows = await this.db
@@ -1502,10 +1606,14 @@ export class PayrollBatchService {
     }));
   }
 
-  async payrollTrend(input: { fromMonth?: string; toMonth?: string; branchId?: string }) {
+  async payrollTrend(
+    input: { fromMonth?: string; toMonth?: string; branchId?: string },
+    effectiveBranchIds?: string[] | null,
+  ) {
     const conditions: SQL[] = [inArray(schema.payrollBatches.status, ['PENDING_FINANCE', 'PAID'])];
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+    if (effectiveBranchIds?.length) conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
 
     const rows = await this.db
@@ -1559,6 +1667,7 @@ export class PayrollBatchService {
   async exportBankUpload(
     input: { batchId?: string; batchIds?: string[] },
     viewer: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     if (!canProcessBatch(viewer)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Finance can export bank upload files.' });
@@ -1572,6 +1681,7 @@ export class PayrollBatchService {
     const batches = [];
     for (const batchId of ids) {
       const batch = await this.requireBatch(batchId);
+      assertBatchInScope(batch, viewer, effectiveBranchIds);
       if (batch.status !== 'PENDING_FINANCE' && batch.status !== 'PAID') {
         throw new TRPCError({
           code: 'CONFLICT',
@@ -1579,7 +1689,7 @@ export class PayrollBatchService {
         });
       }
 
-      const detail = await this.getBatchDetail(batchId, viewer);
+      const detail = await this.getBatchDetail(batchId, viewer, effectiveBranchIds);
       const branchRow = (
         await this.db
           .select({ name: schema.branches.name })
@@ -1589,13 +1699,14 @@ export class PayrollBatchService {
       )[0];
 
       const rows = detail.payouts
-        .filter((p) => Number(p.netPay ?? p.totalPayout) > 0)
+        .filter((p) => Number(p.totalPayout ?? p.netPay) > 0)
         .map((p) => ({
           beneficiaryName: p.payoutAccountName ?? p.staffName ?? p.payRoleName ?? 'Unknown',
           accountNumber: p.payoutAccountNumber ?? '',
           bankCode: p.payoutBankCode ?? '',
           bankName: p.payoutBankName ?? '',
-          amount: Number(p.netPay ?? p.totalPayout),
+          // Cash to bank = totalPayout (after clawbacks); netPay is pre-deduction.
+          amount: Number(p.totalPayout ?? p.netPay),
           reference: `${batch.periodMonth}-${batch.department}-${p.staffName ?? p.payRoleName ?? 'line'}`,
           staffName: p.staffName,
           payRoleName: p.payRoleName,
@@ -1689,9 +1800,17 @@ export class PayrollBatchService {
     };
   }
 
-  async bulkPayslipPdf(input: { batchId?: string; payoutIds?: string[] }, viewer: SessionUser) {
+  async bulkPayslipPdf(
+    input: { batchId?: string; payoutIds?: string[] },
+    viewer: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     if (!input.batchId && !input.payoutIds?.length) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Provide batchId or payoutIds.' });
+    }
+
+    if (input.batchId) {
+      await this.getBatchDetail(input.batchId, viewer, effectiveBranchIds);
     }
 
     const conditions: SQL[] = [];
@@ -1711,11 +1830,27 @@ export class PayrollBatchService {
       .leftJoin(schema.payrollContractors, eq(schema.payrollContractors.id, schema.payoutRecords.contractorId))
       .where(and(...conditions));
 
-    if (input.batchId) {
-      await this.getBatchDetail(input.batchId, viewer);
+    // When selecting by payoutIds (no batch), each row must pass getPayslip auth.
+    const allowed = input.batchId
+      ? rows
+      : (
+          await Promise.all(
+            rows.map(async (row) => {
+              try {
+                await this.getPayslip(row.payout.id, viewer);
+                return row;
+              } catch {
+                return null;
+              }
+            }),
+          )
+        ).filter((r): r is (typeof rows)[number] => r != null);
+
+    if (!input.batchId && input.payoutIds?.length && allowed.length === 0) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'No accessible payslips for the requested IDs.' });
     }
 
-    return rows.map((row) => {
+    return allowed.map((row) => {
       const amounts = effectivePayoutAmounts(row.payout);
       return {
         payoutId: row.payout.id,
@@ -1728,7 +1863,8 @@ export class PayrollBatchService {
         deductionsTotal: Number(row.payout.deductionsTotal),
         grossPay: amounts.gross,
         payeTax: amounts.paye,
-        netPay: amounts.net,
+        // Cash net for payslip / bank parity
+        netPay: amounts.cash,
         bonusBreakdown: row.payout.bonusBreakdown,
         payRoleName: row.payout.payRoleName,
       };
@@ -1956,8 +2092,13 @@ export class PayrollBatchService {
     };
   }
 
-  async getBatchDetail(batchId: string, viewer: SessionUser) {
+  async getBatchDetail(
+    batchId: string,
+    viewer: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     const batch = await this.requireBatch(batchId);
+    assertBatchInScope(batch, viewer, effectiveBranchIds);
 
     // Permission check: same scoping as list
     const allowedAsHead = await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment);
@@ -1971,6 +2112,7 @@ export class PayrollBatchService {
         viewer.role === 'SUPER_ADMIN' ||
         canReviewBatch(viewer) ||
         canProcessBatch(viewer) ||
+        hasFinanceAccess(viewer) ||
         allowedAsHead
       );
     if (!allowed) {
@@ -2061,19 +2203,33 @@ export class PayrollBatchService {
     }
 
     const payoutRows = await tx
-      .select({ baseSalary: schema.payoutRecords.baseSalary, performanceBonus: schema.payoutRecords.performanceBonus })
+      .select({
+        baseSalary: schema.payoutRecords.baseSalary,
+        performanceBonus: schema.payoutRecords.performanceBonus,
+        allowancesTotal: schema.payoutRecords.allowancesTotal,
+        payeTax: schema.payoutRecords.payeTax,
+      })
       .from(schema.payoutRecords)
       .where(eq(schema.payoutRecords.id, payoutId))
       .limit(1);
     const p = payoutRows[0];
     if (!p) return null;
 
-    const total = Math.max(0, Number(p.baseSalary) + Number(p.performanceBonus) + positive - deductions);
+    const base = Number(p.baseSalary);
+    const bonus = Number(p.performanceBonus);
+    const allowances = Number(p.allowancesTotal ?? 0);
+    const gross = base + bonus + positive + allowances;
+    const tax = Number(p.payeTax ?? 0);
+    const net = Math.max(0, gross - tax);
+    const total = Math.max(0, net - deductions);
+
     const updated = await tx
       .update(schema.payoutRecords)
       .set({
         addOnsTotal: sql`${positive.toFixed(2)}::numeric`,
         deductionsTotal: sql`${deductions.toFixed(2)}::numeric`,
+        grossPay: sql`${gross.toFixed(2)}::numeric`,
+        netPay: sql`${net.toFixed(2)}::numeric`,
         totalPayout: sql`${total.toFixed(2)}::numeric`,
       })
       .where(eq(schema.payoutRecords.id, payoutId))

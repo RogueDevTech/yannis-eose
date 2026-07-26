@@ -1,7 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, or, desc, gte, lte, count, sum, sql, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -1544,372 +1543,98 @@ export class FinanceService {
 
   async getGeneralLedger(
     input: GeneralLedgerInput,
-    branchId?: string | null,
-    effectiveBranchIds?: string[] | null,
+    _branchId?: string | null,
+    _effectiveBranchIds?: string[] | null,
   ) {
-    const { userId, startDate, endDate, entryType, search, page, limit } = input;
+    const { startDate, endDate, entryType, search, page, limit } = input;
 
-    const dStart = startDate ? nigeriaDayStart(startDate) : undefined;
-    const dEnd = endDate ? nigeriaDayEnd(endDate) : undefined;
-
-    const senderAlias = alias(schema.users, 'sender');
-    const receiverAlias = alias(schema.users, 'receiver');
-    const staffAlias = alias(schema.users, 'staff');
-    const mbAlias = alias(schema.users, 'mb');
-
-    // ── 1) Revenue — DELIVERED/REMITTED orders ──
-    const revenueConds: SQL[] = [
-      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-      isNull(schema.orders.deletedAt),
-      isNotNull(schema.orders.deliveredAt),
-      isNotNull(schema.orders.totalAmount),
-    ];
-    const revBranchCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
-    if (revBranchCond) revenueConds.push(revBranchCond);
-    if (userId) revenueConds.push(eq(schema.orders.mediaBuyerId, userId));
-    if (dStart) revenueConds.push(gte(schema.orders.deliveredAt, dStart));
-    if (dEnd) revenueConds.push(lte(schema.orders.deliveredAt, dEnd));
-
-    // ── 2) Remittance IN — cash remittances marked RECEIVED ──
-    const remInConds: SQL[] = [eq(schema.deliveryRemittances.status, 'RECEIVED')];
-    if (dStart) remInConds.push(gte(schema.deliveryRemittances.receivedAt, dStart));
-    if (dEnd) remInConds.push(lte(schema.deliveryRemittances.receivedAt, dEnd));
-
-    // ── 3) Remittance OUT — remittance fees ──
-    const remOutConds: SQL[] = [
-      sql`(${schema.deliveryRemittances.commitmentFee}::numeric + ${schema.deliveryRemittances.posFee}::numeric + ${schema.deliveryRemittances.failedDeliveryCost}::numeric) > 0`,
-    ];
-    if (dStart) remOutConds.push(gte(schema.deliveryRemittances.sentAt, dStart));
-    if (dEnd) remOutConds.push(lte(schema.deliveryRemittances.sentAt, dEnd));
-
-    // ── 4) Disbursements — Finance/Admin→HoM/MB transfers ──
-    const disburseConds: SQL[] = [
-      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
-      sql`sender.role IN ('FINANCE_OFFICER', 'SUPER_ADMIN', 'ADMIN')`,
-    ];
-    if (userId) disburseConds.push(eq(schema.marketingFunding.receiverId, userId));
-    if (dStart) disburseConds.push(gte(schema.marketingFunding.sentAt, dStart));
-    if (dEnd) disburseConds.push(lte(schema.marketingFunding.sentAt, dEnd));
-
-    // ── 5) Ad Spend ──
-    // Filter by createdAt (when the expense was recorded in the system), not
-    // spendDate (user-supplied, can be set to future dates).
-    const adSpendConds: SQL[] = [eq(schema.adSpendLogs.status, 'APPROVED')];
-    if (userId) adSpendConds.push(eq(schema.adSpendLogs.mediaBuyerId, userId));
-    if (dStart) adSpendConds.push(gte(schema.adSpendLogs.createdAt, dStart));
-    if (dEnd) adSpendConds.push(lte(schema.adSpendLogs.createdAt, dEnd));
-
-    // ── 6) Payroll — PAID batches ──
-    const payrollConds: SQL[] = [eq(schema.payrollBatches.status, 'PAID'), isNotNull(schema.payrollBatches.financeProcessedAt)];
-    if (userId) payrollConds.push(eq(schema.payoutRecords.staffId, userId));
-    if (dStart) payrollConds.push(gte(schema.payrollBatches.financeProcessedAt, dStart));
-    if (dEnd) payrollConds.push(lte(schema.payrollBatches.financeProcessedAt, dEnd));
-
-    // ── 7) Funding transfers — non-finance peer transfers (HoM/MB→MB) ──
-    const fundingTransferConds: SQL[] = [
-      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
-      sql`sender.role IN ('HEAD_OF_MARKETING', 'MEDIA_BUYER')`,
-    ];
-    if (userId) {
-      fundingTransferConds.push(
+    // ── Query gl_entries directly — single source of truth ──
+    const conditions: SQL[] = [];
+    if (startDate) conditions.push(gte(schema.glEntries.postingDate, startDate));
+    if (endDate) conditions.push(lte(schema.glEntries.postingDate, endDate));
+    if (entryType && entryType !== 'all') {
+      const voucherMap: Record<string, string> = {
+        journal_entry: 'JOURNAL_ENTRY',
+        sales_invoice: 'SALES_INVOICE',
+        payment: 'PAYMENT',
+        purchase_receipt: 'PURCHASE_RECEIPT',
+        payroll: 'PAYROLL',
+        expense: 'EXPENSE',
+      };
+      const mapped = voucherMap[entryType];
+      if (mapped) conditions.push(eq(schema.glEntries.voucherType, mapped as typeof schema.glEntries.voucherType.enumValues[number]));
+    }
+    if (search) {
+      const q = `%${search.toLowerCase()}%`;
+      conditions.push(
         or(
-          eq(schema.marketingFunding.senderId, userId),
-          eq(schema.marketingFunding.receiverId, userId),
+          sql`LOWER(${schema.glEntries.remarks}) LIKE ${q}`,
+          sql`LOWER(${schema.accounts.name}) LIKE ${q}`,
+          sql`LOWER(${schema.accounts.code}) LIKE ${q}`,
         )!,
       );
     }
-    if (dStart) fundingTransferConds.push(gte(schema.marketingFunding.sentAt, dStart));
-    if (dEnd) fundingTransferConds.push(lte(schema.marketingFunding.sentAt, dEnd));
 
-    // Fetch all in parallel, conditioned on entryType filter
-    const [revenueRows, remInRows, remOutRows, disburseRows, adSpendRows, payrollRows, fundingTransferRows] =
-      await Promise.all([
-        entryType === 'all' || entryType === 'revenue'
-          ? this.db
-              .select({
-                id: schema.orders.id,
-                orderNumber: schema.orders.orderNumber,
-                customerName: schema.orders.customerName,
-                totalAmount: schema.orders.totalAmount,
-                deliveredAt: schema.orders.deliveredAt,
-                status: schema.orders.status,
-              })
-              .from(schema.orders)
-              .where(and(...revenueConds))
-          : Promise.resolve([]),
+    const whereClause = conditions.length ? and(...conditions) : undefined;
 
-        entryType === 'all' || entryType === 'remittance_in'
-          ? this.db
-              .select({
-                id: schema.deliveryRemittances.id,
-                receivedAt: schema.deliveryRemittances.receivedAt,
-                status: schema.deliveryRemittances.status,
-                locationName: schema.logisticsLocations.name,
-                sentByName: schema.users.name,
-                // Sum of order totals included in this remittance
-                totalAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}::numeric), 0)`,
-              })
-              .from(schema.deliveryRemittances)
-              .leftJoin(schema.logisticsLocations, eq(schema.deliveryRemittances.logisticsLocationId, schema.logisticsLocations.id))
-              .leftJoin(schema.users, eq(schema.deliveryRemittances.sentBy, schema.users.id))
-              .leftJoin(schema.deliveryRemittanceOrders, eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id))
-              .leftJoin(schema.orders, eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id))
-              .where(and(...remInConds))
-              .groupBy(
-                schema.deliveryRemittances.id,
-                schema.logisticsLocations.name,
-                schema.users.name,
-              )
-          : Promise.resolve([]),
+    // Count + summary in parallel with paginated rows
+    const [rows, [totalsRow]] = await Promise.all([
+      this.db
+        .select({
+          id: schema.glEntries.id,
+          postingDate: schema.glEntries.postingDate,
+          debit: schema.glEntries.debit,
+          credit: schema.glEntries.credit,
+          voucherType: schema.glEntries.voucherType,
+          voucherId: schema.glEntries.voucherId,
+          remarks: schema.glEntries.remarks,
+          accountCode: schema.accounts.code,
+          accountName: schema.accounts.name,
+          accountRootType: schema.accounts.rootType,
+          createdAt: schema.glEntries.createdAt,
+        })
+        .from(schema.glEntries)
+        .innerJoin(schema.accounts, eq(schema.accounts.id, schema.glEntries.accountId))
+        .where(whereClause)
+        .orderBy(desc(schema.glEntries.createdAt))
+        .limit(limit)
+        .offset((page - 1) * limit),
 
-        entryType === 'all' || entryType === 'remittance_out'
-          ? this.db
-              .select({
-                id: schema.deliveryRemittances.id,
-                sentAt: schema.deliveryRemittances.sentAt,
-                status: schema.deliveryRemittances.status,
-                locationName: schema.logisticsLocations.name,
-                commitmentFee: schema.deliveryRemittances.commitmentFee,
-                posFee: schema.deliveryRemittances.posFee,
-                failedDeliveryCost: schema.deliveryRemittances.failedDeliveryCost,
-              })
-              .from(schema.deliveryRemittances)
-              .leftJoin(schema.logisticsLocations, eq(schema.deliveryRemittances.logisticsLocationId, schema.logisticsLocations.id))
-              .where(and(...remOutConds))
-          : Promise.resolve([]),
+      this.db
+        .select({
+          total: count(),
+          totalDebits: sum(schema.glEntries.debit),
+          totalCredits: sum(schema.glEntries.credit),
+        })
+        .from(schema.glEntries)
+        .innerJoin(schema.accounts, eq(schema.accounts.id, schema.glEntries.accountId))
+        .where(whereClause),
+    ]);
 
-        entryType === 'all' || entryType === 'disbursement'
-          ? this.db
-              .select({
-                id: schema.marketingFunding.id,
-                amount: schema.marketingFunding.amount,
-                sentAt: schema.marketingFunding.sentAt,
-                status: schema.marketingFunding.status,
-                senderName: senderAlias.name,
-                receiverName: receiverAlias.name,
-              })
-              .from(schema.marketingFunding)
-              .leftJoin(senderAlias, eq(senderAlias.id, schema.marketingFunding.senderId))
-              .leftJoin(receiverAlias, eq(receiverAlias.id, schema.marketingFunding.receiverId))
-              .where(and(...disburseConds))
-          : Promise.resolve([]),
-
-        entryType === 'all' || entryType === 'ad_spend'
-          ? this.db
-              .select({
-                id: schema.adSpendLogs.id,
-                spendAmount: schema.adSpendLogs.spendAmount,
-                spendDate: schema.adSpendLogs.spendDate,
-                createdAt: schema.adSpendLogs.createdAt,
-                status: schema.adSpendLogs.status,
-                platform: schema.adSpendLogs.platform,
-                description: schema.adSpendLogs.description,
-                productName: schema.products.name,
-                mbName: mbAlias.name,
-              })
-              .from(schema.adSpendLogs)
-              .leftJoin(schema.products, eq(schema.adSpendLogs.productId, schema.products.id))
-              .leftJoin(mbAlias, eq(mbAlias.id, schema.adSpendLogs.mediaBuyerId))
-              .where(and(...adSpendConds))
-          : Promise.resolve([]),
-
-        entryType === 'all' || entryType === 'payroll'
-          ? this.db
-              .select({
-                id: schema.payoutRecords.id,
-                totalPayout: schema.payoutRecords.totalPayout,
-                financeProcessedAt: schema.payrollBatches.financeProcessedAt,
-                status: schema.payrollBatches.status,
-                staffName: staffAlias.name,
-              })
-              .from(schema.payoutRecords)
-              .innerJoin(schema.payrollBatches, eq(schema.payoutRecords.batchId, schema.payrollBatches.id))
-              .leftJoin(staffAlias, eq(staffAlias.id, schema.payoutRecords.staffId))
-              .where(and(...payrollConds))
-          : Promise.resolve([]),
-
-        entryType === 'all' || entryType === 'funding_transfer'
-          ? this.db
-              .select({
-                id: schema.marketingFunding.id,
-                amount: schema.marketingFunding.amount,
-                sentAt: schema.marketingFunding.sentAt,
-                status: schema.marketingFunding.status,
-                receiverName: receiverAlias.name,
-              })
-              .from(schema.marketingFunding)
-              .leftJoin(senderAlias, eq(senderAlias.id, schema.marketingFunding.senderId))
-              .leftJoin(receiverAlias, eq(receiverAlias.id, schema.marketingFunding.receiverId))
-              .where(and(...fundingTransferConds))
-          : Promise.resolve([]),
-      ]);
-
-    // ── Normalize into unified entries ──
-    type LedgerEntry = {
-      id: string;
-      entryType: string;
-      eventDate: Date;
-      amount: number;
-      balanceEffect: number;
-      status: string;
-      description: string;
-      counterpartyName: string | null;
-      userName: string | null;
-    };
-
-    const entries: LedgerEntry[] = [];
-
-    for (const r of revenueRows as Array<{ id: string; orderNumber: number; customerName: string; totalAmount: string | null; deliveredAt: Date | null; status: string }>) {
-      const amt = Number(r.totalAmount ?? 0);
-      entries.push({
-        id: r.id,
-        entryType: 'revenue',
-        eventDate: r.deliveredAt ?? new Date(),
-        amount: amt,
-        balanceEffect: amt,
-        status: r.status,
-        description: `Order YNS-${String(r.orderNumber).padStart(5, '0')}: ${r.customerName}`,
-        counterpartyName: null,
-        userName: null,
-      });
-    }
-
-    for (const r of remInRows as Array<{ id: string; receivedAt: Date | null; status: string; locationName: string | null; sentByName: string | null; totalAmount: string }>) {
-      const amt = Number(r.totalAmount ?? 0);
-      entries.push({
-        id: r.id,
-        entryType: 'remittance_in',
-        eventDate: r.receivedAt ?? new Date(),
-        amount: amt,
-        balanceEffect: amt,
-        status: r.status,
-        description: `Cash remittance from ${r.locationName ?? 'Unknown location'}`,
-        counterpartyName: r.sentByName ?? null,
-        userName: null,
-      });
-    }
-
-    for (const r of remOutRows as Array<{ id: string; sentAt: Date; status: string; locationName: string | null; commitmentFee: string | null; posFee: string | null; failedDeliveryCost: string | null }>) {
-      const amt = Number(r.commitmentFee ?? 0) + Number(r.posFee ?? 0) + Number(r.failedDeliveryCost ?? 0);
-      if (amt <= 0) continue;
-      entries.push({
-        id: `${r.id}:fees`,
-        entryType: 'remittance_out',
-        eventDate: r.sentAt,
-        amount: amt,
-        balanceEffect: -amt,
-        status: r.status,
-        description: `Remittance fees: ${r.locationName ?? 'Unknown location'}`,
-        counterpartyName: null,
-        userName: null,
-      });
-    }
-
-    for (const r of disburseRows as Array<{ id: string; amount: string | null; sentAt: Date; status: string; senderName: string | null; receiverName: string | null }>) {
-      const amt = Number(r.amount ?? 0);
-      const from = r.senderName ?? 'Unknown';
-      const to = r.receiverName ?? 'Unknown';
-      entries.push({
-        id: r.id,
-        entryType: 'disbursement',
-        eventDate: r.sentAt,
-        amount: amt,
-        balanceEffect: -amt,
-        status: r.status,
-        description: `${from} → ${to}`,
-        counterpartyName: r.receiverName ?? null,
-        userName: r.senderName ?? null,
-      });
-    }
-
-    for (const r of adSpendRows as Array<{ id: string; spendAmount: string | null; spendDate: Date; createdAt: Date; status: string; platform: string; description: string | null; productName: string | null; mbName: string | null }>) {
-      const amt = Number(r.spendAmount ?? 0);
-      const label = [r.platform, r.productName, r.description].filter(Boolean).join(': ');
-      entries.push({
-        id: r.id,
-        entryType: 'ad_spend',
-        eventDate: r.createdAt,
-        amount: amt,
-        balanceEffect: -amt,
-        status: r.status ?? 'APPROVED',
-        description: label || 'Ad spend',
-        counterpartyName: r.mbName ?? null,
-        userName: r.mbName ?? null,
-      });
-    }
-
-    for (const r of payrollRows as Array<{ id: string; totalPayout: string | null; financeProcessedAt: Date | null; status: string; staffName: string | null }>) {
-      const amt = Number(r.totalPayout ?? 0);
-      entries.push({
-        id: r.id,
-        entryType: 'payroll',
-        eventDate: r.financeProcessedAt ?? new Date(),
-        amount: amt,
-        balanceEffect: -amt,
-        status: r.status,
-        description: `Payroll: ${r.staffName ?? 'Staff'}`,
-        counterpartyName: r.staffName ?? null,
-        userName: r.staffName ?? null,
-      });
-    }
-
-    for (const r of fundingTransferRows as Array<{ id: string; amount: string | null; sentAt: Date; status: string; receiverName: string | null }>) {
-      const amt = Number(r.amount ?? 0);
-      entries.push({
-        id: `ft:${r.id}`,
-        entryType: 'funding_transfer',
-        eventDate: r.sentAt,
-        amount: amt,
-        balanceEffect: -amt,
-        status: r.status,
-        description: `Fund transfer to ${r.receiverName ?? 'Unknown'}`,
-        counterpartyName: r.receiverName ?? null,
-        userName: null,
-      });
-    }
-
-    // Apply search filter in-memory (on description / counterpartyName)
-    const filteredEntries = search
-      ? (() => {
-          const q = search.toLowerCase();
-          return entries.filter(
-            (e) =>
-              e.description.toLowerCase().includes(q) ||
-              (e.counterpartyName ?? '').toLowerCase().includes(q),
-          );
-        })()
-      : entries;
-
-    // Sort newest-first so the latest transactions appear at the top
-    filteredEntries.sort((a, b) => b.eventDate.getTime() - a.eventDate.getTime());
-
-    const total = filteredEntries.length;
+    const total = Number(totalsRow?.total ?? 0);
     const totalPages = Math.max(1, Math.ceil(total / limit));
-    const offset = (page - 1) * limit;
-    const paged = filteredEntries.slice(offset, offset + limit);
-
-    const totalCredits = filteredEntries.reduce((s, e) => s + (e.balanceEffect > 0 ? e.balanceEffect : 0), 0);
-    const totalDebits = filteredEntries.reduce((s, e) => s + (e.balanceEffect < 0 ? -e.balanceEffect : 0), 0);
 
     return {
-      entries: paged.map((e) => ({
-        id: e.id,
-        entryType: e.entryType,
-        eventDate: e.eventDate.toISOString(),
-        amount: String(e.amount),
-        balanceEffect: e.balanceEffect,
-        status: e.status,
-        description: e.description,
-        counterpartyName: e.counterpartyName,
-        userName: e.userName,
+      entries: rows.map((r) => ({
+        id: r.id,
+        entryType: r.voucherType.toLowerCase(),
+        eventDate: new Date(r.postingDate).toISOString(),
+        amount: String(Math.max(Number(r.debit), Number(r.credit))),
+        balanceEffect: Number(r.debit) - Number(r.credit),
+        status: 'POSTED',
+        description: r.remarks ?? '',
+        counterpartyName: null,
+        userName: null,
+        accountCode: r.accountCode,
+        accountName: r.accountName,
       })),
       total,
       page,
       totalPages,
       limit,
       summary: {
-        totalCredits: String(totalCredits),
-        totalDebits: String(totalDebits),
+        totalDebits: String(totalsRow?.totalDebits ?? 0),
+        totalCredits: String(totalsRow?.totalCredits ?? 0),
       },
     };
   }

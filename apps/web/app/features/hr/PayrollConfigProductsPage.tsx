@@ -166,7 +166,7 @@ export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigPr
 
       {configs.length === 0 ? (
         <EmptyState
-          title="No product tier configs"
+          title="No product tier configs for this company"
           description={
             canWrite
               ? 'Create a config to define DR-based bonus rates per product.'
@@ -181,6 +181,22 @@ export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigPr
           rowKey={(r) => r.id}
           emptyTitle="No configs"
           emptyDescription=""
+          renderMobileCard={(row) => (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-app-fg leading-snug">{row.productName}</p>
+                {!row.active ? (
+                  <span className="badge-danger text-2xs">Inactive</span>
+                ) : null}
+              </div>
+              <p className="text-xs text-app-fg-muted">
+                {row.tierRows.length} {row.tierRows.length === 1 ? 'tier' : 'tiers'}
+              </p>
+              <p className="text-xs text-app-fg-muted truncate">
+                {formatEffective(row.effectiveFrom, row.effectiveTo)}
+              </p>
+            </div>
+          )}
         />
       )}
 

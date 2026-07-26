@@ -23,7 +23,6 @@ import {
   DeliveryRemittancesLoadingShell,
   FinanceDisbursementsLoadingShell,
   FinanceOverviewLoadingShell,
-  FinancePayoutLoadingShell,
   GeneralLedgerLoadingShell,
 } from '~/features/finance/FinanceDeferredLoadingShells';
 import {
@@ -361,15 +360,6 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/finance\/overview$/,
     render: (_m, sp) => <FinanceOverviewLoadingShell filters={parseDateFilters(sp)} />,
-  },
-  {
-    match: /^\/admin\/finance\/payout$/,
-    render: (_m, sp) => {
-      const raw = sp.get('status');
-      const status: '' | 'PAID' | 'PENDING_FINANCE' =
-        raw === 'PAID' || raw === 'PENDING_FINANCE' ? raw : '';
-      return <FinancePayoutLoadingShell status={status} />;
-    },
   },
 
   // ── Admin / Inventory ───────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import type { BranchOption, ViewerInfo, PayrollDepartment } from './types';
@@ -73,6 +74,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
   const [runLabel, setRunLabel] = useState('');
   const [dismissedPreviewError, setDismissedPreviewError] = useState(false);
   const [dismissedGenerateError, setDismissedGenerateError] = useState(false);
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
 
   const generatableDepartments: PayrollDepartment[] = useMemo(() => {
     if (ADMIN_ROLES.has(viewer.role)) return ALL_DEPARTMENTS;
@@ -350,12 +352,13 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
               }}
             />
             <Button
-              type="submit"
+              type="button"
               variant="primary"
               disabled={!canGenerate}
               loading={generating}
               loadingText="…"
               className="h-10 md:h-9 w-full mt-2 sm:mt-0"
+              onClick={() => setShowGenerateConfirm(true)}
             >
               Generate
             </Button>
@@ -374,6 +377,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                 type="checkbox"
                 checked={includeContractors}
                 onChange={(e) => setIncludeContractors(e.target.checked)}
+                className="rounded border-app-border text-brand-600 focus:ring-brand-500"
               />
               <span>Include agency contractors</span>
             </label>
@@ -445,6 +449,37 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
           )}
         </fetcher.Form>
       </div>
+
+      <ConfirmActionModal
+        open={showGenerateConfirm}
+        onClose={() => setShowGenerateConfirm(false)}
+        title="Generate payroll batch"
+        description={
+          <>
+            Create payroll batch{slotCount > 1 ? 'es' : ''} for{' '}
+            <strong>{formatMonthLabel}</strong>
+            {showScopeHint
+              ? ` across up to ${slotCount} branch/department slot${slotCount === 1 ? '' : 's'}`
+              : ''}
+            ? Existing batches for the same scope are skipped.
+          </>
+        }
+        details={
+          <ul className="list-disc pl-4 space-y-1 text-sm">
+            <li>Draft payouts are created from current rules and delivered orders</li>
+            <li>You can review and adjust before submitting to HR</li>
+            {includeContractors ? <li>Contractors will be included in this run</li> : null}
+          </ul>
+        }
+        confirmLabel="Generate"
+        variant="warning"
+        loading={generating}
+        onConfirm={() => {
+          const form = document.getElementById('payroll-generate-form') as HTMLFormElement | null;
+          form?.requestSubmit();
+          setShowGenerateConfirm(false);
+        }}
+      />
     </div>
   );
 }

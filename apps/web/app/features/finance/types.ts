@@ -148,7 +148,7 @@ export interface FundingSummary {
 
 export interface GeneralLedgerEntry {
   id: string;
-  entryType: 'revenue' | 'remittance_in' | 'remittance_out' | 'disbursement' | 'ad_spend' | 'payroll' | 'funding_transfer';
+  entryType: string;
   eventDate: string;
   amount: string;
   balanceEffect: number;
@@ -156,6 +156,8 @@ export interface GeneralLedgerEntry {
   description: string;
   counterpartyName: string | null;
   userName: string | null;
+  accountCode?: string;
+  accountName?: string;
 }
 
 export interface GeneralLedgerLoaderData {
@@ -168,31 +170,12 @@ export interface GeneralLedgerLoaderData {
     totalCredits: string;
     totalDebits: string;
   };
-  users: Array<{ id: string; name: string; role: string }>;
-  selectedUserId: string;
-  selectedUserName: string;
+  users?: Array<{ id: string; name: string; role: string }>;
+  selectedUserId?: string;
+  selectedUserName?: string;
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   entryTypeFilter: string;
   searchFilter: string;
-}
-
-/** Financial KPIs from GL data. */
-export interface FinancialKPIs {
-  currentRatio: number | null;
-  quickRatio: number | null;
-  cashRatio: number | null;
-  grossProfitMargin: number | null;
-  operatingProfitMargin: number | null;
-  netProfitMargin: number | null;
-  returnOnAssets: number | null;
-  returnOnEquity: number | null;
-  debtToEquity: number | null;
-  daysSalesOutstanding: number | null;
-  inventoryTurnover: number | null;
-  daysInventoryOutstanding: number | null;
-  /** null = no interest expense (infinite coverage / "No debt"). */
-  interestCoverage: number | null;
-  cashConversionCycle: number | null;
 }
 
 /** `/admin/finance/overview` loader shape */
@@ -223,6 +206,4 @@ export interface FinanceOverviewLoaderData {
   byProduct?: RemittanceBreakdownRow[];
   /** Delivered/remitted orders breakdown by logistics location. */
   byLocation?: RemittanceBreakdownRow[];
-  /** Financial health KPIs derived from live GL data. */
-  kpis?: FinancialKPIs | null;
 }

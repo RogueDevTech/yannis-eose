@@ -38,3 +38,14 @@ const NIGERIA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
 export function nigeriaToday(now: Date = new Date()): string {
   return NIGERIA_DATE_FORMATTER.format(now);
 }
+
+/**
+ * Calendar date (`YYYY-MM-DD`) in Africa/Lagos for a timestamp.
+ * Prefer this over `date.toISOString().slice(0, 10)` for GL posting dates
+ * (UTC midnight can land on the previous Nigeria calendar day).
+ */
+export function nigeriaCalendarDate(input: Date | string = new Date()): string {
+  const d = typeof input === 'string' ? new Date(input) : input;
+  if (Number.isNaN(d.getTime())) return nigeriaToday();
+  return NIGERIA_DATE_FORMATTER.format(d);
+}

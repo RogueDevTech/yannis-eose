@@ -96,7 +96,7 @@ export const generalLedgerSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   entryType: z
-    .enum(['all', 'revenue', 'remittance_in', 'remittance_out', 'disbursement', 'ad_spend', 'payroll', 'funding_transfer'])
+    .enum(['all', 'journal_entry', 'sales_invoice', 'payment', 'purchase_receipt', 'payroll', 'expense'])
     .default('all'),
   userId: z.string().uuid().optional(),
   search: z.string().trim().max(200).optional(),

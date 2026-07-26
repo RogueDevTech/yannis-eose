@@ -94,5 +94,5 @@ export function createZipStoreBlob(files: Array<{ name: string; data: Uint8Array
     u16(0),
   ]);
 
-  return new Blob([concat([...localParts, centralDir, end])], { type: 'application/zip' });
+  return new Blob([concat([...localParts, centralDir, end]) as BlobPart], { type: 'application/zip' });
 }

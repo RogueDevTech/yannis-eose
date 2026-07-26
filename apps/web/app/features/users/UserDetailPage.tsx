@@ -7,11 +7,20 @@ import {
   Suspense,
   type ReactNode,
 } from 'react';
-import { Form, Link, useActionData, useFetcher, useNavigate, useNavigation } from '@remix-run/react';
+import {
+  Form,
+  Link,
+  useActionData,
+  useFetcher,
+  useNavigate,
+  useNavigation,
+  useRouteLoaderData,
+} from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -25,6 +34,7 @@ import {
   useFetcherActionSurface,
 } from '~/hooks/use-fetcher-action-surface';
 import { humanizeZodIssuesString } from '~/lib/api-error';
+import { isAdminLevel, hasFinanceAccess } from '~/lib/rbac';
 import { clearLoaderCache } from '~/lib/loader-cache';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestamp } from '~/lib/format-date';
@@ -54,9 +64,7 @@ import type {
   StaffPayoutEstimate,
   UserPaidPayoutSnapshot,
 } from './types';
-import { USER_STATUS_COLORS, formatRole } from './types';
-import { RoleBadge } from '~/components/ui/role-badge';
-import { SupervisorBadge } from '~/components/ui/supervisor-badge';
+import { formatRole } from './types';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 const PermissionsPreview = lazy(() =>
@@ -72,23 +80,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { DescriptionList, type DescriptionItem } from '~/components/ui/description-list';
-
-// ─── Constants ──────────────────────────────────────────
-
-const ROLE_DESCRIPTIONS: Record<string, string> = {
-  SUPER_ADMIN: 'Full system access. Can manage all modules, users, and settings.',
-  HEAD_OF_MARKETING: 'Oversees all marketing campaigns, funding, and media buyer performance.',
-  MEDIA_BUYER: 'Runs ad campaigns, manages ad spend, and tracks CPA/ROAS.',
-  HEAD_OF_CS: 'Manages Sales team performance, order processing, and agent workloads.',
-  CS_CLOSER: 'Handles customer calls, confirms orders, and processes cancellations.',
-  FINANCE_OFFICER: 'Manages invoices, approvals, budgets, and financial reporting.',
-  HEAD_OF_LOGISTICS:
-    'Oversees logistics operations, logistics companies, 3PL partners, and transfers.',
-  STOCK_MANAGER: 'Manages inventory, stock movements, and procurement.',
-  TPL_MANAGER: 'Manages a third-party logistics location and its riders.',
-  TPL_RIDER: 'Handles last-mile deliveries and order fulfillment.',
-  HR_MANAGER: 'Manages payroll, commission plans, payouts, and staff records.',
-};
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 
 // ─── Component ──────────────────────────────────────────
 
@@ -158,6 +150,19 @@ export function UserDetailPage({
   }>();
   const navigation = useNavigation();
   const navigate = useNavigate();
+  // Active company from the layout session — scope branch count / modal to this company.
+  const hrLayoutUser = (
+    useRouteLoaderData('routes/hr') as { user?: { activeGroupId?: string | null } } | undefined
+  )?.user;
+  const adminLayoutUser = (
+    useRouteLoaderData('routes/admin') as { user?: { activeGroupId?: string | null } } | undefined
+  )?.user;
+  const activeGroupId = hrLayoutUser?.activeGroupId ?? adminLayoutUser?.activeGroupId ?? null;
+  const scopedBranchMemberships = useMemo(() => {
+    const all = user.branchMemberships ?? [];
+    if (!activeGroupId) return all;
+    return all.filter((m) => m.groupId === activeGroupId);
+  }, [user.branchMemberships, activeGroupId]);
   // Reset Password runs through its own fetcher so the form submission inside the portaled
   // modal stays isolated from the page-level <Form>s — those compete for navigation state and
   // were the source of the crash when the modal-portal Form's actionData reached an unmounted tree.
@@ -179,6 +184,8 @@ export function UserDetailPage({
     | 'marketing'
     | 'funding'
     | 'permissions'
+    | 'account'
+    | 'branches'
     | 'earnings'
     | 'finance'
     | 'activity';
@@ -186,6 +193,7 @@ export function UserDetailPage({
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [showReactivateConfirm, setShowReactivateConfirm] = useState(false);
+  const [showMirrorConfirm, setShowMirrorConfirm] = useState(false);
   const [mobileProfileSheetOpen, setMobileProfileSheetOpen] = useState(false);
   const [showEmailChangeModal, setShowEmailChangeModal] = useState<{
     requestId: string;
@@ -218,7 +226,7 @@ export function UserDetailPage({
   }, [actionData?.error, actionData?.success, actionData?.message]);
 
   // Derived flags (must be before useEffects that reference them)
-  const isSuperAdminProfile = user.role === 'SUPER_ADMIN';
+  const isSuperAdminProfile = isAdminLevel(user);
 
   // Close reset modal on fetcher success.
   useEffect(() => {
@@ -265,8 +273,8 @@ export function UserDetailPage({
     'TPL_RIDER',
     'HR_MANAGER',
   ].includes(user.role);
-  // Finance activity tab is visible to the primary Finance Officer role.
-  const showFinanceTab = user.role === 'FINANCE_OFFICER';
+  // Finance activity tab is visible to Finance Officer and other finance-access roles.
+  const showFinanceTab = hasFinanceAccess(user);
   const showEarningsTab = showPayrollTab;
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
 
@@ -671,15 +679,49 @@ export function UserDetailPage({
   );
 
   const profileHeaderTone = 'bg-brand-600 dark:bg-brand-700';
-  const profileAvatarTone = 'bg-brand-600 dark:bg-brand-500';
-  const profileHeroLabel = isSelfView ? 'My profile' : 'Staff profile';
-  const initials = user.name
-    .split(' ')
-    .map((w) => w.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join('');
   const memberSince = new Date(user.createdAt);
-  const tenure = getTimeSince(memberSince);
+
+  const profileMetaStripItems = useMemo((): OverviewStatStripItem[] => {
+    const roleLabel = user.isTeamSupervisor
+      ? `${formatRole(user.role)} · Supervisor`
+      : formatRole(user.role);
+    const statusValueClassName =
+      user.status === 'ACTIVE'
+        ? 'text-success-600 dark:text-success-400'
+        : user.status === 'PENDING'
+          ? 'text-info-600 dark:text-info-400'
+          : user.status === 'INACTIVE' || user.status === 'DEACTIVATED'
+            ? 'text-danger-600 dark:text-danger-400'
+            : 'text-warning-600 dark:text-warning-400';
+    const items: OverviewStatStripItem[] = [
+      { label: 'Role', value: roleLabel },
+      { label: 'Status', value: user.status, valueClassName: statusValueClassName },
+      {
+        label: 'Last active',
+        value: user.lastLoginAt ? getTimeSince(new Date(user.lastLoginAt)) : '—',
+        title: user.lastLoginAt
+          ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}`
+          : 'No sign-in yet',
+      },
+      {
+        label: 'Phone',
+        value: user.phone?.trim() || '—',
+        plainValue: true,
+      },
+    ];
+    if (showCapacityReadonly) {
+      items.push({ label: 'Capacity', value: String(user.capacity ?? '—') });
+    }
+    return items;
+  }, [
+    user.role,
+    user.isTeamSupervisor,
+    user.status,
+    user.lastLoginAt,
+    user.phone,
+    user.capacity,
+    showCapacityReadonly,
+  ]);
 
   const accountInformationItems = useMemo((): DescriptionItem[] => {
     const items: DescriptionItem[] = [
@@ -721,29 +763,13 @@ export function UserDetailPage({
         );
     } else {
       const sum = onboardingSummaryResolved;
-      const canOpen = isSelfView || viewerCanManageHrOnboarding;
-      const onboardingTo = isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`;
-      const onboardingActionLabel = isSelfView
-        ? 'opening your onboarding'
-        : 'opening staff onboarding';
+      // Open / Edit live on the Details card, not inside this modal value.
       onboardingValue = (
-        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:flex-wrap sm:gap-2">
-          <StatusBadge
-            status={sum.status}
-            label={formatStaffOnboardingStatusLabel(sum.status)}
-            size="sm"
-          />
-          {canOpen ? (
-            <BranchScopedLink
-              to={onboardingTo}
-              actionLabel={onboardingActionLabel}
-              prefetch="intent"
-              className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0 w-fit"
-            >
-              {isSelfView ? 'Your onboarding' : 'Open onboarding'}
-            </BranchScopedLink>
-          ) : null}
-        </div>
+        <StatusBadge
+          status={sum.status}
+          label={formatStaffOnboardingStatusLabel(sum.status)}
+          size="sm"
+        />
       );
     }
 
@@ -803,14 +829,10 @@ export function UserDetailPage({
     onboardingOverviewLoading,
     onboardingSummaryResolved,
     onboardingFetcher.data,
-    isSelfView,
-    viewerCanManageHrOnboarding,
   ]);
 
   return (
-    <div className="w-full space-y-6">
-{/* Breadcrumb removed — back arrow in profile banner navigates back */}
-
+    <div className="w-full space-y-3">
       {/* Action feedback */}
       {actionData?.error &&
         !dismissedError &&
@@ -843,38 +865,30 @@ export function UserDetailPage({
         </div>
       )}
 
-      {/* ─── Profile Header Card ─────────────────────────── */}
+      {/* ─── Profile identity hero ───────────────────────── */}
       <div className="card p-0 overflow-hidden">
-        {/* Profile banner — executive hero with a single identity headline.
-            Mobile: action kebab sits top-right of the banner so it's always reachable. */}
         <div className={`relative isolate overflow-hidden ${profileHeaderTone}`}>
-          <div className="relative px-4 sm:px-6 pt-5 sm:pt-7 pb-16 sm:pb-20">
+          <div
+            className="pointer-events-none absolute inset-0 opacity-40"
+            style={{
+              backgroundImage:
+                'radial-gradient(ellipse 80% 60% at 100% 0%, rgba(255,255,255,0.22), transparent 55%), radial-gradient(ellipse 50% 40% at 0% 100%, rgba(0,0,0,0.18), transparent 50%)',
+            }}
+          />
+          <div className="relative px-4 sm:px-6 pt-3 sm:pt-4 pb-3.5 sm:pb-4">
             <div className="flex items-start justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => navigate(-1)}
-                className="mt-1 flex-shrink-0 h-9 w-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors"
-                aria-label="Go back"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                </svg>
-              </button>
-              <div className="max-w-3xl min-w-0">
-                <p className="text-mini font-semibold uppercase tracking-[0.22em] text-white/75">
-                  {profileHeroLabel}
-                </p>
-                <h1 className="mt-2 text-3xl sm:text-4xl font-bold text-white leading-tight break-words">
+              <div className="min-w-0 space-y-1">
+                <h1 className="text-2xl sm:text-3xl font-bold text-white leading-tight break-words">
                   {user.name}
                 </h1>
+                <p className="text-sm text-white/85 break-all">{user.email}</p>
               </div>
-              {/* Mobile-only: refresh + action kebab in the banner — primary blue bg for visibility */}
-              <div className="md:hidden flex items-center gap-2 shrink-0 mt-1">
+              <div className="md:hidden flex items-center gap-2 shrink-0">
                 <PageRefreshButton iconOnly />
                 <button
                   type="button"
                   onClick={() => setMobileProfileSheetOpen(true)}
-                  className="h-9 w-9 shrink-0 rounded-lg bg-brand-600 border border-brand-500 hover:bg-brand-700 flex items-center justify-center text-white"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 border border-white/20 flex items-center justify-center text-white"
                   aria-label="Profile actions"
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -886,444 +900,300 @@ export function UserDetailPage({
           </div>
         </div>
 
-        {/* Profile Info */}
-        <div className="px-4 sm:px-6 pb-5 -mt-10 sm:-mt-12 relative">
-          <div className="rounded-[1.25rem] border border-app-border/80 bg-app-elevated shadow-sm">
-            <div className="px-4 sm:px-5 py-4">
-              <div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm text-app-fg break-all sm:break-normal">{user.email}</p>
-                      <p className="text-xs text-app-fg-muted mt-1">
-                        {ROLE_DESCRIPTIONS[user.role] ?? ''}
-                      </p>
-                    </div>
-                    <div className="flex-shrink-0 hidden md:block">
-                      <PageHeaderMobileTools
-                        sheetTitle="Actions"
-                        triggerAriaLabel="Profile toolbar"
-                        saveFilterKey
-                        desktop={
-                          <div className="flex flex-wrap items-center gap-2">
-                            <PageRefreshButton />
-                            {!isSelfView &&
-                              viewerShowsMirror &&
-                              (mirrorSubmitDisabled ? (
-                                <span title="Exit mirror mode to start a new mirror session as this user.">
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    disabled
-                                    className="opacity-70 cursor-not-allowed"
-                                  >
-                                    <span className="flex items-center gap-1.5">
-                                      <svg
-                                        className="w-3.5 h-3.5"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                        strokeWidth={2}
-                                      >
-                                        <path
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                                        />
-                                        <path
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                                        />
-                                      </svg>
-                                      Mirror user
-                                    </span>
-                                  </Button>
-                                </span>
-                              ) : (
-                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" onSubmit={() => clearLoaderCache()}>
-                                  <input type="hidden" name="intent" value="mirror" />
-                                  <Button
-                                    type="submit"
-                                    variant="secondary"
-                                    size="sm"
-                                    className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                                    loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                                    loadingText="Entering..."
-                                  >
-                                    <svg
-                                      className="w-3.5 h-3.5"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                                      />
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                                      />
-                                    </svg>
-                                    Mirror user
-                                  </Button>
-                                </Form>
-                              ))}
-                            {!isSelfView &&
-                              !isSuperAdminProfile &&
-                              (canOpenSettingsTab || canEditLimited) && (
-                                <BranchScopedLink
-                                  to={`/hr/users/${user.id}/edit`}
-                                  actionLabel="editing this user"
-                                  prefetch="intent"
-                                  className="btn-primary btn-sm flex items-center gap-1.5"
-                                >
-                                  <svg
-                                    className="w-3.5 h-3.5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth={2}
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
-                                    />
-                                  </svg>
-                                  Edit user
-                                </BranchScopedLink>
-                              )}
-                            {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                              <>
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={() => setShowResetPassword(true)}
-                                  className="flex items-center gap-1.5"
-                                >
-                                  <svg
-                                    className="w-3.5 h-3.5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth={2}
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
-                                    />
-                                  </svg>
-                                  Reset Password
-                                </Button>
-                                {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
-                                  isSuperAdmin && (
-                                    <Button
-                                      type="button"
-                                      variant="danger"
-                                      size="sm"
-                                      onClick={() => setShowDeactivateConfirm(true)}
-                                      className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
-                                    >
-                                      Deactivate
-                                    </Button>
-                                  )}
-                                {(user.status === 'INACTIVE' ||
-                                  user.status === 'ARCHIVED' ||
-                                  (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => setShowReactivateConfirm(true)}
-                                    className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
-                                  >
-                                    Reactivate
-                                  </Button>
-                                )}
-                                {user.status === 'DEACTIVATED' && !canReactivateDeactivatedStaff && (
-                                  <p className="text-xs text-app-fg-muted italic">
-                                    Reactivating deactivated staff requires Super Admin, Admin, or HR Manager
-                                    access.
-                                  </p>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        }
-                        sheet={({ closeSheet }) => (
-                          <>
-                            {isSelfView && (
-                              <Link
-                                to="/admin/settings"
-                                onClick={() => closeSheet()}
-                                className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
-                              >
-                                Settings
-                              </Link>
-                            )}
-                            {!isSelfView &&
-                              viewerShowsMirror &&
-                              (mirrorSubmitDisabled ? (
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="sm"
-                                  disabled
-                                  className="h-12 w-full justify-center"
-                                >
-                                  Mirror user
-                                </Button>
-                              ) : (
-                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" className="w-full" onSubmit={() => clearLoaderCache()}>
-                                  <input type="hidden" name="intent" value="mirror" />
-                                  <Button
-                                    type="submit"
-                                    variant="secondary"
-                                    size="sm"
-                                    className="h-12 w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                                    loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                                    loadingText="Entering..."
-                                  >
-                                    Mirror user
-                                  </Button>
-                                </Form>
-                              ))}
-                            {!isSelfView &&
-                              !isSuperAdminProfile &&
-                              (canOpenSettingsTab || canEditLimited) && (
-                                <BranchScopedLink
-                                  to={`/hr/users/${user.id}/edit`}
-                                  actionLabel="editing this user"
-                                  prefetch="intent"
-                                  className="btn-primary btn-sm h-12 flex items-center justify-center w-full"
-                                  onClick={() => closeSheet()}
-                                >
-                                  Edit user
-                                </BranchScopedLink>
-                              )}
-                            {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                              <>
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="sm"
-                                  className="h-12 w-full justify-center"
-                                  onClick={() => {
-                                    closeSheet();
-                                    setShowResetPassword(true);
-                                  }}
-                                >
-                                  Reset Password
-                                </Button>
-                                {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
-                                  isSuperAdmin && (
-                                    <Button
-                                      type="button"
-                                      variant="danger"
-                                      size="sm"
-                                      className="h-12 w-full justify-center"
-                                      onClick={() => {
-                                        closeSheet();
-                                        setShowDeactivateConfirm(true);
-                                      }}
-                                    >
-                                      Deactivate
-                                    </Button>
-                                  )}
-                                {(user.status === 'INACTIVE' ||
-                                  user.status === 'ARCHIVED' ||
-                                  (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    className="h-12 w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
-                                    onClick={() => {
-                                      closeSheet();
-                                      setShowReactivateConfirm(true);
-                                    }}
-                                  >
-                                    Reactivate
-                                  </Button>
-                                )}
-                                {user.status === 'DEACTIVATED' && !canReactivateDeactivatedStaff && (
-                                  <p className="text-xs text-app-fg-muted italic w-full">
-                                    Reactivating deactivated staff requires Super Admin, Admin, or HR Manager
-                                    access.
-                                  </p>
-                                )}
-                              </>
-                            )}
-                          </>
-                        )}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-app-border/70">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <RoleBadge role={user.role} label={formatRole(user.role)} />
-                      {user.isTeamSupervisor && <SupervisorBadge />}
-                      <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
-                        <svg
-                          className="w-3 h-3"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                        {tenure}
-                      </span>
-                      {(user.loginCount ?? 0) > 0 && (
-                        <span
-                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted"
-                          title={
-                            user.lastLoginAt
-                              ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}`
-                              : 'Sign-in history'
-                          }
-                        >
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
-                            />
-                          </svg>
-                          {user.loginCount} sign-in{user.loginCount === 1 ? '' : 's'}
-                          {user.lastLoginAt && ` · ${getTimeSince(new Date(user.lastLoginAt))}`}
-                        </span>
-                      )}
-                      {user.phone && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
-                            />
-                          </svg>
-                          {user.phone}
-                        </span>
-                      )}
-                      {showCapacityReadonly && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"
-                            />
-                          </svg>
-                          Capacity: {user.capacity}
-                        </span>
-                      )}
-                      <UserBranchBadges branches={user.branchMemberships} showCompanyGroups={isSuperAdmin} />
-                    </div>
-                  </div>
-                </div>
+        {/* Action bar — desktop tools; mobile uses the hero kebab */}
+        <div className="hidden md:block border-t border-app-border bg-app-elevated px-4 sm:px-6 py-2">
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Profile toolbar"
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <PageRefreshButton />
+                {!isSelfView &&
+                  !isSuperAdminProfile &&
+                  (canOpenSettingsTab || canEditLimited) && (
+                    <BranchScopedLink
+                      to={`/hr/users/${user.id}/edit`}
+                      actionLabel="editing this user"
+                      prefetch="intent"
+                      className="btn-primary btn-sm"
+                    >
+                      Edit user
+                    </BranchScopedLink>
+                  )}
+                {showOnboardingTab && (isSelfView || viewerCanManageHrOnboarding) && (
+                  <BranchScopedLink
+                    to={isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`}
+                    actionLabel={isSelfView ? 'opening your onboarding' : 'opening staff onboarding'}
+                    prefetch="intent"
+                    className="btn-secondary btn-sm"
+                  >
+                    {isSelfView ? 'Your onboarding' : 'Open onboarding'}
+                  </BranchScopedLink>
+                )}
+                {!isSelfView &&
+                  viewerShowsMirror &&
+                  (mirrorSubmitDisabled ? (
+                    <span title="Exit mirror mode to start a new mirror session as this user.">
+                      <Button type="button" variant="secondary" size="sm" disabled className="opacity-70 cursor-not-allowed">
+                        Mirror user
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                      loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                      loadingText="Entering..."
+                      onClick={() => setShowMirrorConfirm(true)}
+                    >
+                      Mirror user
+                    </Button>
+                  ))}
+                {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+                  <>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setShowResetPassword(true)}>
+                      Reset Password
+                    </Button>
+                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setShowDeactivateConfirm(true)}
+                        className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                      >
+                        Deactivate
+                      </Button>
+                    )}
+                    {(user.status === 'INACTIVE' ||
+                      user.status === 'ARCHIVED' ||
+                      (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowReactivateConfirm(true)}
+                        className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
+                      >
+                        Reactivate
+                      </Button>
+                    )}
+                  </>
+                )}
               </div>
-            </div>
-          </div>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                {isSelfView && (
+                  <Link
+                    to="/admin/settings"
+                    onClick={() => closeSheet()}
+                    className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
+                  >
+                    Settings
+                  </Link>
+                )}
+                {!isSelfView &&
+                  !isSuperAdminProfile &&
+                  (canOpenSettingsTab || canEditLimited) && (
+                    <BranchScopedLink
+                      to={`/hr/users/${user.id}/edit`}
+                      actionLabel="editing this user"
+                      prefetch="intent"
+                      className="btn-primary btn-sm h-12 flex items-center justify-center w-full"
+                      onClick={() => closeSheet()}
+                    >
+                      Edit user
+                    </BranchScopedLink>
+                  )}
+                {showOnboardingTab && (isSelfView || viewerCanManageHrOnboarding) && (
+                  <BranchScopedLink
+                    to={isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`}
+                    actionLabel={isSelfView ? 'opening your onboarding' : 'opening staff onboarding'}
+                    prefetch="intent"
+                    className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
+                    onClick={() => closeSheet()}
+                  >
+                    {isSelfView ? 'Your onboarding' : 'Open onboarding'}
+                  </BranchScopedLink>
+                )}
+                {!isSelfView &&
+                  viewerShowsMirror &&
+                  (mirrorSubmitDisabled ? (
+                    <Button type="button" variant="secondary" size="sm" disabled className="h-12 w-full justify-center">
+                      Mirror user
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-12 w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                      loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                      loadingText="Entering..."
+                      onClick={() => {
+                        closeSheet();
+                        setShowMirrorConfirm(true);
+                      }}
+                    >
+                      Mirror user
+                    </Button>
+                  ))}
+                {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        setShowResetPassword(true);
+                      }}
+                    >
+                      Reset Password
+                    </Button>
+                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        className="h-12 w-full justify-center"
+                        onClick={() => {
+                          closeSheet();
+                          setShowDeactivateConfirm(true);
+                        }}
+                      >
+                        Deactivate
+                      </Button>
+                    )}
+                    {(user.status === 'INACTIVE' ||
+                      user.status === 'ARCHIVED' ||
+                      (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-12 w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
+                        onClick={() => {
+                          closeSheet();
+                          setShowReactivateConfirm(true);
+                        }}
+                      >
+                        Reactivate
+                      </Button>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          />
         </div>
       </div>
 
-      {/* Dates + onboarding summary (header has name, email, role, status, phone, tenure pill). */}
-      <div className="card space-y-3 !p-4">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-sm font-semibold text-app-fg">Account Information</h2>
-          {!isSelfView &&
-            !isSuperAdminProfile &&
-            (canOpenSettingsTab || canEditLimited) && (
-              <BranchScopedLink
-                to={`${usersBasePath}/${user.id}/edit`}
-                actionLabel="editing this user"
-                prefetch="intent"
-                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0 self-start sm:self-auto"
-              >
-                Edit
-              </BranchScopedLink>
-            )}
-        </div>
-        <DescriptionList
-          layout="grid"
-          gridColumns={showOnboardingTab ? 3 : 2}
-          dense
-          items={accountInformationItems}
+      {/* Overview metrics */}
+      <div className="card !p-0 overflow-hidden">
+        <OverviewStatStrip
+          embedded
+          variant="matrix"
+          items={profileMetaStripItems}
+          showScrollControls={false}
+          tileClassName="!py-1.5 !px-2.5"
         />
       </div>
 
-      {/* ─── Section cards — minimal layout (CEO directive 2026-05): each card opens a
-          modal that lazy-loads the detail. Replaces the previous tab + inline-cards layout. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {/* Detail destinations */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+        <SectionCard
+          label="Account Information"
+          description="Membership dates and onboarding"
+          onClick={() => setOpenModal('account')}
+        />
         {isMarketingRole && (
           <SectionCard
             label="Marketing Performance"
+            description="Campaign metrics and spend"
             onClick={() => setOpenModal('marketing')}
           />
         )}
         {isMarketingRole && (
           <SectionCard
             label="Funding balance"
+            description="Transfers and ledger"
             onClick={() => setOpenModal('funding')}
           />
         )}
         {!isSuperAdminProfile && (
           <SectionCard
             label="Permissions"
+            description="Effective access and grants"
             onClick={() => setOpenModal('permissions')}
           />
         )}
+        {scopedBranchMemberships.length > 0 && (
+          <SectionCard
+            label="Branches"
+            description={`${scopedBranchMemberships.length} branch${scopedBranchMemberships.length === 1 ? '' : 'es'} assigned`}
+            onClick={() => setOpenModal('branches')}
+          />
+        )}
         {showPayrollTab && (
-          <SectionCard label="Payslips & history" linkTo={`/hr/users/${user.id}/history`} />
+          <SectionCard
+            label="Payslips & history"
+            description="Paid payouts and PDFs"
+            linkTo={`/hr/users/${user.id}/history`}
+          />
         )}
         {showEarningsTab && (
           <SectionCard
             label="Earnings outlook"
+            description="Projected pay breakdown"
             onClick={() => setOpenModal('earnings')}
           />
         )}
         {showFinanceTab && (
           <SectionCard
             label="Finance Activity"
+            description="Approvals and remittance trail"
             onClick={() => setOpenModal('finance')}
           />
         )}
-        <SectionCard label="Activity" linkTo={`/admin/analytics/audit?actorId=${user.id}`} />
+        <SectionCard
+          label="Activity"
+          description="Audit trail for this user"
+          linkTo={`/admin/analytics/audit?actorId=${user.id}`}
+        />
       </div>
+
+      {/* ─── Account Information modal ─────────────────── */}
+      {openModal === 'account' && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-lg">
+          <div className="p-4 space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-app-fg">Account Information</h2>
+                <p className="text-xs text-app-fg-muted mt-0.5">Membership dates and onboarding</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <DescriptionList
+              layout="grid"
+              gridColumns={2}
+              dense
+              items={accountInformationItems}
+            />
+          </div>
+        </Modal>
+      )}
 
       {/* ─── Marketing Performance modal ───────────────── */}
       {openModal === 'marketing' && (
@@ -1458,6 +1328,29 @@ export function UserDetailPage({
         </Modal>
       )}
 
+      {/* ─── Branches modal ────────────────────────────── */}
+      {openModal === 'branches' && scopedBranchMemberships.length > 0 && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-lg">
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-app-fg">Branches</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <UserBranchBadges
+              branches={scopedBranchMemberships}
+              showCompanyGroups={isSuperAdmin && !activeGroupId}
+            />
+          </div>
+        </Modal>
+      )}
+
       {/* ─── Permissions modal ─────────────────────────── */}
       {openModal === 'permissions' && !isSuperAdminProfile && (
         <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-3xl">
@@ -1533,16 +1426,18 @@ export function UserDetailPage({
                 ×
               </button>
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="month"
-                value={earningsMonth}
-                onChange={(e) => setEarningsMonth(e.target.value)}
-                className="h-10 md:h-9 flex-1 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              <p className="text-xs text-app-fg-muted shrink-0">
-                Estimate only
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="inline-flex items-center gap-2 rounded-full border border-app-border bg-app-elevated pl-3 pr-2 py-1">
+                <span className="text-xs font-medium text-app-fg-muted shrink-0">Period</span>
+                <input
+                  type="month"
+                  value={earningsMonth}
+                  onChange={(e) => setEarningsMonth(e.target.value)}
+                  aria-label="Earnings period"
+                  className="h-7 w-[9.75rem] border-0 bg-transparent p-0 text-sm font-medium text-app-fg focus:outline-none focus:ring-0 [color-scheme:light] dark:[color-scheme:dark]"
+                />
+              </label>
+              <p className="text-xs text-app-fg-muted shrink-0">Estimate only</p>
             </div>
             {(() => {
               const ep = earningsFetcher.data;
@@ -1781,14 +1676,35 @@ export function UserDetailPage({
             mirrorSubmitDisabled ? (
               <Button type="button" variant="secondary" size="sm" disabled className="w-full justify-center opacity-70 cursor-not-allowed">Mirror user</Button>
             ) : (
-              <Form method="post" data-branch-scoped-action="true" data-mirror-allow="" className="w-full" onSubmit={() => clearLoaderCache()}>
-                <input type="hidden" name="intent" value="mirror" />
-                <Button type="submit" variant="secondary" size="sm" className="w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600" loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'} loadingText="Entering...">Mirror user</Button>
-              </Form>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                loadingText="Entering..."
+                onClick={() => {
+                  setMobileProfileSheetOpen(false);
+                  setShowMirrorConfirm(true);
+                }}
+              >
+                Mirror user
+              </Button>
             )
           )}
           {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
             <BranchScopedLink to={`/hr/users/${user.id}/edit`} actionLabel="editing this user" prefetch="intent" className="btn-secondary btn-sm w-full justify-center" onClick={() => setMobileProfileSheetOpen(false)}>Edit user</BranchScopedLink>
+          )}
+          {showOnboardingTab && (isSelfView || viewerCanManageHrOnboarding) && (
+            <BranchScopedLink
+              to={isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`}
+              actionLabel={isSelfView ? 'opening your onboarding' : 'opening staff onboarding'}
+              prefetch="intent"
+              className="btn-secondary btn-sm w-full justify-center"
+              onClick={() => setMobileProfileSheetOpen(false)}
+            >
+              {isSelfView ? 'Your onboarding' : 'Open onboarding'}
+            </BranchScopedLink>
           )}
           {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
             <>
@@ -1924,6 +1840,43 @@ export function UserDetailPage({
           </Form>
         </Modal>
       )}
+
+      <Form
+        id="mirror-user-form"
+        method="post"
+        data-branch-scoped-action="true"
+        data-mirror-allow=""
+        className="hidden"
+        onSubmit={() => clearLoaderCache()}
+      >
+        <input type="hidden" name="intent" value="mirror" />
+      </Form>
+
+      <ConfirmActionModal
+        open={showMirrorConfirm}
+        onClose={() => setShowMirrorConfirm(false)}
+        title="Mirror this user"
+        description={
+          <>
+            Enter mirror mode as <strong>{user.name}</strong>? You will see the app with their
+            permissions and branch scope until you exit mirror mode.
+          </>
+        }
+        details={
+          <ul className="list-disc pl-4 space-y-1 text-sm">
+            <li>Use this only for support and troubleshooting</li>
+            <li>Your own Super Admin session is paused until you exit</li>
+          </ul>
+        }
+        confirmLabel="Start mirroring"
+        variant="warning"
+        loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+        onConfirm={() => {
+          const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
+          form?.requestSubmit();
+          setShowMirrorConfirm(false);
+        }}
+      />
 
       {/* ─── Deactivate Confirmation Modal ───────────────── */}
       {showDeactivateConfirm && (
@@ -2109,23 +2062,71 @@ export function UserDetailPage({
 // ─── Sub-components ─────────────────────────────────────
 
 /**
- * Grey clickable card for the minimal user-detail layout. Each card opens a
- * modal with the section's lazy-loaded data.
+ * Destination card for the staff profile details grid.
+ * Opens a modal or navigates to a dedicated page.
  */
-function SectionCard({ label, onClick, linkTo }: { label: string; onClick?: () => void; linkTo?: string }) {
-  const className = "text-left rounded-lg border border-app-border bg-app-hover px-4 py-3 hover:bg-app-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 transition-colors";
-  const content = (
-    <>
-      <span className="block text-sm font-medium text-app-fg">{label}</span>
-      <span className="block text-xs text-app-fg-muted mt-0.5">View details →</span>
-    </>
+function SectionCard({
+  label,
+  description,
+  onClick,
+  linkTo,
+  actions,
+}: {
+  label: string;
+  description?: string;
+  onClick?: () => void;
+  linkTo?: string;
+  actions?: ReactNode;
+}) {
+  const className =
+    'group text-left rounded-xl border border-app-border bg-app-elevated px-4 py-4 hover:border-brand-400/50 hover:bg-app-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 transition-colors w-full';
+  const body = (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <span className="block text-sm font-semibold text-app-fg">{label}</span>
+        {description ? (
+          <span className="block text-xs text-app-fg-muted mt-1 leading-snug">{description}</span>
+        ) : null}
+      </div>
+      <span className="shrink-0 text-brand-600 dark:text-brand-400 text-sm font-medium opacity-70 group-hover:opacity-100 transition-opacity">
+        →
+      </span>
+    </div>
   );
+
+  if (actions) {
+    return (
+      <div className="rounded-xl border border-app-border bg-app-elevated overflow-hidden">
+        {linkTo ? (
+          <Link to={linkTo} className={`${className} border-0 rounded-none`}>
+            {body}
+          </Link>
+        ) : (
+          <button type="button" onClick={onClick} className={`${className} border-0 rounded-none`}>
+            {body}
+          </button>
+        )}
+        <div
+          className="px-4 pb-4 pt-0 flex flex-wrap items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {actions}
+        </div>
+      </div>
+    );
+  }
+
   if (linkTo) {
-    return <Link to={linkTo} className={className}>{content}</Link>;
+    return (
+      <Link to={linkTo} className={className}>
+        {body}
+      </Link>
+    );
   }
   return (
     <button type="button" onClick={onClick} className={className}>
-      {content}
+      {body}
     </button>
   );
 }

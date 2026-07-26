@@ -127,8 +127,6 @@ export const PAGE_REGISTRY: ReadonlyArray<PageRegistryEntry> = [
     defaultFilters: { datePreset: 'This Month', perPage: '100' } },
   { key: 'admin.finance.delivery-remittances', label: 'Cash Remittance', parentKey: 'admin.finance', permissionCode: 'finance.read',
     defaultFilters: { datePreset: 'This Month', perPage: '500' } },
-  { key: 'admin.finance.payout', label: 'Payout', parentKey: 'admin.finance', permissionCode: 'finance.read',
-    defaultFilters: { datePreset: 'This Month' } },
   { key: 'admin.finance.disbursements', label: 'Disbursements', parentKey: 'admin.finance', permissionCode: 'finance.read',
     defaultFilters: { datePreset: 'This Month' } },
   { key: 'admin.finance.staff-accounts', label: 'Staff Accounts', parentKey: 'admin.finance', permissionCode: 'finance.read',

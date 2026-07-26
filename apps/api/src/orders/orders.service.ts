@@ -2089,9 +2089,10 @@ export class OrdersService {
             submittingMbId: orderInput.mediaBuyerId,
             phoneHash: orderInput.customerPhoneHash,
           },
-          'universal dedup: duplicate blocked — recorded in cross_funnel_attempts, cart converted',
+          'universal dedup: duplicate detected — recorded in cross_funnel_attempts, order still created',
         );
-        return { duplicateRecorded: true as const };
+        // Do NOT block — fall through so the order is always created.
+        // CS will see it and can merge/delete if needed.
       }
     }
 

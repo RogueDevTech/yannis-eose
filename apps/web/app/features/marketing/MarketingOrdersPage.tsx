@@ -141,7 +141,7 @@ interface MarketingOrdersPageProps {
   personalSecondary?: MarketingOrdersSecondaryPayload;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
-  filters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
   /**
@@ -256,9 +256,7 @@ export function MarketingOrdersPage({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders cancelled',
     successMessage: `${purgeFetcher.data?.deleted ?? 0} cancelled${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Cancel failed',
   });
 
   useEffect(() => {
@@ -382,7 +380,7 @@ export function MarketingOrdersPage({
           : (order) => (
               <span className="font-medium text-app-fg" title={order.customerName ?? undefined}>
                 {clipName(order.customerName)}
-                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
               </span>
@@ -538,7 +536,7 @@ export function MarketingOrdersPage({
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={order.customerName ?? undefined}>
               {clipName(order.customerName)}
-              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+              {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
               {order.isDuplicate === 'FLAGGED' && (

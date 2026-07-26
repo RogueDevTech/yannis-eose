@@ -15,6 +15,7 @@ import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
@@ -33,7 +34,7 @@ import { humanizeZodIssuesString } from '~/lib/api-error';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
 import { PayrollBankPayExportModal } from './PayrollBankPayExportModal';
 import { ADMIN_ROLES, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
-import { hasFinanceAccess } from '~/lib/rbac';
+import { hasFinanceAccess, isAdminLevel } from '~/lib/rbac';
 
 const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 
@@ -66,6 +67,7 @@ export function HRPage({
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [showBankPayExport, setShowBankPayExport] = useState(false);
   const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
+  const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
@@ -82,6 +84,7 @@ export function HRPage({
    *  approve actions too — both intents resolve through this single hook). */
   const handleHrFetcherSuccess = useCallback(() => {
     setShowAddAdjustment(false);
+    setApproveAdjustmentTarget(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleHrFetcherSuccess);
 
@@ -103,7 +106,7 @@ export function HRPage({
     buildAdjustmentApprovalPatches,
   );
 
-  const isAdmin = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
+  const isAdmin = isAdminLevel(viewer);
   const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER';
   const canExportBankPay =
     isAdmin ||
@@ -438,17 +441,14 @@ export function HRPage({
                     tight: true,
                     render: (adj) =>
                       !adj.approvedBy && adj.category !== 'CLAWBACK' ? (
-                        <fetcher.Form method="post" className="inline">
-                          <input type="hidden" name="intent" value="approveAdjustment" />
-                          <input type="hidden" name="adjustmentId" value={adj.id} />
-                          <TableActionButton
-                            type="submit"
-                            variant="primary"
-                            disabled={fetcher.state === 'submitting'}
-                          >
-                            Approve
-                          </TableActionButton>
-                        </fetcher.Form>
+                        <TableActionButton
+                          type="button"
+                          variant="primary"
+                          disabled={fetcher.state === 'submitting'}
+                          onClick={() => setApproveAdjustmentTarget(adj)}
+                        >
+                          Approve
+                        </TableActionButton>
                       ) : null,
                   },
                 ];
@@ -485,18 +485,15 @@ export function HRPage({
                           </div>
                           <p className="text-xs text-app-fg-muted">{adj.reason}</p>
                           {!adj.approvedBy && adj.category !== 'CLAWBACK' && (
-                            <fetcher.Form method="post">
-                              <input type="hidden" name="intent" value="approveAdjustment" />
-                              <input type="hidden" name="adjustmentId" value={adj.id} />
-                              <TableActionButton
-                                type="submit"
-                                variant="primary"
-                                className="w-full justify-center"
-                                disabled={fetcher.state === 'submitting'}
-                              >
-                                Approve
-                              </TableActionButton>
-                            </fetcher.Form>
+                            <TableActionButton
+                              type="button"
+                              variant="primary"
+                              className="w-full justify-center"
+                              disabled={fetcher.state === 'submitting'}
+                              onClick={() => setApproveAdjustmentTarget(adj)}
+                            >
+                              Approve
+                            </TableActionButton>
                           )}
                         </div>
                       )}
@@ -517,6 +514,41 @@ export function HRPage({
           branches={branches}
         />
       ) : null}
+
+      <ConfirmActionModal
+        open={!!approveAdjustmentTarget}
+        onClose={() => setApproveAdjustmentTarget(null)}
+        title="Approve adjustment"
+        description={
+          approveAdjustmentTarget
+            ? `Approve this ${approveAdjustmentTarget.category.replace(/_/g, ' ').toLowerCase()} adjustment for ${
+                users.find((u) => u.id === approveAdjustmentTarget.staffId)?.name ?? 'staff'
+              }?`
+            : ''
+        }
+        details={
+          approveAdjustmentTarget ? (
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>
+                Amount{' '}
+                <NairaPrice amount={Math.abs(Number(approveAdjustmentTarget.amount))} />
+                {Number(approveAdjustmentTarget.amount) < 0 ? ' (deduction)' : ''}
+              </li>
+              <li>{approveAdjustmentTarget.reason}</li>
+            </ul>
+          ) : null
+        }
+        confirmLabel="Approve"
+        variant="warning"
+        loading={fetcher.state === 'submitting'}
+        onConfirm={() => {
+          if (!approveAdjustmentTarget) return;
+          fetcher.submit(
+            { intent: 'approveAdjustment', adjustmentId: approveAdjustmentTarget.id },
+            { method: 'post' },
+          );
+        }}
+      />
     </div>
   );
 }

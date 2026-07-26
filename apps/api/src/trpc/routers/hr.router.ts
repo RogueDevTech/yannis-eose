@@ -144,7 +144,7 @@ export const hrRouter = router({
   updatePlan: authedProcedure
     .input(updateCommissionPlanSchema)
     .mutation(async ({ input, ctx }) => {
-      return getHrService().updateCommissionPlan(input, ctx.user);
+      return getHrService().updateCommissionPlan(input, ctx.user, ctx.activeGroupId);
     }),
 
   listPlans: authedProcedure
@@ -266,8 +266,8 @@ export const hrRouter = router({
     }),
 
   getCurrentSettlementPeriod: permissionProcedure('hr.read')
-    .query(async () => {
-      return getHrService().getCurrentSettlementPeriod();
+    .query(async ({ ctx }) => {
+      return getHrService().getCurrentSettlementPeriod(ctx.activeGroupId);
     }),
 
   // ============================================
@@ -295,7 +295,7 @@ export const hrRouter = router({
   getBatch: authedProcedure
     .input(getBatchSchema)
     .query(async ({ input, ctx }) => {
-      return getPayrollBatchService().getBatchDetail(input.batchId, ctx.user);
+      return getPayrollBatchService().getBatchDetail(input.batchId, ctx.user, ctx.effectiveBranchIds);
     }),
 
   generateBatch: authedProcedure
@@ -325,19 +325,19 @@ export const hrRouter = router({
   approveBatch: authedProcedure
     .input(approveBatchSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().approveBatch(input, ctx.user);
+      return getPayrollBatchService().approveBatch(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   rejectBatch: authedProcedure
     .input(rejectBatchSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().rejectBatch(input, ctx.user);
+      return getPayrollBatchService().rejectBatch(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
-  markBatchPaid: authedProcedure
+  markBatchPaid: permissionProcedure('finance.disburse')
     .input(markBatchPaidSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().markBatchPaid(input, ctx.user);
+      return getPayrollBatchService().markBatchPaid(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   addBatchAdjustment: authedProcedure
@@ -360,32 +360,32 @@ export const hrRouter = router({
 
   listPayslips: permissionProcedure('hr.read')
     .input(listPayslipsSchema)
-    .query(async ({ input }) => {
-      return getPayrollBatchService().listPayslips(input);
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().listPayslips(input, ctx.effectiveBranchIds);
     }),
 
   payrollRegister: permissionProcedure('hr.read')
     .input(payrollRegisterSchema)
-    .query(async ({ input }) => {
-      return getPayrollBatchService().payrollRegister(input);
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().payrollRegister(input, ctx.effectiveBranchIds);
     }),
 
   payrollCostByBranch: permissionProcedure('hr.read')
     .input(payrollReportRangeSchema)
-    .query(async ({ input }) => {
-      return getPayrollBatchService().payrollCostByBranch(input);
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().payrollCostByBranch(input, ctx.effectiveBranchIds);
     }),
 
   payrollCostByRoleCategory: permissionProcedure('hr.read')
     .input(payrollReportRangeSchema)
-    .query(async ({ input }) => {
-      return getPayrollBatchService().payrollCostByRoleCategory(input);
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().payrollCostByRoleCategory(input, ctx.effectiveBranchIds);
     }),
 
   payrollTrend: permissionProcedure('hr.read')
     .input(payrollReportRangeSchema)
-    .query(async ({ input }) => {
-      return getPayrollBatchService().payrollTrend(input);
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().payrollTrend(input, ctx.effectiveBranchIds);
     }),
 
   exportPayRunDraft: permissionProcedure('hr.read')
@@ -397,7 +397,7 @@ export const hrRouter = router({
   exportBankUpload: permissionProcedure('finance.disburse')
     .input(exportBankUploadSchema)
     .query(async ({ input, ctx }) => {
-      return getPayrollBatchService().exportBankUpload(input, ctx.user);
+      return getPayrollBatchService().exportBankUpload(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   getPayslip: authedProcedure
@@ -409,10 +409,10 @@ export const hrRouter = router({
   bulkPayslipPdf: permissionProcedure('hr.read')
     .input(bulkPayslipPdfSchema)
     .query(async ({ input, ctx }) => {
-      return getPayrollBatchService().bulkPayslipPdf(input, ctx.user);
+      return getPayrollBatchService().bulkPayslipPdf(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
-  getPayrollMetrics: authedProcedure
+  getPayrollMetrics: permissionProcedure('hr.read')
     .input(z.object({ staffId: z.string().uuid(), periodStart: z.string(), periodEnd: z.string() }))
     .query(async ({ input }) => {
       const userRows = await getUsersService().getById(input.staffId, null);
@@ -461,13 +461,13 @@ export const hrRouter = router({
   updatePayRole: permissionProcedure('payroll.config.write')
     .input(updatePayRoleSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollConfigService().updatePayRole(input, ctx.user);
+      return getPayrollConfigService().updatePayRole(input, ctx.user, ctx.activeGroupId);
     }),
 
   archivePayRole: permissionProcedure('payroll.config.write')
     .input(archivePayRoleSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollConfigService().archivePayRole(input.id, ctx.user);
+      return getPayrollConfigService().archivePayRole(input.id, ctx.user, ctx.activeGroupId);
     }),
 
   saveFormulaConfig: permissionProcedure('payroll.config.write')
@@ -536,7 +536,7 @@ export const hrRouter = router({
   updateContractor: permissionProcedure('payroll.config.write')
     .input(updateContractorSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollConfigService().updateContractor(input, ctx.user);
+      return getPayrollConfigService().updateContractor(input, ctx.user, ctx.activeGroupId);
     }),
 
   listPayrollOnboardingQueue: permissionProcedure('hr.read')
@@ -620,7 +620,13 @@ export const hrRouter = router({
       const userId = input.userId;
 
       // ── 1. Fetch the target user (single DB hit) ──
-      const profileUser = await getUsersService().getById(userId, actor);
+      // Pass effectiveBranchIds so branchMemberships are company-scoped when a
+      // company is selected in the header (SuperAdmin company switcher).
+      const profileUser = await getUsersService().getById(
+        userId,
+        actor,
+        ctx.effectiveBranchIds ?? undefined,
+      );
       if (!profileUser) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }

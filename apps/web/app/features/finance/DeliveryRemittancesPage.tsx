@@ -353,7 +353,7 @@ export function DeliveryRemittancesPage({
     });
   };
 
-  const s = summary as Record<string, unknown>;
+  const s = summary as unknown as Record<string, unknown>;
   // Use remittedOnlyCount (orders with status=REMITTED in the orders table) as the
   // canonical count for both the tab pill and stat strip so the numbers always match.
   const receivedOrderCount = Number(s.remittedOnlyCount ?? s.receivedOrderCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
@@ -1387,68 +1387,7 @@ export function DeliveryRemittancesPage({
                   />
                 </>
               }
-              sheetFilterBody={
-                <>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
-                    <div className="relative">
-                      {!!filters.location && (
-                        <FilterDismiss onClear={() => handleLocationChange('')} />
-                      )}
-                      <SearchableSelect
-                        id="delivery-remittance-location-filter-sheet"
-                        value={filters.location}
-                        onChange={handleLocationChange}
-                        wrapperClassName="w-full"
-                        placeholder="All locations"
-                        searchPlaceholder="Search locations..."
-                        options={[
-                          { value: '', label: 'All locations' },
-                          ...locations.map((loc) => ({
-                            value: loc.id,
-                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
-                          })),
-                        ]}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
-                    <div className="relative">
-                      {!!filters.sentBy && (
-                        <FilterDismiss onClear={() => handleSentByChange('')} />
-                      )}
-                      <SearchableSelect
-                        id="delivery-remittance-sent-by-filter-sheet"
-                        value={filters.sentBy}
-                        onChange={handleSentByChange}
-                        wrapperClassName="w-full"
-                        placeholder="Sent by anyone"
-                        searchPlaceholder="Search accountants..."
-                        options={[
-                          { value: '', label: 'Sent by anyone' },
-                          ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                        ]}
-                      />
-                    </div>
-                  </div>
-                  <FormSelect
-                    value={viewMode}
-                    onChange={(e) => {
-                      const params = new URLSearchParams(location.search);
-                      if (e.target.value === 'orders') params.set('view', 'orders');
-                      else params.delete('view');
-                      params.set('page', '1');
-                      setSearchParams(params);
-                    }}
-                    options={[
-                      { value: 'batches', label: 'Batches' },
-                      { value: 'orders', label: 'Orders' },
-                    ]}
-                    wrapperClassName="w-full"
-                  />
-                </>
-              }
+              sheetFilterBody={null}
             />
           </div>
 
@@ -1736,33 +1675,40 @@ export function DeliveryRemittancesPage({
             </p>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:items-center">
-            <PageSearchControl
-              value={filters.eligibleQ}
-              placeholder="Search customer, order ID, invoice ref, or bill-to name"
-              title="Search eligible orders"
-              onApply={handleEligibleSearchChange}
+          <div className="list-panel">
+            <ToolbarFiltersCollapsible
+              className="!border-0"
+              hideMobileSheet
+              badgeCount={filters.location ? 1 : 0}
+              searchRow={
+                <PageSearchControl
+                  value={filters.eligibleQ}
+                  placeholder="Search customer, order ID, invoice ref, or bill-to name"
+                  title="Search eligible orders"
+                  onApply={handleEligibleSearchChange}
+                />
+              }
+              desktopInlineFilters={
+                <InlineFilter
+                  type="searchable"
+                  id="eligible-remittance-location"
+                  value={filters.location}
+                  defaultValue=""
+                  onChange={handleLocationChange}
+                  options={[
+                    { value: '', label: 'All locations' },
+                    ...locations.map((loc) => ({
+                      value: loc.id,
+                      label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
+                    })),
+                  ]}
+                  width="location"
+                  placeholder="All locations"
+                  searchPlaceholder="Search locations..."
+                />
+              }
+              sheetFilterBody={null}
             />
-            <div className="relative hidden sm:block sm:w-fit sm:justify-self-end">
-              {!!filters.location && (
-                <FilterDismiss onClear={() => handleLocationChange('')} />
-              )}
-              <SearchableSelect
-                id="eligible-remittance-location"
-                value={filters.location}
-                onChange={handleLocationChange}
-                wrapperClassName="w-full sm:w-52"
-                placeholder="All locations"
-                searchPlaceholder="Search locations..."
-                options={[
-                  { value: '', label: 'All locations' },
-                  ...locations.map((loc) => ({
-                    value: loc.id,
-                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
-                  })),
-                ]}
-              />
-            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md bg-app-hover px-2.5 py-1.5 sm:px-3">

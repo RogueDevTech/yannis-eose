@@ -1,9 +1,12 @@
-import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { Button } from '~/components/ui/button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
 
@@ -30,18 +33,30 @@ const STATUS_MAP: Record<string, { label: string; variant: 'success' | 'warning'
 };
 
 export function BudgetVsActualPage({ rows, filters }: BudgetVsActualPageProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const onDateChange = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setSearchParams(next);
-  };
-
   const totalBudget = rows.reduce((s, r) => s + r.budgetAmount, 0);
   const totalActual = rows.reduce((s, r) => s + r.actualSpend, 0);
   const totalVariance = totalBudget - totalActual;
+
+  const handleExport = () => {
+    const header = 'Department,Budget Name,Budget (NGN),Actual (NGN),Variance (NGN),% Used,Status';
+    const csv = rows.map((r) =>
+      [r.department, r.budgetName, r.budgetAmount, r.actualSpend, r.variance, r.variancePct, r.status].join(','),
+    );
+    const blob = new Blob([header + '\n' + csv.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `budget-vs-actual-${filters.startDate || 'all'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportButton =
+    rows.length > 0 ? (
+      <Button variant="primary" size="sm" onClick={handleExport}>
+        Export CSV
+      </Button>
+    ) : null;
 
   const columns: CompactTableColumn<BudgetVsActualRow>[] = [
     {
@@ -105,57 +120,39 @@ export function BudgetVsActualPage({ rows, filters }: BudgetVsActualPageProps) {
     },
   ];
 
-  const handleExport = () => {
-    const header = 'Department,Budget Name,Budget (NGN),Actual (NGN),Variance (NGN),% Used,Status';
-    const csv = rows.map((r) =>
-      [r.department, r.budgetName, r.budgetAmount, r.actualSpend, r.variance, r.variancePct, r.status].join(','),
-    );
-    const blob = new Blob([header + '\n' + csv.join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `budget-vs-actual-${filters.startDate || 'all'}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Budget vs Actual"
         description="Compare departmental budgets against GL expense postings."
+        mobileInlineActions
         actions={
-          rows.length > 0 ? (
-            <button
-              onClick={handleExport}
-              className="rounded-lg bg-app-primary px-3 py-2 text-sm font-medium text-white hover:bg-app-primary/90"
-            >
-              Export CSV
-            </button>
-          ) : null
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Budget vs actual toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  chrome="pill"
+                />
+                {exportButton}
+              </>
+            }
+            sheet={
+              exportButton ? (
+                <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
+                  Export CSV
+                </Button>
+              ) : null
+            }
+          />
         }
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <label htmlFor="bva-start" className="text-sm text-app-fg-muted">From</label>
-          <DateInput
-            id="bva-start"
-            value={filters.startDate}
-            onChange={(e) => onDateChange('startDate', e.target.value)}
-            wrapperClassName="w-44"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label htmlFor="bva-end" className="text-sm text-app-fg-muted">To</label>
-          <DateInput
-            id="bva-end"
-            value={filters.endDate}
-            onChange={(e) => onDateChange('endDate', e.target.value)}
-            wrapperClassName="w-44"
-          />
-        </div>
-      </div>
+      <MobileDateFilterRow startDate={filters.startDate} endDate={filters.endDate} />
 
       <OverviewStatStrip
         items={[
@@ -181,6 +178,6 @@ export function BudgetVsActualPage({ rows, filters }: BudgetVsActualPageProps) {
       ) : (
         <CompactTable columns={columns} rows={rows} rowKey={(r) => r.budgetId} />
       )}
-    </>
+    </div>
   );
 }
