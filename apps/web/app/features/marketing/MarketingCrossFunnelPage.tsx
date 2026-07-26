@@ -11,7 +11,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import {
@@ -145,16 +145,13 @@ export function MarketingCrossFunnelPage({
 }: PageProps) {
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(filters.search || '');
   const [compareRow, setCompareRow] = useState<CrossFunnelAttemptRow | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const applySearch = (query: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
-      const trimmed = searchQuery.trim();
-      if (trimmed) next.set('search', trimmed);
+      if (query) next.set('search', query);
       else next.delete('search');
       next.set('page', '1');
       return next;
@@ -177,7 +174,7 @@ export function MarketingCrossFunnelPage({
     (searchParams.get('mediaBuyerId') ? 1 : 0) +
     (searchParams.get('productId') ? 1 : 0) +
     (searchParams.get('campaignId') ? 1 : 0) +
-    (searchQuery ? 1 : 0);
+    (filters.search ? 1 : 0);
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = useMemo(() => [
     {
@@ -201,7 +198,7 @@ export function MarketingCrossFunnelPage({
       render: (row) => (
         <span className="font-medium text-app-fg" title={row.customerName ?? undefined}>
           {clipName(row.customerName)}
-          {/^test([^a-zA-Z]|$)/i.test(row.customerName?.trim() ?? '') && (
+          {/\btest\b/i.test(row.customerName?.trim() ?? '') && (
             <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
           )}
           <DuplicateTag row={row} />
@@ -215,7 +212,7 @@ export function MarketingCrossFunnelPage({
         row.mediaBuyerId ? (
           <Link
             to={`/hr/users/${row.mediaBuyerId}`}
-            className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
+            className="font-medium text-app-fg hover:underline"
           >
             {row.mediaBuyerName ?? '—'}
           </Link>
@@ -481,15 +478,12 @@ export function MarketingCrossFunnelPage({
         hideMobileSheet
         badgeCount={filterBadgeCount}
         searchRow={
-          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-            <SearchInput
-              placeholder="Search by name, phone, or product..."
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              withSubmitButton
-              wrapperClassName="min-w-0 flex-1"
-            />
-          </form>
+          <PageSearchControl
+            value={filters.search || ''}
+            placeholder="Search by name, phone, or product..."
+            title="Search attempts"
+            onApply={applySearch}
+          />
         }
         desktopInlineFilters={
           <>

@@ -20,6 +20,7 @@ import {
   cashFlowSchema,
   agingSchema,
   postOpeningBalancesSchema,
+  repostPayrollBatchSchema,
   financialKPIsSchema,
   createAssetSchema,
   listAssetsSchema,
@@ -104,15 +105,19 @@ export function getBankReconciliationService(): BankReconciliationService {
 }
 
 /**
- * Resolve the company (branch group) to scope a ledger operation to. Explicit
- * input wins; otherwise fall back to the request's active company. Phase 1 is
- * single-company, so this is usually null.
+ * Resolve the company (branch group) to scope a ledger operation to.
+ * Non–SuperAdmin callers are locked to the session company (ignore client override).
+ * SuperAdmin may pass an explicit groupId for consolidation / repair.
  */
 function resolveGroupId(
   inputGroupId: string | null | undefined,
   ctxGroupId: string | null,
+  role?: string,
 ): string | null {
-  return inputGroupId ?? ctxGroupId ?? null;
+  if (role === 'SUPER_ADMIN' || role === 'SUPPORT') {
+    return inputGroupId !== undefined ? inputGroupId : ctxGroupId ?? null;
+  }
+  return ctxGroupId ?? null;
 }
 
 export const generalLedgerRouter = router({
@@ -120,17 +125,17 @@ export const generalLedgerRouter = router({
   createJournalEntry: permissionProcedure('finance.ledger.write')
     .input(createJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
-      const groupId = resolveGroupId(input.groupId, ctx.activeGroupId);
+      const groupId = resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role);
       const totalDebit = input.lines.reduce((s, l) => s + (l.debit ?? 0), 0);
 
       // Threshold check: amounts above ₦500,000 force DRAFT unless the actor
       // has SuperAdmin/SUPPORT role (they bypass permissionProcedure anyway).
+      // Only SuperAdmin/SUPPORT bypass the ₦500k approval threshold.
       const forceDraft =
         !input.isDraft &&
         totalDebit > GeneralLedgerService.APPROVAL_THRESHOLD &&
         ctx.user.role !== 'SUPER_ADMIN' &&
-        ctx.user.role !== 'SUPPORT' &&
-        ctx.user.role !== 'ADMIN';
+        ctx.user.role !== 'SUPPORT';
 
       return getGeneralLedgerService().createJournalEntry(
         { ...input, groupId },
@@ -149,7 +154,11 @@ export const generalLedgerRouter = router({
           message: 'Only administrators or finance officers can approve journal entries.',
         });
       }
-      return getGeneralLedgerService().approveJournalEntry(input, { id: ctx.user.id });
+      return getGeneralLedgerService().approveJournalEntry(
+        input,
+        { id: ctx.user.id },
+        resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role),
+      );
     }),
 
   rejectJournalEntry: permissionProcedure('finance.ledger.write')
@@ -176,7 +185,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listJournalEntries({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -192,7 +201,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listAccounts({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -200,7 +209,7 @@ export const generalLedgerRouter = router({
     .input(createAccountSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().createAccount(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
     }),
@@ -223,7 +232,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listFiscalYears({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -231,7 +240,7 @@ export const generalLedgerRouter = router({
     .input(createFiscalYearSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().createFiscalYear(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
     }),
@@ -262,7 +271,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().trialBalance({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -272,7 +281,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().profitAndLoss({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -281,7 +290,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().balanceSheet({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -290,7 +299,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().cashFlow({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -299,7 +308,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().aging({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -308,7 +317,7 @@ export const generalLedgerRouter = router({
     .input(financialKPIsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().financialKPIs(
-        resolveGroupId(input.groupId, ctx.activeGroupId),
+        resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
         input.asOfDate ?? undefined,
       );
     }),
@@ -318,9 +327,21 @@ export const generalLedgerRouter = router({
     .input(postOpeningBalancesSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().postOpeningBalances(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
+    }),
+
+  /** Idempotent repair for paid batches that missed payroll GL auto-post. */
+  repostPayrollBatch: permissionProcedure('finance.ledger.write')
+    .input(repostPayrollBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().postPayrollBatch(input.batchId, { id: ctx.user.id });
+    }),
+
+  backfillPaidPayrollGl: permissionProcedure('finance.ledger.write')
+    .mutation(async ({ ctx }) => {
+      return getGeneralLedgerService().backfillPaidPayrollGlPosts({ id: ctx.user.id });
     }),
 
   // ─── Chart of Accounts seeding (admin / on-demand) ───────────────────────
@@ -328,7 +349,7 @@ export const generalLedgerRouter = router({
     .input(seedChartOfAccountsSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().seedChartOfAccounts(
-        resolveGroupId(input.groupId, ctx.activeGroupId),
+        resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
         { id: ctx.user.id },
       );
     }),
@@ -339,7 +360,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getAssetRegisterService().listAssets({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -353,7 +374,7 @@ export const generalLedgerRouter = router({
     .input(createAssetSchema)
     .mutation(async ({ input, ctx }) => {
       return getAssetRegisterService().createAsset(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
     }),
@@ -368,7 +389,7 @@ export const generalLedgerRouter = router({
     .input(runDepreciationSchema)
     .mutation(async ({ input, ctx }) => {
       return getAssetRegisterService().runMonthlyDepreciation(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
     }),
@@ -380,7 +401,7 @@ export const generalLedgerRouter = router({
       return getExpenseSubmissionService().submitExpense(
         input,
         { id: ctx.user.id },
-        resolveGroupId(null, ctx.activeGroupId),
+        resolveGroupId(null, ctx.activeGroupId, ctx.user.role),
       );
     }),
 
@@ -396,12 +417,12 @@ export const generalLedgerRouter = router({
       return getExpenseSubmissionService().rejectExpense(input, { id: ctx.user.id });
     }),
 
-  listExpenses: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listExpenses: authedProcedure
     .input(listExpensesSchema)
     .query(async ({ input, ctx }) => {
       return getExpenseSubmissionService().listExpenses({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -416,7 +437,7 @@ export const generalLedgerRouter = router({
     .input(budgetVsActualSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().budgetVsActual(
-        resolveGroupId(input.groupId, ctx.activeGroupId),
+        resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
         input.startDate ?? undefined,
         input.endDate ?? undefined,
       );
@@ -427,7 +448,7 @@ export const generalLedgerRouter = router({
     .input(recordWhtSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().recordWhtDeduction(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
     }),
@@ -437,7 +458,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listWhtDeductions({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 
@@ -455,7 +476,7 @@ export const generalLedgerRouter = router({
     .input(vatReturnSummarySchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().vatReturnSummary(
-        resolveGroupId(input.groupId, ctx.activeGroupId),
+        resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
         input.startDate,
         input.endDate,
       );
@@ -466,7 +487,7 @@ export const generalLedgerRouter = router({
     .input(createBankReconciliationSchema)
     .mutation(async ({ input, ctx }) => {
       return getBankReconciliationService().createReconciliation(
-        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
         { id: ctx.user.id },
       );
     }),
@@ -494,7 +515,7 @@ export const generalLedgerRouter = router({
     .query(async ({ input, ctx }) => {
       return getBankReconciliationService().listReconciliations({
         ...input,
-        groupId: resolveGroupId(input.groupId, ctx.activeGroupId),
+        groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
       });
     }),
 

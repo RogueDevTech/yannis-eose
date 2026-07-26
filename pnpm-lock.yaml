@@ -101,6 +101,9 @@ importers:
       swagger-ui-express:
         specifier: ^5.0.1
         version: 5.0.1(express@5.2.1)
+      uuidv7:
+        specifier: ^1.2.1
+        version: 1.2.1
       web-push:
         specifier: ^3.6.7
         version: 3.6.7

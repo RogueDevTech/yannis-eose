@@ -212,12 +212,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Parse product breakdown
     const pbRaw = productBreakdownRes.ok
-      ? ((productBreakdownRes.data as Record<string, unknown>)?.result as { data?: { productId: string; productName: string; received: number; sold: number; available: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string }[] })?.data
+      ? ((productBreakdownRes.data as Record<string, unknown>)?.result as { data?: { productId: string; productName: string; received: number; sold: number; available: number; reserved: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string; qtyAwaitingRemittance: number; amountAwaitingRemittance: string }[] })?.data
       : null;
     const productBreakdown = Array.isArray(pbRaw) ? pbRaw : [];
 
     // Parse location breakdown
-    type LocBreakdown = { locationId: string; locationName: string; available: number; received: number; sold: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string };
+    type LocBreakdown = { locationId: string; locationName: string; available: number; reserved: number; received: number; sold: number; transferredOut: number; adjusted: number; writtenOff: number; dispatched: number; qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string; qtyAwaitingRemittance: number; amountAwaitingRemittance: string };
     const lbRaw = locationBreakdownRes.ok
       ? ((locationBreakdownRes.data as Record<string, unknown>)?.result as { data?: LocBreakdown[] })?.data
       : null;

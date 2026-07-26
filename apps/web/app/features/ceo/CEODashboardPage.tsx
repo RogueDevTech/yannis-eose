@@ -124,7 +124,7 @@ export function CEODashboardPage({
         header: 'Branch',
         render: (branch) => (
           <div className="flex items-center gap-2">
-            <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-primary-100 text-micro font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+            <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-brand-100 text-micro font-bold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
               {branch.branchCode.slice(0, 2)}
             </span>
             <div>

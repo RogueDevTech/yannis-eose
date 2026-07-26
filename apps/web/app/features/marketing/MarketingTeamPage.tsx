@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -15,7 +15,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
 import { ExportModal } from '~/components/ui/export-modal';
@@ -343,14 +343,9 @@ export function MarketingTeamPage({
   // Funnel orders = total minus cart graduated (already included in per-MB totals from backend)
   const funnelOrders = overviewStats.totalOrders - cartGraduatedDelivered;
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
   const [previewMember, setPreviewMember] = useState<FundingBalanceRow | null>(null);
   const [breakdownModal, setBreakdownModal] = useState(false);
-
-  useEffect(() => {
-    setSearchQuery(q);
-  }, [q]);
 
   const mergeListParams = (overrides: {
     q?: string;
@@ -371,11 +366,6 @@ export function MarketingTeamPage({
       else params.set('page', String(overrides.page));
     }
     setSearchParams(params);
-  };
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    mergeListParams({ q: searchQuery, page: 1 });
   };
 
   const showSearchEmpty = unfilteredCount > 0 && teamMembers.length === 0;
@@ -406,7 +396,7 @@ export function MarketingTeamPage({
           <Link
             to={`/hr/users/${m.userId}`}
             prefetch="intent"
-            className="inline-flex items-center gap-1.5 min-w-0 font-medium text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
+            className="inline-flex items-center gap-1.5 min-w-0 font-medium text-app-fg hover:underline"
           >
             <span className="truncate">{m.name}</span>
             {m.role === 'HEAD_OF_MARKETING' && (
@@ -481,7 +471,7 @@ export function MarketingTeamPage({
           m.totalOrders != null ? (
             <Link
               to={buildOrdersQuery(m.userId, dateFilters)}
-              className="tabular-nums text-app-fg hover:text-brand-600 dark:hover:text-brand-400 underline-offset-2 hover:underline"
+              className="tabular-nums text-app-fg underline-offset-2 hover:underline"
             >
               {m.totalOrders.toLocaleString()}
             </Link>
@@ -733,24 +723,18 @@ export function MarketingTeamPage({
         </div>
       </Modal>
 
-      <div>
+      <div className="list-panel">
         <ToolbarFiltersCollapsible
-          className="mb-4 !border-0 !px-0 !py-0"
+          className="!border-0"
           hideMobileSheet
           badgeCount={teamToolbarFilterBadge}
           searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex w-full min-w-0 gap-2 md:flex-1">
-              <SearchInput
-                value={searchQuery}
-                onChange={(v) => setSearchQuery(v)}
-                placeholder="Search by name or role…"
-                withSubmitButton
-                wrapperClassName="w-full min-w-0 flex-1"
-                className="bg-white dark:bg-app-elevated"
-                name="q"
-                autoComplete="off"
-              />
-            </form>
+            <PageSearchControl
+              value={q}
+              placeholder="Search by name or role…"
+              title="Search team"
+              onApply={(query) => mergeListParams({ q: query, page: 1 })}
+            />
           }
           desktopInlineFilters={
             <>
@@ -833,8 +817,9 @@ export function MarketingTeamPage({
             </div>
           }
         />
+      </div>
 
-        {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
+      {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
           <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">
             {totalCount} member{totalCount === 1 ? '' : 's'}
             {q ? ` matching "${q}"` : ''}
@@ -923,7 +908,6 @@ export function MarketingTeamPage({
             )}
           </>
         )}
-      </div>
 
       {/* Mobile peek modal — full media-buyer detail + actions, mirrors Sales pattern */}
       <Modal

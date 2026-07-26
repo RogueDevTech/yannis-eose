@@ -20,7 +20,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
@@ -196,7 +196,7 @@ export interface OrdersListPageProps {
   totalPages: number;
   page: number;
   limit: number;
-  statusCounts: Record<string, number>;
+  statusCounts?: Record<string, number>;
   statusFilter?: string;
   /**
    * Statuses to omit from the status filter dropdown for this surface.
@@ -336,7 +336,7 @@ function OrdersListPageImpl({
   totalPages,
   page,
   limit,
-  statusCounts,
+  statusCounts = {},
   statusFilter,
   excludeStatuses,
   searchFilter,
@@ -430,14 +430,11 @@ function OrdersListPageImpl({
           : statusFilter || 'ALL';
     setSelectedStatus(synced);
   }, [statusFilter, offlineUrlActive, testOrdersUrlActive, enableTestOrdersOption, fromCartUrlActive, enableFromCartStatusOption]);
-  const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders deleted',
     successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Delete failed',
   });
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
@@ -458,8 +455,7 @@ function OrdersListPageImpl({
   // Sync URL params to local state when loader data changes (e.g. back/forward)
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
-    setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter]);
+  }, [statusFilter]);
 
   // Track new/updated rows for 3s highlight effect. Gated on
   // `liveState.showGreen` so it only fires when a relevant socket event
@@ -1245,7 +1241,7 @@ function OrdersListPageImpl({
             <div className="group/cust relative flex min-w-0 items-center gap-2">
               <span className={`min-w-0 truncate font-medium ${isFrozen ? 'text-app-fg/60' : 'text-app-fg'}`}>
                 {clipName(order.customerName)}
-                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
               </span>
@@ -1282,7 +1278,7 @@ function OrdersListPageImpl({
             {order.assignedCsId ? (
               <Link
                 to={`/hr/users/${order.assignedCsId}`}
-                className="hover:text-brand-600 hover:underline"
+                className="hover:underline"
               >
                 {order.assignedCsName ?? 'View user'}
               </Link>
@@ -1457,7 +1453,7 @@ function OrdersListPageImpl({
           <div className="flex items-center justify-between gap-2">
             <span className={`min-w-0 truncate text-sm font-medium ${mobileFrozen ? 'text-app-fg/60' : 'text-app-fg'}`} title={order.customerName ?? undefined}>
               {clipName(order.customerName)}
-              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+              {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
               {(order as { isFollowUp?: boolean }).isFollowUp && !isCSCloser && (
@@ -2408,40 +2404,20 @@ function OrdersListPageImpl({
           badgeCount={ordersListToolbarFilterBadge}
           searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-2">
-              <form
-                method="get"
-                className="flex min-w-0 w-full gap-2 sm:flex-row sm:items-center md:w-[350px]"
-                onSubmit={(e) => {
-                  e.preventDefault();
+              <PageSearchControl
+                value={searchFilter || ''}
+                placeholder="Search by order number, customer name, or phone…"
+                title="Search orders"
+                onApply={(query) => {
                   setSearchParams((p) => {
                     const next = new URLSearchParams(p);
                     next.set('page', '1');
-                    if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                    if (query) next.set('search', query);
                     else next.delete('search');
                     return next;
                   });
                 }}
-              >
-                <SearchInput
-                  name="search"
-                  placeholder="Search by customer name or phone number…"
-                  value={searchQuery}
-                  onChange={(val) => {
-                    setSearchQuery(val);
-                    // Clear × should reload immediately, not wait for submit
-                    if (!val.trim() && searchParams.get('search')) {
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.delete('search');
-                        next.set('page', '1');
-                        return next;
-                      });
-                    }
-                  }}
-                  withSubmitButton
-                  wrapperClassName="min-w-0 w-full flex-1"
-                />
-              </form>
+              />
               <div className="hidden items-center gap-2 md:flex md:flex-wrap">
                 <div className="relative">
                   {selectedStatus !== 'ALL' && (

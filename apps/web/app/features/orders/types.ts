@@ -40,6 +40,8 @@ export interface Order {
   lastCsComment?: { comment: string; actorName: string | null; at: string } | null;
   /** Offline order category — 'website_order' | 'referrals' | null */
   offlineOrderCategory?: string | null;
+  /** Marketing branch (campaign attribution). */
+  branchId?: string | null;
 }
 
 export interface CallLogEntry {

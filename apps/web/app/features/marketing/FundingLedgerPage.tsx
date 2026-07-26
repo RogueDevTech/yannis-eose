@@ -4,12 +4,13 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -66,7 +67,16 @@ export function FundingLedgerPage({
 }: FundingLedgerLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [detailEntry, setDetailEntry] = useState<FundingLedgerEntry | null>(null);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') ?? '');
+  const appliedSearch = searchParams.get('search') ?? '';
+  const applySearch = (query: string) => {
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (query) next.set('search', query);
+      else next.delete('search');
+      return next;
+    });
+  };
   const [showExport, setShowExport] = useState(false);
 
   const columns = useMemo(
@@ -247,6 +257,7 @@ export function FundingLedgerPage({
             sheetTitle="Tools"
             triggerAriaLabel="Ledger tools"
             saveFilterKey
+            filtersBadgeCount={(entryTypeFilter !== 'all' ? 1 : 0) + (mediaBuyers.length > 1 && selectedUserId ? 1 : 0)}
             desktop={
               <>
                 <DateFilterBar
@@ -270,31 +281,71 @@ export function FundingLedgerPage({
                 )}
               </>
             }
-            sheet={
+            filters={
               <>
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  chrome="pill"
-                />
-                {entries.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowExport(true)}
-                    className="btn-secondary btn-sm gap-1.5"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                    </svg>
-                    Export
-                  </button>
+                {mediaBuyers.length > 1 && (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">User</span>
+                    <SearchableSelect
+                      id="ledger-user-filter-mobile"
+                      value={selectedUserId}
+                      onChange={(val) => {
+                        const next = new URLSearchParams(searchParams);
+                        if (val) next.set('userId', val);
+                        else next.delete('userId');
+                        next.delete('page');
+                        setSearchParams(next);
+                      }}
+                      options={[
+                        { value: '', label: 'All users' },
+                        ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
+                      ]}
+                      placeholder="All users"
+                      clearable
+                      wrapperClassName="w-full"
+                    />
+                  </div>
                 )}
-                <PageRefreshButton />
+                <FormSelect
+                  label="Type"
+                  value={entryTypeFilter}
+                  onChange={(e) => {
+                    const next = new URLSearchParams(searchParams);
+                    next.set('entryType', e.target.value);
+                    next.delete('page');
+                    setSearchParams(next);
+                  }}
+                  options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
+                />
               </>
+            }
+            sheet={
+              entries.length > 0
+                ? ({ closeSheet }) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeSheet();
+                        setShowExport(true);
+                      }}
+                      className="btn-secondary h-12 w-full justify-center gap-1.5"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                      </svg>
+                      Export
+                    </button>
+                  )
+                : undefined
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       {selectedUserId ? (
@@ -324,41 +375,18 @@ export function FundingLedgerPage({
           />
 
           <ToolbarFiltersCollapsible
+            hideMobileSheet
             badgeCount={(entryTypeFilter !== 'all' ? 1 : 0) + (mediaBuyers.length > 1 && selectedUserId ? 1 : 0)}
+            searchRow={
+              <PageSearchControl
+                value={appliedSearch}
+                placeholder="Search by name or description..."
+                title="Search ledger"
+                onApply={applySearch}
+              />
+            }
             desktopInlineFilters={
               <>
-                <form
-                  className="contents"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.set('page', '1');
-                      if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                      else next.delete('search');
-                      return next;
-                    });
-                  }}
-                >
-                  <SearchInput
-                    name="search"
-                    placeholder="Search by name or description..."
-                    value={searchQuery}
-                    onChange={(val) => {
-                      setSearchQuery(val);
-                      if (!val.trim() && searchParams.get('search')) {
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.delete('search');
-                          next.set('page', '1');
-                          return next;
-                        });
-                      }
-                    }}
-                    withSubmitButton
-                    wrapperClassName="w-full sm:min-w-[280px]"
-                  />
-                </form>
                 {mediaBuyers.length > 1 && (
                   <SearchableSelect
                     id="ledger-user-filter"
@@ -391,82 +419,6 @@ export function FundingLedgerPage({
                   options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
                   wrapperClassName="w-full sm:w-36"
                 />
-              </>
-            }
-            sheetFilterBody={
-              <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Search</span>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                        else next.delete('search');
-                        return next;
-                      });
-                    }}
-                  >
-                    <SearchInput
-                      name="search"
-                      placeholder="Search..."
-                      value={searchQuery}
-                      onChange={(val) => {
-                        setSearchQuery(val);
-                        if (!val.trim() && searchParams.get('search')) {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.delete('search');
-                            next.set('page', '1');
-                            return next;
-                          });
-                        }
-                      }}
-                      withSubmitButton
-                      wrapperClassName="w-full"
-                    />
-                  </form>
-                </div>
-                {mediaBuyers.length > 1 && (
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">User</span>
-                    <SearchableSelect
-                      id="ledger-user-filter-sheet"
-                      value={selectedUserId}
-                      onChange={(val) => {
-                        const next = new URLSearchParams(searchParams);
-                        if (val) next.set('userId', val);
-                        else next.delete('userId');
-                        next.delete('page');
-                        setSearchParams(next);
-                      }}
-                      options={[
-                        { value: '', label: 'All users' },
-                        ...mediaBuyers.map((m) => ({ value: m.id, label: m.name })),
-                      ]}
-                      placeholder="All users"
-                      clearable
-                      wrapperClassName="w-full"
-                    />
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Type</span>
-                  <FormSelect
-                    label=""
-                    value={entryTypeFilter}
-                    onChange={(e) => {
-                      const next = new URLSearchParams(searchParams);
-                      next.set('entryType', e.target.value);
-                      next.delete('page');
-                      setSearchParams(next);
-                    }}
-                    options={ENTRY_TYPE_TABS.map((t) => ({ value: t.value, label: t.label }))}
-                    wrapperClassName="w-full"
-                  />
-                </div>
               </>
             }
           />

@@ -9,7 +9,6 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { DescriptionList } from '~/components/ui/description-list';
-import { DotSeparator, DualValue } from '~/components/ui/dot-separator';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
@@ -19,6 +18,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Pagination } from '~/components/ui/pagination';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -498,8 +498,16 @@ export function LogisticsProviderDetailPage({
             sheetTitle="Actions"
             triggerAriaLabel="Provider toolbar"
             saveFilterKey
+            filtersBadgeCount={shipmentFilter ? 1 : 0}
+            onClearFilters={shipmentFilter ? () => handleShipmentFilter('') : undefined}
             desktop={
               <div className="flex flex-wrap items-center gap-2">
+                <DateFilterBar
+                  startDate={dateFilters?.startDate ?? undefined}
+                  endDate={dateFilters?.endDate ?? undefined}
+                  periodAllTime={dateFilters?.periodAllTime}
+                  chrome="pill"
+                />
                 <PageRefreshButton />
                 <Button
                   type="button"
@@ -518,6 +526,8 @@ export function LogisticsProviderDetailPage({
                       qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
                       amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
                       amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
+                      qtyAwaitingRemittance: 0,
+                      amountAwaitingRemittance: '0',
                     };
                     setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
                   }}
@@ -540,159 +550,120 @@ export function LogisticsProviderDetailPage({
                 )}
               </div>
             }
-            sheet={({ closeSheet }) => (
-              <div className="space-y-3">
-                <Button
-                  type="button"
-                  variant="secondary"
+            filters={
+              shipments.length > 0 ? (
+                <FormSelect
+                  label="Shipment"
+                  value={shipmentFilter ?? ''}
+                  onChange={(e) => handleShipmentFilter(e.target.value)}
                   className="w-full"
-                  onClick={() => {
-                    closeSheet();
-                    const totals = {
-                      received: totalReceived,
-                      sold: totalSold,
-                      transferredOut: totalTransferredOut,
-                      adjusted: totalAdjusted,
-                      writtenOff: totalWrittenOff,
-                      dispatched: totalDispatched,
-                      reserved: totalReserved,
-                      available: totalAvailable,
-                      qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
-                      qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
-                      amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
-                      amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
-                    };
-                    setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
-                  }}
                 >
-                  View report
-                </Button>
-                {shipments.length > 0 && (
-                  <FormSelect
-                    value={shipmentFilter ?? ''}
-                    onChange={(e) => { handleShipmentFilter(e.target.value); closeSheet(); }}
-                    className="w-full"
-                  >
-                    <option value="">All shipments</option>
-                    {shipments.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
-                      </option>
-                    ))}
-                  </FormSelect>
-                )}
-              </div>
+                  <option value="">All shipments</option>
+                  {shipments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
+                    </option>
+                  ))}
+                </FormSelect>
+              ) : undefined
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => {
+                  closeSheet();
+                  const totals = {
+                    received: totalReceived,
+                    sold: totalSold,
+                    transferredOut: totalTransferredOut,
+                    adjusted: totalAdjusted,
+                    writtenOff: totalWrittenOff,
+                    dispatched: totalDispatched,
+                    reserved: totalReserved,
+                    available: totalAvailable,
+                    qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
+                    qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
+                    amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
+                    amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
+                    qtyAwaitingRemittance: 0,
+                    amountAwaitingRemittance: '0',
+                  };
+                  setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
+                }}
+              >
+                View report
+              </Button>
             )}
           />
         }
       />
 
-      <DateFilterBar
+      <MobileDateFilterRow
         startDate={dateFilters?.startDate ?? undefined}
         endDate={dateFilters?.endDate ?? undefined}
         periodAllTime={dateFilters?.periodAllTime}
-        chrome="pill"
       />
 
-      {shipments.length > 0 && (
-        <div className="md:hidden">
-          <FormSelect
-            value={shipmentFilter ?? ''}
-            onChange={(e) => handleShipmentFilter(e.target.value)}
-            className="w-full"
-          >
-            <option value="">All shipments</option>
-            {shipments.map((s) => (
-              <option key={s.id} value={s.id}>
-                SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
-              </option>
-            ))}
-          </FormSelect>
-        </div>
-      )}
-
       {performance ? (
-        <div>
-          <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Performance</h2>
+        <>
           <OverviewStatStrip
             mobileGrid
-            tileClassName="!py-3.5 !px-4 min-w-[9rem]"
+            mobileGridCols={3}
             items={[
               {
                 label: 'Received',
-                value: (<span className="font-semibold text-app-fg tabular-nums">{(totalReceived + totalAdjusted).toLocaleString()}</span>),
-                plainValue: true,
-                title: 'Total units received at this provider (net of reconciliations)',
+                value: (totalReceived + totalAdjusted).toLocaleString(),
               },
               {
                 label: 'Available',
-                value: (<span className={`font-semibold tabular-nums ${totalAvailable === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{totalAvailable.toLocaleString()}</span>),
-                plainValue: true,
-                title: 'Current available stock across all locations',
+                value: totalAvailable.toLocaleString(),
+                valueClassName: totalAvailable === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400',
               },
               {
                 label: 'Sold',
-                value: (<span className="font-semibold text-brand-600 dark:text-brand-400 tabular-nums">{totalSold.toLocaleString()}</span>),
-                plainValue: true,
-                title: 'Total units sold via delivery movements',
+                value: totalSold.toLocaleString(),
+                valueClassName: 'text-brand-600 dark:text-brand-400',
               },
               {
-                label: 'Transferred out',
-                value: (<span className={`font-semibold tabular-nums ${totalTransferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{totalTransferredOut > 0 ? '−' : ''}{totalTransferredOut.toLocaleString()}</span>),
-                plainValue: true,
-                title: 'Units transferred out to other providers/locations',
+                label: 'Transferred',
+                value: `${totalTransferredOut > 0 ? '−' : ''}${totalTransferredOut.toLocaleString()}`,
+                valueClassName: totalTransferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted',
               },
               {
                 label: 'Reserved',
-                value: (<span className={`font-semibold tabular-nums ${totalReserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{totalReserved.toLocaleString()}</span>),
-                plainValue: true,
-                title: 'Units reserved for confirmed orders (not yet delivered)',
+                value: totalReserved.toLocaleString(),
+                valueClassName: totalReserved > 0 ? 'text-app-fg' : 'text-app-fg-muted',
               },
               {
-                label: 'Delivered',
-                value: (
-                  <DualValue
-                    className="font-semibold"
-                    left={<span className="text-app-fg">{performance.delivered.toLocaleString()}</span>}
-                    right={<span className={deliveryRateColorClass(performance.deliveryRate)}>{performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '0%'}</span>}
-                  />
-                ),
-                plainValue: true,
-                title: `${performance.delivered.toLocaleString()} delivered of ${performance.totalAssigned.toLocaleString()} assigned`,
+                label: `Delivered (${performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '0%'})`,
+                value: performance.delivered.toLocaleString(),
+                valueClassName: deliveryRateColorClass(performance.deliveryRate),
               },
               {
-                label: 'Delinquency',
-                value: (() => {
-                  const delinquentCount = performance.returned + performance.partiallyDelivered + performance.writtenOff;
-                  return (
-                    <DualValue
-                      className="font-semibold"
-                      left={<span className="text-app-fg">{delinquentCount.toLocaleString()}</span>}
-                      right={<span className={delinquencyRateColorClass(performance.delinquencyRate)}>{performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '0%'}</span>}
-                    />
-                  );
-                })(),
-                plainValue: true,
-                title: `Returned + partial + write-off of ${performance.totalAssigned.toLocaleString()} assigned`,
+                label: `Delinquency (${performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '0%'})`,
+                value: (performance.returned + performance.partiallyDelivered + performance.writtenOff).toLocaleString(),
+                valueClassName: delinquencyRateColorClass(performance.delinquencyRate),
               },
               {
                 label: 'Remitted',
-                value: (<span className="font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(performance.remittedAmount)}</span>),
-                plainValue: true,
+                value: formatNaira(performance.remittedAmount),
+                valueClassName: 'text-success-600 dark:text-success-400',
               },
               {
                 label: 'Pending',
-                value: (<span className={`font-semibold tabular-nums ${Number(performance.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}`}>{formatNaira(performance.pendingRemittanceAmount)}</span>),
-                plainValue: true,
+                value: formatNaira(performance.pendingRemittanceAmount),
+                valueClassName: Number(performance.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted',
               },
               {
                 label: 'Disputed',
-                value: (<span className={`font-semibold tabular-nums ${Number(performance.disputedRemittanceAmount) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>{formatNaira(performance.disputedRemittanceAmount)}</span>),
-                plainValue: true,
+                value: formatNaira(performance.disputedRemittanceAmount),
+                valueClassName: Number(performance.disputedRemittanceAmount) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted',
               },
             ]}
           />
-        </div>
+        </>
       ) : null}
 
       <FilterPills
@@ -711,26 +682,34 @@ export function LogisticsProviderDetailPage({
           {locationBreakdown.map((l) => {
             const lc = checkConsistency(l);
             return (
-            <div key={l.locationId} className="rounded-lg border border-app-border bg-app-card p-4 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">{l.locationName}</p>
+            <div key={l.locationId} className="card p-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h3 className="text-sm font-semibold text-app-fg">{l.locationName}</h3>
                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${lc.isConsistent ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>
                   {lc.isConsistent ? '✓ Balanced' : `✗ ${Math.abs(lc.diff).toLocaleString()} off`}
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-sm tabular-nums min-w-0">
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Received</span> <span className="font-semibold text-app-fg">{(l.received + l.adjusted).toLocaleString()}</span></span>
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Sold</span> <span className={`font-semibold ${l.sold > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>{l.sold.toLocaleString()}</span></span>
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Transferred</span> <span className={`font-semibold ${l.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.transferredOut > 0 ? '−' : ''}{l.transferredOut.toLocaleString()}</span></span>
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Available</span> <span className={`font-semibold ${l.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{l.available.toLocaleString()}</span></span>
-
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Reserved</span> <span className={`font-semibold ${l.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.reserved.toLocaleString()}</span></span>
-                <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Remitted</span> <span className={`font-semibold ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{l.qtyRemitted.toLocaleString()}</span> <span className={l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>({formatNaira(l.amountRemitted)})</span>{l.qtyPending > 0 && <><span className="text-app-fg-muted text-[0.6em] mx-1">●</span><span className="font-semibold text-warning-600 dark:text-warning-400">{l.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(l.amountPending)}) pending</span></>}</span>
-                {l.qtyAwaitingRemittance > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatNaira(l.amountAwaitingRemittance)})</span></span>}
-              </div>
+              <ul className="space-y-1.5 text-sm tabular-nums">
+                <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Received</span> <span className="font-semibold text-app-fg">{(l.received + l.adjusted).toLocaleString()}</span></li>
+                <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Sold</span> <span className={`font-semibold ${l.sold > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>{l.sold.toLocaleString()}</span></li>
+                <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Transferred</span> <span className={`font-semibold ${l.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.transferredOut > 0 ? '−' : ''}{l.transferredOut.toLocaleString()}</span></li>
+                <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Available</span> <span className={`font-semibold ${l.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{l.available.toLocaleString()}</span></li>
+                <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Reserved</span> <span className={`font-semibold ${l.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{l.reserved.toLocaleString()}</span></li>
+                <li className="flex justify-between gap-2">
+                  <span className="text-app-fg-muted">Remitted</span>
+                  <span className="text-right">
+                    <span className={`font-semibold ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{l.qtyRemitted.toLocaleString()}</span>
+                    <span className={`ml-1 ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>({formatNaira(l.amountRemitted)})</span>
+                    {l.qtyPending > 0 && <span className="ml-1.5 text-warning-600 dark:text-warning-400"><span className="font-semibold">{l.qtyPending.toLocaleString()}</span> ({formatNaira(l.amountPending)}) pending</span>}
+                  </span>
+                </li>
+                {l.qtyAwaitingRemittance > 0 && (
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.qtyAwaitingRemittance.toLocaleString()} ({formatNaira(l.amountAwaitingRemittance)})</span></li>
+                )}
+              </ul>
               <button
                 type="button"
-                className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium"
+                className="mt-3 text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium"
                 onClick={() => setReportModal({ name: l.locationName, row: l })}
               >
                 View report
@@ -748,26 +727,35 @@ export function LogisticsProviderDetailPage({
             {productBreakdown.map((p) => {
               const pc = checkConsistency(p);
               return (
-              <div key={p.productId} className="rounded-lg border border-app-border bg-app-card p-4 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">{p.productName}</p>
+              <div key={p.productId} className="card p-4">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h3 className="text-sm font-semibold text-app-fg">{p.productName}</h3>
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pc.isConsistent ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>
                     {pc.isConsistent ? '✓ Balanced' : `✗ ${Math.abs(pc.diff).toLocaleString()} off`}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-sm tabular-nums min-w-0">
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Received</span> <span className="font-semibold text-app-fg">{(p.received + p.adjusted).toLocaleString()}</span></span>
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Sold</span> <span className={`font-semibold ${p.sold > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>{p.sold.toLocaleString()}</span></span>
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Transferred</span> <span className={`font-semibold ${p.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.transferredOut > 0 ? '−' : ''}{p.transferredOut.toLocaleString()}</span></span>
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Available</span> <span className={`font-semibold ${p.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{p.available.toLocaleString()}</span></span>
-                  {p.dispatched > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Dispatched</span> <span className="font-semibold text-warning-600 dark:text-warning-400">{p.dispatched.toLocaleString()}</span></span>}
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Reserved</span> <span className={`font-semibold ${p.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.reserved.toLocaleString()}</span></span>
-                  <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Remitted</span> <span className={`font-semibold ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{p.qtyRemitted.toLocaleString()}</span> <span className={p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>({formatNaira(p.amountRemitted)})</span>{p.qtyPending > 0 && <><span className="text-app-fg-muted text-[0.6em] mx-1">●</span><span className="font-semibold text-warning-600 dark:text-warning-400">{p.qtyPending.toLocaleString()}</span> <span className="text-warning-600 dark:text-warning-400">({formatNaira(p.amountPending)}) pending</span></>}</span>
-                  {p.qtyAwaitingRemittance > 0 && <span className="flex items-baseline gap-1 text-micro font-normal min-w-0 sm:col-span-2"><span className="text-app-fg-muted w-[4.5rem] shrink-0">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatNaira(p.amountAwaitingRemittance)})</span></span>}
-                </div>
+                <ul className="space-y-1.5 text-sm tabular-nums">
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Received</span> <span className="font-semibold text-app-fg">{(p.received + p.adjusted).toLocaleString()}</span></li>
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Sold</span> <span className={`font-semibold ${p.sold > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg-muted'}`}>{p.sold.toLocaleString()}</span></li>
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Transferred</span> <span className={`font-semibold ${p.transferredOut > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.transferredOut > 0 ? '−' : ''}{p.transferredOut.toLocaleString()}</span></li>
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Available</span> <span className={`font-semibold ${p.available === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{p.available.toLocaleString()}</span></li>
+                  {p.dispatched > 0 && <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Dispatched</span> <span className="font-semibold text-warning-600 dark:text-warning-400">{p.dispatched.toLocaleString()}</span></li>}
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Reserved</span> <span className={`font-semibold ${p.reserved > 0 ? 'text-app-fg' : 'text-app-fg-muted'}`}>{p.reserved.toLocaleString()}</span></li>
+                  <li className="flex justify-between gap-2">
+                    <span className="text-app-fg-muted">Remitted</span>
+                    <span className="text-right">
+                      <span className={`font-semibold ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{p.qtyRemitted.toLocaleString()}</span>
+                      <span className={`ml-1 ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>({formatNaira(p.amountRemitted)})</span>
+                      {p.qtyPending > 0 && <span className="ml-1.5 text-warning-600 dark:text-warning-400"><span className="font-semibold">{p.qtyPending.toLocaleString()}</span> ({formatNaira(p.amountPending)}) pending</span>}
+                    </span>
+                  </li>
+                  {p.qtyAwaitingRemittance > 0 && (
+                    <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.qtyAwaitingRemittance.toLocaleString()} ({formatNaira(p.amountAwaitingRemittance)})</span></li>
+                  )}
+                </ul>
                 <button
                   type="button"
-                  className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium"
+                  className="mt-3 text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium"
                   onClick={() => setReportModal({ name: p.productName, row: p })}
                 >
                   View report

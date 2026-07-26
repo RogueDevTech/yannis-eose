@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import {
   asc,
@@ -62,6 +62,7 @@ import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel, canViewAllBranches } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
@@ -89,6 +90,8 @@ export type ProfitabilityConfig = {
 
 @Injectable()
 export class MarketingService {
+  private readonly logger = new Logger(MarketingService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
@@ -2595,11 +2598,19 @@ export class MarketingService {
     });
 
     // GL auto-post: marketing expense (non-fatal — never blocks funding approval)
-    try {
-      await this.generalLedger.postMarketingFunding(requestId, sentAmount, currentBranchId, { id: approverId });
-    } catch (err) {
-      console.warn(`GL postMarketingFunding failed for request ${requestId}: ${err instanceof Error ? err.message : err}`);
-    }
+    await runGlPostWithFinanceAlert(
+      this.notifications,
+      this.logger,
+      'Marketing funding disbursement',
+      requestId,
+      () =>
+        this.generalLedger.postMarketingFunding(
+          requestId,
+          sentAmount,
+          currentBranchId,
+          { id: approverId },
+        ),
+    );
 
     this.events.emitToUser(existing.requesterId, 'funding:received', {
       fundingId: ledger.id,

@@ -98,7 +98,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       const fixed = n.toFixed(maxFractionDigits);
       const clean = fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
       if (!useGrouping) return clean;
-      const [intPart, decPart] = clean.split('.');
+      const [intPart = '', decPart] = clean.split('.');
       return decPart != null
         ? `${addThousandSeparators(intPart)}.${decPart}`
         : addThousandSeparators(intPart);
@@ -191,7 +191,7 @@ function addThousandSeparators(s: string): string {
   if (!s) return s;
   const negative = s.startsWith('-');
   const abs = negative ? s.slice(1) : s;
-  const [intPart, ...decParts] = abs.split('.');
+  const [intPart = '', ...decParts] = abs.split('.');
   const formatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const result = decParts.length > 0 ? `${formatted}.${decParts.join('')}` : formatted;
   return negative ? `-${result}` : result;

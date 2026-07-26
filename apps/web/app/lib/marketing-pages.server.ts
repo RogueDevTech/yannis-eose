@@ -300,7 +300,7 @@ export interface MarketingDateFilterResult {
   leaderboardPeriod: 'this_month' | 'all_time';
 }
 
-type MarketingDefaultDatePreset = 'this_month' | 'last_48_hours' | 'today';
+type MarketingDefaultDatePreset = 'this_month' | 'last_48_hours' | 'today' | 'all_time';
 
 // YYYY-MM-DD in the company's operational TZ. Server-local `getFullYear/
 // getMonth/getDate` resolves to the wrong Nigeria date around UTC midnight

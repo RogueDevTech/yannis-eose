@@ -1,32 +1,77 @@
-import { useMemo } from 'react';
-import { Link } from '@remix-run/react';
+import { useMemo, useState } from 'react';
+import { Link, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageSearchControl } from '~/components/ui/page-search-control';
+import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {
   CompactTable,
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { formatRoleLabel } from '~/components/ui/role-badge';
 import type { PayRole } from './payroll-prd-types';
 
 interface PayrollConfigRolesPageProps {
   roles: PayRole[];
+  canWrite: boolean;
 }
+
+const FORMULA_FILTER_OPTIONS = [
+  { value: '', label: 'All formula status' },
+  { value: 'linked', label: 'Formula linked' },
+  { value: 'none', label: 'No formula' },
+];
 
 function formatCategory(category: string): string {
-  return category.replace(/_/g, ' ');
+  return formatRoleLabel(category);
 }
 
-export function PayrollConfigRolesPage({ roles }: PayrollConfigRolesPageProps) {
+export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPageProps) {
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [archiveRole, setArchiveRole] = useState<PayRole | null>(null);
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [formulaFilter, setFormulaFilter] = useState('');
+
+  useFetcherToast(fetcher.data, { successMessage: 'Pay role archived' });
+  useCloseOnFetcherSuccess(fetcher, () => setArchiveRole(null), { intent: 'archivePayRole' });
+
+  const categoryOptions = useMemo(() => {
+    const cats = [...new Set(roles.map((r) => r.category))].sort();
+    return [{ value: '', label: 'All categories' }, ...cats.map((c) => ({ value: c, label: formatCategory(c) }))];
+  }, [roles]);
+
+  const filteredRoles = useMemo(() => {
+    let list = roles;
+    const q = search.toLowerCase().trim();
+    if (q) list = list.filter((r) => r.name.toLowerCase().includes(q));
+    if (categoryFilter) list = list.filter((r) => r.category === categoryFilter);
+    if (formulaFilter === 'linked') list = list.filter((r) => r.commissionPlanId);
+    else if (formulaFilter === 'none') list = list.filter((r) => !r.commissionPlanId);
+    return list;
+  }, [roles, search, categoryFilter, formulaFilter]);
+
   const columns: CompactTableColumn<PayRole>[] = useMemo(
     () => [
       {
         key: 'name',
         header: 'Pay role',
         hideable: false,
-        render: (row) => <span className="font-medium text-app-fg">{row.name}</span>,
+        render: (row) => (
+          <Link
+            to={`/hr/payroll/config/rules/${row.id}`}
+            className="font-medium text-app-fg hover:underline"
+          >
+            {row.name}
+          </Link>
+        ),
       },
       {
         key: 'category',
@@ -48,7 +93,7 @@ export function PayrollConfigRolesPage({ roles }: PayrollConfigRolesPageProps) {
               row.commissionPlanId ? 'Formula linked' : 'No formula',
             ]
               .filter(Boolean)
-              .join(' · ')}
+              .join(' \u00b7 ')}
           </span>
         ),
       },
@@ -60,13 +105,25 @@ export function PayrollConfigRolesPage({ roles }: PayrollConfigRolesPageProps) {
         tight: true,
         hideable: false,
         render: (row) => (
-          <CompactTableActionButton to={`/hr/payroll/config/rules/${row.id}`} tone="brand">
-            Rules
-          </CompactTableActionButton>
+          <div className="inline-flex items-center gap-1.5">
+            <CompactTableActionButton to={`/hr/payroll/config/rules/${row.id}`} tone="brand">
+              {canWrite ? 'Edit' : 'View'}
+            </CompactTableActionButton>
+            {canWrite && (
+              <CompactTableActionButton to={`/hr/payroll/config/roles/${row.id}/assign`}>
+                View
+              </CompactTableActionButton>
+            )}
+            {canWrite && (
+              <CompactTableActionButton onClick={() => setArchiveRole(row)} tone="danger">
+                Archive
+              </CompactTableActionButton>
+            )}
+          </div>
         ),
       },
     ],
-    [],
+    [canWrite],
   );
 
   return (
@@ -79,10 +136,96 @@ export function PayrollConfigRolesPage({ roles }: PayrollConfigRolesPageProps) {
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Pay roles toolbar"
-            desktop={<PageRefreshButton />}
+            filtersBadgeCount={[categoryFilter, formulaFilter].filter(Boolean).length}
+            onClearFilters={
+              categoryFilter || formulaFilter
+                ? () => {
+                    setCategoryFilter('');
+                    setFormulaFilter('');
+                  }
+                : undefined
+            }
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                {canWrite && (
+                  <Link
+                    to="/hr/payroll/config/rules/new"
+                    className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg"
+                  >
+                    + Pay Role
+                  </Link>
+                )}
+              </div>
+            }
+            filters={
+              <div className="space-y-3">
+                <FormSelect
+                  label="Category"
+                  name="category"
+                  options={categoryOptions}
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                />
+                <FormSelect
+                  label="Formula status"
+                  name="formula"
+                  options={FORMULA_FILTER_OPTIONS}
+                  value={formulaFilter}
+                  onChange={(e) => setFormulaFilter(e.target.value)}
+                />
+              </div>
+            }
+            sheet={({ closeSheet }) =>
+              canWrite ? (
+                <Link
+                  to="/hr/payroll/config/rules/new"
+                  onClick={closeSheet}
+                  className="btn-primary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
+                >
+                  + Pay Role
+                </Link>
+              ) : null
+            }
           />
         }
       />
+
+      <div className="list-panel">
+      <ToolbarFiltersCollapsible
+        className="!border-0"
+        hideMobileSheet
+        badgeCount={[categoryFilter, formulaFilter].filter(Boolean).length}
+        searchRow={
+          <PageSearchControl
+            value={search}
+            onApply={setSearch}
+            placeholder="Search pay roles"
+            title="Search pay roles"
+          />
+        }
+        desktopInlineFilters={
+          <>
+            <FormSelect
+              label=""
+              name="category"
+              options={categoryOptions}
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-44"
+            />
+            <FormSelect
+              label=""
+              name="formula"
+              options={FORMULA_FILTER_OPTIONS}
+              value={formulaFilter}
+              onChange={(e) => setFormulaFilter(e.target.value)}
+              className="w-40"
+            />
+          </>
+        }
+      />
+      </div>
 
       <p className="text-xs text-app-fg-muted">
         Related:{' '}
@@ -90,24 +233,49 @@ export function PayrollConfigRolesPage({ roles }: PayrollConfigRolesPageProps) {
           Product tiers
         </Link>
         ,{' '}
-        <Link to="/hr/plans" className="text-brand-600 dark:text-brand-400 hover:underline">
-          Commission plans
+        <Link to="/hr/payroll/config/tax-bands" className="text-brand-600 dark:text-brand-400 hover:underline">
+          Tax bands
         </Link>
       </p>
 
-      {roles.length === 0 ? (
+      {filteredRoles.length === 0 ? (
         <EmptyState
-          title="No pay roles configured"
-          description="Pay roles are seeded during payroll setup. Contact your administrator if this list is empty."
+          title={search || categoryFilter || formulaFilter ? 'No matching pay roles' : 'No pay roles for this company'}
+          description={
+            search || categoryFilter || formulaFilter
+              ? 'Try adjusting your filters.'
+              : canWrite
+                ? 'Select a company in the header, then create a pay role or run payroll config seed for that company.'
+                : 'Pay roles are company-specific. Select a company in the header, or contact your administrator.'
+          }
         />
       ) : (
         <CompactTable<PayRole>
           columnVisibilityKey="hr.payroll.config.roles"
           columns={columns}
-          rows={roles}
+          rows={filteredRoles}
           rowKey={(r) => r.id}
           emptyTitle="No pay roles"
           emptyDescription=""
+        />
+      )}
+
+      {/* Archive confirmation */}
+      {archiveRole && (
+        <ConfirmActionModal
+          open
+          title="Archive pay role"
+          description={`Archive "${archiveRole.name}"? Staff currently assigned this role will keep their existing payouts, but no new batches will use it.`}
+          confirmLabel="Archive"
+          variant="danger"
+          loading={fetcher.state === 'submitting'}
+          onClose={() => setArchiveRole(null)}
+          onConfirm={() => {
+            fetcher.submit(
+              { intent: 'archivePayRole', payRoleId: archiveRole.id },
+              { method: 'post' },
+            );
+          }}
         />
       )}
     </div>

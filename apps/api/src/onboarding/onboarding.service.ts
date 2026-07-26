@@ -377,9 +377,12 @@ export class OnboardingService {
       if (
         !bankRow?.payoutBankName?.trim() ||
         !bankRow?.payoutAccountName?.trim() ||
-        !bankRow?.payoutAccountNumber?.trim()
+        !bankRow?.payoutAccountNumber?.trim() ||
+        !bankRow?.payoutBankCode?.trim()
       ) {
-        missing.push('payout bank details (bank name, account name, account number)');
+        missing.push(
+          'payout bank details (bank name, bank code, account name, account number)',
+        );
       }
       if (missing.length > 0) {
         throw new TRPCError({
@@ -674,6 +677,8 @@ export class OnboardingService {
         status: schema.users.status,
         primaryBranchId: schema.users.primaryBranchId,
         primaryBranchName: schema.branches.name,
+        payRoleId: schema.users.payRoleId,
+        onboardingPayrollStatus: schema.users.onboardingPayrollStatus,
         onboardingStatus: effectiveStatusSql,
         submittedAt: schema.staffOnboarding.submittedAt,
         approvedAt: schema.staffOnboarding.approvedAt,

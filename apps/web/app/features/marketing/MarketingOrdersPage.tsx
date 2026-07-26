@@ -18,7 +18,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import {
@@ -47,6 +47,7 @@ import {
 } from '~/components/ui/deferred-skeletons';
 
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
+import { InlineFilter } from '~/components/ui/inline-filter';
 
 const DEFERRED_PLACEHOLDER_ROW_COUNT = 10;
 const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
@@ -140,7 +141,7 @@ interface MarketingOrdersPageProps {
   personalSecondary?: MarketingOrdersSecondaryPayload;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
-  filters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
   /**
@@ -244,7 +245,6 @@ export function MarketingOrdersPage({
           ? FROM_CART_STATUS_VALUE
           : statusFilter || 'ALL',
   );
-  const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [myTeamTab, setMyTeamTab] = useState<'personal' | 'team'>(
     activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team',
@@ -256,9 +256,7 @@ export function MarketingOrdersPage({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders cancelled',
     successMessage: `${purgeFetcher.data?.deleted ?? 0} cancelled${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Cancel failed',
   });
 
   useEffect(() => {
@@ -271,9 +269,8 @@ export function MarketingOrdersPage({
             ? FROM_CART_STATUS_VALUE
             : statusFilter || 'ALL',
     );
-    setSearchQuery(searchFilter || '');
     setMyTeamTab(activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team');
-  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, offlineUrlActive, activeMediaBuyerFilter, viewerUserId]);
+  }, [statusFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, offlineUrlActive, activeMediaBuyerFilter, viewerUserId]);
 
   // Quick-detail modal for an abandoned cart row — fetched on demand from the
   // marketing cart-detail resource route (scoped server-side to the viewer).
@@ -319,34 +316,17 @@ export function MarketingOrdersPage({
     });
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('page', '1');
-      const q = searchQuery.trim();
-      if (q) next.set('search', q);
-      else next.delete('search');
-      return next;
-    });
-  };
-
-  // When the search input is cleared (X button), immediately remove `search`
-  // from the URL so the list refreshes. Without this, clearing only empties the
-  // local state but the URL param (and therefore the server filter) stays.
-  const handleSearchChange = useCallback(
-    (val: string) => {
-      setSearchQuery(val);
-      if (val === '' && searchParams.has('search')) {
-        setSearchParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete('search');
-          next.set('page', '1');
-          return next;
-        });
-      }
+  const applySearch = useCallback(
+    (query: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('page', '1');
+        if (query) next.set('search', query);
+        else next.delete('search');
+        return next;
+      });
     },
-    [searchParams, setSearchParams],
+    [setSearchParams],
   );
 
   // Status dropdown options shown before streamed counts hydrate — with the
@@ -400,7 +380,7 @@ export function MarketingOrdersPage({
           : (order) => (
               <span className="font-medium text-app-fg" title={order.customerName ?? undefined}>
                 {clipName(order.customerName)}
-                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
               </span>
@@ -417,7 +397,7 @@ export function MarketingOrdersPage({
               order.mediaBuyerId ? (
                 <Link
                   to={`/hr/users/${order.mediaBuyerId}`}
-                  className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-semibold hover:underline"
+                  className="text-app-fg font-semibold hover:underline"
                 >
                   {order.mediaBuyerName ?? 'View user'}
                 </Link>
@@ -556,7 +536,7 @@ export function MarketingOrdersPage({
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-app-fg" title={order.customerName ?? undefined}>
               {clipName(order.customerName)}
-              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+              {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
               {order.isDuplicate === 'FLAGGED' && (
@@ -920,8 +900,6 @@ export function MarketingOrdersPage({
             return (
               <>
                 <OverviewStatStrip
-                  mobileGrid
-                  tileClassName="!py-2.5"
                   liveFlash={liveState.showGreen}
                   loading={deferredLoading}
                   items={[
@@ -989,13 +967,13 @@ export function MarketingOrdersPage({
                           label: 'CR',
                           value: `${cr.toFixed(1)}%`,
                           valueClassName: confirmationRateColorClass(cr),
-                          title: 'Confirmation Rate — confirmed-or-beyond / total (DELETED excluded)',
+                          title: 'Confirmation Rate: confirmed-or-beyond / total (DELETED excluded)',
                         },
                         {
                           label: 'DR',
                           value: <>{dr.toFixed(1)}%</>,
                           valueClassName: deliveryRateColorClass(dr),
-                          title: 'Delivery Rate — delivered / total orders',
+                          title: 'Delivery Rate: delivered / total orders',
                         },
                       ];
                     })(),
@@ -1024,147 +1002,139 @@ export function MarketingOrdersPage({
                   ]}
                 />
 
+                <div className="list-panel">
                 <ToolbarFiltersCollapsible
+                  className="!border-0"
                   hideMobileSheet
                   badgeCount={ordersToolbarFilterBadge}
                   searchRow={
-                    <form onSubmit={handleSearchSubmit} className="flex min-w-0 w-full gap-2">
-                      <SearchInput
-                        placeholder="Search by name, order number, or ID..."
-                        value={searchQuery}
-                        onChange={handleSearchChange}
-                        withSubmitButton
-                        wrapperClassName="min-w-0 flex-1"
-                      />
-                    </form>
+                    <PageSearchControl
+                      value={searchFilter || ''}
+                      placeholder="Search by name, order number, or ID..."
+                      title="Search orders"
+                      onApply={applySearch}
+                    />
                   }
                   desktopInlineFilters={
                     <>
-                      <FormSelect
+                      <InlineFilter
+                        type="select"
                         value={selectedStatus}
-                        onChange={(e) => handleStatusChange(e.target.value)}
+                        onChange={handleStatusChange}
                         options={statusOptions}
-                        wrapperClassName="w-auto min-w-[11rem]"
+                        width="w-auto min-w-[11rem]"
                       />
                       {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
-                        <div className="relative">
-                          {(searchParams.get('mediaBuyerId') || 'ALL') !== 'ALL' && (
-                            <FilterDismiss onClear={() => {
-                              setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
-                            }} />
-                          )}
-                          <SearchableSelect
-                            id="marketing-orders-filter-buyer"
-                            value={searchParams.get('mediaBuyerId') || 'ALL'}
-                            onChange={(v) => {
-                              setSearchParams((p) => {
-                                const next = new URLSearchParams(p);
-                                next.set('page', '1');
-                                if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                                else next.delete('mediaBuyerId');
-                                return next;
-                              });
-                            }}
-                            options={mediaBuyerFilterOptions}
-                            wrapperClassName="w-full min-w-0 sm:w-56"
-                            placeholder="All media buyers"
-                            searchPlaceholder="Search buyers…"
-                          />
-                        </div>
-                      ) : null}
-                      {ins.productsForFilter.length > 0 ? (
-                        <div className="relative">
-                          {(searchParams.get('productId') || 'ALL') !== 'ALL' && (
-                            <FilterDismiss onClear={() => {
-                              setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
-                            }} />
-                          )}
-                          <SearchableSelect
-                            id="marketing-orders-filter-product"
-                            value={searchParams.get('productId') || 'ALL'}
-                            onChange={(v) => {
-                              setSearchParams((p) => {
-                                const next = new URLSearchParams(p);
-                                next.set('page', '1');
-                                if (v && v !== 'ALL') next.set('productId', v);
-                                else next.delete('productId');
-                                return next;
-                              });
-                            }}
-                            options={[
-                              { value: 'ALL', label: 'All products' },
-                              ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                            ]}
-                            wrapperClassName="w-full min-w-0 sm:w-48"
-                            placeholder="All products"
-                            searchPlaceholder="Search products…"
-                          />
-                        </div>
-                      ) : null}
-                      {ins.campaignsForFilter.length > 0 ? (
-                        <div className="relative">
-                          {(searchParams.get('campaignId') || 'ALL') !== 'ALL' && (
-                            <FilterDismiss onClear={() => {
-                              setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
-                            }} />
-                          )}
-                          <SearchableSelect
-                            id="marketing-orders-filter-form"
-                            value={searchParams.get('campaignId') || 'ALL'}
-                            onChange={(v) => {
-                              setSearchParams((p) => {
-                                const next = new URLSearchParams(p);
-                                next.set('page', '1');
-                                if (v && v !== 'ALL') next.set('campaignId', v);
-                                else next.delete('campaignId');
-                                return next;
-                              });
-                            }}
-                            options={[
-                              { value: 'ALL', label: 'All forms' },
-                              ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                            ]}
-                            wrapperClassName="w-full min-w-0 sm:w-48"
-                            placeholder="All forms"
-                            searchPlaceholder="Search forms…"
-                          />
-                        </div>
-                      ) : null}
-                      <div className="relative">
-                        {(sortByProp !== 'createdAt' || sortOrderProp !== 'desc') && (
-                          <FilterDismiss onClear={() => {
-                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('sortBy'); n.delete('sortOrder'); n.set('page', '1'); return n; });
-                          }} />
-                        )}
-                        <FormSelect
-                          value={`${sortByProp}:${sortOrderProp}`}
-                          onChange={(e) => {
-                            const [newSortBy, newSortOrder] = e.target.value.split(':');
+                        <InlineFilter
+                          type="searchable"
+                          id="marketing-orders-filter-buyer"
+                          value={searchParams.get('mediaBuyerId') || 'ALL'}
+                          defaultValue="ALL"
+                          onChange={(v) => {
                             setSearchParams((p) => {
                               const next = new URLSearchParams(p);
                               next.set('page', '1');
-                              if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
-                              else next.delete('sortBy');
-                              if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
-                              else next.delete('sortOrder');
+                              if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                              else next.delete('mediaBuyerId');
                               return next;
                             });
                           }}
-                          options={[
-                            { value: 'createdAt:desc', label: 'Newest first' },
-                            { value: 'createdAt:asc', label: 'Oldest first' },
-                            { value: 'totalAmount:desc', label: 'Highest amount' },
-                            { value: 'totalAmount:asc', label: 'Lowest amount' },
-                            { value: 'updatedAt:desc', label: 'Recently updated' },
-                          ]}
-                          wrapperClassName="w-full min-w-0 sm:w-44"
+                          onClear={() => {
+                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
+                          }}
+                          options={mediaBuyerFilterOptions}
+                          width="user"
+                          placeholder="All media buyers"
+                          searchPlaceholder="Search buyers…"
                         />
-                      </div>
-                      {/* Source filter removed — only relevant on the Sales orders page */}
+                      ) : null}
+                      {ins.productsForFilter.length > 0 ? (
+                        <InlineFilter
+                          type="searchable"
+                          id="marketing-orders-filter-product"
+                          value={searchParams.get('productId') || 'ALL'}
+                          defaultValue="ALL"
+                          onChange={(v) => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (v && v !== 'ALL') next.set('productId', v);
+                              else next.delete('productId');
+                              return next;
+                            });
+                          }}
+                          onClear={() => {
+                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
+                          }}
+                          options={[
+                            { value: 'ALL', label: 'All products' },
+                            ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                          ]}
+                          width="product"
+                          placeholder="All products"
+                          searchPlaceholder="Search products…"
+                        />
+                      ) : null}
+                      {ins.campaignsForFilter.length > 0 ? (
+                        <InlineFilter
+                          type="searchable"
+                          id="marketing-orders-filter-form"
+                          value={searchParams.get('campaignId') || 'ALL'}
+                          defaultValue="ALL"
+                          onChange={(v) => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (v && v !== 'ALL') next.set('campaignId', v);
+                              else next.delete('campaignId');
+                              return next;
+                            });
+                          }}
+                          onClear={() => {
+                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
+                          }}
+                          options={[
+                            { value: 'ALL', label: 'All forms' },
+                            ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                          ]}
+                          width="product"
+                          placeholder="All forms"
+                          searchPlaceholder="Search forms…"
+                        />
+                      ) : null}
+                      <InlineFilter
+                        type="select"
+                        value={`${sortByProp}:${sortOrderProp}`}
+                        defaultValue="createdAt:desc"
+                        onChange={(v) => {
+                          const [newSortBy, newSortOrder] = v.split(':');
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
+                            else next.delete('sortBy');
+                            if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
+                            else next.delete('sortOrder');
+                            return next;
+                          });
+                        }}
+                        onClear={() => {
+                          setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('sortBy'); n.delete('sortOrder'); n.set('page', '1'); return n; });
+                        }}
+                        options={[
+                          { value: 'createdAt:desc', label: 'Newest first' },
+                          { value: 'createdAt:asc', label: 'Oldest first' },
+                          { value: 'totalAmount:desc', label: 'Highest amount' },
+                          { value: 'totalAmount:asc', label: 'Lowest amount' },
+                          { value: 'updatedAt:desc', label: 'Recently updated' },
+                        ]}
+                        width="sort"
+                      />
                     </>
                   }
                   sheetFilterBody={null}
                 />
+                </div>
               </>
             );
       })()}
@@ -1247,7 +1217,7 @@ export function MarketingOrdersPage({
         picklists={secondary.marketingExportPicklists}
         initialFilters={{
           status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
-          search: searchQuery || undefined,
+          search: searchFilter || undefined,
           mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
           ...(dateFilters.periodAllTime
             ? { periodAllTime: true as const }

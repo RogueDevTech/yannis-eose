@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { useFetcher, useNavigate } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { formatRoleLabel } from '~/components/ui/role-badge';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -15,10 +15,13 @@ import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -29,7 +32,9 @@ import { TextInput } from '~/components/ui/text-input';
 import type { Adjustment, HRUser, HRStreamData } from './types';
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
+import { PayrollBankPayExportModal } from './PayrollBankPayExportModal';
 import { ADMIN_ROLES, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
+import { hasFinanceAccess, isAdminLevel } from '~/lib/rbac';
 
 const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 
@@ -53,12 +58,16 @@ export function HRPage({
   monthlyPayrolls,
   branches,
   viewer,
+  filters,
 }: HRStreamData) {
+  const navigate = useNavigate();
   const fetcher = useFetcher();
   const hrSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
+  const [showBankPayExport, setShowBankPayExport] = useState(false);
   const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
+  const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
@@ -75,6 +84,7 @@ export function HRPage({
    *  approve actions too — both intents resolve through this single hook). */
   const handleHrFetcherSuccess = useCallback(() => {
     setShowAddAdjustment(false);
+    setApproveAdjustmentTarget(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleHrFetcherSuccess);
 
@@ -96,8 +106,28 @@ export function HRPage({
     buildAdjustmentApprovalPatches,
   );
 
-  const isAdmin = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
+  const isAdmin = isAdminLevel(viewer);
   const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER';
+  const canExportBankPay =
+    isAdmin ||
+    hasFinanceAccess(viewer) ||
+    (viewer.permissions ?? []).includes('finance.disburse');
+
+  const showGenerateButton = useMemo(() => {
+    const generatableDepartments = ADMIN_ROLES.has(viewer.role)
+      ? ALL_DEPARTMENTS
+      : viewer.prepareDepartments?.length
+        ? viewer.prepareDepartments
+        : viewer.role === 'HR_MANAGER'
+          ? ['LOGISTICS', 'HR']
+          : ALL_DEPARTMENTS.filter((d) => DEPT_OWNER_ROLE[d] === viewer.role);
+    const generatableBranches = ADMIN_ROLES.has(viewer.role)
+      ? branches
+      : viewer.prepareBranchIds?.length
+        ? branches.filter((b) => viewer.prepareBranchIds?.includes(b.id))
+        : branches.filter((b) => b.id === viewer.currentBranchId);
+    return generatableDepartments.length > 0 && generatableBranches.length > 0;
+  }, [viewer, branches]);
 
   return (
     <div className="space-y-4">
@@ -113,6 +143,17 @@ export function HRPage({
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
+                {canExportBankPay ? (
+                  <Button variant="secondary" size="sm" onClick={() => setShowBankPayExport(true)}>
+                    Export bank pay
+                  </Button>
+                ) : null}
                 {isHrOrFinance ? (
                   <Button
                     variant="primary"
@@ -122,25 +163,64 @@ export function HRPage({
                     + Add-on
                   </Button>
                 ) : null}
+                {showGenerateButton ? (
+                  <Button variant="primary" size="sm" onClick={() => navigate('/hr/payroll/generate')}>
+                    + Generate Monthly Batch
+                  </Button>
+                ) : null}
               </div>
             }
-            sheet={({ closeSheet }) =>
-              isHrOrFinance ? (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowAddAdjustment(true);
-                  }}
-                >
-                  + Add-on
-                </Button>
-              ) : null
-            }
+            sheet={({ closeSheet }) => (
+              <div className="space-y-2">
+                {canExportBankPay ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowBankPayExport(true);
+                    }}
+                  >
+                    Export bank pay
+                  </Button>
+                ) : null}
+                {isHrOrFinance ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowAddAdjustment(true);
+                    }}
+                  >
+                    + Add-on
+                  </Button>
+                ) : null}
+                {showGenerateButton ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      navigate('/hr/payroll/generate');
+                    }}
+                  >
+                    + Generate Monthly Batch
+                  </Button>
+                ) : null}
+              </div>
+            )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       {actionError &&
@@ -287,7 +367,6 @@ export function HRPage({
         <MonthlyPayrolls
           monthlyPayrolls={monthlyPayrolls}
           branches={branches}
-          viewer={viewer}
         />
       )}
 
@@ -362,17 +441,14 @@ export function HRPage({
                     tight: true,
                     render: (adj) =>
                       !adj.approvedBy && adj.category !== 'CLAWBACK' ? (
-                        <fetcher.Form method="post" className="inline">
-                          <input type="hidden" name="intent" value="approveAdjustment" />
-                          <input type="hidden" name="adjustmentId" value={adj.id} />
-                          <TableActionButton
-                            type="submit"
-                            variant="primary"
-                            disabled={fetcher.state === 'submitting'}
-                          >
-                            Approve
-                          </TableActionButton>
-                        </fetcher.Form>
+                        <TableActionButton
+                          type="button"
+                          variant="primary"
+                          disabled={fetcher.state === 'submitting'}
+                          onClick={() => setApproveAdjustmentTarget(adj)}
+                        >
+                          Approve
+                        </TableActionButton>
                       ) : null,
                   },
                 ];
@@ -409,18 +485,15 @@ export function HRPage({
                           </div>
                           <p className="text-xs text-app-fg-muted">{adj.reason}</p>
                           {!adj.approvedBy && adj.category !== 'CLAWBACK' && (
-                            <fetcher.Form method="post">
-                              <input type="hidden" name="intent" value="approveAdjustment" />
-                              <input type="hidden" name="adjustmentId" value={adj.id} />
-                              <TableActionButton
-                                type="submit"
-                                variant="primary"
-                                className="w-full justify-center"
-                                disabled={fetcher.state === 'submitting'}
-                              >
-                                Approve
-                              </TableActionButton>
-                            </fetcher.Form>
+                            <TableActionButton
+                              type="button"
+                              variant="primary"
+                              className="w-full justify-center"
+                              disabled={fetcher.state === 'submitting'}
+                              onClick={() => setApproveAdjustmentTarget(adj)}
+                            >
+                              Approve
+                            </TableActionButton>
                           )}
                         </div>
                       )}
@@ -432,6 +505,50 @@ export function HRPage({
           )}
         </DeferredSection>
       )}
+
+      {canExportBankPay ? (
+        <PayrollBankPayExportModal
+          open={showBankPayExport}
+          onClose={() => setShowBankPayExport(false)}
+          monthlyPayrolls={monthlyPayrolls}
+          branches={branches}
+        />
+      ) : null}
+
+      <ConfirmActionModal
+        open={!!approveAdjustmentTarget}
+        onClose={() => setApproveAdjustmentTarget(null)}
+        title="Approve adjustment"
+        description={
+          approveAdjustmentTarget
+            ? `Approve this ${approveAdjustmentTarget.category.replace(/_/g, ' ').toLowerCase()} adjustment for ${
+                users.find((u) => u.id === approveAdjustmentTarget.staffId)?.name ?? 'staff'
+              }?`
+            : ''
+        }
+        details={
+          approveAdjustmentTarget ? (
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>
+                Amount{' '}
+                <NairaPrice amount={Math.abs(Number(approveAdjustmentTarget.amount))} />
+                {Number(approveAdjustmentTarget.amount) < 0 ? ' (deduction)' : ''}
+              </li>
+              <li>{approveAdjustmentTarget.reason}</li>
+            </ul>
+          ) : null
+        }
+        confirmLabel="Approve"
+        variant="warning"
+        loading={fetcher.state === 'submitting'}
+        onConfirm={() => {
+          if (!approveAdjustmentTarget) return;
+          fetcher.submit(
+            { intent: 'approveAdjustment', adjustmentId: approveAdjustmentTarget.id },
+            { method: 'post' },
+          );
+        }}
+      />
     </div>
   );
 }

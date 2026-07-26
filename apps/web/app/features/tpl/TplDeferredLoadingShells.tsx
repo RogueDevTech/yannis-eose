@@ -9,6 +9,8 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { logisticsOrdersShellColumns } from '~/features/logistics/LogisticsDeferredLoadingShells';
 
 /** Reuse admin inventory overview chrome for TPL stock hub. */
@@ -106,7 +108,6 @@ export function TplOrdersLoadingShell({
         periodAllTime={filters.periodAllTime}
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total Orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Awaiting logistics assignment', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -116,14 +117,36 @@ export function TplOrdersLoadingShell({
           { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
-      <div className="h-10 w-full max-w-md rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
-      <CompactTable<{ id: string }>
-        columns={cols}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
+      {/* Filters outside elevated table chrome — mirrors LogisticsOrdersPage. */}
+      <ToolbarFiltersCollapsible
+        className="!border-0 !p-0 !bg-transparent"
+        hideMobileSheet
+        searchRow={
+          <PageSearchControl
+            value=""
+            onApply={() => {}}
+            placeholder="Search by customer name..."
+            title="Search orders"
+          />
+        }
+        desktopInlineFilters={
+          <div
+            className="h-9 w-full min-w-0 sm:w-48 rounded-md border border-app-border bg-app-hover animate-pulse"
+            aria-hidden
+          />
+        }
+        sheetFilterBody={<div className="space-y-3" />}
       />
+      <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={cols}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }

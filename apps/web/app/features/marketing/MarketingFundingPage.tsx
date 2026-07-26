@@ -26,6 +26,7 @@ import {
 } from '~/components/ui/compact-table';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -33,10 +34,10 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Tabs } from '~/components/ui/tabs';
 import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { NairaPrice } from '~/components/ui/naira-price';
 import { Textarea } from '~/components/ui/textarea';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { isAdminLevel } from '~/lib/rbac';
@@ -517,14 +518,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   // ── Disputed totals + search local state ────────────────
   const totalDisputed = directionSummary.disputedAsReceiver + directionSummary.disputedAsSender;
 
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') ?? '');
+  const appliedSearch = searchParams.get('search') ?? '';
   const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
-  useEffect(() => {
-    setSearchQuery(searchParams.get('search') ?? '');
-  }, [searchParams]);
-  const submitSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    updateSliceParam('search', searchQuery.trim() || undefined);
+  const applySearch = (query: string) => {
+    updateSliceParam('search', query || undefined);
   };
 
   const handleCreateFundingSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -1071,9 +1068,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <>
             <UnifiedDistributingFilterBar
               slice={unifiedDistributingSlice}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onSearchSubmit={submitSearch}
+              searchQuery={appliedSearch}
+              onSearchApply={applySearch}
               onTypeChange={(v) => updateSliceParam('entryType', v)}
               onStatusChange={(v) => updateSliceParam('entryStatus', v)}
               senders={distributingSenders}
@@ -1126,9 +1122,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <>
             <UnifiedReceivedFilterBar
               slice={unifiedReceivedSlice}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onSearchSubmit={submitSearch}
+              searchQuery={appliedSearch}
+              onSearchApply={applySearch}
               onTypeChange={(v) => updateSliceParam('entryType', v)}
               onStatusChange={(v) => updateSliceParam('entryStatus', v)}
             />
@@ -1218,11 +1213,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                     ? 'Team supervisor'
                     : r.isFinance
                       ? 'Finance'
-                      : r.role === 'SUPER_ADMIN'
-                        ? 'Super Admin'
-                        : r.role === 'ADMIN'
-                          ? 'Admin'
-                          : 'Head of Marketing';
+                      : isAdminLevel(r)
+                        ? 'Admin'
+                        : 'Head of Marketing';
                   return {
                     value: r.id,
                     label: `${r.name}: ${roleLabel}${r.isPreferred ? ' (default)' : ''}`,
@@ -1480,7 +1473,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             <input type="hidden" name="requestId" value={approvingRequest.id} />
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Amount ({'₦'})<span className="text-app-fg-muted/70">. Requested {'₦'}{Number(approvingRequest.amount).toLocaleString()}</span>
+                Amount ({'₦'})<span className="text-app-fg-muted/70">. Requested <NairaPrice amount={Number(approvingRequest.amount)} /></span>
               </label>
               <AmountInput
                 name="amount"
@@ -2155,8 +2148,7 @@ function SliceFilterBar({
   transfers,
   requests,
   searchQuery,
-  onSearchChange,
-  onSearchSubmit,
+  onSearchApply,
   onStatusChange,
   onRequestStatusChange,
 }: {
@@ -2164,8 +2156,7 @@ function SliceFilterBar({
   transfers: FundingSliceData;
   requests: FundingRequestsSliceData;
   searchQuery: string;
-  onSearchChange: (val: string) => void;
-  onSearchSubmit: (e: React.FormEvent) => void;
+  onSearchApply: (query: string) => void;
   onStatusChange: (val: string) => void;
   onRequestStatusChange: (val: string) => void;
 }) {
@@ -2176,15 +2167,12 @@ function SliceFilterBar({
 
   return (
     <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
-      <form onSubmit={onSearchSubmit} className="flex gap-2 flex-1 min-w-0">
-        <SearchInput
-          value={searchQuery}
-          onChange={(val) => onSearchChange(val)}
-          placeholder={placeholder}
-          withSubmitButton
-          wrapperClassName="flex-1 min-w-0"
-        />
-      </form>
+      <PageSearchControl
+        value={searchQuery}
+        placeholder={placeholder}
+        title="Search funding"
+        onApply={onSearchApply}
+      />
       {isTransfers ? (
         <FormSelect
           value={transfers.statusFilter ?? 'ALL'}
@@ -2293,8 +2281,7 @@ function FundingFilterControls({
 function UnifiedDistributingFilterBar({
   slice,
   searchQuery,
-  onSearchChange,
-  onSearchSubmit,
+  onSearchApply,
   onTypeChange,
   onStatusChange,
   senders,
@@ -2306,8 +2293,7 @@ function UnifiedDistributingFilterBar({
 }: {
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   searchQuery: string;
-  onSearchChange: (val: string) => void;
-  onSearchSubmit: (e: React.FormEvent) => void;
+  onSearchApply: (query: string) => void;
   onTypeChange: (val: string) => void;
   onStatusChange: (val: string) => void;
   senders?: Array<{ value: string; label: string }>;
@@ -2344,15 +2330,12 @@ function UnifiedDistributingFilterBar({
       hideMobileSheet
       badgeCount={filterBadge}
       searchRow={
-        <form onSubmit={onSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-          <SearchInput
-            value={searchQuery}
-            onChange={(val) => onSearchChange(val)}
-            placeholder="Search by requester, sender, receiver, or reason..."
-            withSubmitButton
-            wrapperClassName="min-w-0 flex-1"
-          />
-        </form>
+        <PageSearchControl
+          value={searchQuery}
+          placeholder="Search by requester, sender, receiver, or reason..."
+          title="Search funding"
+          onApply={onSearchApply}
+        />
       }
       desktopInlineFilters={
         <>
@@ -2509,8 +2492,9 @@ function UnifiedDistributingTable({
       {
         key: 'from',
         header: 'From',
+        nowrap: true,
         render: (entry) => (
-          <span className="text-app-fg text-sm">
+          <span className="text-app-fg text-sm truncate max-w-[10rem] inline-block">
             {entry.entryType === 'request'
               ? (entry.requesterName ?? userNameById(entry.requesterId))
               : (entry.senderName ?? userNameById(entry.senderId))}
@@ -2520,8 +2504,9 @@ function UnifiedDistributingTable({
       {
         key: 'to',
         header: 'To',
+        nowrap: true,
         render: (entry) => (
-          <span className="text-app-fg text-sm">
+          <span className="text-app-fg text-sm truncate max-w-[10rem] inline-block">
             {entry.entryType === 'request'
               ? (entry.targetUserName ?? '—')
               : (entry.receiverName ?? userNameById(entry.receiverId))}
@@ -2764,15 +2749,13 @@ type UnifiedReceivedSlice = {
 function UnifiedReceivedFilterBar({
   slice,
   searchQuery,
-  onSearchChange,
-  onSearchSubmit,
+  onSearchApply,
   onTypeChange,
   onStatusChange,
 }: {
   slice: UnifiedReceivedSlice;
   searchQuery: string;
-  onSearchChange: (val: string) => void;
-  onSearchSubmit: (e: React.FormEvent) => void;
+  onSearchApply: (query: string) => void;
   onTypeChange: (val: string) => void;
   onStatusChange: (val: string) => void;
 }) {
@@ -2803,15 +2786,12 @@ function UnifiedReceivedFilterBar({
       hideMobileSheet
       badgeCount={filterBadge}
       searchRow={
-        <form onSubmit={onSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-          <SearchInput
-            value={searchQuery}
-            onChange={(val) => onSearchChange(val)}
-            placeholder="Search by sender, requester, or reason..."
-            withSubmitButton
-            wrapperClassName="min-w-0 flex-1"
-          />
-        </form>
+        <PageSearchControl
+          value={searchQuery}
+          placeholder="Search by sender, requester, or reason..."
+          title="Search funding"
+          onApply={onSearchApply}
+        />
       }
       desktopInlineFilters={
         <>
@@ -2940,8 +2920,9 @@ function UnifiedReceivedTable({
       {
         key: 'from',
         header: 'From',
+        nowrap: true,
         render: (entry) => (
-          <span className="text-app-fg text-sm">
+          <span className="text-app-fg text-sm truncate max-w-[10rem] inline-block">
             {entry.entryType === 'transfer'
               ? (entry.senderName ?? userNameById(entry.senderId))
               : (entry.requesterName ?? userNameById(entry.requesterId))}
@@ -3034,7 +3015,7 @@ function UnifiedReceivedTable({
                   kind: 'button',
                   label: 'Received',
                   tone: 'success',
-                  onClick: () => onOpenMarkReceived(transferToFundingRecord(entry)),
+                  onClick: () => onOpenMarkReceived(transferToFundingRecord(entry as DistributingFundingTransferEntry)),
                   show: canMarkReceived,
                 },
                 {
@@ -3042,7 +3023,7 @@ function UnifiedReceivedTable({
                   kind: 'button',
                   label: 'Dispute',
                   tone: 'danger',
-                  onClick: () => onOpenNotReceived(transferToFundingRecord(entry)),
+                  onClick: () => onOpenNotReceived(transferToFundingRecord(entry as DistributingFundingTransferEntry)),
                   show: canMarkReceived,
                 },
                 {

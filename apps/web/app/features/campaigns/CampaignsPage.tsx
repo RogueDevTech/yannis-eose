@@ -12,7 +12,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
@@ -297,6 +297,8 @@ export function FormsPage({
             sheetTitle="Actions"
             triggerAriaLabel="Forms toolbar"
             saveFilterKey
+            filtersBadgeCount={productFilter ? 1 : 0}
+            onClearFilters={productFilter ? () => applyProductFilter('') : undefined}
             desktop={
               <>
                 <PageRefreshButton />
@@ -310,6 +312,24 @@ export function FormsPage({
                   </Button>
                 </BranchScopedLink>
               </>
+            }
+            filters={
+              products.length > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                  <SearchableSelect
+                    id="forms-product-filter-mobile"
+                    value={productFilter}
+                    onChange={applyProductFilter}
+                    options={[
+                      { value: '', label: 'All products' },
+                      ...products.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    placeholder="All products"
+                    searchPlaceholder="Search products…"
+                  />
+                </div>
+              ) : undefined
             }
             sheet={
               <BranchScopedLink
@@ -367,18 +387,12 @@ export function FormsPage({
               : undefined
           }
           searchRow={
-            <form
-              className="min-w-0 flex-1"
-              onSubmit={(e) => e.preventDefault()}
-            >
-              <SearchInput
-                value={searchQuery}
-                onChange={applySearch}
-                placeholder="Search by name or ID…"
-                withSubmitButton
-                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-              />
-            </form>
+            <PageSearchControl
+              value={searchQuery}
+              placeholder="Search by name or ID…"
+              title="Search forms"
+              onApply={applySearch}
+            />
           }
           desktopInlineFilters={
             products.length > 0 ? (
@@ -395,24 +409,6 @@ export function FormsPage({
                 wrapperClassName="w-full min-w-0 sm:w-48"
               />
             ) : null
-          }
-          sheetFilterBody={
-            products.length > 0 ? (
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                <SearchableSelect
-                  id="forms-product-filter-mobile"
-                  value={productFilter}
-                  onChange={applyProductFilter}
-                  options={[
-                    { value: '', label: 'All products' },
-                    ...products.map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                  placeholder="All products"
-                  searchPlaceholder="Search products…"
-                />
-              </div>
-            ) : <div />
           }
         />
       </div>
@@ -488,7 +484,7 @@ export function FormsPage({
                 <>
                   <Link
                     to={`/hr/users/${c.mediaBuyerId}`}
-                    className="text-brand-600 dark:text-brand-400 hover:underline font-medium"
+                    className="font-medium text-app-fg hover:underline"
                   >
                     {c.mediaBuyerName ?? 'View user'}
                   </Link>

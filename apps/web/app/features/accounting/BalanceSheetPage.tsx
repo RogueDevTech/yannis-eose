@@ -1,17 +1,22 @@
-import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface BSRow {
   code: string;
   name: string;
+  accountType?: string | null;
   amount: number;
 }
+
 
 export interface BalanceSheetPageProps {
   assets: BSRow[];
@@ -25,19 +30,24 @@ export interface BalanceSheetPageProps {
   asOfDate: string | null;
 }
 
-export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?: boolean; filters?: { asOfDate: string } }) {
+export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
   const { assets, liabilities, equity, retainedEarnings, totalAssets, totalLiabilities, totalEquity, balanced, consolidated, filters } = props;
-  const [searchParams, setSearchParams] = useSearchParams();
 
-  const onAsOfChange = (value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set('asOfDate', value);
-    else next.delete('asOfDate');
-    setSearchParams(next);
-  };
+  const balancedBadge = (
+    <span
+      className={[
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
+        balanced
+          ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+          : 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
+      ].join(' ')}
+    >
+      {balanced ? 'Balanced' : 'Out of balance'}
+    </span>
+  );
 
   const columns: CompactTableColumn<BSRow>[] = [
-    { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
+    { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span> },
     { key: 'amount', header: 'Amount', align: 'right', render: (r) => <NairaPrice amount={r.amount} /> },
   ];
 
@@ -60,36 +70,35 @@ export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?:
   );
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title={consolidated ? 'Consolidated Balance Sheet' : 'Balance Sheet'}
         description="Assets versus liabilities and equity, as of a date."
+        mobileInlineActions
         actions={
           <div className="flex items-center gap-2">
             <ConsolidatedToggle active={consolidated} />
-            <span
-              className={[
-                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold',
-                balanced
-                  ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                  : 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
-              ].join(' ')}
-            >
-              {balanced ? 'Balanced' : 'Out of balance'}
-            </span>
+            {balancedBadge}
+            <PageHeaderMobileTools
+              sheetTitle="Filters"
+              triggerAriaLabel="Balance sheet toolbar"
+              sheet={<ConsolidatedToggle active={consolidated} />}
+              desktop={
+                <>
+                  <PageRefreshButton />
+                  <DateFilterBar
+                    startDate={filters?.startDate}
+                    endDate={filters?.endDate}
+                    chrome="pill"
+                  />
+                </>
+              }
+            />
           </div>
         }
       />
 
-      <div className="flex items-center gap-2">
-        <label htmlFor="bs-asof" className="text-sm text-app-fg-muted">As of</label>
-        <DateInput
-          id="bs-asof"
-          value={filters?.asOfDate ?? ''}
-          onChange={(e) => onAsOfChange(e.target.value)}
-          wrapperClassName="w-44"
-        />
-      </div>
+      <MobileDateFilterRow startDate={filters?.startDate} endDate={filters?.endDate} />
 
       <OverviewStatStrip
         items={[
@@ -108,6 +117,6 @@ export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?:
           {section('Equity', equity, totalEquity, { label: 'Current-period earnings', amount: retainedEarnings })}
         </div>
       )}
-    </>
+    </div>
   );
 }

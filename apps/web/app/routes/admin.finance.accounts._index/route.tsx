@@ -4,9 +4,9 @@ import { useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
-  requireAccountingEnabled,
   requirePermissionOrRoles,
 } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -20,14 +20,15 @@ export const meta: MetaFunction = () => [{ title: 'Chart of Accounts — Account
 export { cachedClientLoader as clientLoader };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  requireAccountingEnabled();
-  await requirePermissionOrRoles(request, {
+  const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
   });
   const cookie = getSessionCookie(request);
+  const perms = (user as { permissions?: string[] }).permissions ?? [];
+  const canWrite = isAdminLevel(user) || user.role === 'FINANCE_OFFICER' || perms.includes('finance.ledger.write');
 
-  const shell = { canWrite: true };
+  const shell = { canWrite };
 
   const pageData = (async () => {
     const input = encodeURIComponent(JSON.stringify({ includeInactive: true }));
@@ -45,7 +46,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  requireAccountingEnabled();
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
 

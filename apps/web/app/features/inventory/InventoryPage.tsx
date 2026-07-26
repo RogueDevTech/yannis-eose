@@ -25,7 +25,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { RadioGroup } from '~/components/ui/radio-group';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -276,10 +276,6 @@ export function InventoryPage(props: InventoryStreamData) {
       return next;
     }, { preventScrollReset: true });
   };
-
-  // Controlled search input — submitted on form submit (Enter) or when the user clears it.
-  const [searchInput, setSearchInput] = useState(serverSearch);
-  useEffect(() => { setSearchInput(serverSearch); }, [serverSearch]);
 
   const submitSearch = (next: string) => {
     const trimmed = next.trim();
@@ -1546,26 +1542,12 @@ export function InventoryPage(props: InventoryStreamData) {
               hideMobileSheet
               badgeCount={filterBadgeCount}
               searchRow={
-                <form
-                  method="get"
-                  className="flex min-w-0 flex-1 items-center gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    submitSearch(searchInput);
-                  }}
-                >
-                  <SearchInput
-                    name="search"
-                    placeholder="Search by product name…"
-                    value={searchInput}
-                    onChange={(val) => {
-                      setSearchInput(val);
-                      if (val === '') submitSearch('');
-                    }}
-                    withSubmitButton
-                    wrapperClassName="w-full"
-                  />
-                </form>
+                <PageSearchControl
+                  value={serverSearch}
+                  placeholder="Search by product name…"
+                  title="Search stock levels"
+                  onApply={submitSearch}
+                />
               }
               desktopInlineFilters={
                 <>

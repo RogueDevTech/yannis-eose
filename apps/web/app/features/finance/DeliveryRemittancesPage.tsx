@@ -18,6 +18,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
+import { InlineFilter } from '~/components/ui/inline-filter';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -27,7 +28,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { RemittanceInfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
@@ -66,6 +67,7 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
   failedDeliveryCost?: string | null;
   orders: Array<{
     id: string;
+    orderNumber: number | null;
     customerName: string;
     totalAmount: string | null;
     deliveryFee: string | null;
@@ -243,16 +245,8 @@ export function DeliveryRemittancesPage({
   const [selectedEligibleById, setSelectedEligibleById] = useState<Map<string, EligibleOrder>>(
     () => new Map(),
   );
-  const [eligibleSearchDraft, setEligibleSearchDraft] = useState(filters.eligibleQ);
-  const [remittanceSearchDraft, setRemittanceSearchDraft] = useState(filters.remittanceSearch);
   const [infoModal, setInfoModal] = useState<string | null>(null);
   const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
-  useEffect(() => {
-    setEligibleSearchDraft(filters.eligibleQ);
-  }, [filters.eligibleQ]);
-  useEffect(() => {
-    setRemittanceSearchDraft(filters.remittanceSearch);
-  }, [filters.remittanceSearch]);
 
   /**
    * Default: Awaiting remittance; `?tab=remittances` is the batch list.
@@ -359,7 +353,7 @@ export function DeliveryRemittancesPage({
     });
   };
 
-  const s = summary as Record<string, unknown>;
+  const s = summary as unknown as Record<string, unknown>;
   // Use remittedOnlyCount (orders with status=REMITTED in the orders table) as the
   // canonical count for both the tab pill and stat strip so the numbers always match.
   const receivedOrderCount = Number(s.remittedOnlyCount ?? s.receivedOrderCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
@@ -534,6 +528,16 @@ export function DeliveryRemittancesPage({
 
   const eligibleColumns: CompactTableColumn<EligibleOrder>[] = useMemo(
     () => [
+      {
+        key: 'orderNumber',
+        header: 'Order',
+        nowrap: true,
+        render: (o) => (
+          <span className="font-mono text-sm text-app-fg">
+            {o.orderNumber ? `YNS-${String(o.orderNumber).padStart(5, '0')}` : '—'}
+          </span>
+        ),
+      },
       {
         key: 'invoiceRef',
         header: 'Invoice',
@@ -1010,7 +1014,7 @@ export function DeliveryRemittancesPage({
         <>
         {/* Info row — awaiting all time (view-only, not filterable) */}
         {Number(summary.awaitingCount) > 0 && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg-muted">
+          <div className="card flex flex-wrap items-center gap-x-4 gap-y-1 !px-3 !py-2.5 text-sm text-app-fg-muted">
             <span>
               Awaiting remittance (all time): <span className="font-medium tabular-nums text-info-600 dark:text-info-400">{Number(summary.awaitingCount).toLocaleString()}</span> orders
               {' '}(<NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} className="inline font-medium tabular-nums text-info-600 dark:text-info-400" />)
@@ -1030,6 +1034,7 @@ export function DeliveryRemittancesPage({
             <OverviewStatStrip
               mobileGrid
               mobileGridCols={1}
+              matrixCols={3}
               loading={isPageLoading}
               items={[
                 {
@@ -1266,69 +1271,54 @@ export function DeliveryRemittancesPage({
               className="!border-0"
               hideMobileSheet
               badgeCount={remittanceToolbarFilterBadge}
+              searchRow={
+                <PageSearchControl
+                  value={filters.remittanceSearch}
+                  placeholder="Search customer or order #"
+                  title="Search remittances"
+                  onApply={handleRemittanceSearchChange}
+                />
+              }
               desktopInlineFilters={
                 <>
-                  <form
-                    className="contents"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleRemittanceSearchChange(remittanceSearchDraft);
-                    }}
-                  >
-                    <SearchInput
-                      value={remittanceSearchDraft}
-                      onChange={(v) => {
-                        setRemittanceSearchDraft(v);
-                        if (v.trim() === '') handleRemittanceSearchChange('');
-                      }}
-                      withSubmitButton
-                      placeholder="Search customer or order #"
-                      controlSize="md"
-                      wrapperClassName="w-full sm:min-w-[400px]"
-                    />
-                  </form>
-                  <div className="relative">
-                    {!!filters.location && (
-                      <FilterDismiss onClear={() => handleLocationChange('')} />
-                    )}
-                    <SearchableSelect
-                      id="delivery-remittance-location-filter"
-                      value={filters.location}
-                      onChange={handleLocationChange}
-                      wrapperClassName="w-full min-w-0 sm:w-52"
-                      placeholder="All locations"
-                      searchPlaceholder="Search locations..."
-                      options={[
-                        { value: '', label: 'All locations' },
-                        ...locations.map((loc) => ({
-                          value: loc.id,
-                          label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
-                        })),
-                      ]}
-                    />
-                  </div>
-                  <div className="relative">
-                    {!!filters.sentBy && (
-                      <FilterDismiss onClear={() => handleSentByChange('')} />
-                    )}
-                    <SearchableSelect
-                      id="delivery-remittance-sent-by-filter"
-                      value={filters.sentBy}
-                      onChange={handleSentByChange}
-                      wrapperClassName="w-full min-w-0 sm:w-48"
-                      placeholder="Sent by anyone"
-                      searchPlaceholder="Search accountants..."
-                      options={[
-                        { value: '', label: 'Sent by anyone' },
-                        ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                      ]}
-                    />
-                  </div>
-                  <FormSelect
+                  <InlineFilter
+                    type="searchable"
+                    id="delivery-remittance-location-filter"
+                    value={filters.location}
+                    defaultValue=""
+                    onChange={handleLocationChange}
+                    options={[
+                      { value: '', label: 'All locations' },
+                      ...locations.map((loc) => ({
+                        value: loc.id,
+                        label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
+                      })),
+                    ]}
+                    width="location"
+                    placeholder="All locations"
+                    searchPlaceholder="Search locations..."
+                  />
+                  <InlineFilter
+                    type="searchable"
+                    id="delivery-remittance-sent-by-filter"
+                    value={filters.sentBy}
+                    defaultValue=""
+                    onChange={handleSentByChange}
+                    options={[
+                      { value: '', label: 'Sent by anyone' },
+                      ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                    ]}
+                    width="user"
+                    placeholder="Sent by anyone"
+                    searchPlaceholder="Search accountants..."
+                  />
+                  <InlineFilter
+                    type="select"
                     value={viewMode}
-                    onChange={(e) => {
+                    defaultValue="batches"
+                    onChange={(v) => {
                       const params = new URLSearchParams(location.search);
-                      if (e.target.value === 'orders') params.set('view', 'orders');
+                      if (v === 'orders') params.set('view', 'orders');
                       else params.delete('view');
                       params.set('page', '1');
                       setSearchParams(params);
@@ -1337,15 +1327,17 @@ export function DeliveryRemittancesPage({
                       { value: 'batches', label: 'Batches' },
                       { value: 'orders', label: 'Orders' },
                     ]}
-                    wrapperClassName="w-full sm:w-32"
+                    width="w-full sm:w-32"
                   />
                   {viewMode === 'orders' && (
-                    <FormSelect
+                    <InlineFilter
+                      type="select"
                       value={new URLSearchParams(location.search).get('category') ?? ''}
-                      onChange={(e) => {
+                      defaultValue=""
+                      onChange={(v) => {
                         setSearchParams((p) => {
                           const next = new URLSearchParams(p);
-                          if (e.target.value) next.set('category', e.target.value);
+                          if (v) next.set('category', v);
                           else next.delete('category');
                           next.set('page', '1');
                           return next;
@@ -1353,12 +1345,12 @@ export function DeliveryRemittancesPage({
                       }}
                       options={[
                         { value: '', label: 'All categories' },
-                        { value: 'marketing', label: 'Marketing orders', dot: 'bg-blue-500' },
-                        { value: 'cart', label: 'Cart orders', dot: 'bg-purple-500' },
-                        { value: 'follow-up', label: 'Follow-up orders', dot: 'bg-amber-500' },
-                        { value: 'offline', label: 'Offline orders', dot: 'bg-gray-400' },
+                        { value: 'marketing', label: 'Marketing orders' },
+                        { value: 'cart', label: 'Cart orders' },
+                        { value: 'follow-up', label: 'Follow-up orders' },
+                        { value: 'offline', label: 'Offline orders' },
                       ]}
-                      wrapperClassName="w-full sm:w-44"
+                      width="sort"
                     />
                   )}
                   <SortMenu
@@ -1395,68 +1387,7 @@ export function DeliveryRemittancesPage({
                   />
                 </>
               }
-              sheetFilterBody={
-                <>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
-                    <div className="relative">
-                      {!!filters.location && (
-                        <FilterDismiss onClear={() => handleLocationChange('')} />
-                      )}
-                      <SearchableSelect
-                        id="delivery-remittance-location-filter-sheet"
-                        value={filters.location}
-                        onChange={handleLocationChange}
-                        wrapperClassName="w-full"
-                        placeholder="All locations"
-                        searchPlaceholder="Search locations..."
-                        options={[
-                          { value: '', label: 'All locations' },
-                          ...locations.map((loc) => ({
-                            value: loc.id,
-                            label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
-                          })),
-                        ]}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
-                    <div className="relative">
-                      {!!filters.sentBy && (
-                        <FilterDismiss onClear={() => handleSentByChange('')} />
-                      )}
-                      <SearchableSelect
-                        id="delivery-remittance-sent-by-filter-sheet"
-                        value={filters.sentBy}
-                        onChange={handleSentByChange}
-                        wrapperClassName="w-full"
-                        placeholder="Sent by anyone"
-                        searchPlaceholder="Search accountants..."
-                        options={[
-                          { value: '', label: 'Sent by anyone' },
-                          ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                        ]}
-                      />
-                    </div>
-                  </div>
-                  <FormSelect
-                    value={viewMode}
-                    onChange={(e) => {
-                      const params = new URLSearchParams(location.search);
-                      if (e.target.value === 'orders') params.set('view', 'orders');
-                      else params.delete('view');
-                      params.set('page', '1');
-                      setSearchParams(params);
-                    }}
-                    options={[
-                      { value: 'batches', label: 'Batches' },
-                      { value: 'orders', label: 'Orders' },
-                    ]}
-                    wrapperClassName="w-full"
-                  />
-                </>
-              }
+              sheetFilterBody={null}
             />
           </div>
 
@@ -1744,45 +1675,40 @@ export function DeliveryRemittancesPage({
             </p>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <form
-              className="min-w-0"
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleEligibleSearchChange(eligibleSearchDraft);
-              }}
-            >
-              <SearchInput
-                value={eligibleSearchDraft}
-                onChange={(v) => {
-                  setEligibleSearchDraft(v);
-                  if (v.trim() === '') handleEligibleSearchChange('');
-                }}
-                withSubmitButton
-                placeholder="Search customer, order ID, invoice ref, or bill-to name"
-                controlSize="md"
-              />
-            </form>
-            <div className="relative hidden sm:block sm:w-fit sm:justify-self-end">
-              {!!filters.location && (
-                <FilterDismiss onClear={() => handleLocationChange('')} />
-              )}
-              <SearchableSelect
-                id="eligible-remittance-location"
-                value={filters.location}
-                onChange={handleLocationChange}
-                wrapperClassName="w-full sm:w-52"
-                placeholder="All locations"
-                searchPlaceholder="Search locations..."
-                options={[
-                  { value: '', label: 'All locations' },
-                  ...locations.map((loc) => ({
-                    value: loc.id,
-                    label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
-                  })),
-                ]}
-              />
-            </div>
+          <div className="list-panel">
+            <ToolbarFiltersCollapsible
+              className="!border-0"
+              hideMobileSheet
+              badgeCount={filters.location ? 1 : 0}
+              searchRow={
+                <PageSearchControl
+                  value={filters.eligibleQ}
+                  placeholder="Search customer, order ID, invoice ref, or bill-to name"
+                  title="Search eligible orders"
+                  onApply={handleEligibleSearchChange}
+                />
+              }
+              desktopInlineFilters={
+                <InlineFilter
+                  type="searchable"
+                  id="eligible-remittance-location"
+                  value={filters.location}
+                  defaultValue=""
+                  onChange={handleLocationChange}
+                  options={[
+                    { value: '', label: 'All locations' },
+                    ...locations.map((loc) => ({
+                      value: loc.id,
+                      label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
+                    })),
+                  ]}
+                  width="location"
+                  placeholder="All locations"
+                  searchPlaceholder="Search locations..."
+                />
+              }
+              sheetFilterBody={null}
+            />
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md bg-app-hover px-2.5 py-1.5 sm:px-3">

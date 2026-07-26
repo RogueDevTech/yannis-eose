@@ -1033,7 +1033,7 @@ function GroupsAndBranchesTab({
               render: (r) => {
                 if (r.kind === 'group') {
                   return (
-                    <button type="button" onClick={() => setPeekGroup(r as FollowUpGroupItem)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
+                    <button type="button" onClick={() => setPeekGroup(r as FollowUpGroupItem)} className="text-sm font-medium text-app-fg hover:underline text-left">
                       {r.name}
                     </button>
                   );

@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requireAccountingEnabled, requirePermissionOrRoles, parsePerPage } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, parsePerPage } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -34,7 +34,6 @@ const EMPTY: ListResponse = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
@@ -61,17 +60,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/generalLedger.listAssets?input=${input}`,
       { method: 'GET', cookie },
     );
-    const data: ListResponse = res.ok
-      ? ((res.data as { result?: { data?: ListResponse } })?.result?.data ?? EMPTY)
-      : EMPTY;
-    return data;
+    if (!res.ok) return EMPTY;
+    const raw = (res.data as { result?: { data?: Record<string, unknown> } })?.result?.data;
+    if (!raw) return EMPTY;
+
+    // API returns { assets, pagination } — map to page's expected shape
+    const records = (raw.assets ?? raw.records ?? []) as AssetRow[];
+    const pag = (raw.pagination ?? EMPTY.pagination) as ListResponse['pagination'];
+
+    // Build summary from records if not provided by API
+    const summary = (raw.summary as ListResponse['summary'] | undefined) ?? {
+      totalAssets: pag.total,
+      totalCost: String(records.reduce((s, r) => s + Number(r.cost || 0), 0)),
+      totalAccumulatedDepreciation: String(records.reduce((s, r) => s + Number(r.accumulatedDepreciation || 0), 0)),
+      totalNbv: String(records.reduce((s, r) => s + Number(r.nbv || 0), 0)),
+    };
+
+    return { records, pagination: pag, summary };
   })();
 
   return defer({ shell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  requireAccountingEnabled();
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
 

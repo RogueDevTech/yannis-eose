@@ -21,6 +21,10 @@ import type {
 import { formatRole, ROLE_AVATAR_GRADIENTS } from './types';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PermissionMatrix } from './PermissionMatrix';
+import {
+  PayrollUserProfileSection,
+  type PayrollProfileValues,
+} from '~/features/hr/PayrollUserProfileSection';
 
 // HoCS / HoM / HoLogistics + HR_MANAGER: existing ACTIVE+PENDING holders shown
 // as a soft warning only. Multiple holders are allowed; HR is company-wide too.
@@ -152,6 +156,12 @@ export interface EditingUser {
   branchIds: string[];
   roleTemplateId: string | null;
   permissionOverrides: Record<string, boolean>;
+  payRoleId?: string | null;
+  employmentType?: string;
+  salaryBasis?: string;
+  taxStatus?: string;
+  reportsToUserId?: string | null;
+  crmLinked?: boolean;
 }
 
 /** Type guard — distinguishes a pre-resolved payload (clientLoader cache hit
@@ -170,6 +180,7 @@ const EMPTY_USER_PICKLISTS: UserCreateLoaderData = {
   permissionCatalog: [],
   templatePermissionsById: {},
   defaultMembershipBranchId: null,
+  payRoles: [],
 };
 
 /** Accordion-style branch membership picker, grouped by company, collapsed by default. */
@@ -352,6 +363,7 @@ export function UserCreatePage({
     defaultMembershipBranchId,
     branchGroups,
     viewerRole,
+    payRoles,
   } = picklists ?? EMPTY_USER_PICKLISTS;
   const isEditMode = !!editingUser;
   const actionData = useActionData<{
@@ -534,6 +546,16 @@ export function UserCreatePage({
   const [permissionOverrides, setPermissionOverrides] = useState<Record<string, boolean>>(
     editingUser?.permissionOverrides ?? {},
   );
+  const [payrollProfile, setPayrollProfile] = useState<PayrollProfileValues>({
+    payRoleId: editingUser?.payRoleId ?? null,
+    employmentType: editingUser?.employmentType ?? 'STAFF',
+    salaryBasis: editingUser?.salaryBasis ?? 'FORMULA_BASED',
+    taxStatus: editingUser?.taxStatus ?? 'STANDARD_PAYE',
+    reportsToUserId: editingUser?.reportsToUserId ?? null,
+    crmLinked: editingUser?.crmLinked ?? true,
+  });
+  const payrollProfileFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(payrollProfileFetcher.data, { successMessage: 'Payroll profile saved' });
 
   // Reset permissions to role defaults — standalone server action via fetcher.
   const resetPermsFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
@@ -1339,6 +1361,34 @@ export function UserCreatePage({
             )}
           </div>
         )}
+
+        {isEditMode && (payRoles ?? []).length > 0 ? (
+          <payrollProfileFetcher.Form method="post" className="space-y-3">
+            <input type="hidden" name="intent" value="updatePayrollProfile" />
+            <input type="hidden" name="userId" value={editingUser!.id} />
+            <input type="hidden" name="payRoleId" value={payrollProfile.payRoleId ?? ''} />
+            <input type="hidden" name="employmentType" value={payrollProfile.employmentType} />
+            <input type="hidden" name="salaryBasis" value={payrollProfile.salaryBasis} />
+            <input type="hidden" name="taxStatus" value={payrollProfile.taxStatus} />
+            <input type="hidden" name="reportsToUserId" value={payrollProfile.reportsToUserId ?? ''} />
+            <input type="hidden" name="crmLinked" value={payrollProfile.crmLinked ? 'true' : 'false'} />
+            <PayrollUserProfileSection
+              values={payrollProfile}
+              payRoles={(payRoles ?? []) as import('~/features/hr/payroll-prd-types').PayRole[]}
+              managerOptions={activeHeads.map((h) => ({ value: h.id, label: h.name }))}
+              onChange={(patch) => setPayrollProfile((prev) => ({ ...prev, ...patch }))}
+            />
+            <Button
+              type="submit"
+              variant="secondary"
+              size="sm"
+              loading={payrollProfileFetcher.state === 'submitting'}
+              loadingText="Saving…"
+            >
+              Save payroll profile
+            </Button>
+          </payrollProfileFetcher.Form>
+        ) : null}
 
         {/* Section 4: Contact */}
         {selectedRole && (

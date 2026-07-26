@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -9,6 +9,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useFetcherToast } from '~/components/ui/toast';
 import {
@@ -55,7 +56,19 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
         key: 'name',
         header: 'Contractor',
         hideable: false,
-        render: (row) => <span className="font-medium text-app-fg">{row.name}</span>,
+        render: (row) => (
+          <Link
+            to={`/hr/payroll/contractors/${row.id}`}
+            className="font-medium text-app-fg hover:underline"
+          >
+            {row.name}
+          </Link>
+        ),
+      },
+      {
+        key: 'jobTitle',
+        header: 'Job title',
+        render: (row) => <span className="text-app-fg-muted">{row.jobTitle || 'Not set'}</span>,
       },
       {
         key: 'fee',
@@ -84,14 +97,18 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
         align: 'right',
         tight: true,
         hideable: false,
-        render: (row) =>
-          canWrite ? (
-            <CompactTableActionButton tone="brand" onClick={() => setEditRow(row)}>
-              Edit
+        render: (row) => (
+          <div className="flex items-center justify-end gap-2">
+            <CompactTableActionButton to={`/hr/payroll/contractors/${row.id}`} tone="brand">
+              View
             </CompactTableActionButton>
-          ) : (
-            <CompactTableActionButton onClick={() => setEditRow(row)}>View</CompactTableActionButton>
-          ),
+            {canWrite ? (
+              <CompactTableActionButton tone="brand" onClick={() => setEditRow(row)}>
+                Edit
+              </CompactTableActionButton>
+            ) : null}
+          </div>
+        ),
       },
     ],
     [branchName, canWrite],
@@ -136,6 +153,26 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
         }
       />
 
+      {contractors.length > 0 && (
+        <OverviewStatStrip
+          mobileGrid
+          items={[
+            { label: 'Contractors', value: contractors.length },
+            { label: 'Active', value: contractors.filter((c) => c.active).length },
+            {
+              label: 'Monthly cost',
+              value: (
+                <NairaPrice
+                  amount={contractors
+                    .filter((c) => c.active)
+                    .reduce((sum, c) => sum + Number(c.monthlyFee), 0)}
+                />
+              ),
+            },
+          ]}
+        />
+      )}
+
       {contractors.length === 0 ? (
         <EmptyState
           title="No contractors"
@@ -153,6 +190,28 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
           rowKey={(r) => r.id}
           emptyTitle="No contractors"
           emptyDescription=""
+          renderMobileCard={(row) => (
+            <Link
+              to={`/hr/payroll/contractors/${row.id}`}
+              className="block rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 hover:bg-app-hover transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-medium text-app-fg text-sm">{row.name}</p>
+                  <p className="text-xs text-app-fg-muted mt-0.5">
+                    {row.jobTitle ? `${row.jobTitle} · ` : ''}{branchName(row.branchId)}
+                  </p>
+                </div>
+                <span className="text-sm font-semibold text-app-fg">
+                  <NairaPrice amount={Number(row.monthlyFee)} />
+                </span>
+              </div>
+              <p className="text-xs text-app-fg-muted">
+                {row.bankName ?? 'Bank not set'}
+                {row.accountNumber ? ` · ****${row.accountNumber.slice(-4)}` : ''}
+              </p>
+            </Link>
+          )}
         />
       )}
 
@@ -160,7 +219,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
         <ContractorModal
           contractor={editRow}
           branches={branches}
-          readOnly={!canWrite}
+          readOnly={false}
           submitting={fetcher.state === 'submitting'}
           error={surface.errorMatchingIntent(editRow ? 'updateContractor' : 'createContractor') ?? undefined}
           fetcher={fetcher}
@@ -218,6 +277,13 @@ function ContractorModal({
           required
           readOnly={readOnly}
           defaultValue={contractor?.name ?? ''}
+        />
+        <TextInput
+          label="Job title"
+          name="jobTitle"
+          readOnly={readOnly}
+          placeholder="e.g. IT Support, Cleaning Services"
+          defaultValue={contractor?.jobTitle ?? ''}
         />
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Monthly fee (₦)</label>

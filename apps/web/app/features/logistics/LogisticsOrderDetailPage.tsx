@@ -515,7 +515,7 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
               )}
               {isExpanded && diffs.length === 0 && isFirst && (
                 <div className="mt-1.5 ml-2 bg-app-hover rounded-lg p-2.5 text-xs text-app-fg-muted">
-                  Initial record creation &mdash; {formatDate(entry.validFrom)}
+                  Initial record creation: {formatDate(entry.validFrom)}
                 </div>
               )}
             </div>

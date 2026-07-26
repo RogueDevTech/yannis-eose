@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '~/components/ui/button';
+import { StatusBadge } from '~/components/ui/status-badge';
 import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { detectBrowser, getDeniedSteps } from '~/lib/push-denied-steps';
 
@@ -83,18 +84,11 @@ export function SettingsPushPanel({ userId }: { userId?: string | null }) {
             </p>
           </div>
           {isDenied ? (
-            <span className="flex-shrink-0 inline-flex items-center gap-1 rounded-full bg-danger-50 dark:bg-transparent dark:ring-1 dark:ring-inset dark:ring-danger-500/55 px-2.5 py-0.5 text-xs font-medium text-danger-700 dark:text-danger-300">
-              Blocked
-            </span>
+            <StatusBadge status="Blocked" variant="danger" className="flex-shrink-0" />
           ) : pushActive ? (
-            <span className="flex-shrink-0 inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-900/30 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-success-500 flex-shrink-0" />
-              Active
-            </span>
+            <StatusBadge status="Active" className="flex-shrink-0" />
           ) : isSupported ? (
-            <span className="flex-shrink-0 inline-flex items-center gap-1 rounded-full bg-app-hover px-2.5 py-0.5 text-xs font-medium text-app-fg-muted">
-              Off
-            </span>
+            <StatusBadge status="Off" variant="neutral" className="flex-shrink-0" />
           ) : null}
         </div>
 

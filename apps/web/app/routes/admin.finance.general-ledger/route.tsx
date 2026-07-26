@@ -4,75 +4,95 @@ import { useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
-  requireAccountingEnabled,
   requirePermissionOrRoles,
-  parsePerPage,
   defaultThisMonthRange,
+  parsePerPage,
 } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
-import { GeneralLedgerPage, type GeneralLedgerPageProps } from '~/features/accounting/GeneralLedgerPage';
+import { GeneralLedgerPage } from '~/features/finance/GeneralLedgerPage';
+import { GeneralLedgerLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
+import type { GeneralLedgerLoaderData, GeneralLedgerEntry } from '~/features/finance/types';
 
-export const meta: MetaFunction = () => [{ title: 'General Ledger — Finance — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'General Ledger — Yannis EOSE' }];
 
 export { cachedClientLoader as clientLoader };
 
-type JournalEntryRow = GeneralLedgerPageProps['records'][number];
+type LedgerResponse = {
+  entries: GeneralLedgerEntry[];
+  total: number;
+  page: number;
+  totalPages: number;
+  summary: {
+    totalCredits: string;
+    totalDebits: string;
+    closingBalance: string;
+    openingBalance?: string;
+  };
+};
 
-interface ListResponse {
-  records: JournalEntryRow[];
-  pagination: { total: number; page: number; pageSize: number; totalPages: number };
-}
-
-const EMPTY: ListResponse = {
-  records: [],
-  pagination: { total: 0, page: 1, pageSize: 50, totalPages: 1 },
+const EMPTY_LEDGER: LedgerResponse = {
+  entries: [],
+  total: 0,
+  page: 1,
+  totalPages: 1,
+  summary: { totalCredits: '0', totalDebits: '0', closingBalance: '0' },
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
-  const status = url.searchParams.get('status') || undefined;
-  const search = url.searchParams.get('search') || undefined;
-  const defaults = defaultThisMonthRange();
-  const startDate = url.searchParams.get('startDate') || defaults.startDate;
-  const endDate = url.searchParams.get('endDate') || defaults.endDate;
 
-  const shell = {
-    filters: {
-      startDate,
-      endDate,
-      status: status ?? '',
-      search: search ?? '',
-    },
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  const defaults = defaultThisMonthRange();
+  const startDate = url.searchParams.get('startDate') || (periodAllTime ? undefined : defaults.startDate);
+  const endDate = url.searchParams.get('endDate') || (periodAllTime ? undefined : defaults.endDate);
+
+  const filters = {
+    startDate: startDate ?? '',
+    endDate: endDate ?? '',
+    periodAllTime,
   };
 
-  const pageData = (async () => {
-    const input = encodeURIComponent(
-      JSON.stringify({
-        page,
-        limit: perPage,
-        ...(status ? { status } : {}),
-        ...(search ? { search } : {}),
-        ...(startDate ? { startDate } : {}),
-        ...(endDate ? { endDate } : {}),
-      }),
-    );
+  const entryTypeFilter = url.searchParams.get('entryType') || 'all';
+  const searchFilter = url.searchParams.get('search') || '';
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 100 });
+
+  const shell = { filters, entryTypeFilter, searchFilter };
+
+  const pageData = (async (): Promise<GeneralLedgerLoaderData> => {
+    const ledgerInput: Record<string, unknown> = {
+      entryType: entryTypeFilter,
+      page,
+      limit: perPage,
+    };
+    if (searchFilter) ledgerInput.search = searchFilter;
+    if (!periodAllTime) {
+      if (startDate) ledgerInput.startDate = startDate;
+      if (endDate) ledgerInput.endDate = endDate;
+    }
+
     const res = await apiRequest<unknown>(
-      `/trpc/generalLedger.listJournalEntries?input=${input}`,
+      `/trpc/finance.generalLedger?input=${encodeURIComponent(JSON.stringify(ledgerInput))}`,
       { method: 'GET', cookie },
     );
-    const data: ListResponse = res.ok
-      ? ((res.data as { result?: { data?: ListResponse } })?.result?.data ?? EMPTY)
-      : EMPTY;
-    return data;
+
+    const ledger: LedgerResponse = res.ok
+      ? ((res.data as { result?: { data?: LedgerResponse } })?.result?.data ?? EMPTY_LEDGER)
+      : EMPTY_LEDGER;
+
+    return {
+      ...ledger,
+      limit: perPage,
+      filters,
+      entryTypeFilter,
+      searchFilter,
+    };
   })();
 
   return defer({ shell, pageData });
@@ -83,21 +103,9 @@ export default function GeneralLedgerRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={
-        <GeneralLedgerPage
-          records={[]}
-          pagination={EMPTY.pagination}
-          filters={shell.filters}
-        />
-      }
+      fallback={<GeneralLedgerLoadingShell filters={shell.filters} />}
     >
-      {(data) => (
-        <GeneralLedgerPage
-          records={data.records}
-          pagination={data.pagination}
-          filters={shell.filters}
-        />
-      )}
+      {(data) => <GeneralLedgerPage {...(data as GeneralLedgerLoaderData)} />}
     </CachedAwait>
   );
 }

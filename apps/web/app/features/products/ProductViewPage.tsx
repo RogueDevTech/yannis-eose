@@ -114,7 +114,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
               <li key={comp.id} className="flex items-center justify-between py-2.5 text-sm">
                 <Link
                   to={`/admin/products/${comp.componentProductId}`}
-                  className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                  className="font-medium text-app-fg hover:underline"
                 >
                   {comp.componentName}
                 </Link>

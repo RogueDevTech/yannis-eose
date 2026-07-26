@@ -9,6 +9,10 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Button } from '~/components/ui/button';
 import { Tabs } from '~/components/ui/tabs';
 
@@ -168,37 +172,402 @@ export function MonthlyPayrollsLoadingShell() {
 /** `/hr/payroll/generate` */
 export function GeneratePayrollLoadingShell() {
   return (
-    <div className="space-y-6 max-w-3xl" aria-busy="true" aria-live="polite">
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="Generate Payroll Batch"
-        mobileInlineActions
-        description="Generate payroll for a selected month and scope."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Actions"
-            triggerAriaLabel="Payroll generator toolbar"
-            showMobileRefresh={false}
-            desktop={
-              <Link to="/hr/payroll" className="btn-ghost btn-sm shrink-0 opacity-60 pointer-events-none">
-                ← Back to payroll
-              </Link>
-            }
-            sheet={
-              <span
-                className="inline-block h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
-                aria-hidden
-              />
-            }
-          />
-        }
+        title="Generate payroll"
+        description="Pick month and scope, then generate a draft batch."
+        backTo="/hr/payroll"
       />
-      <div className="card p-4 space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className="card space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
+          <div className="h-10 rounded-md bg-app-hover animate-pulse sm:col-span-1 xl:col-span-2" aria-hidden />
+          <div className="h-10 rounded-md bg-app-hover animate-pulse" aria-hidden />
+          <div className="h-10 rounded-md bg-app-hover animate-pulse" aria-hidden />
           <div className="h-10 rounded-md bg-app-hover animate-pulse" aria-hidden />
           <div className="h-10 rounded-md bg-app-hover animate-pulse" aria-hidden />
         </div>
-        <div className="h-10 rounded-md bg-app-hover animate-pulse max-w-xs" aria-hidden />
-        <div className="h-10 w-40 rounded-md bg-app-hover animate-pulse" aria-hidden />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="h-10 rounded-md bg-app-hover animate-pulse" aria-hidden />
+          <div className="h-10 rounded-md bg-app-hover animate-pulse max-w-xs" aria-hidden />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Payroll config pages (roles, products, tax bands, rules, contractors) */
+export function PayrollConfigLoadingShell() {
+  const rows = shellPulsePlaceholderRows('payroll_config', 8);
+  const cols: CompactTableColumn<{ id: string }>[] = [
+    { key: 'name', header: 'Name', render: () => <TableCellTextPulse className="w-[14rem]" /> },
+    { key: 'category', header: 'Category', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      tight: true,
+      render: () => <CompactTableActionButton disabled>Edit</CompactTableActionButton>,
+    },
+  ];
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Payroll config"
+        mobileInlineActions
+        description="Loading payroll configuration…"
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Payroll config toolbar"
+            desktop={<PageRefreshButton />}
+          />
+        }
+      />
+      <CompactTable<{ id: string }>
+        columns={cols}
+        rows={rows}
+        rowKey={(r) => r.id}
+        emptyTitle="Loading…"
+        emptyDescription=""
+      />
+    </div>
+  );
+}
+
+/** `/hr/payroll-batch/:id` */
+export function PayrollBatchDetailLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Payroll batch"
+        backTo="/hr/payroll"
+        mobileInlineActions
+        description="Loading batch details…"
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Batch actions"
+            triggerAriaLabel="Payroll batch toolbar"
+            desktop={<PageRefreshButton />}
+          />
+        }
+      />
+      <div className="card !p-4">
+        <div className="flex items-center gap-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex flex-1 min-w-0 items-center gap-1">
+              <div className="h-2 w-2 rounded-full bg-app-hover animate-pulse shrink-0" aria-hidden />
+              <div className="min-w-0 space-y-1 flex-1">
+                <div className="h-3 w-16 rounded bg-app-hover animate-pulse" aria-hidden />
+                <div className="h-2.5 w-10 rounded bg-app-hover animate-pulse" aria-hidden />
+              </div>
+              {i < 3 ? <div className="flex-1 h-px bg-app-border shrink" aria-hidden /> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+      <OverviewStatStrip
+        items={[
+          { label: 'Staff payouts', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Total gross', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Total PAYE', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Total net', value: <StatValuePulse className="min-w-[4rem]" /> },
+        ]}
+      />
+      <div className="list-panel p-0">
+        <div className="px-4 py-3 border-b border-app-border">
+          <div className="h-4 w-32 rounded bg-app-hover animate-pulse" aria-hidden />
+        </div>
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={[
+            { key: 'staff', header: 'Staff', render: () => <TableCellTextPulse className="w-[12rem]" /> },
+            { key: 'net', header: 'Net', align: 'right', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+          ]}
+          rows={shellPulsePlaceholderRows('batch_payouts', 6)}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
+    </div>
+  );
+}
+
+/** `/hr/users/:id/history` */
+export function UserPayrollHistoryLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="History"
+        backTo="/hr/users"
+        mobileInlineActions
+        description="Loading payout and adjustment history…"
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="History toolbar"
+            desktop={<PageRefreshButton />}
+          />
+        }
+      />
+      <div className="list-panel p-0">
+        <div className="px-4 py-3 border-b border-app-border">
+          <div className="h-4 w-36 rounded bg-app-hover animate-pulse" aria-hidden />
+        </div>
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={[
+            { key: 'period', header: 'Period', render: () => <TableCellTextPulse className="w-[10rem]" /> },
+            { key: 'net', header: 'Net', align: 'right', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+          ]}
+          rows={shellPulsePlaceholderRows('user_history_payouts', 5)}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
+    </div>
+  );
+}
+
+/** `/hr/payroll/contractors/:id` */
+export function PayrollContractorDetailLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Contractor"
+        backTo="/hr/payroll/contractors"
+        mobileInlineActions
+        description="Loading contractor details…"
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Contractor detail toolbar"
+            desktop={<PageRefreshButton />}
+          />
+        }
+      />
+      <OverviewStatStrip
+        items={[
+          { label: 'Job title', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Branch', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Monthly fee', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Bank', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Account', value: <StatValuePulse className="min-w-[6rem]" /> },
+          { label: 'Payments', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Paid total', value: <StatValuePulse className="min-w-[4rem]" /> },
+        ]}
+      />
+      <Tabs
+        value="payments"
+        onChange={() => {}}
+        tabs={[
+          { value: 'payments', label: 'Payment history' },
+          { value: 'changes', label: 'Change history' },
+        ]}
+      />
+      <div className="list-panel">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={[
+            { key: 'period', header: 'Period', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+            { key: 'amount', header: 'Amount', align: 'right', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+          ]}
+          rows={shellPulsePlaceholderRows('contractor_payouts', 5)}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
+    </div>
+  );
+}
+
+/** `/hr/payroll/reports` — header → date → strip → breakdown → filters → table */
+export function PayrollReportsLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Payroll register"
+        mobileInlineActions
+        description="Exportable payroll register across paid and in-flight batches."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Payroll reports toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar startDate="" endDate="" periodAllTime={false} chrome="pill" />
+                <Button variant="secondary" size="sm" disabled className="opacity-60">
+                  Export CSV
+                </Button>
+              </>
+            }
+            sheet={<Button variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>Export CSV</Button>}
+          />
+        }
+      />
+      <MobileDateFilterRow startDate="" endDate="" periodAllTime={false} />
+      <OverviewStatStrip
+        items={[
+          { label: 'Rows', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Total gross', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Total PAYE', value: <StatValuePulse className="min-w-[4rem]" /> },
+          { label: 'Total net', value: <StatValuePulse className="min-w-[4rem]" /> },
+        ]}
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {['Cost by branch', 'Cost by role category', 'Payroll trend'].map((title) => (
+          <div key={title} className="card p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-app-fg">{title}</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between gap-2">
+                <div className="h-3.5 w-24 rounded bg-app-hover animate-pulse" aria-hidden />
+                <div className="h-3.5 w-16 rounded bg-app-hover animate-pulse" aria-hidden />
+              </div>
+              <div className="flex justify-between gap-2">
+                <div className="h-3.5 w-20 rounded bg-app-hover animate-pulse" aria-hidden />
+                <div className="h-3.5 w-14 rounded bg-app-hover animate-pulse" aria-hidden />
+              </div>
+              <div className="flex justify-between gap-2">
+                <div className="h-3.5 w-28 rounded bg-app-hover animate-pulse" aria-hidden />
+                <div className="h-3.5 w-16 rounded bg-app-hover animate-pulse" aria-hidden />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="list-panel">
+        <div className="flex flex-col gap-2 px-3 py-3 md:flex-row md:flex-wrap md:items-center md:gap-3 md:px-4">
+          <div className="h-9 w-full min-w-0 sm:w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+          <div className="h-9 w-full min-w-0 sm:w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+          <div className="h-9 w-full min-w-0 sm:w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+        </div>
+      </div>
+      <div className="list-panel">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={[
+            { key: 'staff', header: 'Employee', render: () => <TableCellTextPulse className="w-[12rem]" /> },
+            { key: 'period', header: 'Period', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+            { key: 'net', header: 'Net', align: 'right', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              tight: true,
+              render: () => <CompactTableActionButton disabled>View</CompactTableActionButton>,
+            },
+          ]}
+          rows={shellPulsePlaceholderRows('payroll_register', 8)}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
+    </div>
+  );
+}
+
+/** `/hr/payroll/payslips` */
+export function PayrollPayslipsLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Payslips"
+        mobileInlineActions
+        description="Paid payout lines with downloadable PDF payslips."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Payslips toolbar"
+            desktop={<PageRefreshButton />}
+          />
+        }
+      />
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          hideMobileSheet
+          searchRow={
+            <PageSearchControl value="" onApply={() => {}} placeholder="Search by name" title="Search payslips" />
+          }
+          desktopInlineFilters={
+            <>
+              <div className="h-9 w-full min-w-0 sm:w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+              <div className="h-9 w-full min-w-0 sm:w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+              <div className="h-9 w-full min-w-0 sm:w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+            </>
+          }
+          sheetFilterBody={<div className="space-y-3" />}
+        />
+      </div>
+      <div className="list-panel">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={[
+            { key: 'staff', header: 'Employee', render: () => <TableCellTextPulse className="w-[12rem]" /> },
+            { key: 'period', header: 'Period', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+            { key: 'net', header: 'Net', align: 'right', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              tight: true,
+              render: () => <CompactTableActionButton disabled>View</CompactTableActionButton>,
+            },
+          ]}
+          rows={shellPulsePlaceholderRows('payslips', 8)}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
+    </div>
+  );
+}
+
+/** `/hr/payroll/config/roles/:roleId/assign` */
+export function PayrollAssignRoleLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Assign pay role"
+        backTo="/hr/payroll/config/roles"
+        mobileInlineActions
+        description="Select staff members to assign this pay role."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Filters"
+            triggerAriaLabel="Assign toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageSearchControl value="" onApply={() => {}} placeholder="Search by name" title="Search staff" />
+                <div className="h-9 w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+                <div className="h-9 w-44 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+                <div className="h-9 w-48 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+                <PageRefreshButton />
+              </div>
+            }
+            sheet={<div className="space-y-2" />}
+          />
+        }
+      />
+      <div className="list-panel">
+        <CompactTable<{ id: string }>
+          withCard={false}
+          columns={[
+            { key: 'name', header: 'Staff', render: () => <TableCellTextPulse className="w-[12rem]" /> },
+            { key: 'role', header: 'Role', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+            { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+          ]}
+          rows={shellPulsePlaceholderRows('assign_role', 8)}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
       </div>
     </div>
   );
@@ -275,8 +644,6 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
       />
 
       <OverviewStatStrip
-        mobileGrid
-        tileClassName="min-w-[6.5rem]"
         items={
           staffAccounts
             ? [
@@ -292,6 +659,23 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
               ]
         }
       />
+
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          hideMobileSheet
+          desktopInlineFilters={
+            <>
+              <div className="h-9 w-full min-w-0 sm:w-40 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+              <div className="h-9 w-full min-w-0 sm:w-48 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+            </>
+          }
+          sheetFilterBody={<div className="space-y-3" />}
+          searchRow={
+            <PageSearchControl value="" onApply={() => {}} placeholder="Search by name, email, or phone…" title="Search users" />
+          }
+        />
+      </div>
 
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
@@ -608,7 +992,6 @@ export function StaffOnboardingDocsLoadingShell() {
         }
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Not started', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -618,10 +1001,19 @@ export function StaffOnboardingDocsLoadingShell() {
         ]}
       />
       <div className="list-panel">
-        <div className="p-3 border-b border-app-border flex gap-2">
-          <div className="h-9 flex-1 rounded-md bg-app-hover animate-pulse" aria-hidden />
-          <div className="h-9 w-24 rounded-md bg-app-hover animate-pulse" aria-hidden />
-        </div>
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          hideMobileSheet
+          searchRow={
+            <PageSearchControl value="" onApply={() => {}} placeholder="Search staff…" title="Search documents" />
+          }
+          desktopInlineFilters={
+            <div className="h-9 w-24 rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
+          }
+          sheetFilterBody={<div />}
+        />
+      </div>
+      <div className="list-panel">
         <CompactTable<{ id: string }>
           withCard={false}
           columns={ONBOARDING_DOCS_SHELL_COLS}

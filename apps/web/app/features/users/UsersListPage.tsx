@@ -9,7 +9,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { useBranchesCatalog, useBranchGroupsCatalog } from '~/contexts/branches-catalog-context';
@@ -158,7 +158,6 @@ export function UsersListPage({
   const currentStatusParam = searchParams.has('status') ? (searchParams.get('status') || 'ALL') : 'ALL';
   const currentRoleParam = searchParams.has('role') ? (searchParams.get('role') || 'ALL') : 'ALL';
   const searchFromUrl = searchParams.get('search') ?? '';
-  const [draftSearch, setDraftSearch] = useState(searchFromUrl);
   const isFilterLoading = useLoaderRefetchBusy().busy;
   const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
@@ -183,10 +182,6 @@ export function UsersListPage({
     navigate(`${usersBasePath}/new`);
   }, [navigate, usersBasePath]);
 
-  useEffect(() => {
-    setDraftSearch(searchFromUrl);
-  }, [searchFromUrl]);
-
   const submitSearchToUrl = useCallback(
     (raw: string) => {
       const trimmed = raw.trim().slice(0, 120);
@@ -203,32 +198,13 @@ export function UsersListPage({
     },
     [setSearchParams],
   );
-  const hasAppliedSearch = searchFromUrl.trim().length > 0;
-  const handleSearchDraftChange = useCallback(
-    (value: string) => {
-      setDraftSearch(value);
-      if (value === '' && hasAppliedSearch) {
-        submitSearchToUrl('');
-      }
-    },
-    [hasAppliedSearch, submitSearchToUrl],
-  );
   const searchRow = (
-    <form
-      className="min-w-0 flex-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submitSearchToUrl(draftSearch);
-      }}
-    >
-      <SearchInput
-        value={draftSearch}
-        onChange={handleSearchDraftChange}
-        placeholder="Search by name, email, or phone…"
-        withSubmitButton
-        wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-      />
-    </form>
+    <PageSearchControl
+      value={searchFromUrl}
+      placeholder="Search by name, email, or phone…"
+      title="Search users"
+      onApply={submitSearchToUrl}
+    />
   );
 
   const handleStatusChange = (value: string) => {
@@ -1169,7 +1145,7 @@ export function UsersListPage({
             <div className="space-y-4">
               {/* Header */}
               <div className="flex items-center gap-3">
-                <CompactUserAvatar name={u.name} size="lg" />
+                <CompactUserAvatar name={u.name} sizeClassName="w-10 h-10" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-app-fg truncate">{u.name}</p>
                   <p className="text-xs text-app-fg-muted truncate">{u.email}</p>

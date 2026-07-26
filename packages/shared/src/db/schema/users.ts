@@ -1,5 +1,12 @@
 import { uuid, pgTable, text, integer, serial, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { userRoleEnum, recordStatusEnum } from './enums';
+import {
+  userRoleEnum,
+  recordStatusEnum,
+  payrollEmploymentTypeEnum,
+  payrollSalaryBasisEnum,
+  payrollTaxStatusEnum,
+  payrollOnboardingStatusEnum,
+} from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { products } from './products';
 
@@ -79,6 +86,16 @@ export const users = pgTable('users', {
   isTeamSupervisor: boolean('is_team_supervisor').default(false).notNull(),
   /** Sequential human-friendly user number (USR-1, USR-2, ...). Auto-increment, backfilled by creation order. */
   userNumber: serial('user_number'),
+  /** Payroll profile — PRD Section 4.2 */
+  payRoleId: uuid('pay_role_id'),
+  employmentType: payrollEmploymentTypeEnum('employment_type').default('STAFF'),
+  salaryBasis: payrollSalaryBasisEnum('salary_basis').default('FORMULA_BASED'),
+  taxStatus: payrollTaxStatusEnum('tax_status').default('STANDARD_PAYE'),
+  reportsToUserId: uuid('reports_to_user_id'),
+  crmLinked: boolean('crm_linked').default(true).notNull(),
+  onboardingPayrollStatus: payrollOnboardingStatusEnum('onboarding_payroll_status').default('NOT_APPLICABLE'),
+  payrollEmployeeId: text('payroll_employee_id'),
+  bankVerificationStatus: text('bank_verification_status').default('UNVERIFIED'),
   ...temporalColumns,
   ...timestampColumns,
 });

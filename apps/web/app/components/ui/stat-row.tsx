@@ -32,8 +32,8 @@ const variantLabelClass: Record<StatRowVariant, string> = {
 
 const variantValueClass: Record<StatRowVariant, string> = {
   default: 'text-sm font-medium text-app-fg tabular-nums',
-  total: 'text-sm font-bold text-app-fg tabular-nums',
-  subtotal: 'text-sm font-semibold text-app-fg tabular-nums',
+  total: 'text-sm font-bold text-success-600 dark:text-success-400 tabular-nums',
+  subtotal: 'text-sm font-semibold text-success-600 dark:text-success-400 tabular-nums',
   deduction: 'text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums',
   highlight: 'text-sm font-semibold text-brand-600 dark:text-brand-400 tabular-nums',
 };
@@ -43,7 +43,7 @@ export function StatRow({ label, value, amount, sign, variant = 'default', inden
     amount !== undefined ? (
       <NairaPrice
         amount={amount}
-        colorize={variant === 'default' || variant === 'deduction'}
+        colorize={variant === 'default' || variant === 'deduction' || variant === 'subtotal' || variant === 'total'}
       />
     ) : (
       value

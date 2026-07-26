@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, requireAccountingEnabled } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import {
@@ -24,7 +24,6 @@ const EMPTY: ListWhtResponse = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',
@@ -55,7 +54,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.write',
@@ -74,7 +72,7 @@ export async function action({ request }: ActionFunctionArgs) {
     };
     const res = await apiRequest<unknown>(
       '/trpc/generalLedger.recordWht',
-      { method: 'POST', cookie, body: JSON.stringify(input) },
+      { method: 'POST', cookie, body: input },
     );
     return json({ success: res.ok, error: res.ok ? null : 'Failed to record WHT deduction' });
   }
@@ -83,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const deductionId = String(form.get('deductionId') || '');
     const res = await apiRequest<unknown>(
       '/trpc/generalLedger.generateWhtCertificate',
-      { method: 'POST', cookie, body: JSON.stringify({ deductionId }) },
+      { method: 'POST', cookie, body: { deductionId } },
     );
     return json({ success: res.ok, error: res.ok ? null : 'Failed to generate certificate' });
   }

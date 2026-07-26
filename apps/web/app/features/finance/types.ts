@@ -70,6 +70,29 @@ export interface FinanceOverviewPulse {
   approvalsPendingCount: number;
 }
 
+/** Payroll slice for finance overview (from `finance.overviewPageBundle`). */
+export interface FinancePayrollTotals {
+  batchCount: number;
+  staffCount: number;
+  totalGross: number;
+  totalNet: number;
+  totalTax: number;
+}
+
+export interface FinancePayrollPayRoleRow {
+  label: string;
+  totalGross: number;
+  totalNet: number;
+  headcount: number;
+}
+
+export interface FinancePayrollOverview {
+  pendingFinance: FinancePayrollTotals;
+  periodCost: FinancePayrollTotals;
+  paidInPeriod: FinancePayrollTotals;
+  byPayRole: FinancePayrollPayRoleRow[];
+}
+
 export interface RemittanceBreakdownRow {
   productId?: string;
   locationId?: string;
@@ -125,7 +148,7 @@ export interface FundingSummary {
 
 export interface GeneralLedgerEntry {
   id: string;
-  entryType: 'revenue' | 'remittance_in' | 'remittance_out' | 'disbursement' | 'ad_spend' | 'payroll' | 'funding_transfer';
+  entryType: string;
   eventDate: string;
   amount: string;
   balanceEffect: number;
@@ -133,6 +156,8 @@ export interface GeneralLedgerEntry {
   description: string;
   counterpartyName: string | null;
   userName: string | null;
+  accountCode?: string;
+  accountName?: string;
 }
 
 export interface GeneralLedgerLoaderData {
@@ -145,36 +170,19 @@ export interface GeneralLedgerLoaderData {
     totalCredits: string;
     totalDebits: string;
   };
-  users: Array<{ id: string; name: string; role: string }>;
-  selectedUserId: string;
-  selectedUserName: string;
+  users?: Array<{ id: string; name: string; role: string }>;
+  selectedUserId?: string;
+  selectedUserName?: string;
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   entryTypeFilter: string;
   searchFilter: string;
-}
-
-/** Financial KPIs from GL data. */
-export interface FinancialKPIs {
-  currentRatio: number;
-  quickRatio: number;
-  cashRatio: number;
-  grossProfitMargin: number;
-  operatingProfitMargin: number;
-  netProfitMargin: number;
-  returnOnAssets: number;
-  returnOnEquity: number;
-  debtToEquity: number;
-  daysSalesOutstanding: number;
-  inventoryTurnover: number;
-  daysInventoryOutstanding: number;
-  interestCoverage: number;
-  cashConversionCycle: number;
 }
 
 /** `/admin/finance/overview` loader shape */
 export interface FinanceOverviewLoaderData {
   profit: ProfitReport;
   pulse: FinanceOverviewPulse;
+  payrollOverview: FinancePayrollOverview;
   filters: {
     startDate: string;
     endDate: string;
@@ -198,6 +206,4 @@ export interface FinanceOverviewLoaderData {
   byProduct?: RemittanceBreakdownRow[];
   /** Delivered/remitted orders breakdown by logistics location. */
   byLocation?: RemittanceBreakdownRow[];
-  /** Financial health KPIs derived from live GL data. */
-  kpis?: FinancialKPIs | null;
 }

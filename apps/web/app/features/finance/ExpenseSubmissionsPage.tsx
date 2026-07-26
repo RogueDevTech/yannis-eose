@@ -3,19 +3,21 @@ import { useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
+import { AmountInput } from '~/components/ui/amount-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
-import { TableActionButton } from '~/components/ui/table-action-button';
 import { SearchableSelect, type SearchableSelectOption } from '~/components/ui/searchable-select';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -68,9 +70,11 @@ export function ExpenseSubmissionsPage({
 }: ExpenseSubmissionsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('status') || 'PENDING';
+  const searchQuery = searchParams.get('q') ?? '';
 
   // Modal state
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [viewTarget, setViewTarget] = useState<ExpenseRow | null>(null);
   const [approveTarget, setApproveTarget] = useState<ExpenseRow | null>(null);
   const [rejectTarget, setRejectTarget] = useState<ExpenseRow | null>(null);
 
@@ -114,10 +118,60 @@ export function ExpenseSubmissionsPage({
     () =>
       accounts.map((a) => ({
         value: a.id,
-        label: `${a.code} — ${a.name}`,
+        label: `${a.code} · ${a.name.replace(/\s*[—–]\s*/g, ' · ')}`,
       })),
     [accounts],
   );
+
+  // ── Search filter ─────────────────────────────────────────────────
+
+  function handleSearchApply(query: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (query) {
+        next.set('q', query);
+      } else {
+        next.delete('q');
+      }
+      next.delete('page');
+      return next;
+    });
+  }
+
+  const filteredExpenses = useMemo(() => {
+    if (!searchQuery.trim()) return expenses;
+    const lower = searchQuery.toLowerCase();
+    return expenses.filter(
+      (e) =>
+        e.vendorName.toLowerCase().includes(lower) ||
+        e.description.toLowerCase().includes(lower),
+    );
+  }, [expenses, searchQuery]);
+
+  // ── Stat strip ────────────────────────────────────────────────────
+
+  const statItems = useMemo((): OverviewStatStripItem[] => {
+    const total = expenses.length;
+    const pendingAmount = expenses
+      .filter((e) => e.status === 'PENDING')
+      .reduce((sum, e) => sum + parseFloat(e.amount || '0'), 0);
+    const approvedAmount = expenses
+      .filter((e) => e.status === 'APPROVED')
+      .reduce((sum, e) => sum + parseFloat(e.amount || '0'), 0);
+    return [
+      { label: 'Total Expenses', value: total.toLocaleString() },
+      {
+        label: 'Pending Amount',
+        value: <NairaPrice amount={pendingAmount} />,
+        plainValue: true,
+      },
+      {
+        label: 'Approved Amount',
+        value: <NairaPrice amount={approvedAmount} />,
+        plainValue: true,
+      },
+    ];
+  }, [expenses]);
 
   // ── Columns ────────────────────────────────────────────────────────
 
@@ -181,16 +235,24 @@ export function ExpenseSubmissionsPage({
         header: '',
         align: 'right',
         tight: true,
-        mobileShowLabel: false,
-        render: (r) =>
-          canWrite && r.status === 'PENDING' ? (
-            <div className="flex items-center gap-1">
-              <TableActionButton onClick={() => setApproveTarget(r)}>Approve</TableActionButton>
-              <TableActionButton onClick={() => setRejectTarget(r)} variant="danger">
-                Reject
-              </TableActionButton>
-            </div>
-          ) : null,
+        hideable: false,
+        render: (r) => (
+          <div className="flex items-center gap-1">
+            <CompactTableActionButton tone="brand" onClick={() => setViewTarget(r)}>
+              View
+            </CompactTableActionButton>
+            {canWrite && r.status === 'PENDING' && (
+              <>
+                <CompactTableActionButton tone="success" onClick={() => setApproveTarget(r)}>
+                  Approve
+                </CompactTableActionButton>
+                <CompactTableActionButton tone="danger" onClick={() => setRejectTarget(r)}>
+                  Reject
+                </CompactTableActionButton>
+              </>
+            )}
+          </div>
+        ),
       },
     ],
     [canWrite],
@@ -202,10 +264,8 @@ export function ExpenseSubmissionsPage({
     () => (r: ExpenseRow) => (
       <button
         type="button"
-        className="w-full text-left p-3 space-y-1"
-        onClick={() => {
-          if (canWrite && r.status === 'PENDING') setApproveTarget(r);
-        }}
+        className="w-full text-left rounded-lg border border-app-border bg-app-elevated p-3 space-y-1 hover:bg-app-hover transition-colors"
+        onClick={() => setViewTarget(r)}
       >
         <div className="flex items-center justify-between gap-2">
           <span className="font-medium text-app-fg truncate">{r.vendorName}</span>
@@ -230,7 +290,7 @@ export function ExpenseSubmissionsPage({
   // ── Render ─────────────────────────────────────────────────────────
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Expense Submissions"
         description="Submit and review vendor expense claims."
@@ -260,7 +320,18 @@ export function ExpenseSubmissionsPage({
         <Tabs value={activeTab} onChange={handleTabChange} tabs={STATUS_TABS} variant="pill" />
       </PageHeader>
 
-      {expenses.length === 0 ? (
+      <OverviewStatStrip items={statItems} />
+
+      <div className="flex items-center gap-2">
+        <PageSearchControl
+          value={searchQuery}
+          onApply={handleSearchApply}
+          placeholder="Search by vendor or description..."
+          title="Search Expenses"
+        />
+      </div>
+
+      {filteredExpenses.length === 0 ? (
         <EmptyState
           title="No expense submissions"
           description="Submit your first vendor expense to get started."
@@ -274,12 +345,110 @@ export function ExpenseSubmissionsPage({
         <>
           <CompactTable
             columns={columns}
-            rows={expenses}
+            rows={filteredExpenses}
             rowKey={(r) => r.id}
             renderMobileCard={renderMobileCard}
           />
           <Pagination page={pagination.page} totalPages={pagination.totalPages} />
         </>
+      )}
+
+      {/* ── View Expense Modal ──────────────────────────────────────── */}
+      {viewTarget && (
+        <Modal open onClose={() => setViewTarget(null)} maxWidth="max-w-md">
+          <div className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Expense Detail</h2>
+              <StatusBadge status={viewTarget.status} />
+            </div>
+            <dl className="text-sm space-y-2">
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Vendor</dt>
+                <dd className="text-app-fg font-medium text-right">{viewTarget.vendorName}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Amount</dt>
+                <dd className="text-app-fg font-medium"><NairaPrice amount={viewTarget.amount} /></dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Submitted</dt>
+                <dd className="text-app-fg">
+                  {new Date(viewTarget.createdAt).toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-app-fg-muted mb-0.5">Description</dt>
+                <dd className="text-app-fg">{viewTarget.description}</dd>
+              </div>
+              {viewTarget.receiptUrl && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-app-fg-muted">Receipt</dt>
+                  <dd>
+                    <a
+                      href={viewTarget.receiptUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand-600 dark:text-brand-400 hover:underline text-sm"
+                    >
+                      View receipt
+                    </a>
+                  </dd>
+                </div>
+              )}
+              {viewTarget.approvedAt && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-app-fg-muted">Approved</dt>
+                  <dd className="text-app-fg">
+                    {new Date(viewTarget.approvedAt).toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </dd>
+                </div>
+              )}
+              {viewTarget.rejectionReason && (
+                <div>
+                  <dt className="text-app-fg-muted mb-0.5">Rejection reason</dt>
+                  <dd className="text-app-fg">{viewTarget.rejectionReason}</dd>
+                </div>
+              )}
+            </dl>
+            <div className="flex gap-2 pt-1">
+              {canWrite && viewTarget.status === 'PENDING' && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => {
+                      setViewTarget(null);
+                      setApproveTarget(viewTarget);
+                    }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => {
+                      setViewTarget(null);
+                      setRejectTarget(viewTarget);
+                    }}
+                  >
+                    Reject
+                  </Button>
+                </>
+              )}
+              <Button size="sm" variant="secondary" onClick={() => setViewTarget(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* ── Submit Expense Modal ─────────────────────────────────────── */}
@@ -292,15 +461,22 @@ export function ExpenseSubmissionsPage({
 
               <TextInput label="Vendor Name" name="vendorName" required />
               <TextInput label="Description" name="description" required />
-              <TextInput label="Amount" name="amount" type="number" min="0.01" step="0.01" required />
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-app-fg">Amount</label>
+                <AmountInput name="amount" prefix="₦" required />
+              </div>
               <TextInput label="Receipt URL" name="receiptUrl" placeholder="https://..." />
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setShowSubmitModal(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={submitFetcher.state !== 'idle'}>
-                  {submitFetcher.state !== 'idle' ? 'Submitting...' : 'Submit Expense'}
+                <Button
+                  type="submit"
+                  loading={submitFetcher.state !== 'idle'}
+                  loadingText="Submitting..."
+                >
+                  Submit Expense
                 </Button>
               </div>
             </submitFetcher.Form>
@@ -411,6 +587,6 @@ export function ExpenseSubmissionsPage({
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

@@ -122,7 +122,7 @@ export type DistributingFundingEntry =
   | DistributingFundingRequestEntry;
 
 export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE' | 'OTHER';
-export type ExpenseCategory = 'AD_SPEND' | 'AD_ACCOUNT' | 'RECRUITMENT_AD' | 'WHATSAPP_CAMPAIGN' | 'UGC_PRODUCTION';
+export type ExpenseCategory = 'AD_SPEND' | 'AD_ACCOUNT' | 'RECRUITMENT_AD' | 'WHATSAPP_CAMPAIGN' | 'UGC_PRODUCTION' | 'OTHER';
 
 export interface AdSpendRecord {
   id: string;

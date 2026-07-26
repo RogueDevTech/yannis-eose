@@ -16,7 +16,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Textarea } from '~/components/ui/textarea';
 import { useToast } from '~/components/ui/toast';
@@ -318,20 +318,12 @@ export function ProductsListPage({
           hideMobileSheet
           badgeCount={productsToolbarFilterBadge}
           searchRow={
-            <form
-              className="min-w-0 flex-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-              }}
-            >
-              <SearchInput
-                value={searchQuery}
-                onChange={setSearchQuery}
-                placeholder="Search by name..."
-                withSubmitButton
-                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-              />
-            </form>
+            <PageSearchControl
+              value={searchQuery}
+              placeholder="Search by name..."
+              title="Search products"
+              onApply={setSearchQuery}
+            />
           }
           desktopInlineFilters={
             <div className="relative">

@@ -6,6 +6,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { Tabs } from '~/components/ui/tabs';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -275,6 +276,12 @@ export function MbFundTransfersPage({
             triggerAriaLabel="Transfer tools"
             desktop={
               <>
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
                 <PageRefreshButton />
                 <Button size="sm" onClick={() => setShowCreateModal(true)}>
                   Send to MB
@@ -291,11 +298,10 @@ export function MbFundTransfersPage({
       />
 
       <div className="px-4 md:px-6 space-y-4 pb-8">
-        <DateFilterBar
+        <MobileDateFilterRow
           startDate={filters.startDate}
           endDate={filters.endDate}
           periodAllTime={filters.periodAllTime}
-          chrome="pill"
         />
 
         <OverviewStatStrip items={statItems} mobileGrid />
@@ -502,8 +508,8 @@ function CreateTransferModal({
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || !receiverId || !amount}>
-            {busy ? 'Sending...' : 'Send'}
+          <Button type="submit" disabled={busy || !receiverId || !amount} loading={busy} loadingText="Sending...">
+            Send
           </Button>
         </div>
       </form>
@@ -675,8 +681,8 @@ function RejectTransferModal({
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" variant="danger" disabled={busy || !reason.trim()}>
-            {busy ? 'Rejecting...' : 'Reject'}
+          <Button type="submit" variant="danger" disabled={busy || !reason.trim()} loading={busy} loadingText="Rejecting...">
+            Reject
           </Button>
         </div>
       </form>

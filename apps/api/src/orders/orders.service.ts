@@ -45,6 +45,7 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { CsOrderRoutingService } from './cs-order-routing.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import { CacheService } from '../common/cache/cache.service';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 
@@ -2091,7 +2092,7 @@ export class OrdersService {
           'universal dedup: duplicate detected — recorded in cross_funnel_attempts, order still created',
         );
         // Do NOT block — fall through so the order is always created.
-        // MB sees the cross-funnel attempt on their dashboard.
+        // CS will see it and can merge/delete if needed.
       }
     }
 
@@ -8830,76 +8831,85 @@ export class OrdersService {
         // Phase 2 — post the sale to the general ledger (Dr Debtors / Cr Sale +
         // Dr COGS / Cr Stock In Hand). Non-fatal: a missing account or fiscal year
         // must never block a delivery. Idempotent per order.
-        try {
-          const res = await this.generalLedger.postSalesInvoice(updatedOrder.id, actor);
-          if (!res.posted && res.reason && res.reason !== 'already-posted') {
-            this.logger.warn(`Sales GL not posted for order ${updatedOrder.id}: ${res.reason}`);
-          }
-        } catch (err) {
-          this.logger.warn(`Sales GL posting on DELIVERED for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
-        }
+        await runGlPostWithFinanceAlert(
+          this.notifications,
+          this.logger,
+          'Sales invoice (delivered)',
+          updatedOrder.id,
+          () => this.generalLedger.postSalesInvoice(updatedOrder.id, actor),
+        );
         break;
       }
 
       case 'CANCELLED':
       case 'DELETED': {
         if (previousOrder.status === 'CONFIRMED') {
-          for (const item of orderItems) {
-            await this.db.insert(schema.stockMovements).values({
-              productId: item.productId,
-              movementType: 'ADJUSTMENT',
-              quantity: item.quantity,
-              referenceId: updatedOrder.id,
-              reason: `Released: order ${updatedOrder.id} deleted`,
-              actorId: actor.id,
-            });
-          }
+          await withActor(this.db, actor, async (tx) => {
+            for (const item of orderItems) {
+              await tx.insert(schema.stockMovements).values({
+                productId: item.productId,
+                movementType: 'ADJUSTMENT',
+                quantity: item.quantity,
+                referenceId: updatedOrder.id,
+                reason: `Released: order ${updatedOrder.id} deleted`,
+                actorId: actor.id,
+              });
+            }
+          });
         }
         break;
       }
 
       case 'RETURNED': {
-        for (const item of orderItems) {
-          await this.db.insert(schema.stockMovements).values({
-            productId: item.productId,
-            movementType: 'RETURN',
-            quantity: item.quantity,
-            toLocationId: updatedOrder.logisticsLocationId ?? undefined,
-            referenceId: updatedOrder.id,
-            reason: `Returned: order ${updatedOrder.id}`,
-            actorId: actor.id,
-          });
-        }
+        await withActor(this.db, actor, async (tx) => {
+          for (const item of orderItems) {
+            await tx.insert(schema.stockMovements).values({
+              productId: item.productId,
+              movementType: 'RETURN',
+              quantity: item.quantity,
+              toLocationId: updatedOrder.logisticsLocationId ?? undefined,
+              referenceId: updatedOrder.id,
+              reason: `Returned: order ${updatedOrder.id}`,
+              actorId: actor.id,
+            });
+          }
+        });
         break;
       }
 
       case 'RESTOCKED': {
-        for (const item of orderItems) {
-          await this.db.insert(schema.stockMovements).values({
-            productId: item.productId,
-            movementType: 'RESTOCK',
-            quantity: item.quantity,
-            toLocationId: updatedOrder.logisticsLocationId ?? undefined,
-            referenceId: updatedOrder.id,
-            reason: `Restocked at logistics company: order ${updatedOrder.id}`,
-            actorId: actor.id,
-          });
-        }
+        await withActor(this.db, actor, async (tx) => {
+          for (const item of orderItems) {
+            await tx.insert(schema.stockMovements).values({
+              productId: item.productId,
+              movementType: 'RESTOCK',
+              quantity: item.quantity,
+              toLocationId: updatedOrder.logisticsLocationId ?? undefined,
+              referenceId: updatedOrder.id,
+              reason: `Restocked at logistics company: order ${updatedOrder.id}`,
+              actorId: actor.id,
+            });
+          }
+        });
         break;
       }
 
       case 'WRITTEN_OFF': {
-        for (const item of orderItems) {
-          await this.db.insert(schema.stockMovements).values({
-            productId: item.productId,
-            movementType: 'WRITE_OFF',
-            quantity: -item.quantity,
-            fromLocationId: updatedOrder.logisticsLocationId ?? undefined,
-            referenceId: updatedOrder.id,
-            reason: `Written off: order ${updatedOrder.id}`,
-            actorId: actor.id,
-          });
+        await withActor(this.db, actor, async (tx) => {
+          for (const item of orderItems) {
+            await tx.insert(schema.stockMovements).values({
+              productId: item.productId,
+              movementType: 'WRITE_OFF',
+              quantity: -item.quantity,
+              fromLocationId: updatedOrder.logisticsLocationId ?? undefined,
+              referenceId: updatedOrder.id,
+              reason: `Written off: order ${updatedOrder.id}`,
+              actorId: actor.id,
+            });
+          }
+        });
 
+        for (const item of orderItems) {
           if (updatedOrder.logisticsLocationId) {
             this.inventoryService.scheduleLowStockCheck(item.productId, updatedOrder.logisticsLocationId);
           }
@@ -10467,34 +10477,36 @@ export class OrdersService {
           },
         );
 
-        // 4. Copy order items
+        // 4. Copy order items + 5. Write timeline event — inside withActor
+        //    so stockMovements history rows get proper modified_by attribution.
         const sourceItems = itemsByOrder.get(sourceId) ?? [];
-        if (sourceItems.length > 0 && newOrder) {
-          await this.db.insert(schema.orderItems).values(
-            sourceItems.map((item) => ({
-              orderId: newOrder.id,
-              productId: item.productId,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              offerLabel: item.offerLabel,
-            })),
-          );
-        }
-
-        // 5. Write timeline event on the NEW order
         if (newOrder) {
-          await this.db.insert(schema.orderTimelineEvents).values({
-            orderId: newOrder.id,
-            eventType: 'ORDER_RECEIVED' as const,
-            actorId: actor.id,
-            actorName: actor.name ?? null,
-            description: `Follow-up order created from original YNS-${String(orig.orderNumber).padStart(5, '0')}. Original status: ${orig.status}.`,
-            metadata: {
-              sourceOrderId: sourceId,
-              sourceOrderNumber: orig.orderNumber,
-              sourceStatus: orig.status,
-            },
-            branchId: targetBranch ?? orig.servicingBranchId,
+          await withActor(this.db, actor, async (tx) => {
+            if (sourceItems.length > 0) {
+              await tx.insert(schema.orderItems).values(
+                sourceItems.map((item) => ({
+                  orderId: newOrder.id,
+                  productId: item.productId,
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                  offerLabel: item.offerLabel,
+                })),
+              );
+            }
+
+            await tx.insert(schema.orderTimelineEvents).values({
+              orderId: newOrder.id,
+              eventType: 'ORDER_RECEIVED' as const,
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: `Follow-up order created from original YNS-${String(orig.orderNumber).padStart(5, '0')}. Original status: ${orig.status}.`,
+              metadata: {
+                sourceOrderId: sourceId,
+                sourceOrderNumber: orig.orderNumber,
+                sourceStatus: orig.status,
+              },
+              branchId: targetBranch ?? orig.servicingBranchId,
+            });
           });
         }
 

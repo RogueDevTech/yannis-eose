@@ -2,8 +2,8 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { eq, desc, asc, and, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
-import { randomUUID } from 'crypto';
 import { DRIZZLE } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 import { encryptApiKey, decryptApiKey } from '../common/utils/encryption';
 import { AI_TOOLS } from './ai-tool-definitions';
 import { executeTool, type ToolExecutorContext, type ToolExecutorServices, type ToolExecutorUser } from './ai-tool-executor';
@@ -162,8 +162,6 @@ const PAGE_CONTEXT_MAP: Record<string, string> = {
   '/admin/finance/accounts': `Chart of Accounts. Master list of GL accounts (active only). Account codes, names, types in hierarchy.`,
 
   '/admin/finance/profit-by-shipment': `Profit by Shipment. P&L analysis scoped to a specific shipment. Revenue, costs, profit breakdown per shipment.`,
-
-  '/admin/finance/payout': `Payroll Batches. Monthly payroll batch management for finance approval. Status: Pending Finance, Paid.`,
 
   '/admin/finance/expenses': `Expense Submissions. Expense approval workflow with GL account assignment.`,
 
@@ -346,12 +344,14 @@ export class AiAssistantService {
   private static MAX_SESSIONS_PER_USER = 7;
 
   async createSession(userId: string, title?: string): Promise<{ id: string }> {
-    const id = randomUUID();
-    await this.db.insert(schema.aiChatSessions).values({
-      id,
-      userId,
-      title: title || 'New conversation',
+    const [inserted] = await withActor(this.db, { id: userId }, async (tx) => {
+      return tx.insert(schema.aiChatSessions).values({
+        userId,
+        title: title || 'New conversation',
+      }).returning({ id: schema.aiChatSessions.id });
     });
+
+    const id = inserted!.id;
 
     // Enforce max sessions: delete oldest beyond the cap
     const allSessions = await this.db
@@ -363,9 +363,11 @@ export class AiAssistantService {
     if (allSessions.length > AiAssistantService.MAX_SESSIONS_PER_USER) {
       const toDelete = allSessions.slice(AiAssistantService.MAX_SESSIONS_PER_USER).map((s) => s.id);
       if (toDelete.length > 0) {
-        await this.db
-          .delete(schema.aiChatSessions)
-          .where(inArray(schema.aiChatSessions.id, toDelete));
+        await withActor(this.db, { id: userId }, async (tx) => {
+          await tx
+            .delete(schema.aiChatSessions)
+            .where(inArray(schema.aiChatSessions.id, toDelete));
+        });
       }
     }
 
@@ -416,15 +418,17 @@ export class AiAssistantService {
   }
 
   async deleteSession(sessionId: string, userId: string) {
-    const deleted = await this.db
-      .delete(schema.aiChatSessions)
-      .where(
-        and(
-          eq(schema.aiChatSessions.id, sessionId),
-          eq(schema.aiChatSessions.userId, userId),
-        ),
-      )
-      .returning({ id: schema.aiChatSessions.id });
+    const deleted = await withActor(this.db, { id: userId }, async (tx) => {
+      return tx
+        .delete(schema.aiChatSessions)
+        .where(
+          and(
+            eq(schema.aiChatSessions.id, sessionId),
+            eq(schema.aiChatSessions.userId, userId),
+          ),
+        )
+        .returning({ id: schema.aiChatSessions.id });
+    });
 
     if (deleted.length === 0) throw new Error('Session not found');
   }
@@ -447,32 +451,37 @@ export class AiAssistantService {
       .limit(1);
 
     if (existing.length > 0) {
-      await this.db
-        .update(schema.systemSettings)
-        .set({ value: { encryptedKey: encrypted }, updatedBy })
-        .where(eq(schema.systemSettings.id, existing[0]!.id));
+      await withActor(this.db, { id: updatedBy }, async (tx) => {
+        await tx
+          .update(schema.systemSettings)
+          .set({ value: { encryptedKey: encrypted }, updatedBy })
+          .where(eq(schema.systemSettings.id, existing[0]!.id));
+      });
     } else {
-      await this.db.insert(schema.systemSettings).values({
-        id: randomUUID(),
-        key: 'AI_CLAUDE_API_KEY',
-        groupId,
-        value: { encryptedKey: encrypted },
-        updatedBy,
+      await withActor(this.db, { id: updatedBy }, async (tx) => {
+        await tx.insert(schema.systemSettings).values({
+          key: 'AI_CLAUDE_API_KEY',
+          groupId,
+          value: { encryptedKey: encrypted },
+          updatedBy,
+        });
       });
     }
   }
 
-  async deleteOrgApiKey(groupId: string | null): Promise<void> {
-    await this.db
-      .delete(schema.systemSettings)
-      .where(
-        and(
-          eq(schema.systemSettings.key, 'AI_CLAUDE_API_KEY'),
-          groupId
-            ? eq(schema.systemSettings.groupId, groupId)
-            : undefined as any,
-        ),
-      );
+  async deleteOrgApiKey(groupId: string | null, deletedBy: string): Promise<void> {
+    await withActor(this.db, { id: deletedBy }, async (tx) => {
+      await tx
+        .delete(schema.systemSettings)
+        .where(
+          and(
+            eq(schema.systemSettings.key, 'AI_CLAUDE_API_KEY'),
+            groupId
+              ? eq(schema.systemSettings.groupId, groupId)
+              : undefined as any,
+          ),
+        );
+    });
   }
 
   async orgApiKeyExists(groupId: string | null): Promise<boolean> {
@@ -500,23 +509,28 @@ export class AiAssistantService {
       .limit(1);
 
     if (existing.length > 0) {
-      await this.db
-        .update(schema.aiUserApiKeys)
-        .set({ encryptedKey: encrypted, updatedAt: new Date() })
-        .where(eq(schema.aiUserApiKeys.id, existing[0]!.id));
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx
+          .update(schema.aiUserApiKeys)
+          .set({ encryptedKey: encrypted, updatedAt: new Date() })
+          .where(eq(schema.aiUserApiKeys.id, existing[0]!.id));
+      });
     } else {
-      await this.db.insert(schema.aiUserApiKeys).values({
-        id: randomUUID(),
-        userId,
-        encryptedKey: encrypted,
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx.insert(schema.aiUserApiKeys).values({
+          userId,
+          encryptedKey: encrypted,
+        });
       });
     }
   }
 
   async deletePersonalApiKey(userId: string): Promise<void> {
-    await this.db
-      .delete(schema.aiUserApiKeys)
-      .where(eq(schema.aiUserApiKeys.userId, userId));
+    await withActor(this.db, { id: userId }, async (tx) => {
+      await tx
+        .delete(schema.aiUserApiKeys)
+        .where(eq(schema.aiUserApiKeys.userId, userId));
+    });
   }
 
   async personalApiKeyExists(userId: string): Promise<boolean> {
@@ -623,11 +637,12 @@ export class AiAssistantService {
     }
 
     // Persist user message
-    await this.db.insert(schema.aiChatMessages).values({
-      id: randomUUID(),
-      sessionId,
-      role: 'user',
-      content: userMessage,
+    await withActor(this.db, { id: userId }, async (tx) => {
+      await tx.insert(schema.aiChatMessages).values({
+        sessionId,
+        role: 'user',
+        content: userMessage,
+      });
     });
 
     // Load conversation history (last 50 messages for context)
@@ -674,11 +689,12 @@ export class AiAssistantService {
     }
 
     // Persist assistant message
-    await this.db.insert(schema.aiChatMessages).values({
-      id: randomUUID(),
-      sessionId,
-      role: 'assistant',
-      content: assistantMessage,
+    await withActor(this.db, { id: userId }, async (tx) => {
+      await tx.insert(schema.aiChatMessages).values({
+        sessionId,
+        role: 'assistant',
+        content: assistantMessage,
+      });
     });
 
     // Update session title from first message if it's a new session
@@ -687,15 +703,19 @@ export class AiAssistantService {
       sessionTitle = userMessage.length > 60
         ? userMessage.slice(0, 57) + '...'
         : userMessage;
-      await this.db
-        .update(schema.aiChatSessions)
-        .set({ title: sessionTitle, updatedAt: new Date() })
-        .where(eq(schema.aiChatSessions.id, sessionId));
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx
+          .update(schema.aiChatSessions)
+          .set({ title: sessionTitle, updatedAt: new Date() })
+          .where(eq(schema.aiChatSessions.id, sessionId));
+      });
     } else {
-      await this.db
-        .update(schema.aiChatSessions)
-        .set({ updatedAt: new Date() })
-        .where(eq(schema.aiChatSessions.id, sessionId));
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx
+          .update(schema.aiChatSessions)
+          .set({ updatedAt: new Date() })
+          .where(eq(schema.aiChatSessions.id, sessionId));
+      });
     }
 
     return { sessionId, assistantMessage, sessionTitle };
@@ -749,7 +769,9 @@ export class AiAssistantService {
     onEvent('session', JSON.stringify({ sessionId, sessionTitle }));
 
     // Persist user message
-    await this.db.insert(schema.aiChatMessages).values({ id: randomUUID(), sessionId, role: 'user', content: userMessage });
+    await withActor(this.db, { id: userId }, async (tx) => {
+      await tx.insert(schema.aiChatMessages).values({ sessionId, role: 'user', content: userMessage });
+    });
 
     // Load history
     const history = await this.db
@@ -863,14 +885,20 @@ export class AiAssistantService {
 
     // Persist assistant message
     if (fullResponse) {
-      await this.db.insert(schema.aiChatMessages).values({ id: randomUUID(), sessionId, role: 'assistant', content: fullResponse });
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx.insert(schema.aiChatMessages).values({ sessionId, role: 'assistant', content: fullResponse });
+      });
     }
 
     // Update session
     if (!params.sessionId && sessionTitle) {
-      await this.db.update(schema.aiChatSessions).set({ title: sessionTitle, updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx.update(schema.aiChatSessions).set({ title: sessionTitle, updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+      });
     } else {
-      await this.db.update(schema.aiChatSessions).set({ updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+      await withActor(this.db, { id: userId }, async (tx) => {
+        await tx.update(schema.aiChatSessions).set({ updatedAt: new Date() }).where(eq(schema.aiChatSessions.id, sessionId));
+      });
     }
   }
 

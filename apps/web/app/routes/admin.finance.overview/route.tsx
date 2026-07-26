@@ -9,7 +9,7 @@ import type {
   ProfitReport,
   FinanceOverviewLoaderData,
   FinanceOverviewPulse,
-  FinancialKPIs,
+  FinancePayrollOverview,
 } from '~/features/finance/types';
 
 export const meta: MetaFunction = () => [{ title: 'Finance — Yannis EOSE' }];
@@ -52,6 +52,21 @@ const emptyPulse: FinanceOverviewPulse = {
   failedDeliveryCount: 0,
   payrollPendingFinanceCount: 0,
   approvalsPendingCount: 0,
+};
+
+const emptyPayrollTotals = {
+  batchCount: 0,
+  staffCount: 0,
+  totalGross: 0,
+  totalNet: 0,
+  totalTax: 0,
+};
+
+const emptyPayrollOverview: FinancePayrollOverview = {
+  pendingFinance: emptyPayrollTotals,
+  periodCost: emptyPayrollTotals,
+  paidInPeriod: emptyPayrollTotals,
+  byPayRole: [],
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -107,24 +122,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     );
 
-    // KPI query — as-of today (point-in-time balance sheet KPIs).
-    const kpiInput = encodeURIComponent(JSON.stringify({}));
-
-    const [bundleRes, kpiRes] = await Promise.all([
-      apiRequest<unknown>(
-        `/trpc/finance.overviewPageBundle?input=${bundleInput}`,
-        { method: 'GET', cookie },
-      ),
-      apiRequest<unknown>(
-        `/trpc/generalLedger.financialKPIs?input=${kpiInput}`,
-        { method: 'GET', cookie },
-      ),
-    ]);
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/finance.overviewPageBundle?input=${bundleInput}`,
+      { method: 'GET', cookie },
+    );
 
     type BreakdownRow = { productId?: string; locationId?: string | null; productName?: string; locationName?: string; totalAmount: string; orderCount: number };
     type BundleData = {
       profit: ProfitReport | null;
       remittanceSummary: Record<string, string | number> | null;
+      payroll?: FinancePayrollOverview;
       payrollBatchCount: number;
       approvalsPendingCount: number;
       branches: Array<{ id: string; name: string }>;
@@ -163,18 +170,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       posFeeCount: Number(remSummary?.posFeeCount ?? 0),
       totalFailedDeliveryCosts: Number(remSummary?.totalFailedDeliveryCosts ?? 0),
       failedDeliveryCount: Number(remSummary?.failedDeliveryCount ?? 0),
-      payrollPendingFinanceCount: bundle?.payrollBatchCount ?? 0,
+      payrollPendingFinanceCount:
+        bundle?.payroll?.pendingFinance.batchCount ?? bundle?.payrollBatchCount ?? 0,
       approvalsPendingCount: bundle?.approvalsPendingCount ?? 0,
     };
 
-    // Extract KPIs from the GL response.
-    const kpis: FinancialKPIs | null = kpiRes.ok
-      ? ((kpiRes.data as { result?: { data?: FinancialKPIs } })?.result?.data ?? null)
-      : null;
+    const payrollOverview: FinancePayrollOverview = bundle?.payroll ?? emptyPayrollOverview;
 
     return {
       profit: bundle?.profit ?? emptyProfit,
       pulse,
+      payrollOverview,
       filters: financeShell.filters,
       branches: bundle?.branches ?? [],
       mediaBuyers: bundle?.mediaBuyers ?? [],
@@ -191,7 +197,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         totalAmount: r.totalAmount,
         orderCount: r.orderCount,
       })),
-      kpis,
     };
   })();
 

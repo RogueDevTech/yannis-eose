@@ -15,7 +15,7 @@ import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
-import { isAdminLevel } from '~/lib/rbac';
+import { isAdminLevel, hasFinanceAccess } from '~/lib/rbac';
 import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
 import {
   DashboardCartOrdersSection,
@@ -153,7 +153,7 @@ export function DashboardPage({
           isMarketingTeamSupervisor={isMarketingTeamSupervisor}
         />
       )}
-      {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
+      {hasFinanceAccess({ role: role ?? '' }) && !isAdminLevel({ role: role ?? '' }) && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
       {(role === 'HR_MANAGER') && <HRDashboard naira={naira} />}
@@ -1512,6 +1512,20 @@ function CartOrdersDashboardStrip({ showUnassigned = true, filters }: { showUnas
 
 // ── Delivered Follow-Up stat strip ─────────────────────────────
 function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
+  function dfuLink(extra?: Record<string, string>): string {
+    const params = new URLSearchParams();
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    }
+    const qs = params.toString();
+    return `/admin/sales/delivered-follow-up${qs ? `?${qs}` : ''}`;
+  }
   return (
     <DashboardDeliveredFollowUpSection fallback={<OverviewStatStripSkeleton count={5} />}>
       {(sc) => {
@@ -1536,12 +1550,12 @@ function DeliveredFollowUpDashboardStrip({ filters }: { filters?: { startDate: s
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
-                { label: 'Total', value: total, valueClassName: 'text-app-fg', to: '/admin/sales/delivered-follow-up' },
-                { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: '/admin/sales/delivered-follow-up?status=UNPROCESSED' },
-                { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/delivered-follow-up?status=CS_ASSIGNED' },
-                { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/delivered-follow-up?status=CS_ENGAGED' },
-                { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/delivered-follow-up?status=CONFIRMED' },
-                { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/delivered-follow-up?status=DELIVERED' },
+                { label: 'Total', value: total, valueClassName: 'text-app-fg', to: dfuLink() },
+                { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: dfuLink({ status: 'UNPROCESSED' }) },
+                { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400', to: dfuLink({ status: 'CS_ASSIGNED' }) },
+                { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: dfuLink({ status: 'CS_ENGAGED' }) },
+                { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: dfuLink({ status: 'CONFIRMED' }) },
+                { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400', to: dfuLink({ status: 'DELIVERED' }) },
                 { label: 'CR', value: `${cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(cr) },
                 { label: 'DR', value: `${dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(dr) },
               ]}

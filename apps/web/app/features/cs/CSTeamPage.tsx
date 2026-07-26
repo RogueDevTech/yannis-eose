@@ -21,7 +21,7 @@ import { ExportModal } from '~/components/ui/export-modal';
 import { Modal } from '~/components/ui/modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 import { SortMenu, type SortMenuOption, type SortMenuValue } from '~/components/ui/sort-menu';
@@ -488,13 +488,8 @@ export function CSTeamPage({
   const [peekMember, setPeekMember] = useState<CSTeamMemberOverview | null>(null);
   const [breakdownModal, setBreakdownModal] = useState<'total' | 'unassigned' | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(q);
   const navigation = useNavigation();
   const isNavigating = navigation.state === 'loading';
-
-  useEffect(() => {
-    setSearchQuery(q);
-  }, [q]);
 
   const mergeListParams = (overrides: {
     q?: string;
@@ -536,11 +531,6 @@ export function CSTeamPage({
       },
       { replace: true },
     );
-  };
-
-  const handleSearchSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    mergeListParams({ q: searchQuery, page: 1 });
   };
 
   const handleSortChange = (next: SortMenuValue) => {
@@ -1048,20 +1038,12 @@ export function CSTeamPage({
           hideMobileSheet
           badgeCount={filtersBadgeCount}
           searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                value={searchQuery}
-                onChange={(value) => {
-                  setSearchQuery(value);
-                  if (value === '' && q.length > 0) mergeListParams({ q: '', page: 1 });
-                }}
-                placeholder="Search by closer, role, or branch…"
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-                name="q"
-                autoComplete="off"
-              />
-            </form>
+            <PageSearchControl
+              value={q}
+              placeholder="Search by closer, role, or branch…"
+              title="Search team"
+              onApply={(query) => mergeListParams({ q: query, page: 1 })}
+            />
           }
           desktopInlineFilters={
             <>
@@ -1255,7 +1237,7 @@ export function CSTeamPage({
           <Link to="/admin/sales/queue" prefetch="intent" className="text-brand-500 hover:text-brand-600">
             Live activities
           </Link>
-          {' — '}dashboard with workloads, unassigned orders, and leaderboard.
+{': '}dashboard with workloads, unassigned orders, and leaderboard.
         </p>
       </div>
 

@@ -43,52 +43,136 @@ const clickableTileClass =
 const activeTileClass =
   'ring-2 ring-inset ring-brand-500 dark:ring-brand-400';
 
+/** Active matrix cell: background fill only (no border ring). */
+const activeMatrixTileClass = 'relative z-[1] rounded-lg bg-app-hover';
 const SCROLL_DELTA = 280;
 
 const labelClass = 'text-xs font-medium text-app-fg-muted uppercase tracking-wider';
 const valueClass = 'text-lg font-bold leading-tight md:mt-0.5 md:text-xl';
 
+type MatrixCols = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * Auto column count for matrix strips, scored per item length so pages adapt:
+ * - ≤5 items → exact match (one row)
+ * - more items → prefer even fills / fuller last rows; avoid orphans and
+ *   sparse tails (e.g. 7 → 4+3 on a shared 4-col track, not 5+2)
+ */
+export function resolveMatrixCols(count: number, explicit?: MatrixCols): MatrixCols {
+  if (explicit) return explicit;
+  if (count <= 1) return 1;
+  if (count <= 5) return count as MatrixCols;
+
+  // Prefer 4 cols when it fits cleanly (7–8 → two rows of four).
+  const candidates = [4, 3, 5, 2] as const;
+  let best: MatrixCols = 4;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const cols of candidates) {
+    if (cols > count) continue;
+    const rem = count % cols;
+    const lastRowLen = rem === 0 ? cols : rem;
+    const empty = cols - lastRowLen;
+    const rows = Math.ceil(count / cols);
+    const lastFill = lastRowLen / cols;
+
+    let score = 0;
+    // Perfect short grids win; tall 2-col stacks should lose to fuller 4/5 grids.
+    if (rem === 0) score += rows <= 3 ? 80 : 18;
+    score -= empty * 22;
+    if (lastRowLen === 1) score -= 90;
+    if (lastFill >= 0.6) score += 28;
+    else if (lastFill >= 0.5) score += 12;
+    score -= rows * 14;
+    if (cols === 4) score += 10;
+    else if (cols === 3) score += 6;
+    else if (cols === 5) score += 4;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = cols;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Keep every row on the same column track so vertical dividers align.
+ * Only a lone last cell spans full width (avoids a tiny orphan tile).
+ */
+function rowMatrixCols(baseCols: MatrixCols, rowLen: number): MatrixCols {
+  if (rowLen < 1) return 1;
+  if (rowLen === 1 && baseCols > 1) return 1;
+  return baseCols;
+}
+
+/** From `sm` up, show the intended column count (no early wrap for short strips). */
+function matrixColsClass(cols: MatrixCols): string {
+  if (cols === 1) return 'grid-cols-1';
+  if (cols === 2) return 'grid-cols-1 sm:grid-cols-2';
+  if (cols === 3) return 'grid-cols-1 sm:grid-cols-3';
+  if (cols === 4) return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4';
+  // Five across needs width; stack → 2 → 5 (skip a 3-col band that orphans cells).
+  return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-5';
+}
+
 export function OverviewStatStripSkeleton({
   count,
   labels,
   tileClassName = '',
+  matrixCols: matrixColsProp,
 }: {
   count: number;
   /**
-   * Optional real labels for each tile. When provided, the labels render as
-   * real text and ONLY the value below pulses (App Shell pattern). When
-   * omitted, both label and value pulse — the legacy behaviour.
+   * Optional real labels for each cell. When provided, the labels render as
+   * real text and ONLY the value pulses (App Shell pattern). When omitted,
+   * both label and value pulse.
    */
   labels?: string[];
   tileClassName?: string;
+  /** Columns for the matrix skeleton (auto from `count` when omitted). */
+  matrixCols?: MatrixCols;
 }) {
-  const tiles = Array.from({ length: count });
+  const matrixCols = resolveMatrixCols(count, matrixColsProp);
+  const cells = Array.from({ length: count });
   const hasLabels = !!labels && labels.length > 0;
+  const rowCount = Math.ceil(count / matrixCols);
+
   return (
     <div className="card !p-0 overflow-hidden">
-      <div className="overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem]">
-        <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
-          {tiles.map((_, i) => (
+      <div className="text-sm">
+        {Array.from({ length: rowCount }, (_, rowIdx) => {
+          const start = rowIdx * matrixCols;
+          const rowCells = cells.slice(start, start + matrixCols);
+          const rowCols = rowMatrixCols(matrixCols, rowCells.length);
+          const colsClass = matrixColsClass(rowCols);
+          return (
             <div
-              key={i}
-              className={`shrink-0 min-w-[10rem] rounded-lg bg-app-hover/50 px-2 py-1.5 text-center md:min-w-[5rem] ${tileClassName}`}
+              key={`row-${rowIdx}`}
+              className={`grid ${colsClass} divide-y divide-app-border sm:divide-y-0 sm:divide-x sm:divide-app-border ${
+                rowIdx > 0 ? 'border-t border-app-border' : ''
+              }`}
             >
-              {hasLabels ? (
-                <div>
-                  <div className={`truncate ${labelClass}`}>
-                    {labels[i] ?? ''}
+              {rowCells.map((_, colIdx) => {
+                const i = start + colIdx;
+                return (
+                  <div
+                    key={i}
+                    className={`flex items-center justify-between gap-3 px-3 py-2.5 min-w-0 ${tileClassName}`}
+                  >
+                    {hasLabels ? (
+                      <span className="text-xs text-app-fg-muted shrink-0 pr-3">{labels[i] ?? ''}</span>
+                    ) : (
+                      <span className="h-3 w-16 rounded bg-app-hover animate-pulse shrink-0" />
+                    )}
+                    <span className="h-4 w-12 rounded bg-app-hover/70 animate-pulse" />
                   </div>
-                  <div className="mt-1.5 h-6 rounded bg-app-hover animate-pulse md:mx-auto md:w-8" />
-                </div>
-              ) : (
-                <>
-                  <div className="mx-auto h-3 w-14 rounded bg-app-hover animate-pulse" />
-                  <div className="mt-1.5 h-6 rounded bg-app-hover animate-pulse md:mx-auto md:w-8" />
-                </>
-              )}
+                );
+              })}
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -107,6 +191,7 @@ type OverviewStatStripProps = {
    * On mobile, render a wrapping grid (3 columns) instead of the horizontal
    * scroll strip. Better for strips with ≤6 fixed items where the user
    * should see everything at a glance. Desktop layout is unchanged.
+   * Ignored when `variant="matrix"`.
    */
   mobileGrid?: boolean;
   /** Number of columns in the mobile grid (default 2). Use 1 for strips
@@ -130,6 +215,17 @@ type OverviewStatStripProps = {
    * strip layout stays mounted while data streams in.
    */
   loading?: boolean;
+  /**
+   * `matrix` (default): dense key/value cells in one bordered card (label left, value right).
+   * `tiles`: legacy padded metric tiles in a scroll/grid strip.
+   */
+  variant?: 'tiles' | 'matrix';
+  /**
+   * Columns for `variant="matrix"`. Omit to auto-fit from `items.length`
+   * (≤5 = one row; longer strips pick a balanced grid). Rows share one column
+   * track so dividers stay aligned; a lone last cell spans full width.
+   */
+  matrixCols?: MatrixCols;
 };
 
 /** Tiny green up-arrow shown beside a value that just changed. */
@@ -163,7 +259,10 @@ export function OverviewStatStrip({
   wrap = false,
   liveFlash = false,
   loading = false,
+  variant = 'matrix',
+  matrixCols: matrixColsProp,
 }: OverviewStatStripProps) {
+  const matrixCols = resolveMatrixCols(items.length, matrixColsProp);
   const resolveHref = useResolveFilterHref();
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = useCallback((delta: number) => {
@@ -238,6 +337,115 @@ export function OverviewStatStrip({
   );
 
   const valueSkeleton = <div className="mt-1 h-6 w-10 rounded bg-app-hover/70 animate-pulse md:mx-auto" />;
+  const matrixValueSkeleton = <div className="h-4 w-16 rounded bg-app-hover/70 animate-pulse" />;
+
+  if (variant === 'matrix') {
+    const rowCount = Math.ceil(items.length / matrixCols);
+    const matrixBody = (
+      <div className="text-sm">
+        {Array.from({ length: rowCount }, (_, rowIdx) => {
+          const start = rowIdx * matrixCols;
+          const rowItems = items.slice(start, start + matrixCols);
+          const rowCols = rowMatrixCols(matrixCols, rowItems.length);
+          const colsClass = matrixColsClass(rowCols);
+          return (
+            <div
+              key={`row-${rowIdx}`}
+              className={`grid ${colsClass} divide-y divide-app-border sm:divide-y-0 sm:divide-x sm:divide-app-border ${
+                rowIdx > 0 ? 'border-t border-app-border' : ''
+              }`}
+            >
+              {rowItems.map((item, colIdx) => {
+                const i = start + colIdx;
+                const stamp = changedAt.get(i);
+                const isFirstRow = rowIdx === 0;
+                const isLastRow = rowIdx === rowCount - 1;
+                const isFirstCol = colIdx === 0;
+                const isLastCol = colIdx === rowItems.length - 1;
+                // Match the outer card radius on corner cells so the active ring fits.
+                const cornerRadius = [
+                  isFirstRow && isFirstCol ? 'rounded-tl-[inherit] sm:rounded-tl-xl' : '',
+                  isFirstRow && isLastCol ? 'rounded-tr-[inherit] sm:rounded-tr-xl' : '',
+                  isLastRow && isFirstCol ? 'rounded-bl-[inherit] sm:rounded-bl-xl' : '',
+                  isLastRow && isLastCol ? 'rounded-br-[inherit] sm:rounded-br-xl' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+                const inner = (
+                  <>
+                    <span className="text-xs text-app-fg-muted shrink-0 pr-3">{item.label}</span>
+                    {loading ? (
+                      matrixValueSkeleton
+                    ) : item.plainValue ? (
+                      <div className="min-w-0 text-right flex items-center justify-end gap-1">
+                        {item.value}
+                        {stamp !== undefined && <LiveFlashArrow key={stamp} />}
+                      </div>
+                    ) : (
+                      <span
+                        className={`min-w-0 text-right font-medium tabular-nums ${item.valueClassName ?? 'text-app-fg'}`}
+                      >
+                        {item.value}
+                        {stamp !== undefined && <LiveFlashArrow key={stamp} />}
+                      </span>
+                    )}
+                  </>
+                );
+                const cellClass = [
+                  'flex items-center justify-between gap-3 px-3 py-2.5 min-w-0',
+                  item.active ? `${activeMatrixTileClass} ${cornerRadius}` : '',
+                  item.itemClassName ?? '',
+                  tileClassName,
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+                if (item.to) {
+                  return (
+                    <Link
+                      key={i}
+                      to={resolveHref(item.to)}
+                      onClick={item.onClick}
+                      className={`${cellClass} ${clickableTileClass}`}
+                      title={item.title}
+                    >
+                      {inner}
+                    </Link>
+                  );
+                }
+                if (item.onClick) {
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`${cellClass} ${clickableTileClass} w-full text-left`}
+                      title={item.title}
+                    >
+                      {inner}
+                    </button>
+                  );
+                }
+                return (
+                  <div key={i} className={cellClass} title={item.title}>
+                    {inner}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+
+    if (embedded) {
+      return <div className={className}>{matrixBody}</div>;
+    }
+    return (
+      <div className={['card', '!p-0', 'overflow-hidden', className].filter(Boolean).join(' ')}>
+        {matrixBody}
+      </div>
+    );
+  }
 
   const tileBase = [
     'shrink-0',

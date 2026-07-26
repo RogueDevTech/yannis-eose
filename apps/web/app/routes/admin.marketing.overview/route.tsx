@@ -87,6 +87,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const metrics: Metrics = bundle?.metrics ?? {
       totalSpend: 0,
+      pendingSpend: 0,
+      approvedSpend: 0,
       totalOrders: 0,
       deliveredOrders: 0,
       deliveredRevenue: 0,

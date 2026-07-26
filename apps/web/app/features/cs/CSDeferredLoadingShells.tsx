@@ -1,4 +1,4 @@
-import type { ReactNode, FormEvent } from 'react';
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import type { ListOrdersScheduleKind } from '@yannis/shared';
@@ -24,7 +24,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Tabs } from '~/components/ui/tabs';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import type { Order } from '~/features/orders/types';
@@ -354,13 +354,11 @@ export function CSOrdersLoadingShell({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
-  const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [scheduleCalendarModalOpen, setScheduleCalendarModalOpen] = useState(false);
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
-    setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter]);
+  }, [statusFilter]);
 
   const scheduleSelectValue =
     scheduleFilters.scheduleKind === 'callback_due'
@@ -520,7 +518,7 @@ export function CSOrdersLoadingShell({
         endTime={filters.endTime ?? ''}
         periodAllTime={filters.periodAllTime}
       />
-      <OverviewStatStrip mobileGrid items={csOrdersStatPulseStripItems()} />
+      <OverviewStatStrip items={csOrdersStatPulseStripItems()} />
 
       {isCSCloser ? (
         <div className="card animate-pulse space-y-3" aria-hidden>
@@ -536,35 +534,28 @@ export function CSOrdersLoadingShell({
         </div>
       ) : null}
 
-      <div className="card p-0 overflow-hidden">
+      {/* Filters + table in separate list-panels — matches OrdersListPage. */}
+      <div className="list-panel">
         <ToolbarFiltersCollapsible
           className="!border-0"
+          hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
           searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
-              <form
-                method="get"
-                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
+              <PageSearchControl
+                value={searchFilter || ''}
+                placeholder="Search by customer name..."
+                title="Search orders"
+                onApply={(query) => {
                   setSearchParams((p) => {
                     const next = new URLSearchParams(p);
                     next.set('page', '1');
-                    if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                    if (query) next.set('search', query);
                     else next.delete('search');
                     return next;
                   });
                 }}
-              >
-                <SearchInput
-                  name="search"
-                  placeholder="Search by customer name..."
-                  value={searchQuery}
-                  onChange={(val) => setSearchQuery(val)}
-                  withSubmitButton
-                  wrapperClassName="w-full md:flex-1"
-                />
-              </form>
+              />
               <div className="hidden shrink-0 items-center gap-3 md:flex">
                 <FormSelect
                   value={selectedStatus}
@@ -690,14 +681,17 @@ export function CSOrdersLoadingShell({
         </Modal>
       ) : null}
 
-      <CompactTable<Order>
-        rows={CS_ORDERS_SHELL_ROW_DATA}
-        rowKey={(o) => o.id}
-        columns={csOrdersShellTableColumns(showCSCloserColumn, showCampaignColumn)}
-        renderMobileCard={() => renderCSOrdersMobileCardShell()}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      <div className="list-panel">
+        <CompactTable<Order>
+          withCard={false}
+          rows={CS_ORDERS_SHELL_ROW_DATA}
+          rowKey={(o) => o.id}
+          columns={csOrdersShellTableColumns(showCSCloserColumn, showCampaignColumn)}
+          renderMobileCard={() => renderCSOrdersMobileCardShell()}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }
@@ -727,11 +721,6 @@ export function CSTeamLoadingShell({
   backlogFilter?: string;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(q);
-
-  useEffect(() => {
-    setSearchQuery(q);
-  }, [q]);
 
   const mergeListParams = useCallback(
     (overrides: { q?: string; activity?: string; backlog?: string; page?: number }) => {
@@ -762,11 +751,6 @@ export function CSTeamLoadingShell({
     },
     [setSearchParams],
   );
-
-  const handleSearchSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    mergeListParams({ q: searchQuery, page: 1 });
-  };
 
   const filtersBadgeCount = useMemo(() => {
     let count = 0;
@@ -804,7 +788,6 @@ export function CSTeamLoadingShell({
         periodAllTime={dateFilters.periodAllTime}
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Closers', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Total orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
@@ -824,20 +807,12 @@ export function CSTeamLoadingShell({
           hideMobileSheet
           badgeCount={filtersBadgeCount}
           searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                value={searchQuery}
-                onChange={(value) => {
-                  setSearchQuery(value);
-                  if (value === '' && (searchParams.get('q') ?? '').length > 0) mergeListParams({ q: '', page: 1 });
-                }}
-                placeholder="Search by closer, role, or branch…"
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-                name="q"
-                autoComplete="off"
-              />
-            </form>
+            <PageSearchControl
+              value={q}
+              placeholder="Search by closer, role, or branch…"
+              title="Search team"
+              onApply={(query) => mergeListParams({ q: query, page: 1 })}
+            />
           }
           desktopInlineFilters={
             <>
@@ -1048,7 +1023,6 @@ export function FollowUpBatchesLoadingShell({
         }
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Branches', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
@@ -1116,6 +1090,14 @@ export function FollowUpOrdersLoadingShell({
         {Array.from({ length: 6 }, (_, i) => (
           <div key={i} className="h-7 rounded-full bg-app-hover animate-pulse" style={{ width: `${60 + i * 10}px` }} />
         ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <PageSearchControl
+          value=""
+          onApply={() => {}}
+          placeholder="Search by name, order ID, or closer..."
+          title="Search orders"
+        />
       </div>
       <CompactTable<{ id: string }>
         rows={shellPulsePlaceholderRows('fu_orders', 8)}

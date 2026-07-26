@@ -129,7 +129,7 @@ export function FinanceProfitWaterfall({ profit }: { profit: ProfitReport }) {
                   Top products by contribution (delivered orders). Shared costs allocated by revenue share.
                 </p>
               </div>
-              <Link to="/admin/products" className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">
+              <Link to="/admin/products" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
                 Products
               </Link>
             </div>

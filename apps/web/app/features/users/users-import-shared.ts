@@ -93,6 +93,8 @@ export interface ResolvedRow extends ParsedRow {
   primaryBranchId: string | null;
   additionalBranchIds: string[];
   errors: string[];
+  /** Probation flag for imported users. */
+  isProbation?: boolean;
 }
 
 export function pickHeaderValue(row: Record<string, unknown>, header: string): string {

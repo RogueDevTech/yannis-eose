@@ -3,7 +3,11 @@ import { useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -13,9 +17,8 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Tabs } from '~/components/ui/tabs';
-import { TableActionButton } from '~/components/ui/table-action-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
@@ -96,6 +99,7 @@ export function AssetRegisterPage({
 
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [viewTarget, setViewTarget] = useState<AssetRow | null>(null);
   const [disposeTarget, setDisposeTarget] = useState<AssetRow | null>(null);
   const [showDepreciationModal, setShowDepreciationModal] = useState(false);
 
@@ -211,10 +215,18 @@ export function AssetRegisterPage({
         align: 'right',
         tight: true,
         mobileShowLabel: false,
-        render: (r) =>
-          canWrite && r.status === 'ACTIVE' ? (
-            <TableActionButton onClick={() => setDisposeTarget(r)}>Dispose</TableActionButton>
-          ) : null,
+        render: (r) => (
+          <div className="flex justify-end gap-1">
+            <CompactTableActionButton tone="brand" onClick={() => setViewTarget(r)}>
+              View
+            </CompactTableActionButton>
+            {canWrite && r.status === 'ACTIVE' ? (
+              <CompactTableActionButton tone="danger" onClick={() => setDisposeTarget(r)}>
+                Dispose
+              </CompactTableActionButton>
+            ) : null}
+          </div>
+        ),
       },
     ],
     [canWrite],
@@ -227,9 +239,7 @@ export function AssetRegisterPage({
       <button
         type="button"
         className="w-full text-left p-3 space-y-1"
-        onClick={() => {
-          if (canWrite && r.status === 'ACTIVE') setDisposeTarget(r);
-        }}
+        onClick={() => setViewTarget(r)}
       >
         <div className="flex items-center justify-between gap-2">
           <span className="font-medium text-app-fg truncate">{r.assetName}</span>
@@ -241,7 +251,7 @@ export function AssetRegisterPage({
         </div>
       </button>
     ),
-    [canWrite],
+    [],
   );
 
   // ── Render ─────────────────────────────────────────────────────────
@@ -258,7 +268,7 @@ export function AssetRegisterPage({
   ) : undefined;
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Asset Register"
         description="Track fixed assets, depreciation, and disposals."
@@ -267,38 +277,42 @@ export function AssetRegisterPage({
           <PageHeaderMobileTools
             desktop={
               <div className="flex items-center gap-2">
+                <PageSearchControl
+                  value={searchQuery}
+                  onApply={handleSearch}
+                  placeholder="Search assets..."
+                  title="Search assets"
+                />
                 <PageRefreshButton />
                 {actions}
               </div>
             }
             sheet={
-              canWrite ? (
-                <div className="flex flex-col gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setShowDepreciationModal(true)}>
-                    Run Depreciation
-                  </Button>
-                  <Button type="button" onClick={() => setShowAddModal(true)}>
-                    + Add Asset
-                  </Button>
-                </div>
-              ) : undefined
+              <div className="flex flex-col gap-2">
+                <PageSearchControl
+                  value={searchQuery}
+                  onApply={handleSearch}
+                  placeholder="Search assets..."
+                  title="Search assets"
+                />
+                {canWrite ? (
+                  <>
+                    <Button type="button" variant="secondary" onClick={() => setShowDepreciationModal(true)}>
+                      Run Depreciation
+                    </Button>
+                    <Button type="button" onClick={() => setShowAddModal(true)}>
+                      + Add Asset
+                    </Button>
+                  </>
+                ) : null}
+              </div>
             }
             sheetTitle="Asset Register"
             triggerAriaLabel="Asset register actions"
           />
         }
       >
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <Tabs value={activeTab} onChange={handleTabChange} tabs={STATUS_TABS} variant="pill" />
-          <SearchInput
-            value={searchQuery}
-            onChange={handleSearch}
-            debounceMs={300}
-            placeholder="Search assets..."
-            clearable
-            wrapperClassName="w-full md:w-64"
-          />
-        </div>
+        <Tabs value={activeTab} onChange={handleTabChange} tabs={STATUS_TABS} variant="pill" />
       </PageHeader>
 
       <OverviewStatStrip
@@ -332,6 +346,81 @@ export function AssetRegisterPage({
           />
           <Pagination page={pagination.page} totalPages={pagination.totalPages} />
         </>
+      )}
+
+      {viewTarget && (
+        <Modal open onClose={() => setViewTarget(null)} maxWidth="max-w-md">
+          <div className="p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-app-fg truncate">{viewTarget.assetName}</h2>
+              <StatusBadge status={viewTarget.status} />
+            </div>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Category</dt>
+                <dd className="text-app-fg font-medium text-right">{viewTarget.assetCategory}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Acquired</dt>
+                <dd className="text-app-fg">{viewTarget.acquisitionDate}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Cost</dt>
+                <dd className="text-app-fg font-medium"><NairaPrice amount={viewTarget.cost} /></dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Acc. depreciation</dt>
+                <dd className="text-app-fg"><NairaPrice amount={viewTarget.accumulatedDepreciation} /></dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">NBV</dt>
+                <dd className="text-app-fg font-medium"><NairaPrice amount={viewTarget.nbv} /></dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-app-fg-muted">Method</dt>
+                <dd className="text-app-fg">
+                  {METHOD_LABELS[viewTarget.depreciationMethod] ?? viewTarget.depreciationMethod}
+                </dd>
+              </div>
+              {viewTarget.serialNumber ? (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-app-fg-muted">Serial</dt>
+                  <dd className="text-app-fg font-mono text-xs">{viewTarget.serialNumber}</dd>
+                </div>
+              ) : null}
+              {viewTarget.location ? (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-app-fg-muted">Location</dt>
+                  <dd className="text-app-fg text-right">{viewTarget.location}</dd>
+                </div>
+              ) : null}
+              {viewTarget.notes ? (
+                <div>
+                  <dt className="text-app-fg-muted mb-0.5">Notes</dt>
+                  <dd className="text-app-fg">{viewTarget.notes}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <div className="flex justify-end gap-2">
+              {canWrite && viewTarget.status === 'ACTIVE' ? (
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setDisposeTarget(viewTarget);
+                    setViewTarget(null);
+                  }}
+                >
+                  Dispose
+                </Button>
+              ) : null}
+              <Button type="button" variant="secondary" size="sm" onClick={() => setViewTarget(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* ── Add Asset Modal ──────────────────────────────────────────── */}
@@ -490,6 +579,6 @@ export function AssetRegisterPage({
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

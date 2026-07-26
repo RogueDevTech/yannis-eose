@@ -31,9 +31,10 @@ const AI_MODELS = [
 
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
-const VALID_MODEL_IDS = new Set(AI_MODELS.map((m) => m.id));
+type ModelId = (typeof AI_MODELS)[number]['id'];
+const VALID_MODEL_IDS: Set<string> = new Set(AI_MODELS.map((m) => m.id));
 
-function getStoredModel(): string {
+function getStoredModel(): ModelId {
   if (typeof window === 'undefined') return DEFAULT_MODEL;
   const stored = localStorage.getItem('yannis_ai_model');
   // Reset if stored model is deprecated/invalid
@@ -41,7 +42,7 @@ function getStoredModel(): string {
     localStorage.removeItem('yannis_ai_model');
     return DEFAULT_MODEL;
   }
-  return stored || DEFAULT_MODEL;
+  return (stored as ModelId) || DEFAULT_MODEL;
 }
 
 function setStoredModel(model: string) {
@@ -138,7 +139,7 @@ function renderMessageContent(content: string) {
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i] ?? '';
 
     // Table detection
     if (line.includes('|') && line.trim().startsWith('|')) {
@@ -168,7 +169,7 @@ function renderMessageContent(content: string) {
     }
     // Bullet points
     else if (/^[\s]*[-*]\s/.test(line)) {
-      const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+      const indent = (line.match(/^(\s*)/)?.[1] ?? '').length;
       elements.push(
         <div key={i} className="flex gap-1.5 text-sm text-app-fg" style={{ paddingLeft: `${Math.min(indent, 8) * 4}px` }}>
           <span className="text-app-fg-muted mt-0.5">-</span>
@@ -291,7 +292,7 @@ function ChatDrawer({ user, onClose }: {
     trpcQuery<ChatSession[]>('listSessions', { limit: 30, offset: 0 }).then((data) => {
       if (data) {
         setSessions(data);
-        if (data.length > 0 && !activeSessionId) {
+        if (data.length > 0 && !activeSessionId && data[0]) {
           setActiveSessionId(data[0].id);
         }
       }
@@ -518,7 +519,7 @@ function ChatDrawer({ user, onClose }: {
             onNewChat={handleNewChat}
           />
         ) : view === 'settings' ? (
-          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} initialKeyExists={hasApiKey === true} selectedModel={selectedModel} onModelChange={(m) => { setSelectedModel(m); setStoredModel(m); }} />
+          <ApiKeySettings user={user} onBack={() => setView('chat')} onKeyConnected={() => { setHasApiKey(true); setView('chat'); }} isFirstSetup={hasApiKey === false} initialKeyExists={hasApiKey === true} selectedModel={selectedModel} onModelChange={(m) => { setSelectedModel(m as ModelId); setStoredModel(m); }} />
         ) : (
           <>
             {/* Messages area */}

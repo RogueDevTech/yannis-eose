@@ -1,22 +1,28 @@
-import { useMemo, useState } from 'react';
-import { useSearchParams } from '@remix-run/react';
+import { useCallback, useMemo } from 'react';
+import { Link, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { InlineFilter } from '~/components/ui/inline-filter';
 import { FormSelect } from '~/components/ui/form-select';
-import { TextInput } from '~/components/ui/text-input';
 import { Button } from '~/components/ui/button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { exportToCsv } from '~/lib/csv-export';
 import type { PayrollRegisterRow } from './payroll-prd-types';
 
-interface PayrollReportsPageProps {
+export interface PayrollReportsPageProps {
   rows: PayrollRegisterRow[];
   costByBranch: Array<{
     branchId: string;
@@ -36,8 +42,9 @@ interface PayrollReportsPageProps {
   }>;
   branches: Array<{ id: string; name: string }>;
   filters: {
-    fromMonth: string;
-    toMonth: string;
+    startDate: string;
+    endDate: string;
+    periodAllTime: boolean;
     status: string;
     department: string;
     branchId: string;
@@ -69,11 +76,10 @@ const DEPARTMENT_OPTIONS = [
 
 export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, branches, filters }: PayrollReportsPageProps) {
   const [, setSearchParams] = useSearchParams();
-  const [fromMonth, setFromMonth] = useState(filters.fromMonth);
-  const [toMonth, setToMonth] = useState(filters.toMonth);
-  const [status, setStatus] = useState(filters.status);
-  const [department, setDepartment] = useState(filters.department);
-  const [branchId, setBranchId] = useState(filters.branchId);
+
+  const status = filters.status || 'ALL';
+  const department = filters.department || '';
+  const branchId = filters.branchId || '';
 
   const branchOptions = useMemo(
     () => [{ value: '', label: 'All branches' }, ...branches.map((b) => ({ value: b.id, label: b.name }))],
@@ -94,17 +100,40 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
     );
   }, [rows]);
 
-  const applyFilters = () => {
-    const params = new URLSearchParams();
-    if (fromMonth) params.set('fromMonth', fromMonth.length === 7 ? `${fromMonth}-01` : fromMonth);
-    if (toMonth) params.set('toMonth', toMonth.length === 7 ? `${toMonth}-01` : toMonth);
-    if (status && status !== 'ALL') params.set('status', status);
-    if (department) params.set('department', department);
-    if (branchId) params.set('branchId', branchId);
-    setSearchParams(params);
-  };
+  const setFilter = useCallback(
+    (key: 'status' | 'department' | 'branchId', value: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          // Drop legacy month params if present.
+          next.delete('fromMonth');
+          next.delete('toMonth');
+          if (!value || (key === 'status' && value === 'ALL')) next.delete(key);
+          else next.set(key, value);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
-  const activeFilterCount = [fromMonth, toMonth, status !== 'ALL' ? status : '', department, branchId].filter(Boolean).length;
+  const clearAllFilters = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('status');
+        next.delete('department');
+        next.delete('branchId');
+        next.delete('fromMonth');
+        next.delete('toMonth');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const activeFilterCount = [status !== 'ALL' ? status : '', department, branchId].filter(Boolean).length;
 
   const columns: CompactTableColumn<PayrollRegisterRow>[] = useMemo(
     () => [
@@ -120,7 +149,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
         key: 'role',
         header: 'Role',
         nowrap: true,
-        render: (row) => row.staffRole ? <RoleBadge role={row.staffRole} size="sm" /> : <span className="text-sm text-app-fg-muted">—</span>,
+        render: (row) => row.staffRole ? <RoleBadge role={row.staffRole} size="sm" /> : <span className="text-sm text-app-fg-muted">N/A</span>,
       },
       {
         key: 'period',
@@ -164,6 +193,19 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
         header: 'Batch',
         render: (row) => <StatusBadge status={row.batch.status} />,
       },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        hideable: false,
+        render: (row) => (
+          <CompactTableActionButton to={`/hr/payroll-batch/${row.batch.id}`}>
+            View
+          </CompactTableActionButton>
+        ),
+      },
     ],
     [],
   );
@@ -203,44 +245,29 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
     );
   };
 
-  const filterFields = (
-    <>
-      <TextInput
-        label="From month"
-        type="month"
-        value={fromMonth.slice(0, 7)}
-        onChange={(e) => setFromMonth(e.target.value ? `${e.target.value}-01` : '')}
-      />
-      <TextInput
-        label="To month"
-        type="month"
-        value={toMonth.slice(0, 7)}
-        onChange={(e) => setToMonth(e.target.value ? `${e.target.value}-01` : '')}
-      />
+  const sheetFilters = (
+    <div className="space-y-3">
       <FormSelect
         label="Batch status"
         value={status}
-        onChange={(e) => setStatus(e.target.value)}
+        onChange={(e) => setFilter('status', e.target.value)}
         options={STATUS_OPTIONS}
-        className="sm:w-44"
       />
       <FormSelect
         label="Department"
         value={department}
-        onChange={(e) => setDepartment(e.target.value)}
+        onChange={(e) => setFilter('department', e.target.value)}
         options={DEPARTMENT_OPTIONS}
-        className="sm:w-44"
       />
-      {branches.length > 1 && (
+      {branches.length > 1 ? (
         <FormSelect
           label="Branch"
           value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
+          onChange={(e) => setFilter('branchId', e.target.value)}
           options={branchOptions}
-          className="sm:w-44"
         />
-      )}
-    </>
+      ) : null}
+    </div>
   );
 
   return (
@@ -253,13 +280,22 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Payroll reports toolbar"
+            filtersBadgeCount={activeFilterCount}
+            onClearFilters={activeFilterCount > 0 ? clearAllFilters : undefined}
+            filters={sheetFilters}
             desktop={
-              <>
+              <div className="flex items-center gap-2">
                 <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
                 <Button variant="secondary" size="sm" onClick={handleExport} disabled={!rows.length}>
                   Export CSV
                 </Button>
-              </>
+              </div>
             }
             sheet={({ closeSheet }) => (
               <Button
@@ -279,30 +315,13 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
         }
       />
 
-      <ToolbarFiltersCollapsible
-        badgeCount={activeFilterCount}
-        desktopInlineFilters={
-          <>
-            {filterFields}
-            <div className="flex items-end">
-              <Button type="button" variant="primary" size="sm" onClick={applyFilters}>
-                Apply filters
-              </Button>
-            </div>
-          </>
-        }
-        sheetFilterBody={
-          <div className="space-y-3">
-            {filterFields}
-            <Button type="button" variant="primary" size="sm" className="w-full justify-center h-12" onClick={applyFilters}>
-              Apply filters
-            </Button>
-          </div>
-        }
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Rows', value: rows.length },
           { label: 'Total gross', value: <NairaPrice amount={totals.gross} /> },
@@ -358,6 +377,46 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
         </div>
       )}
 
+      <div className="list-panel">
+      <ToolbarFiltersCollapsible
+        className="!border-0"
+        hideMobileSheet
+        badgeCount={activeFilterCount}
+        onClearAll={activeFilterCount > 0 ? clearAllFilters : undefined}
+        desktopInlineFilters={
+          <>
+            <InlineFilter
+              type="select"
+              value={status}
+              defaultValue="ALL"
+              onChange={(v) => setFilter('status', v)}
+              options={STATUS_OPTIONS}
+              width="status"
+            />
+            <InlineFilter
+              type="select"
+              value={department}
+              defaultValue=""
+              onChange={(v) => setFilter('department', v)}
+              options={DEPARTMENT_OPTIONS}
+              width="department"
+            />
+            {branches.length > 1 ? (
+              <InlineFilter
+                type="select"
+                value={branchId}
+                defaultValue=""
+                onChange={(v) => setFilter('branchId', v)}
+                options={branchOptions}
+                width="branch"
+              />
+            ) : null}
+          </>
+        }
+        sheetFilterBody={sheetFilters}
+      />
+      </div>
+
       {rows.length === 0 ? (
         <EmptyState
           title="No register rows"
@@ -373,6 +432,30 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
             rowKey={(r) => r.payout.id}
             emptyTitle="No rows"
             emptyDescription=""
+            renderMobileCard={(row) => (
+              <Link
+                to={`/hr/payroll-batch/${row.batch.id}`}
+                className="block rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 hover:bg-app-hover transition-colors"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-app-fg text-sm truncate">
+                      {row.staffName ?? 'Contractor / unknown'}
+                    </p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">
+                      {formatMonth(row.batch.periodMonth)} · {row.batch.department}
+                    </p>
+                  </div>
+                  <StatusBadge status={row.batch.status} />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-app-fg-muted">Net</span>
+                  <span className="font-semibold text-app-fg">
+                    <NairaPrice amount={Number(row.payout.netPay) || Number(row.payout.totalPayout)} />
+                  </span>
+                </div>
+              </Link>
+            )}
           />
         </div>
       )}

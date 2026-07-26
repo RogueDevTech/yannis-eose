@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { Form, useFetcher, useNavigation } from '@remix-run/react';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
@@ -555,18 +554,9 @@ export function StaffOnboardingPage({
 
   return (
     <div className="space-y-4">
-      {showBackToProfile ? (
-        <Breadcrumb
-          items={[
-            { label: 'HR', to: '/hr/users' },
-            { label: subject.name, to: `/hr/users/${subject.id}` },
-            { label: 'Onboarding' },
-          ]}
-        />
-      ) : null}
-
       <PageHeader
-        title={mode === 'self' ? 'Your onboarding' : `Onboarding · ${subject.name}`}
+        title={mode === 'self' ? 'Your onboarding' : `Onboarding: ${subject.name}`}
+        backTo={showBackToProfile ? `/hr/users/${subject.id}` : undefined}
         mobileInlineActions
         description={
           mode === 'self'
@@ -907,7 +897,7 @@ export function StaffOnboardingPage({
           <Card>
             <CardHeader
               title="Payout bank details"
-              description="Where Finance sends your payroll. Required before review."
+              description="Where Finance sends your payroll. Bank, bank code, account name, and account number are required before review."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Bank" hint="Pick from the list. Bank code fills in automatically.">
@@ -927,9 +917,20 @@ export function StaffOnboardingPage({
               </FormField>
               <FormField
                 label="Bank code"
-                hint={bankCode ? `Auto-filled from ${bankName || 'selected bank'}` : '3-digit CBN code'}
+                hint={
+                  bankCode
+                    ? `Auto-filled from ${bankName || 'selected bank'}. Edit if Finance needs a different code.`
+                    : 'Required. Pick a bank above or type the CBN/NIBSS code.'
+                }
               >
-                <TextInput value={bankCode} disabled readOnly placeholder="—" />
+                <TextInput
+                  name="payoutBankCodeVisible"
+                  value={bankCode}
+                  onChange={(e) => setBankCode(e.target.value.trim())}
+                  placeholder="e.g. 058"
+                  maxLength={20}
+                  inputMode="numeric"
+                />
               </FormField>
               <FormField label="Account name" hint="As it appears on your bank statement">
                 <TextInput

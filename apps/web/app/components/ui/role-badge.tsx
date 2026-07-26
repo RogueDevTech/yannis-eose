@@ -126,7 +126,7 @@ export function RoleBadge({
   role,
   label,
   size = 'md',
-  variant = 'chip',
+  variant = 'text',
   showDot = false,
   className = '',
   style,

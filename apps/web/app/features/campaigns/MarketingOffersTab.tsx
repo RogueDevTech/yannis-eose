@@ -3,7 +3,7 @@ import { useFetcher, useSearchParams } from '@remix-run/react';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Modal } from '~/components/ui/modal';
@@ -211,20 +211,12 @@ export function MarketingOffersTab({
           hideMobileSheet
           badgeCount={filterProductId ? 1 : 0}
           searchRow={
-            <form
-              className="min-w-0 flex-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-              }}
-            >
-              <SearchInput
-                value={offerSearch}
-                onChange={setOfferSearch}
-                placeholder="Name or product…"
-                withSubmitButton
-                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-              />
-            </form>
+            <PageSearchControl
+              value={offerSearch}
+              placeholder="Name or product…"
+              title="Search offers"
+              onApply={setOfferSearch}
+            />
           }
           desktopInlineFilters={
             <SearchableSelect

@@ -1,13 +1,14 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Link, useFetcher, useNavigate, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { clipName } from '~/lib/clip-name';
+import { isAdminLevel } from '~/lib/rbac';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Pagination } from '~/components/ui/pagination';
@@ -129,7 +130,7 @@ export function FollowUpPage({
   const adminRouteData = useRouteLoaderData('routes/admin') as
     | { user?: { role?: string } }
     | undefined;
-  const canEditPrices = adminRouteData?.user?.role === 'SUPER_ADMIN' || adminRouteData?.user?.role === 'ADMIN' || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING';
+  const canEditPrices = isAdminLevel(adminRouteData?.user?.role ? adminRouteData.user as { role: string } : null) || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING';
   const branchesCatalog = useBranchesCatalog();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const showSkeletonRows = deferredLoading || isLoaderRefetchBusy;
@@ -152,7 +153,6 @@ export function FollowUpPage({
   const [selectAllMatchingCapped, setSelectAllMatchingCapped] = useState(false);
   const [selectAllMatchingError, setSelectAllMatchingError] = useState<string | null>(null);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState(filters.search);
   const [convertCartPrefill, setConvertCartPrefill] = useState<CartPrefill | null>(null);
   const [peekOrder, setPeekOrder] = useState<FollowUpPageData['orders'][number] | null>(null);
   const [customDateModalOpen, setCustomDateModalOpen] = useState(false);
@@ -278,10 +278,10 @@ export function FollowUpPage({
     setCustomDateModalOpen(false);
   };
 
-  const handleSearchSubmit = () => {
+  const applySearch = (query: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
-      if (searchQuery.trim()) next.set('search', searchQuery.trim());
+      if (query) next.set('search', query);
       else next.delete('search');
       next.set('page', '1');
       return next;
@@ -349,7 +349,7 @@ export function FollowUpPage({
           : (order) => (
               <span className="text-sm font-medium text-app-fg" title={order.customerName}>
                 {clipName(order.customerName)}
-                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
                 {order.isFollowUp && (
@@ -709,13 +709,11 @@ export function FollowUpPage({
           />
         </div>
         <div className="flex-1">
-          <SearchInput
-            value={searchQuery}
-            onChange={setSearchQuery}
+          <PageSearchControl
+            value={filters.search}
             placeholder={isCartView ? 'Search customer name…' : 'Search customer…'}
-            controlSize="sm"
-            withSubmitButton
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSearchSubmit(); } }}
+            title="Search customers"
+            onApply={applySearch}
           />
         </div>
       </div>
@@ -1009,7 +1007,7 @@ export function FollowUpPage({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-app-fg truncate" title={order.customerName}>
                   {clipName(order.customerName)}
-                  {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                  {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                     <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                   )}
                   {order.isFollowUp && (

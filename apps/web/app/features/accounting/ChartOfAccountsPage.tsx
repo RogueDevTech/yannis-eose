@@ -1,18 +1,20 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { StatusBadge } from '~/components/ui/status-badge';
+import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
 
@@ -61,6 +63,12 @@ const CATEGORY_OPTIONS = [
   { value: '9', label: '9000s System' },
 ];
 
+/** Replace em dashes with dot separators in display names. */
+function displayName(name: string): string {
+  return name.replace(/\s*[—–]\s*/g, ' · ');
+}
+
+
 /** Normal balance based on root type per IFRS. */
 function normalBalance(rootType: string): 'Debit' | 'Credit' {
   return rootType === 'ASSET' || rootType === 'EXPENSE' ? 'Debit' : 'Credit';
@@ -98,12 +106,28 @@ function toTree(accounts: AccountRow[]): Array<AccountRow & { depth: number }> {
 export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<AccountRow | null>(null);
   const [parentId, setParentId] = useState('');
   const [search, setSearch] = useState('');
   const [rootTypeFilter, setRootTypeFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [postableOnly, setPostableOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState('active');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
+    // Start with only the first top-level group (Assets) expanded
+    for (const a of accounts) {
+      if (a.isGroup && !a.parentAccountId) return new Set([a.id]);
+    }
+    return new Set<string>();
+  });
+  const toggleGroup = (id: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -131,6 +155,8 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
   const rows = useMemo(() => {
     let filtered = tree;
     const q = search.trim().toLowerCase();
+    const hasFilters = !!(q || rootTypeFilter || categoryFilter || postableOnly);
+
     if (q) {
       filtered = filtered
         .filter((a) => `${a.code} ${a.name}`.toLowerCase().includes(q))
@@ -145,11 +171,32 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
     if (postableOnly) {
       filtered = filtered.filter((a) => !a.isGroup);
     }
+
+    // When no search/filter active, apply accordion collapse
+    if (!hasFilters) {
+      const visible: typeof filtered = [];
+      for (const row of filtered) {
+        // Check if all ancestor groups are expanded
+        let ancestorId = row.parentAccountId ?? null;
+        let ancestorVisible = true;
+        while (ancestorId) {
+          if (!expandedGroups.has(ancestorId)) {
+            ancestorVisible = false;
+            break;
+          }
+          const parent = filtered.find((r) => r.id === ancestorId);
+          ancestorId = parent?.parentAccountId ?? null;
+        }
+        if (ancestorVisible) visible.push(row);
+      }
+      return visible;
+    }
+
     return filtered;
-  }, [tree, search, rootTypeFilter, categoryFilter, postableOnly]);
+  }, [tree, search, rootTypeFilter, categoryFilter, postableOnly, expandedGroups]);
 
   const parentOptions = useMemo(
-    () => accounts.filter((a) => a.isGroup).map((a) => ({ value: a.id, label: `${a.code} ${a.name}` })),
+    () => accounts.filter((a) => a.isGroup).map((a) => ({ value: a.id, label: `${a.code} ${a.name.replace(/\s*[—–]\s*/g, ' · ')}` })),
     [accounts],
   );
 
@@ -157,18 +204,22 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
   const activeCount = accounts.filter((a) => a.isActive).length;
   const inactiveCount = accounts.length - activeCount;
 
-  const handleDeactivate = useCallback(
-    (account: AccountRow) => {
-      if (!confirm(`Deactivate "${account.code} ${account.name}"? It will no longer be selectable for new postings.`)) return;
-      deactivateFetcher.submit(
-        { intent: 'deactivateAccount', accountId: account.id },
-        { method: 'post' },
-      );
-    },
-    [deactivateFetcher],
-  );
+  const handleDeactivateConfirm = useCallback(() => {
+    if (!deactivateTarget) return;
+    deactivateFetcher.submit(
+      { intent: 'deactivateAccount', accountId: deactivateTarget.id },
+      { method: 'post' },
+    );
+    setDeactivateTarget(null);
+  }, [deactivateFetcher, deactivateTarget]);
 
-  const hasFilters = rootTypeFilter || categoryFilter || postableOnly || statusFilter !== 'active';
+  const hasFilters = Boolean(rootTypeFilter || categoryFilter || postableOnly || statusFilter !== 'active' || search.trim());
+  const filtersBadgeCount =
+    (rootTypeFilter ? 1 : 0) +
+    (categoryFilter ? 1 : 0) +
+    (postableOnly ? 1 : 0) +
+    (statusFilter !== 'active' ? 1 : 0) +
+    (search.trim() ? 1 : 0);
   const resetFilters = () => {
     setRootTypeFilter('');
     setCategoryFilter('');
@@ -177,107 +228,85 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
     setSearch('');
   };
 
-  const columns: CompactTableColumn<AccountRow & { depth: number }>[] = [
-    {
-      key: 'code',
-      header: 'Code',
-      className: 'w-20',
-      render: (r) => (
-        <span className="text-xs font-mono text-app-fg-muted">{r.code}</span>
-      ),
-    },
-    {
-      key: 'name',
-      header: 'Account',
-      render: (r) => (
-        <span style={{ paddingLeft: `${r.depth * 16}px` }} className="flex items-center gap-2">
-          <span className={`${r.isGroup ? 'font-semibold' : ''} ${r.isActive ? 'text-app-fg' : 'text-app-fg-muted line-through'}`}>
-            {r.name}
-          </span>
-          {r.isGroup && (
-            <span className="rounded bg-app-hover px-1.5 py-0.5 text-[10px] uppercase text-app-fg-muted">
-              group
-            </span>
-          )}
-          {!r.isActive && (
-            <StatusBadge status="INACTIVE" size="sm" />
-          )}
-        </span>
-      ),
-    },
-    {
-      key: 'rootType',
-      header: 'Type',
-      hideOnMobile: true,
-      render: (r) => (
-        <span className="text-xs text-app-fg-muted">{r.rootType}</span>
-      ),
-    },
-    {
-      key: 'accountType',
-      header: 'Account Type',
-      hideOnMobile: true,
-      render: (r) => (
-        <span className="text-xs text-app-fg-muted">{typeLabel(r.accountType)}</span>
-      ),
-    },
-    {
-      key: 'normalBalance',
-      header: 'Normal',
-      hideOnMobile: true,
-      render: (r) => (
-        <span className={`text-xs ${normalBalance(r.rootType) === 'Debit' ? 'text-info-600 dark:text-info-400' : 'text-success-600 dark:text-success-400'}`}>
-          {normalBalance(r.rootType)}
-        </span>
-      ),
-    },
-    {
-      key: 'postable',
-      header: 'Post?',
-      hideOnMobile: true,
-      render: (r) => (
-        <span className={`text-xs ${r.isGroup ? 'text-app-fg-muted' : 'text-success-600 dark:text-success-400'}`}>
-          {r.isGroup ? 'No' : 'Yes'}
-        </span>
-      ),
-    },
-    {
-      key: 'balance',
-      header: 'Balance',
-      align: 'right',
-      hideOnMobile: true,
-      render: (r) =>
-        r.isGroup || Number(r.balance) === 0 ? null : <NairaPrice amount={r.balance} />,
-    },
-  ];
+  const filterControls = (
+    <>
+      <FormSelect
+        label="Type"
+        value={rootTypeFilter}
+        onChange={(e) => setRootTypeFilter(e.target.value)}
+        options={[{ value: '', label: 'All types' }, ...ROOT_TYPES]}
+      />
+      <FormSelect
+        label="Category"
+        value={categoryFilter}
+        onChange={(e) => setCategoryFilter(e.target.value)}
+        options={CATEGORY_OPTIONS}
+      />
+      <FormSelect
+        label="Status"
+        value={statusFilter}
+        onChange={(e) => setStatusFilter(e.target.value)}
+        options={[
+          { value: 'active', label: 'Active' },
+          { value: 'inactive', label: 'Inactive' },
+          { value: 'all', label: 'All' },
+        ]}
+      />
+      <label className="flex items-center gap-1.5 text-xs text-app-fg-muted cursor-pointer select-none pt-5">
+        <input
+          type="checkbox"
+          checked={postableOnly}
+          onChange={(e) => setPostableOnly(e.target.checked)}
+          className="rounded border-app-border text-brand-600 focus:ring-brand-500"
+        />
+        Postable only
+      </label>
+    </>
+  );
 
-  if (canWrite) {
-    columns.push({
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => (
-        <span className="flex items-center justify-end gap-1">
-          <TableActionButton onClick={() => setEditAccount(r)}>Edit</TableActionButton>
-          {r.isActive && (
-            <TableActionButton onClick={() => handleDeactivate(r)} variant="danger">Deactivate</TableActionButton>
-          )}
-        </span>
-      ),
-    });
-  }
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Chart of Accounts"
         description="IFRS-compliant account tree for double-entry ledger postings."
+        mobileInlineActions
         actions={
-          canWrite ? (
-            <Button type="button" onClick={() => setCreateOpen(true)}>
-              New Account
-            </Button>
-          ) : undefined
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Chart of accounts tools"
+            saveFilterKey
+            filtersBadgeCount={filtersBadgeCount}
+            onClearFilters={hasFilters ? resetFilters : undefined}
+            filters={
+              <>
+                <PageSearchControl
+                  value={search}
+                  onApply={setSearch}
+                  placeholder="Search by code or name"
+                  title="Search accounts"
+                />
+                {filterControls}
+              </>
+            }
+            desktop={
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <PageRefreshButton />
+                {canWrite ? (
+                  <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+                    New Account
+                  </Button>
+                ) : null}
+              </div>
+            }
+            sheet={
+              canWrite ? (
+                <Button type="button" className="w-full" onClick={() => setCreateOpen(true)}>
+                  New Account
+                </Button>
+              ) : undefined
+            }
+          />
         }
       />
 
@@ -291,9 +320,13 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
         ]}
       />
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SearchInput value={search} onChange={setSearch} placeholder="Search by code or name" className="max-w-xs" />
+      <div className="hidden md:flex flex-wrap items-center gap-2">
+        <PageSearchControl
+          value={search}
+          onApply={setSearch}
+          placeholder="Search by code or name"
+          title="Search accounts"
+        />
         <FormSelect
           value={rootTypeFilter}
           onChange={(e) => setRootTypeFilter(e.target.value)}
@@ -321,7 +354,7 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
             type="checkbox"
             checked={postableOnly}
             onChange={(e) => setPostableOnly(e.target.checked)}
-            className="rounded border-app-border"
+            className="rounded border-app-border text-brand-600 focus:ring-brand-500"
           />
           Postable only
         </label>
@@ -340,10 +373,81 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
       ) : rows.length === 0 ? (
         <EmptyState title="No matches" description="No accounts match the current filters." />
       ) : (
-        <CompactTable columns={columns} rows={rows} rowKey={(r) => r.id} />
+        <div className="card !p-0 overflow-hidden">
+          <div className="divide-y divide-app-border">
+            {rows.map((r) => {
+              const isExpanded = expandedGroups.has(r.id);
+              const hasChildren = r.isGroup && tree.some((t) => t.parentAccountId === r.id);
+              return (
+                <div
+                  key={r.id}
+                  className={`flex items-center gap-3 px-4 py-2.5 ${r.isGroup ? 'bg-app-hover/30' : ''} ${!r.isActive ? 'opacity-50' : ''}`}
+                  style={{ paddingLeft: `${16 + r.depth * 20}px` }}
+                >
+                  {/* Chevron / spacer */}
+                  {r.isGroup && hasChildren ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(r.id)}
+                      className="shrink-0 p-0.5 rounded hover:bg-app-hover text-app-fg-muted"
+                      aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                    >
+                      <svg
+                        className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <span className="w-4.5 shrink-0" />
+                  )}
+
+                  {/* Code */}
+                  <span className="text-xs font-mono text-app-fg-muted w-14 shrink-0 tabular-nums">{r.code}</span>
+
+                  {/* Name */}
+                  <span className={`flex-1 min-w-0 text-sm truncate ${r.isGroup ? 'font-semibold text-app-fg' : 'text-app-fg'} ${!r.isActive ? 'line-through' : ''}`}>
+                    {displayName(r.name)}
+                    <RealMoneyTag accountType={r.accountType} />
+                  </span>
+
+                  {/* Badges */}
+                  {r.isGroup && (
+                    <span className="hidden sm:inline rounded bg-app-hover px-1.5 py-0.5 text-[10px] uppercase text-app-fg-muted shrink-0">
+                      group
+                    </span>
+                  )}
+
+                  {/* Type */}
+                  <span className="hidden md:inline text-xs text-app-fg-muted w-16 shrink-0 text-right">{r.rootType}</span>
+
+                  {/* Balance */}
+                  {!r.isGroup && Number(r.balance) !== 0 && (
+                    <span className="hidden md:inline text-xs font-medium tabular-nums shrink-0 text-right w-24">
+                      <NairaPrice amount={r.balance} />
+                    </span>
+                  )}
+                  {(r.isGroup || Number(r.balance) === 0) && (
+                    <span className="hidden md:inline w-24 shrink-0" />
+                  )}
+
+                  {/* Actions */}
+                  {canWrite && (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <TableActionButton onClick={() => setEditAccount(r)}>Edit</TableActionButton>
+          {r.isActive && (
+            <TableActionButton onClick={() => setDeactivateTarget(r)} variant="danger">Deactivate</TableActionButton>
+          )}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
-      {/* Create Account Modal */}
       {createOpen && (
         <Modal open onClose={() => setCreateOpen(false)} maxWidth="max-w-md">
           <div className="p-6 space-y-4">
@@ -367,7 +471,7 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
                 clearable
               />
               <label className="flex items-center gap-2 text-sm text-app-fg">
-                <input type="checkbox" name="isGroup" value="true" /> This is a group (header) account
+                <input type="checkbox" name="isGroup" value="true" className="rounded border-app-border text-brand-600 focus:ring-brand-500" /> This is a group (header) account
               </label>
               {createFetcher.data?.error && (
                 <p className="text-sm text-danger-600">{createFetcher.data.error}</p>
@@ -385,7 +489,21 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
         </Modal>
       )}
 
-      {/* Edit Account Modal (name only per FRD) */}
+      <ConfirmActionModal
+        open={!!deactivateTarget}
+        onClose={() => setDeactivateTarget(null)}
+        title="Deactivate account"
+        description={
+          deactivateTarget
+            ? `Deactivate "${deactivateTarget.code} ${deactivateTarget.name.replace(/\s*[—–]\s*/g, ' · ')}"? It will no longer be selectable for new postings.`
+            : ''
+        }
+        confirmLabel="Deactivate"
+        variant="danger"
+        loading={deactivateFetcher.state !== 'idle'}
+        onConfirm={handleDeactivateConfirm}
+      />
+
       {editAccount && (
         <Modal open onClose={() => setEditAccount(null)} maxWidth="max-w-md">
           <div className="p-6 space-y-4">
@@ -415,6 +533,6 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

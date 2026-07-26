@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Link, useLoaderData } from '@remix-run/react';
+import { Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import {
@@ -20,7 +20,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
@@ -306,6 +306,17 @@ function ShipmentsIndexContent(data: {
   // Controlled state for SearchableSelect warehouse filters (mobile + desktop).
   const [mobileWarehouse, setMobileWarehouse] = useState(data.filters.destinationLocationId);
   const [desktopWarehouse, setDesktopWarehouse] = useState(data.filters.destinationLocationId);
+  const [, setSearchParams] = useSearchParams();
+
+  const applySearch = (query: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (query) next.set('search', query);
+      else next.delete('search');
+      next.set('page', '1');
+      return next;
+    }, { replace: true });
+  };
 
   // Build a status-filter URL that preserves the other active filters and resets
   // pagination to page 1 — mirrors the GET filter form.
@@ -433,15 +444,12 @@ function ShipmentsIndexContent(data: {
             hideMobileSheet
             badgeCount={activeFilters.length}
             searchRow={
-              <div className="min-w-0 flex-1 flex items-center gap-2">
-                <SearchInput
-                  name="search"
-                  defaultValue={data.filters.search}
-                  placeholder="Search label, supplier, or ref…"
-                  withSubmitButton
-                  wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-                />
-              </div>
+              <PageSearchControl
+                value={data.filters.search}
+                placeholder="Search label, supplier, or ref…"
+                title="Search shipments"
+                onApply={applySearch}
+              />
             }
             desktopInlineFilters={
               <>

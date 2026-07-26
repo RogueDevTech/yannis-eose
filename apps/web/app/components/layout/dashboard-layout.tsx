@@ -345,101 +345,34 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.read',
       },
       {
-        label: 'Payout',
-        href: '/admin/finance/payout',
-        icon: SidebarIcons.finance,
-        permission: 'finance.read',
-      },
-      {
         label: 'Disbursements',
         href: '/admin/finance/disbursements',
         icon: SidebarIcons.disbursements,
         permission: 'finance.disburse',
       },
-      {
-        // Renamed from "Ledger" — synthetic activity feed (revenue, remittances,
-        // ad spend, payroll). Double-entry GL lives in the Accounting group.
-        label: 'Financial Activity',
-        href: '/admin/finance/ledger',
-        icon: SidebarIcons.remittances,
-        permission: 'finance.read',
-      },
-      {
-        // Sidebar gate is OR(permission, roles). Listing `permission: 'users.read'`
-        // here let HoM in (they hold `users.read` for team management).
-        // CEO directive 2026-05-10: HoM does NOT manage staff accounts.
-        // Roles-only restricts to HR_MANAGER + FINANCE_OFFICER (+ admin-class
-        // via `navBypass`). The page itself is also gated by
-        // `requireStaffAccountsAccess` so an unauthorized user typing the URL
-        // is redirected anyway.
-        label: 'Staff Accounts',
-        href: '/admin/finance/staff-accounts',
-        icon: SidebarIcons.users,
-        roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
-      },
-      {
-        label: 'Profit by shipment',
-        href: '/admin/finance/profit-by-shipment',
-        icon: SidebarIcons.finance,
-        permission: 'finance.read',
-      },
     ],
   },
   {
+    // Order = accounting flow: setup → post → inquire → statements → compliance.
     group: 'Accounting',
     items: [
       {
         label: 'Chart of Accounts',
         href: '/admin/finance/accounts',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.chartOfAccounts,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Opening Balances',
         href: '/admin/finance/opening-balances',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.scale,
         permission: 'finance.ledger.write',
       },
       {
         label: 'Journal Entries',
         href: '/admin/finance/journal-entries',
-        icon: SidebarIcons.remittances,
-        permission: 'finance.ledger.read',
-        roles: ['AUDITOR'],
-      },
-      {
-        label: 'General Ledger',
-        href: '/admin/finance/general-ledger',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-        roles: ['AUDITOR'],
-      },
-      {
-        label: 'Trial Balance',
-        href: '/admin/finance/trial-balance',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-        roles: ['AUDITOR'],
-      },
-      {
-        label: 'Profit & Loss',
-        href: '/admin/finance/profit-loss',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-        roles: ['AUDITOR'],
-      },
-      {
-        label: 'Balance Sheet',
-        href: '/admin/finance/balance-sheet',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-        roles: ['AUDITOR'],
-      },
-      {
-        label: 'Cash Flow',
-        href: '/admin/finance/cash-flow',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.journal,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
@@ -448,8 +381,57 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/finance/expenses',
         icon: SidebarIcons.finance,
         permission: 'finance.ledger.read',
+        roles: ['AUDITOR', 'HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'],
+      },
+      {
+        label: 'Bank Reconciliation',
+        href: '/admin/finance/bank-reconciliation',
+        icon: SidebarIcons.bank,
+        permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
+      {
+        label: 'General Ledger',
+        href: '/admin/finance/general-ledger',
+        icon: SidebarIcons.journal,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Trial Balance',
+        href: '/admin/finance/trial-balance',
+        icon: SidebarIcons.scale,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Profit & Loss',
+        href: '/admin/finance/profit-loss',
+        icon: SidebarIcons.trendUp,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Balance Sheet',
+        href: '/admin/finance/balance-sheet',
+        icon: SidebarIcons.scale,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+      {
+        label: 'Cash Flow',
+        href: '/admin/finance/cash-flow',
+        icon: SidebarIcons.trendUp,
+        permission: 'finance.ledger.read',
+        roles: ['AUDITOR'],
+      },
+    ],
+  },
+  {
+    // Deferred accounting surfaces — visible only when IS_DEV is true (not prod).
+    group: 'Dev only',
+    devOnly: true,
+    items: [
       {
         label: 'Asset Register',
         href: '/admin/finance/assets',
@@ -458,37 +440,30 @@ const navStructure: NavGroupDef[] = [
         roles: ['AUDITOR'],
       },
       {
-        label: 'Bank Reconciliation',
-        href: '/admin/finance/bank-reconciliation',
-        icon: SidebarIcons.finance,
+        label: 'Aging',
+        href: '/admin/finance/aging',
+        icon: SidebarIcons.clock,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Tax Returns',
         href: '/admin/finance/tax-returns',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.calculator,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'WHT Certificates',
         href: '/admin/finance/wht-certificates',
-        icon: SidebarIcons.finance,
-        permission: 'finance.ledger.read',
-        roles: ['AUDITOR'],
-      },
-      {
-        label: 'Aging',
-        href: '/admin/finance/aging',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.calculator,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Budget Report',
         href: '/admin/finance/budget-report',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.campaigns,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
@@ -497,15 +472,25 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'HR',
     items: [
-      // Payroll (Monthly Batches): HR + admins via permission, Heads + Finance via explicit role
-      // allow-list. Heads see only their dept's batches; Finance sees PENDING_FINANCE+. See
-      // CLAUDE.md → "Payroll Workflow".
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
+      {
+        label: 'Staff Onboarding',
+        href: '/hr/staff-onboarding-documents',
+        icon: SidebarIcons.orders,
+        permission: 'hr.onboarding.read',
+      },
       {
         label: 'Payroll',
         href: '/hr/payroll',
         icon: SidebarIcons.hr,
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
+      },
+      {
+        label: 'Payroll Config',
+        href: '/hr/payroll/config/roles',
+        icon: SidebarIcons.settings,
+        permission: 'payroll.config.read',
       },
       {
         label: 'Payslips',
@@ -520,25 +505,11 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
       },
       {
-        label: 'Payroll Config',
-        href: '/hr/payroll/config/roles',
-        icon: SidebarIcons.settings,
-        permission: 'payroll.config.read',
-      },
-      {
-        label: 'Onboarding Queue',
-        href: '/hr/payroll/onboarding',
-        icon: SidebarIcons.orders,
-        permission: 'hr.write',
-      },
-      {
         label: 'Contractors',
         href: '/hr/payroll/contractors',
         icon: SidebarIcons.users,
         permission: 'payroll.config.read',
       },
-      // Commission Plans: friendlier label for HoCS / HoLogistics who don't see "Payroll Config"
-      // (CEO directive 2026-04-26). Admin-level roles already see the page via "Payroll Config".
       {
         label: 'Commission Plans',
         href: '/hr/payroll/config/roles',
@@ -546,18 +517,6 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
         excludeRoles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'],
-      },
-      // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
-      // Head of Marketing / Head of CS hold `users.read` for other features but must not see
-      // this link — they manage their team from the Marketing / Sales team pages instead.
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
-      // Permission-first: link appears only with hr.onboarding.* on the session (or admin-class).
-      // Do not add HR_MANAGER (or any role) as a sidebar bypass — grant the caps via template / overrides.
-      {
-        label: 'Staff Onboarding',
-        href: '/hr/staff-onboarding-documents',
-        icon: SidebarIcons.orders,
-        permission: 'hr.onboarding.read',
       },
     ],
   },
@@ -709,10 +668,10 @@ function getNavGroupsForUser(
   const forMobile = options?.forMobile === true;
 
   const isLogisticsOnly = role === 'TPL_MANAGER';
-  const logisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Finance', 'Accounting'];
+  const logisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Finance', 'Accounting', 'Dev only'];
   /** Head of Logistics sees Finance overview but not the full logistics-hidden set. */
   const isHoLogistics = role === 'HEAD_OF_LOGISTICS';
-  const hoLogisticsHiddenGroups = ['Catalog', 'HR', 'Analytics'];
+  const hoLogisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Dev only'];
 
   for (const groupDef of navStructure) {
     // Dev-only groups are hidden unless IS_DEV is true.
@@ -849,6 +808,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/marketing/team',
     '/admin/marketing/funding',
     '/admin/marketing/expenses',
+    '/admin/finance/expenses',
   ],
   MEDIA_BUYER: [
     '/admin',
@@ -863,6 +823,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/sales/team',
     '/admin/sales/orders',
     '/admin/sales/leaderboard',
+    '/admin/finance/expenses',
   ],
   CS_CLOSER: ['/admin', '/admin/sales/queue', '/admin/sales/orders', '/admin/sales/leaderboard'],
   HEAD_OF_LOGISTICS: [
@@ -872,6 +833,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/logistics/partners',
     '/admin/logistics/transfers',
     '/admin/finance/overview',
+    '/admin/finance/expenses',
   ],
   TPL_MANAGER: [
     '/admin',
@@ -885,11 +847,11 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/disbursements',
   ],
   STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/shipments', '/admin/transfers'],
-  HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
+  HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users', '/admin/finance/expenses'],
   AUDITOR: [
     '/admin',
     '/admin/finance/overview',
-    '/admin/finance/ledger',
+    '/admin/finance/general-ledger',
     '/admin/finance/trial-balance',
     '/admin/analytics/audit',
   ],
@@ -1072,7 +1034,7 @@ function DashboardLayoutInner({
     const msgHandler = (event: MessageEvent) => {
       if (event.data?.type === 'SW_UPDATED') {
         // Mark that a reload is needed — the next Remix navigation will trigger it.
-        window.__yannisSwUpdated = true;
+        (window as unknown as Record<string, boolean>).__yannisSwUpdated = true;
       }
     };
     navigator.serviceWorker?.addEventListener('message', msgHandler);
@@ -1598,7 +1560,7 @@ function DashboardLayoutInner({
 
       {/* Main content area */}
       <main
-        className={`pt-[var(--header-height)] min-h-screen transition-all duration-300 pb-[var(--bottom-nav-height)] md:pb-0
+        className={`pt-[var(--header-height)] min-h-screen transition-all duration-300 pb-[calc(var(--bottom-nav-height)+5rem)] md:pb-20
           ${collapsed ? 'lg:pl-[var(--sidebar-collapsed-width)]' : 'lg:pl-[var(--sidebar-width)]'}
         `}
       >
@@ -1619,10 +1581,14 @@ function DashboardLayoutInner({
                   fall through to `<Outlet />` and let the old page linger — `NavProgressBar`
                   + the in-route Suspense fallback own the rest. Gated on cache miss so
                   `cachedClientLoader` revisits never flash a skeleton over cached data. */}
-              {showTransitionSkeleton
+                {showTransitionSkeleton
                 ? (getShellForPath(
                     navigation.location!.pathname,
                     navigation.location!.search,
+                    {
+                      userName: user?.name ?? undefined,
+                      role: user?.role ?? null,
+                    },
                   ) ?? <Outlet />)
                 : <Outlet />}
             </BranchGroupsCatalogProvider>

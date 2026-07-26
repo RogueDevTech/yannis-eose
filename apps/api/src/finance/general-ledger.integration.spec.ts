@@ -275,6 +275,37 @@ describe.skipIf(SKIP_IF_NO_DB)('General Ledger — Integration', () => {
 
   // ── Phase 3: remittance settlement closes the AR loop ─────────────────────────
 
+  it('VAT-inclusive sale keeps AR equal to totalAmount (remittance clears AR)', async () => {
+    const actor = await createTestUser(db as never, { role: 'FINANCE_OFFICER' });
+    await setSessionActor(pgClient, actor.id);
+    await seedFiscalYear();
+    const acc = await seedAccounts([
+      ...DEFAULT_ACCOUNTS,
+      // Codes must match ACCT.* used by postSalesInvoice.
+      { code: '4110', name: 'Product Sales', rootType: 'INCOME' },
+      { code: '2141', name: 'VAT Output', rootType: 'LIABILITY', accountType: null, isGroup: false },
+    ]);
+
+    const [ord] = await db
+      .insert(schema.orders)
+      .values({
+        customerName: 'VAT Jane',
+        customerPhoneHash: `h-${randomUUID()}`,
+        status: 'DELIVERED',
+        totalAmount: '107500',
+        landedCost: '0',
+        deliveredAt: new Date('2026-06-10'),
+      })
+      .returning({ id: schema.orders.id });
+
+    const res = await svc.postSalesInvoice(ord!.id, { id: actor.id });
+    expect(res.posted).toBe(true);
+    // AR = invoice total only (not total + extra VAT).
+    expect(await acctNet(acc.get('Debtors')!)).toBe(107500);
+    expect(await acctNet(acc.get('2141')!)).toBe(-7500);
+    expect(await acctNet(acc.get('4110')!)).toBe(-100000);
+  });
+
   it('remittance settlement nets the delivered order AR back to zero', async () => {
     const actor = await createTestUser(db as never, { role: 'FINANCE_OFFICER' });
     await setSessionActor(pgClient, actor.id);

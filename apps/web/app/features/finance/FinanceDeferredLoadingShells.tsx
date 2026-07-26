@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import {
@@ -17,7 +17,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -72,31 +72,52 @@ function CashRemittanceSectionShell() {
 
 function PayrollSectionShell() {
   const tiles = [
-    { title: 'Payroll awaiting Finance', subtitle: 'Batches in PENDING_FINANCE' },
-    { title: 'Approval inbox', subtitle: 'Funding requests pending' },
+    { title: 'Awaiting Finance', subtitle: 'Batch(es) · staff' },
+    { title: 'Paid in period', subtitle: 'Batch(es) · staff' },
+    { title: 'Period gross', subtitle: 'Pending Finance + Paid' },
+    { title: 'Period PAYE', subtitle: 'Tax on batches' },
   ];
   return (
-    <Card>
-      <CardHeader
-        title="Payroll"
-        description="Payroll batches and approval requests awaiting finance action."
-      />
-      <CardBody className="-mt-2">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {tiles.map((t) => (
-            <div
-              key={t.title}
-              className="rounded-lg border border-app-border bg-app-hover/60 p-3 animate-pulse space-y-2"
-              aria-hidden
-            >
-              <p className="text-xs font-medium text-app-fg-muted">{t.title}</p>
-              <div className="h-7 w-24 rounded-md bg-app-hover" />
-              <p className="text-xs text-app-fg-muted">{t.subtitle}</p>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader
+          title="Payroll"
+          description="Pending disbursement queue and payroll cost for the selected period."
+        />
+        <CardBody className="-mt-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {tiles.map((t) => (
+              <div
+                key={t.title}
+                className="rounded-lg border border-app-border bg-app-hover/60 p-3 animate-pulse space-y-2"
+                aria-hidden
+              >
+                <p className="text-xs font-medium text-app-fg-muted">{t.title}</p>
+                <div className="h-7 w-28 rounded-md bg-app-hover" />
+                <p className="text-xs text-app-fg-muted">{t.subtitle}</p>
+              </div>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader
+          title="Cost by pay role"
+          description="Net pay from payout lines in the selected period."
+        />
+        <CardBody className="-mt-2 space-y-2" aria-hidden>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="animate-pulse space-y-1">
+              <div className="flex justify-between gap-2">
+                <div className="h-3 w-32 rounded bg-app-hover" />
+                <div className="h-3 w-20 rounded bg-app-hover" />
+              </div>
+              <div className="h-1.5 rounded-full bg-app-border" />
             </div>
           ))}
-        </div>
-      </CardBody>
-    </Card>
+        </CardBody>
+      </Card>
+    </div>
   );
 }
 
@@ -242,16 +263,6 @@ export function FinanceDisbursementsLoadingShell({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const mainTab = useMemo(() => disbMainTabFromSp(searchParams), [searchParams]);
-  const [searchQuery, setSearchQuery] = useState(() => filters.search);
-  const [balancesSearchQuery, setBalancesSearchQuery] = useState(() => filters.balancesSearch);
-
-  useEffect(() => {
-    setSearchQuery(filters.search);
-  }, [filters.search]);
-  useEffect(() => {
-    setBalancesSearchQuery(filters.balancesSearch);
-  }, [filters.balancesSearch]);
-
   const selectedStatus =
     filters.status && DISB_STATUS_OPTIONS.includes(filters.status as (typeof DISB_STATUS_OPTIONS)[number])
       ? filters.status
@@ -303,25 +314,21 @@ export function FinanceDisbursementsLoadingShell({
     });
   };
 
-  const handleSearchSubmit = (e: FormEvent) => {
-    e.preventDefault();
+  const applySearch = (query: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('page', '1');
-      const q = searchQuery.trim();
-      if (q) next.set('search', q);
+      if (query) next.set('search', query);
       else next.delete('search');
       return next;
     });
   };
 
-  const handleBalancesSearchSubmit = (e: FormEvent) => {
-    e.preventDefault();
+  const applyBalancesSearch = (query: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('balancesPage', '1');
-      const q = balancesSearchQuery.trim();
-      if (q) next.set('balancesSearch', q);
+      if (query) next.set('balancesSearch', query);
       else next.delete('balancesSearch');
       return next;
     });
@@ -392,7 +399,6 @@ export function FinanceDisbursementsLoadingShell({
         periodAllTime={filters.periodAllTime}
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total disbursed', value: <StatValuePulse className="min-w-[3.5rem]" /> },
           { label: 'Pending', value: <StatValuePulse className="min-w-[3rem]" /> },
@@ -419,19 +425,13 @@ export function FinanceDisbursementsLoadingShell({
       {mainTab === 'disbursements' ? (
         <div className="card">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-              <SearchInput
-                type="search"
-                value={searchQuery}
-                onChange={(v) => setSearchQuery(v)}
-                placeholder="Search by sender, receiver, or ID…"
-                controlSize="sm"
-                clearable
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-                aria-label="Search disbursements"
-              />
-            </form>
+            <PageSearchControl
+              value={filters.search}
+              placeholder="Search by sender, receiver, or ID…"
+              title="Search disbursements"
+              aria-label="Search disbursements"
+              onApply={applySearch}
+            />
             <FormSelect
               id="disbursement-status-filter-shell"
               value={selectedStatus}
@@ -458,19 +458,13 @@ export function FinanceDisbursementsLoadingShell({
       {mainTab === 'balances' ? (
         <div className="card">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <form onSubmit={handleBalancesSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-              <SearchInput
-                type="search"
-                value={balancesSearchQuery}
-                onChange={(v) => setBalancesSearchQuery(v)}
-                placeholder="Search recipient name…"
-                controlSize="sm"
-                clearable
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-                aria-label="Search recipient balances"
-              />
-            </form>
+            <PageSearchControl
+              value={filters.balancesSearch}
+              placeholder="Search recipient name…"
+              title="Search balances"
+              aria-label="Search recipient balances"
+              onApply={applyBalancesSearch}
+            />
             <FormSelect
               id="balances-role-filter-shell"
               value={balancesRoleFilter}
@@ -606,19 +600,27 @@ export function DeliveryRemittancesLoadingShell({
     endDate: string;
     periodAllTime: boolean;
     eligibleQ: string;
+    remittanceSearch?: string;
   };
   /** Mirrors loaded page — hides Confirm remittance when the actor cannot create. */
   canCreateRemittance?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const viewTab = searchParams.get('tab') === 'remittances' ? 'remittances' : 'eligible';
-  const [eligibleDraft, setEligibleDraft] = useState(() => filters.eligibleQ);
-
-  useEffect(() => {
-    setEligibleDraft(filters.eligibleQ);
-  }, [filters.eligibleQ]);
-
   // setViewTab removed — tab switching handled inline by <Tabs onChange>
+
+  const applyRemittanceSearch = useCallback(
+    (query: string) => {
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.set('page', '1');
+        if (!query) next.delete('rq');
+        else next.set('rq', query);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   const handleLocationChange = useCallback(
     (locationId: string) => {
@@ -647,16 +649,18 @@ export function DeliveryRemittancesLoadingShell({
     [setSearchParams],
   );
 
-  const commitEligibleQ = useCallback(() => {
-    const trimmed = eligibleDraft.trim();
-    setSearchParams((p) => {
-      const next = new URLSearchParams(p);
-      next.set('eligiblePage', '1');
-      if (!trimmed) next.delete('q');
-      else next.set('q', trimmed);
-      return next;
-    });
-  }, [eligibleDraft, setSearchParams]);
+  const applyEligibleSearch = useCallback(
+    (query: string) => {
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.set('eligiblePage', '1');
+        if (!query) next.delete('q');
+        else next.set('q', query);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   const locationPickOptions = useMemo(() => {
     const base = [{ value: '', label: 'All locations' }];
@@ -727,8 +731,6 @@ export function DeliveryRemittancesLoadingShell({
       />
 
       <OverviewStatStrip
-        mobileGrid
-        mobileGridCols={1}
         items={[
           { label: 'Total Delivered', value: <StatValuePulse className="min-w-[3.5rem]" /> },
           { label: 'Awaiting · Period', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -739,8 +741,6 @@ export function DeliveryRemittancesLoadingShell({
       />
 
       <OverviewStatStrip
-        mobileGrid
-        mobileGridCols={1}
         tileClassName="!py-2"
         items={[
           { label: 'Gross Order Value', value: <StatValuePulse className="min-w-[3rem]" /> },
@@ -791,6 +791,14 @@ export function DeliveryRemittancesLoadingShell({
               className="!border-0"
               hideMobileSheet
               badgeCount={remittanceToolbarBadge}
+              searchRow={
+                <PageSearchControl
+                  value={filters.remittanceSearch ?? searchParams.get('rq') ?? ''}
+                  placeholder="Search customer or order #"
+                  title="Search remittances"
+                  onApply={applyRemittanceSearch}
+                />
+              }
               desktopInlineFilters={
                 <>
                   <SearchableSelect
@@ -864,22 +872,12 @@ export function DeliveryRemittancesLoadingShell({
       {viewTab === 'eligible' ? (
         <div className="space-y-3">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <form
-              className="min-w-0"
-              onSubmit={(e) => {
-                e.preventDefault();
-                commitEligibleQ();
-              }}
-            >
-              <SearchInput
-                value={eligibleDraft}
-                onChange={(v) => setEligibleDraft(v)}
-                placeholder="Search customer, order ID, invoice ref, or bill-to name"
-                controlSize="md"
-                withSubmitButton
-                wrapperClassName="w-full"
-              />
-            </form>
+            <PageSearchControl
+              value={filters.eligibleQ}
+              placeholder="Search customer, order ID, invoice ref, or bill-to name"
+              title="Search eligible orders"
+              onApply={applyEligibleSearch}
+            />
             <FormSelect
               id="eligible-remittance-location-shell"
               aria-label="Filter by logistics location"
@@ -1105,91 +1103,6 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
   );
 }
 
-/** Finance payout — URL-driven status pills; stats + batch cards pulse. */
-export function FinancePayoutLoadingShell({
-  status: _statusShell,
-}: {
-  status: '' | 'PENDING_FINANCE' | 'PAID';
-}) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const raw = searchParams.get('status');
-  const active: '' | 'PAID' | 'PENDING_FINANCE' =
-    raw === 'PAID' || raw === 'PENDING_FINANCE' ? raw : '';
-
-  const setFilter = (next: '' | 'PAID' | 'PENDING_FINANCE') => {
-    setSearchParams(
-      (p) => {
-        const n = new URLSearchParams(p);
-        if (!next) n.delete('status');
-        else n.set('status', next);
-        return n;
-      },
-      { replace: true },
-    );
-  };
-
-  const pillClass = (v: '' | 'PAID' | 'PENDING_FINANCE') =>
-    [
-      'rounded-full px-4 py-2 text-sm font-medium border transition-colors',
-      active === v
-        ? 'border-brand-500 bg-brand-500 text-white shadow-sm'
-        : 'border-app-border bg-app-elevated text-app-fg hover:bg-app-hover',
-    ].join(' ');
-
-  return (
-    <div className="space-y-4" aria-busy="true" aria-live="polite">
-      <PageHeader
-        title="Payout"
-        mobileInlineActions
-        description="Review payroll payout batches."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Actions"
-            triggerAriaLabel="Payout toolbar"
-            desktop={
-              <>
-                <PageRefreshButton />
-                <Button type="button" variant="secondary" size="sm" disabled>
-                  Export payout document
-                </Button>
-              </>
-            }
-            sheet={<Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>Export payout document</Button>}
-          />
-        }
-      />
-      <OverviewStatStrip
-        mobileGrid
-        items={[
-          { label: 'Pending finance', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-          { label: 'Paid', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-          { label: 'Batches', value: <StatValuePulse className="min-w-[2rem]" /> },
-        ]}
-      />
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by payout status">
-        <button type="button" className={pillClass('')} onClick={() => setFilter('')}>
-          All
-        </button>
-        <button type="button" className={pillClass('PENDING_FINANCE')} onClick={() => setFilter('PENDING_FINANCE')}>
-          Pending finance
-        </button>
-        <button type="button" className={pillClass('PAID')} onClick={() => setFilter('PAID')}>
-          Paid
-        </button>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="card p-4 space-y-3 animate-pulse">
-            <div className="h-5 w-full max-w-xs rounded bg-app-hover" aria-hidden />
-            <div className="h-3 w-full rounded bg-app-hover" aria-hidden />
-            <div className="h-8 w-24 rounded bg-app-hover" aria-hidden />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** General Ledger — matches GeneralLedgerPage chrome. */
 export function GeneralLedgerLoadingShell({
   filters,
@@ -1223,7 +1136,6 @@ export function GeneralLedgerLoadingShell({
         }
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total Credits', value: <StatValuePulse className="min-w-[3.5rem]" /> },
           { label: 'Total Debits', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -1236,8 +1148,12 @@ export function GeneralLedgerLoadingShell({
         <div className="h-10 md:h-9 w-52 rounded-md bg-app-hover/60 animate-pulse" aria-hidden />
         <div className="h-10 md:h-9 w-48 rounded-md bg-app-hover/60 animate-pulse" aria-hidden />
       </div>
-      {/* Search bar */}
-      <div className="h-10 md:h-9 w-full rounded-md bg-app-hover/60 animate-pulse" aria-hidden />
+      <PageSearchControl
+        value=""
+        onApply={() => {}}
+        placeholder="Search by description..."
+        title="Search ledger"
+      />
       {/* Table rows skeleton */}
       <div className="space-y-2">
         {[1, 2, 3, 4, 5, 6].map((i) => (

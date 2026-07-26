@@ -1,22 +1,44 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageSearchControl } from '~/components/ui/page-search-control';
+import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { Modal } from '~/components/ui/modal';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { Pagination } from '~/components/ui/pagination';
 import {
   CompactTable,
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { PayslipPreviewModal } from '~/components/ui/payslip-preview-modal';
 import { downloadPayslipPdf } from '~/lib/payslip-pdf';
 import type { PayslipListItem } from './payroll-prd-types';
+import type { BranchOption } from './types';
+import { formatRole } from '~/features/users/types';
+import { DEPT_LABEL } from './payroll-constants';
+import { payslipFilename, toPayslipPdfInput } from './payslip-mappers';
 
 interface PayrollPayslipsPageProps {
   items: PayslipListItem[];
   page: number;
   limit: number;
+  total: number;
+  branches: BranchOption[];
+  filters: {
+    department?: string;
+    branchId?: string;
+    startDate: string;
+    endDate: string;
+    periodAllTime: boolean;
+    search?: string;
+  };
 }
 
 function formatPeriod(month: string): string {
@@ -25,57 +47,46 @@ function formatPeriod(month: string): string {
   return d.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
 }
 
-function parseBonusLines(breakdown: unknown): Array<{ label: string; amount: number }> {
-  if (!Array.isArray(breakdown)) return [];
-  return breakdown
-    .map((line) => {
-      if (!line || typeof line !== 'object') return null;
-      const obj = line as Record<string, unknown>;
-      const label = String(obj.label ?? obj.name ?? 'Bonus');
-      const amount = Number(obj.amount ?? 0);
-      if (!Number.isFinite(amount)) return null;
-      return { label, amount };
-    })
-    .filter((x): x is { label: string; amount: number } => x != null);
-}
+const DEPARTMENT_OPTIONS = [
+  { value: '', label: 'All departments' },
+  ...Object.entries(DEPT_LABEL).map(([value, label]) => ({ value, label })),
+];
 
-function PayslipDetailLine({ label, amount, bold }: { label: string; amount: number; bold?: boolean }) {
-  return (
-    <div className={`flex justify-between py-2 ${bold ? 'font-semibold text-app-fg' : 'text-sm text-app-fg-muted'}`}>
-      <span>{label}</span>
-      <NairaPrice amount={amount} />
-    </div>
-  );
-}
 
-export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageProps) {
+export function PayrollPayslipsPage({ items, page, limit, total, branches, filters }: PayrollPayslipsPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [viewingPayslip, setViewingPayslip] = useState<PayslipListItem | null>(null);
 
-  const handleDownload = useCallback(async (row: PayslipListItem) => {
-    const { payout, batch, staffName } = row;
-    setDownloadingId(payout.id);
-    try {
-      const periodLabel = formatPeriod(batch.periodMonth);
-      const filename = `payslip-${(staffName ?? 'staff').replace(/\s+/g, '-').toLowerCase()}-${batch.periodMonth.slice(0, 7)}.pdf`;
-      await downloadPayslipPdf(
-        {
-          periodLabel,
-          employeeName: staffName ?? 'Staff',
-          employeeId: payout.staffId ?? undefined,
-          roleName: payout.payRoleName ?? undefined,
-          baseSalary: Number(payout.baseSalary),
-          performanceBonus: Number(payout.performanceBonus),
-          allowancesTotal: Number(payout.allowancesTotal),
-          addOnsTotal: Number(payout.addOnsTotal),
-          deductionsTotal: Number(payout.deductionsTotal),
-          grossPay: Number(payout.grossPay),
-          payeTax: Number(payout.payeTax),
-          netPay: Number(payout.netPay),
-          bonusLines: parseBonusLines(payout.bonusBreakdown),
+  const branchOptions = useMemo(
+    () => [{ value: '', label: 'All branches' }, ...branches.map((b) => ({ value: b.id, label: b.name }))],
+    [branches],
+  );
+
+  const setFilter = useCallback(
+    (key: string, value: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value) {
+            next.set(key, value);
+          } else {
+            next.delete(key);
+          }
+          // Reset to page 1 when a non-page filter changes
+          if (key !== 'page') next.delete('page');
+          return next;
         },
-        filename,
+        { replace: true },
       );
+    },
+    [setSearchParams],
+  );
+
+  const handleDownload = useCallback(async (row: PayslipListItem) => {
+    setDownloadingId(row.payout.id);
+    try {
+      await downloadPayslipPdf(toPayslipPdfInput(row), payslipFilename(row));
     } finally {
       setDownloadingId(null);
     }
@@ -96,7 +107,19 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
         header: 'Role',
         nowrap: true,
         render: (row) => (
-          <span className="text-sm text-app-fg-muted">{row.payout.payRoleName ?? '—'}</span>
+          <span className="text-sm text-app-fg-muted">
+            {row.staffRole
+              ? formatRole(row.staffRole)
+              : row.payout.payRoleName?.trim() || 'N/A'}
+          </span>
+        ),
+      },
+      {
+        key: 'department',
+        header: 'Dept',
+        nowrap: true,
+        render: (row) => (
+          <span className="text-sm text-app-fg-muted">{DEPT_LABEL[row.batch.department as keyof typeof DEPT_LABEL] ?? row.batch.department}</span>
         ),
       },
       {
@@ -139,7 +162,7 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
               disabled={downloadingId === row.payout.id}
               onClick={() => void handleDownload(row)}
             >
-              {downloadingId === row.payout.id ? 'Generating…' : 'PDF'}
+              {downloadingId === row.payout.id ? 'Generating\u2026' : 'PDF'}
             </CompactTableActionButton>
           </div>
         ),
@@ -148,8 +171,27 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
     [downloadingId, handleDownload],
   );
 
-  const vp = viewingPayslip;
-  const bonusLines = vp ? parseBonusLines(vp.payout.bonusBreakdown) : [];
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const hasActiveFilters = !!(filters.department || filters.branchId || filters.search || filters.startDate || filters.endDate);
+
+  const totalNetPay = useMemo(
+    () => items.reduce((sum, r) => sum + Number(r.payout.netPay), 0),
+    [items],
+  );
+
+  const payslipStatStrip = useMemo(
+    () => [
+      { label: 'Payslips', value: total },
+      {
+        label: 'Total net pay',
+        value: <NairaPrice amount={totalNetPay} />,
+        plainValue: true,
+      },
+    ],
+    [total, totalNetPay],
+  );
+
+  const viewingPdf = viewingPayslip ? toPayslipPdfInput(viewingPayslip) : null;
 
   return (
     <div className="space-y-4">
@@ -159,107 +201,147 @@ export function PayrollPayslipsPage({ items, page, limit }: PayrollPayslipsPageP
         description="Paid payout lines with downloadable PDF payslips."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Actions"
+            sheetTitle="Filters"
             triggerAriaLabel="Payslips toolbar"
-            desktop={<PageRefreshButton />}
+            filtersBadgeCount={[filters.department, filters.branchId].filter(Boolean).length}
+            onClearFilters={
+              filters.department || filters.branchId
+                ? () => {
+                    setSearchParams(
+                      (prev) => {
+                        const next = new URLSearchParams(prev);
+                        next.delete('department');
+                        next.delete('branchId');
+                        next.delete('page');
+                        return next;
+                      },
+                      { replace: true },
+                    );
+                  }
+                : undefined
+            }
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
+              </div>
+            }
+            filters={
+              <div className="space-y-3">
+                <FormSelect
+                  label="Department"
+                  name="department"
+                  options={DEPARTMENT_OPTIONS}
+                  value={filters.department ?? ''}
+                  onChange={(e) => setFilter('department', e.target.value)}
+                />
+                {branches.length > 1 && (
+                  <FormSelect
+                    label="Branch"
+                    name="branchId"
+                    options={branchOptions}
+                    value={filters.branchId ?? ''}
+                    onChange={(e) => setFilter('branchId', e.target.value)}
+                  />
+                )}
+              </div>
+            }
           />
         }
       />
 
-      <p className="text-xs text-app-fg-muted">
-        Showing page {page} · up to {limit} records per page (PAID batches only).
-      </p>
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+      />
+
+      <OverviewStatStrip items={payslipStatStrip} />
+
+      <ToolbarFiltersCollapsible
+        hideMobileSheet
+        badgeCount={[filters.department, filters.branchId].filter(Boolean).length}
+        searchRow={
+          <PageSearchControl
+            value={filters.search ?? ''}
+            placeholder="Search by name"
+            title="Search payslips"
+            onApply={(query) => setFilter('search', query)}
+          />
+        }
+        desktopInlineFilters={
+          <>
+            <FormSelect
+              label=""
+              name="department"
+              options={DEPARTMENT_OPTIONS}
+              value={filters.department ?? ''}
+              onChange={(e) => setFilter('department', e.target.value)}
+              className="w-44"
+            />
+            {branches.length > 1 && (
+              <FormSelect
+                label=""
+                name="branchId"
+                options={branchOptions}
+                value={filters.branchId ?? ''}
+                onChange={(e) => setFilter('branchId', e.target.value)}
+                className="w-44"
+              />
+            )}
+          </>
+        }
+      />
 
       {items.length === 0 ? (
         <EmptyState
-          title="No payslips yet"
-          description="Payslips appear after Finance marks payroll batches as paid."
+          title={hasActiveFilters ? 'No matching payslips' : 'No payslips yet'}
+          description={
+            hasActiveFilters
+              ? 'Try adjusting your filters.'
+              : 'Payslips appear after Finance marks payroll batches as paid.'
+          }
         />
       ) : (
-        <CompactTable<PayslipListItem>
-          columnVisibilityKey="hr.payroll.payslips"
-          columns={columns}
-          rows={items}
-          rowKey={(r) => r.payout.id}
-          emptyTitle="No payslips"
-          emptyDescription=""
-        />
+        <>
+          <CompactTable<PayslipListItem>
+            columnVisibilityKey="hr.payroll.payslips"
+            columns={columns}
+            rows={items}
+            rowKey={(r) => r.payout.id}
+            emptyTitle="No payslips"
+            emptyDescription=""
+          />
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border pt-4">
+            <p className="text-sm text-app-fg-muted">
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
+            </p>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={(p) => setFilter('page', String(p))}
+            />
+          </div>
+        </>
       )}
 
-      {/* ── Payslip Detail Modal ── */}
-      <Modal open={!!vp} onClose={() => setViewingPayslip(null)} maxWidth="max-w-md" contentClassName="p-5 space-y-5">
-        {vp && (
-          <>
-            <div>
-              <h2 className="text-lg font-semibold text-app-fg">{vp.staffName ?? 'Staff'}</h2>
-              <p className="text-sm text-app-fg-muted mt-0.5">
-                {vp.payout.payRoleName ? `${vp.payout.payRoleName} \u00b7 ` : ''}{formatPeriod(vp.batch.periodMonth)} \u00b7 {vp.batch.department}
-              </p>
-            </div>
-
-            {/* Earnings */}
-            <div>
-              <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-2">Earnings</h3>
-              <div className="divide-y divide-app-border">
-                <PayslipDetailLine label="Base Salary" amount={Number(vp.payout.baseSalary)} />
-                {Number(vp.payout.performanceBonus) > 0 && (
-                  <PayslipDetailLine label="Performance Bonus" amount={Number(vp.payout.performanceBonus)} />
-                )}
-                {bonusLines.map((bl, i) => (
-                  <PayslipDetailLine key={i} label={bl.label} amount={bl.amount} />
-                ))}
-                {Number(vp.payout.allowancesTotal) > 0 && (
-                  <PayslipDetailLine label="Allowances" amount={Number(vp.payout.allowancesTotal)} />
-                )}
-                {Number(vp.payout.addOnsTotal) > 0 && (
-                  <PayslipDetailLine label="Add-ons" amount={Number(vp.payout.addOnsTotal)} />
-                )}
-                <PayslipDetailLine label="Gross Pay" amount={Number(vp.payout.grossPay)} bold />
-              </div>
-            </div>
-
-            {/* Deductions */}
-            <div>
-              <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-2">Deductions</h3>
-              <div className="divide-y divide-app-border">
-                {Number(vp.payout.payeTax) > 0 && (
-                  <PayslipDetailLine label="PAYE Tax" amount={Number(vp.payout.payeTax)} />
-                )}
-                {Number(vp.payout.deductionsTotal) > 0 && (
-                  <PayslipDetailLine label="Other Deductions" amount={Number(vp.payout.deductionsTotal)} />
-                )}
-                <PayslipDetailLine label="Total Deductions" amount={Number(vp.payout.payeTax) + Number(vp.payout.deductionsTotal)} bold />
-              </div>
-            </div>
-
-            {/* Net Pay */}
-            <div className="rounded-lg bg-app-hover px-4 py-3 flex justify-between items-center">
-              <span className="font-semibold text-app-fg">Net Pay</span>
-              <span className="text-lg font-bold text-success-600 dark:text-success-400">
-                <NairaPrice amount={Number(vp.payout.netPay)} />
-              </span>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1 border-t border-app-border">
-              <button
-                type="button"
-                className="rounded-lg px-4 py-2 text-sm font-medium text-app-fg-muted hover:bg-app-hover transition-colors"
-                onClick={() => setViewingPayslip(null)}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
-                disabled={downloadingId === vp.payout.id}
-                onClick={() => void handleDownload(vp)}
-              >
-                {downloadingId === vp.payout.id ? 'Generating\u2026' : 'Download PDF'}
-              </button>
-            </div>
-          </>
-        )}
-      </Modal>
+      <PayslipPreviewModal
+        payslip={viewingPdf}
+        title={
+          viewingPayslip
+            ? `View · ${viewingPayslip.staffName ?? 'Payslip'} · ${formatPeriod(viewingPayslip.batch.periodMonth)}`
+            : undefined
+        }
+        downloading={viewingPayslip != null && downloadingId === viewingPayslip.payout.id}
+        onDownload={viewingPayslip ? () => void handleDownload(viewingPayslip) : undefined}
+        onClose={() => setViewingPayslip(null)}
+      />
     </div>
   );
 }

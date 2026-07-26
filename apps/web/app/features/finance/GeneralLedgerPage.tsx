@@ -4,49 +4,49 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { FormSelect } from '~/components/ui/form-select';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { InlineFilter } from '~/components/ui/inline-filter';
 import { Modal } from '~/components/ui/modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { GeneralLedgerEntry, GeneralLedgerLoaderData } from './types';
 
 const ENTRY_TYPE_OPTIONS = [
-  { value: 'all', label: 'All transactions' },
-  { value: 'revenue', label: 'Revenue' },
-  { value: 'remittance_in', label: 'Remittance In' },
-  { value: 'remittance_out', label: 'Remittance Fees' },
-  { value: 'disbursement', label: 'Disbursements' },
-  { value: 'ad_spend', label: 'Ad Spend' },
+  { value: 'all', label: 'All types' },
+  { value: 'journal_entry', label: 'Journal Entries' },
+  { value: 'sales_invoice', label: 'Sales Invoices' },
+  { value: 'payment', label: 'Payments' },
+  { value: 'purchase_receipt', label: 'Purchase Receipts' },
   { value: 'payroll', label: 'Payroll' },
-  { value: 'funding_transfer', label: 'Fund Transfers' },
+  { value: 'expense', label: 'Expenses' },
 ] as const;
 
 const TYPE_COLORS: Record<string, string> = {
-  revenue: 'text-success-600 dark:text-success-400',
-  remittance_in: 'text-success-600 dark:text-success-400',
-  remittance_out: 'text-danger-600 dark:text-danger-400',
-  disbursement: 'text-warning-600 dark:text-warning-400',
-  ad_spend: 'text-danger-600 dark:text-danger-400',
-  payroll: 'text-brand-600 dark:text-brand-400',
-  funding_transfer: 'text-info-600 dark:text-info-400',
+  journal_entry: 'text-brand-600 dark:text-brand-400',
+  sales_invoice: 'text-success-600 dark:text-success-400',
+  payment: 'text-info-600 dark:text-info-400',
+  purchase_receipt: 'text-cyan-600 dark:text-cyan-400',
+  payroll: 'text-warning-600 dark:text-warning-400',
+  expense: 'text-orange-600 dark:text-orange-400',
 };
 
 const TYPE_LABELS: Record<string, string> = {
-  revenue: 'Revenue',
-  remittance_in: 'Remittance In',
-  remittance_out: 'Remittance Fee',
-  disbursement: 'Disbursement',
-  ad_spend: 'Ad Spend',
+  journal_entry: 'Journal Entry',
+  sales_invoice: 'Sales Invoice',
+  payment: 'Payment',
+  purchase_receipt: 'Purchase Receipt',
   payroll: 'Payroll',
-  funding_transfer: 'Fund Transfer',
+  expense: 'Expense',
 };
 
 function formatNaira(n: number): string {
@@ -67,16 +67,13 @@ export function GeneralLedgerPage({
   totalPages,
   limit,
   summary,
-  users,
-  selectedUserId,
-  selectedUserName: _selectedUserName,
   filters,
   entryTypeFilter,
   searchFilter,
 }: GeneralLedgerLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [detailEntry, setDetailEntry] = useState<GeneralLedgerEntry | null>(null);
-  const [searchQuery, setSearchQuery] = useState(searchFilter ?? searchParams.get('search') ?? '');
+  const appliedSearch = searchFilter ?? searchParams.get('search') ?? '';
   const [showExport, setShowExport] = useState(false);
 
 
@@ -143,42 +140,41 @@ export function GeneralLedgerPage({
         },
       },
       {
-        key: 'counterparty',
-        header: 'Counterparty',
-        render: (e) => {
-          return e.counterpartyName ? (
-            <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={e.counterpartyName}>
-              {e.counterpartyName}
-            </span>
-          ) : (
-            <span className="text-sm text-app-fg-muted">—</span>
-          );
-        },
+        key: 'account',
+        header: 'Account',
+        render: (e) => (
+          <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={`${e.accountCode} ${e.accountName}`}>
+            <span className="text-xs font-mono text-app-fg-muted">{e.accountCode}</span>{' '}
+            {e.accountName}
+          </span>
+        ),
       },
       {
-        key: 'status',
-        header: 'Status',
-        render: (e) =>
-          <StatusBadge status={e.status} textOnly />,
-      },
-      {
-        key: 'amount',
-        header: 'Amount',
+        key: 'debit',
+        header: 'Debit',
         align: 'right',
         nowrap: true,
         render: (e) => {
-          if (e.balanceEffect > 0) {
-            return (
-              <span className="text-sm font-medium text-success-600 dark:text-success-400 tabular-nums">
-                +<NairaPrice amount={e.balanceEffect} />
-              </span>
-            );
-          }
-          return (
-            <span className="text-sm font-medium text-danger-600 dark:text-danger-400 tabular-nums">
-              -<NairaPrice amount={Math.abs(e.balanceEffect)} />
+          const debit = Number(e.amount);
+          return e.balanceEffect > 0 || (e.balanceEffect === 0 && debit > 0) ? (
+            <span className="text-sm font-medium tabular-nums text-danger-600 dark:text-danger-400">
+              <NairaPrice amount={debit} />
             </span>
-          );
+          ) : null;
+        },
+      },
+      {
+        key: 'credit',
+        header: 'Credit',
+        align: 'right',
+        nowrap: true,
+        render: (e) => {
+          const credit = Number(e.amount);
+          return e.balanceEffect < 0 || (e.balanceEffect === 0 && credit > 0) ? (
+            <span className="text-sm font-medium tabular-nums text-success-600 dark:text-success-400">
+              <NairaPrice amount={credit} />
+            </span>
+          ) : null;
         },
       },
       {
@@ -231,39 +227,47 @@ export function GeneralLedgerPage({
             }
             filters={
               <>
-                {users.length > 0 && (
-                  <FormSelect
-                    label="User"
-                    value={selectedUserId}
-                    onChange={(e) => {
-                      const next = new URLSearchParams(searchParams);
-                      if (e.target.value) next.set('userId', e.target.value);
-                      else next.delete('userId');
-                      next.delete('page');
-                      setSearchParams(next);
-                    }}
-                    options={[
-                      { value: '', label: 'All users' },
-                      ...users.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                  />
-                )}
                 <FormSelect
                   label="Type"
-                  value={entryTypeFilter}
+                  value={entryTypeFilter ?? 'all'}
                   onChange={(e) => {
                     const next = new URLSearchParams(searchParams);
                     next.set('entryType', e.target.value);
                     next.delete('page');
                     setSearchParams(next);
                   }}
-                  options={ENTRY_TYPE_OPTIONS}
+                  options={ENTRY_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                 />
               </>
             }
-            sheet={<PageRefreshButton />}
+            filtersBadgeCount={entryTypeFilter && entryTypeFilter !== 'all' ? 1 : 0}
+            sheet={
+              entries.length > 0 ? (
+                ({ closeSheet }) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExport(true);
+                    }}
+                    className="btn-secondary h-12 w-full justify-center gap-1.5"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                    Export
+                  </button>
+                )
+              ) : undefined
+            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip
@@ -288,73 +292,45 @@ export function GeneralLedgerPage({
         ]}
       />
 
-      {/* Filter row — desktop only; mobile uses PageHeaderMobileTools filters */}
-      <div className="hidden md:flex flex-row gap-2">
-        {users.length > 0 && (
-          <FormSelect
-            label=""
-            value={selectedUserId}
-            onChange={(e) => {
-              const next = new URLSearchParams(searchParams);
-              if (e.target.value) next.set('userId', e.target.value);
-              else next.delete('userId');
-              next.delete('page');
-              setSearchParams(next);
-            }}
-            options={[
-              { value: '', label: 'All users' },
-              ...users.map((u) => ({ value: u.id, label: u.name })),
-            ]}
-            wrapperClassName="w-52"
-          />
-        )}
-        <FormSelect
-          label=""
-          value={entryTypeFilter}
-          onChange={(e) => {
-            const next = new URLSearchParams(searchParams);
-            next.set('entryType', e.target.value);
-            next.delete('page');
-            setSearchParams(next);
-          }}
-          options={ENTRY_TYPE_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
-          wrapperClassName="w-48"
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          hideMobileSheet
+          badgeCount={entryTypeFilter && entryTypeFilter !== 'all' ? 1 : 0}
+          searchRow={
+            <PageSearchControl
+              value={appliedSearch}
+              placeholder="Search by description..."
+              title="Search ledger"
+              onApply={(query) => {
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  next.set('page', '1');
+                  if (query) next.set('search', query);
+                  else next.delete('search');
+                  return next;
+                });
+              }}
+            />
+          }
+          desktopInlineFilters={
+            <InlineFilter
+              type="select"
+              value={entryTypeFilter ?? 'all'}
+              defaultValue="all"
+              onChange={(v) => {
+                const next = new URLSearchParams(searchParams);
+                next.set('entryType', v);
+                next.delete('page');
+                setSearchParams(next);
+              }}
+              options={ENTRY_TYPE_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
+              width="status"
+            />
+          }
+          sheetFilterBody={null}
         />
       </div>
-
-      <form
-        method="get"
-        className="flex min-w-0 w-full gap-2 items-center"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSearchParams((p) => {
-            const next = new URLSearchParams(p);
-            next.set('page', '1');
-            if (searchQuery.trim()) next.set('search', searchQuery.trim());
-            else next.delete('search');
-            return next;
-          });
-        }}
-      >
-        <SearchInput
-          name="search"
-          placeholder="Search by description..."
-          value={searchQuery}
-          onChange={(val) => {
-            setSearchQuery(val);
-            if (!val.trim() && searchParams.get('search')) {
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.delete('search');
-                next.set('page', '1');
-                return next;
-              });
-            }
-          }}
-          withSubmitButton
-          wrapperClassName="min-w-0 w-full flex-1"
-        />
-      </form>
 
       {entries.length === 0 ? (
         <EmptyState
@@ -447,28 +423,33 @@ export function GeneralLedgerPage({
             year: 'numeric',
           }),
           type: TYPE_LABELS[e.entryType] ?? e.entryType,
+          accountCode: e.accountCode ?? '',
+          accountName: e.accountName ?? '',
           description: e.description,
-          counterparty: e.counterpartyName ?? '',
-          amount: e.balanceEffect > 0 ? `+₦${Math.abs(e.balanceEffect).toLocaleString()}` : `-₦${Math.abs(e.balanceEffect).toLocaleString()}`,
+          debit: e.balanceEffect > 0 ? Number(e.amount).toLocaleString() : '',
+          credit: e.balanceEffect < 0 ? Number(e.amount).toLocaleString() : '',
           status: e.status,
         }))}
         columns={[
           { key: 'txnId', label: 'Transaction ID' },
           { key: 'date', label: 'Date' },
           { key: 'type', label: 'Type' },
+          { key: 'accountCode', label: 'Account Code' },
+          { key: 'accountName', label: 'Account Name' },
           { key: 'description', label: 'Description' },
-          { key: 'counterparty', label: 'Counterparty' },
+          { key: 'debit', label: 'Debit' },
+          { key: 'credit', label: 'Credit' },
           { key: 'status', label: 'Status' },
-          { key: 'amount', label: 'Amount' },
         ]}
         defaultColumns={[
           'txnId',
           'date',
           'type',
+          'accountCode',
+          'accountName',
           'description',
-          'counterparty',
-          'status',
-          'amount',
+          'debit',
+          'credit',
         ]}
         filenamePrefix="general-ledger"
       />
