@@ -17,6 +17,7 @@ import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -405,6 +406,18 @@ function ReconciliationDetail({
         }
       />
 
+      <MobileDateFilterRow
+        hideDate
+        actionsSheet={
+          detail.status === 'IN_PROGRESS' ? (
+            <Button type="button" className="w-full" onClick={() => setShowCompleteConfirm(true)}>
+              Complete
+            </Button>
+          ) : undefined
+        }
+        actionsSheetTitle="Actions"
+      />
+
       <OverviewStatStrip
         items={[
           { label: 'Statement Balance', value: <NairaPrice amount={detail.statementBalance} /> },
@@ -415,7 +428,26 @@ function ReconciliationDetail({
         ]}
       />
 
-      <CompactTable columns={lineColumns} rows={detail.lines} rowKey={(r) => r.id} />
+      <CompactTable
+        columns={lineColumns}
+        rows={detail.lines}
+        rowKey={(r) => r.id}
+        renderMobileCard={(r) => {
+          const s = LINE_STATUS[r.status] ?? { label: r.status, variant: 'warning' as const };
+          return (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-app-fg truncate">{r.statementDescription ?? r.glDescription ?? '-'}</span>
+                <StatusBadge status={r.status} label={s.label} variant={s.variant} />
+              </div>
+              <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+                <span>{r.statementDate ?? r.glDate ?? '-'}</span>
+                <NairaPrice amount={r.statementAmount ?? r.glAmount ?? 0} className="font-medium text-app-fg" />
+              </div>
+            </div>
+          );
+        }}
+      />
 
       <ConfirmActionModal
         open={showCompleteConfirm}
@@ -586,6 +618,16 @@ export function BankReconciliationPage({
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        hideDate
+        actionsSheet={
+          <Button type="button" className="w-full" onClick={() => setShowCreate(true)}>
+            New Reconciliation
+          </Button>
+        }
+        actionsSheetTitle="Actions"
       />
 
       {reconciliations.length === 0 ? (

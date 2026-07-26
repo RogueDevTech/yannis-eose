@@ -11,6 +11,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
 import {
@@ -318,6 +319,23 @@ export function PayrollContractorDetailPage({
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        hideDate
+        actionsSheet={
+          canWrite ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-12 w-full justify-center"
+              onClick={() => setShowEdit(true)}
+            >
+              Edit
+            </Button>
+          ) : undefined
+        }
+        actionsSheetTitle="Actions"
       />
 
       <OverviewStatStrip

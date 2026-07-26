@@ -7,6 +7,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 
 export interface VatTransaction {
   id: string;
@@ -173,6 +174,18 @@ export function TaxReturnsPage({
         }
       />
 
+      <MobileDateFilterRow
+        hideDate
+        actionsSheet={
+          transactionCount > 0 ? (
+            <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
+              Export CSV (FIRS)
+            </Button>
+          ) : undefined
+        }
+        actionsSheetTitle="Actions"
+      />
+
       <div className="hidden md:flex items-center gap-2">
         {monthInput('vat-month')}
       </div>
@@ -200,7 +213,23 @@ export function TaxReturnsPage({
         />
       ) : (
         <>
-          <CompactTable columns={columns} rows={transactions} rowKey={(r) => r.id} />
+          <CompactTable
+            columns={columns}
+            rows={transactions}
+            rowKey={(r) => r.id}
+            renderMobileCard={(r) => (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg">{VOUCHER_LABELS[r.voucherType] ?? r.voucherType}</span>
+                  <span className="text-xs text-app-fg-muted">{r.postingDate}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
+                  <span>Input <NairaPrice amount={r.debit} zeroAsDash className="ml-1 text-app-fg" /></span>
+                  <span>Output <NairaPrice amount={r.credit} zeroAsDash className="ml-1 text-app-fg" /></span>
+                </div>
+              </div>
+            )}
+          />
 
           <div className="mt-4 rounded-lg border border-app-border bg-app-bg-subtle p-4">
             <h3 className="mb-3 text-sm font-semibold text-app-fg">VAT Return Summary</h3>

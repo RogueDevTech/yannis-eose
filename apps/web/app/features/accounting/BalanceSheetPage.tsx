@@ -56,7 +56,17 @@ export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?:
   const section = (title: string, rows: BSRow[], total: number, extra?: { label: string; amount: number }) => (
     <div>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-fg-muted">{title}</h3>
-      <CompactTable columns={columns} rows={rows} rowKey={(r) => r.code} />
+      <CompactTable
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.code}
+        renderMobileCard={(r) => (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-app-fg truncate">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span>
+            <NairaPrice amount={r.amount} className="shrink-0 font-medium text-app-fg" />
+          </div>
+        )}
+      />
       {extra && (
         <div className="mt-1 flex justify-between px-4 text-sm text-app-fg-muted">
           <span>{extra.label}</span>

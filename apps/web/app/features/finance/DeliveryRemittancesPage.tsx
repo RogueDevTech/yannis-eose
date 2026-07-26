@@ -35,6 +35,7 @@ import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { useNavigate } from '@remix-run/react';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import type { EligibleOrder } from './CashRemittanceCreateModal';
+import { CashStatementExportModal } from './CashStatementExportModal';
 
 export interface DeliveryRemittanceListItem {
   id: string;
@@ -112,7 +113,7 @@ export interface DeliveryRemittanceSummary {
 export interface DeliveryRemittancesPageProps {
   remittances: DeliveryRemittanceListItem[];
   pagination: { total: number; totalPages: number; page: number; pageSize: number; pageSizeOptions?: number[] };
-  locations: Array<{ id: string; name: string; providerName?: string | null }>;
+  locations: Array<{ id: string; name: string; providerId?: string | null; providerName?: string | null }>;
   filters: {
     status: string;
     location: string;
@@ -229,6 +230,7 @@ export function DeliveryRemittancesPage({
   } = eligiblePagination;
   const navigateTo = useNavigate();
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showCashStatementModal, setShowCashStatementModal] = useState(false);
   const [eligibleInvoicePreview, setEligibleInvoicePreview] = useState<OrderInvoice | null>(null);
   const generateInvoiceFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [generatingOrderId, setGeneratingOrderId] = useState<string | null>(null);
@@ -785,6 +787,9 @@ export function DeliveryRemittancesPage({
                 <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                   Generate report
                 </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowCashStatementModal(true)}>
+                  Cash statement
+                </Button>
               </>
             }
             sheet={({ closeSheet }) => (
@@ -799,6 +804,17 @@ export function DeliveryRemittancesPage({
                   }}
                 >
                   Generate report
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowCashStatementModal(true);
+                  }}
+                >
+                  Cash statement
                 </Button>
                 <Button
                   variant="secondary"
@@ -873,6 +889,17 @@ export function DeliveryRemittancesPage({
           </button>
         </div>
       </Modal>
+
+      <CashStatementExportModal
+        open={showCashStatementModal}
+        onClose={() => setShowCashStatementModal(false)}
+        locations={locations}
+        initialLocationId={filters.location || null}
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+        dateScope={filters.dateScope ?? 'createdAt'}
+      />
 
       <LocalExportModal
         open={showExportModal}

@@ -88,14 +88,34 @@ export function ProfitAndLossPage({
         <div className="space-y-6">
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Income</h3>
-            <CompactTable columns={columns} rows={income} rowKey={(r) => r.code} />
+            <CompactTable
+              columns={columns}
+              rows={income}
+              rowKey={(r) => r.code}
+              renderMobileCard={(r) => (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg truncate">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span>
+                  <NairaPrice amount={r.amount} className="shrink-0 font-medium text-app-fg" />
+                </div>
+              )}
+            />
             <div className="mt-1 flex justify-end pr-4 text-sm font-semibold">
               Total income <NairaPrice amount={totalIncome} className="ml-2" />
             </div>
           </div>
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Expenses</h3>
-            <CompactTable columns={columns} rows={expense} rowKey={(r) => r.code} />
+            <CompactTable
+              columns={columns}
+              rows={expense}
+              rowKey={(r) => r.code}
+              renderMobileCard={(r) => (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg truncate">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span>
+                  <NairaPrice amount={r.amount} className="shrink-0 font-medium text-app-fg" />
+                </div>
+              )}
+            />
             <div className="mt-1 flex justify-end pr-4 text-sm font-semibold">
               Total expense <NairaPrice amount={totalExpense} className="ml-2" />
             </div>

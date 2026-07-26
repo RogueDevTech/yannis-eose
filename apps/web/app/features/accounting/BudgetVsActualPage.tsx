@@ -176,7 +176,29 @@ export function BudgetVsActualPage({ rows, filters }: BudgetVsActualPageProps) {
           description="Create budgets to see comparison with actual spend."
         />
       ) : (
-        <CompactTable columns={columns} rows={rows} rowKey={(r) => r.budgetId} />
+        <CompactTable
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.budgetId}
+          renderMobileCard={(r) => {
+            const s = STATUS_MAP[r.status] ?? STATUS_MAP.under!;
+            return (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg truncate">{r.budgetName}</span>
+                  <StatusBadge status={s.label} variant={s.variant} />
+                </div>
+                <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
+                  <span>Budget <NairaPrice amount={r.budgetAmount} className="ml-1 text-app-fg" /></span>
+                  <span>Actual <NairaPrice amount={r.actualSpend} className="ml-1 text-app-fg" /></span>
+                  <span className={r.variance < 0 ? 'text-danger-600' : 'text-success-600'}>
+                    {r.variancePct.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            );
+          }}
+        />
       )}
     </div>
   );

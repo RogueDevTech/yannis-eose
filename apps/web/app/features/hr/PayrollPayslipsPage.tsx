@@ -316,6 +316,29 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
             rowKey={(r) => r.payout.id}
             emptyTitle="No payslips"
             emptyDescription=""
+            renderMobileCard={(row) => (
+              <button
+                type="button"
+                onClick={() => setViewingPayslip(row)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.staffName ?? 'Unknown'}</p>
+                  <span className="shrink-0 text-sm font-semibold text-app-fg tabular-nums">
+                    <NairaPrice amount={Number(row.payout.netPay)} />
+                  </span>
+                </div>
+                <p className="text-xs text-app-fg-muted truncate">
+                  {row.staffRole
+                    ? formatRole(row.staffRole)
+                    : row.payout.payRoleName?.trim() || 'N/A'}
+                  {' \u00b7 '}
+                  {DEPT_LABEL[row.batch.department as keyof typeof DEPT_LABEL] ?? row.batch.department}
+                  {' \u00b7 '}
+                  {formatPeriod(row.batch.periodMonth)}
+                </p>
+              </button>
+            )}
           />
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border pt-4">

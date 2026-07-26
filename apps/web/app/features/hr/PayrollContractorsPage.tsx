@@ -9,6 +9,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -151,6 +152,23 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        hideDate
+        actionsSheet={
+          canWrite ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-12 w-full justify-center"
+              onClick={() => setShowCreate(true)}
+            >
+              Add contractor
+            </Button>
+          ) : undefined
+        }
+        actionsSheetTitle="Actions"
       />
 
       {contractors.length > 0 && (

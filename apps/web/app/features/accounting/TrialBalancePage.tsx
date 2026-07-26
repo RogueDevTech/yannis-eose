@@ -131,7 +131,24 @@ export function TrialBalancePage({ accounts, totals, filters }: TrialBalancePage
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
                   {g.label}
                 </h3>
-                <CompactTable columns={columns} rows={g.rows} rowKey={(r) => r.accountId} />
+                <CompactTable
+                  columns={columns}
+                  rows={g.rows}
+                  rowKey={(r) => r.accountId}
+                  renderMobileCard={(r) => (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs text-app-fg-muted">{r.code}</span>
+                        <span className="font-medium text-app-fg truncate">{r.name.replace(/\s*[—–]\s*/g, ' · ')}</span>
+                        <RealMoneyTag accountType={r.accountType} />
+                      </div>
+                      <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
+                        <span>Dr <NairaPrice amount={r.debit} zeroAsDash className="ml-1 text-app-fg" /></span>
+                        <span>Cr <NairaPrice amount={r.credit} zeroAsDash className="ml-1 text-app-fg" /></span>
+                      </div>
+                    </div>
+                  )}
+                />
                 <div className="mt-1 flex justify-end gap-8 pr-4 text-sm font-medium text-app-fg-muted">
                   <span>
                     Subtotal debit <NairaPrice amount={subDebit} className="ml-1 text-app-fg" />

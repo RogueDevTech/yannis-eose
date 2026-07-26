@@ -78,7 +78,24 @@ export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFl
         <EmptyState title="No cash accounts" description="Add a bank or cash account to the chart of accounts." />
       ) : (
         <>
-          <CompactTable columns={columns} rows={accounts} rowKey={(r) => r.code} />
+          <CompactTable
+            columns={columns}
+            rows={accounts}
+            rowKey={(r) => r.code}
+            renderMobileCard={(r) => (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg truncate">{r.name.replace(/\s*[—–]\s*/g, ' · ')}</span>
+                  <RealMoneyTag accountType={r.accountType} />
+                </div>
+                <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
+                  <span>In <NairaPrice amount={r.inflow} zeroAsDash className="ml-1 text-app-fg" /></span>
+                  <span>Out <NairaPrice amount={r.outflow} zeroAsDash className="ml-1 text-app-fg" /></span>
+                  <span>Close <NairaPrice amount={r.closing} className="ml-1 font-medium text-app-fg" /></span>
+                </div>
+              </div>
+            )}
+          />
           <div className="mt-1 flex justify-end gap-8 border-t-2 border-app-border pt-3 pr-4 text-sm font-semibold">
             <span>Net change <NairaPrice amount={totals.inflow - totals.outflow} colorize className="ml-1" /></span>
             <span>Closing cash <NairaPrice amount={totals.closing} className="ml-1" /></span>

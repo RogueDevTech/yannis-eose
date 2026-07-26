@@ -3,6 +3,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { InlineFilter } from '~/components/ui/inline-filter';
 import { FormSelect } from '~/components/ui/form-select';
@@ -215,6 +216,8 @@ export function StaffOnboardingDocumentsPage({
         }
       />
 
+      <MobileDateFilterRow hideDate />
+
       {counts ? (
         <OverviewStatStrip
           mobileGrid
@@ -322,6 +325,24 @@ export function StaffOnboardingDocumentsPage({
           withCard={false}
           emptyTitle="No staff match these filters"
           emptyDescription="Try clearing search or widening the onboarding status filter."
+          renderMobileCard={(row) => (
+            <Link
+              to={`/hr/users/${row.userId}/onboarding`}
+              prefetch="intent"
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.name}</p>
+                <StatusBadge status={row.onboardingStatus} size="sm" />
+              </div>
+              <p className="text-xs text-app-fg-muted">
+                Payroll:{' '}
+                <span className={row.payRoleId ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}>
+                  {row.payRoleId ? 'Set up' : 'Not set up'}
+                </span>
+              </p>
+            </Link>
+          )}
           pagination={
             totalCount > 0
               ? {

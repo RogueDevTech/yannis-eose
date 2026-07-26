@@ -16,6 +16,7 @@ import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DateInput } from '~/components/ui/date-input';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { NumberInput } from '~/components/ui/number-input';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -367,6 +368,23 @@ export function ChartOfAccountsPage({ accounts, canWrite, hasOpeningBalances = f
         }
       />
 
+      <MobileDateFilterRow
+        hideDate
+        actionsSheet={
+          canWrite ? (
+            <>
+              <Button type="button" className="w-full" variant="secondary" onClick={() => setOpeningOpen(true)}>
+                {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
+              </Button>
+              <Button type="button" className="w-full" onClick={() => setCreateOpen(true)}>
+                New Account
+              </Button>
+            </>
+          ) : undefined
+        }
+        actionsSheetTitle="Actions"
+      />
+
       <OverviewStatStrip
         items={[
           { label: 'Total', value: String(accounts.length) },
@@ -514,13 +532,13 @@ export function ChartOfAccountsPage({ accounts, canWrite, hasOpeningBalances = f
                   )}
 
                   {/* Actions */}
-                  {canWrite && (
-                    <span className="flex items-center gap-1 shrink-0">
-                      <TableActionButton onClick={() => setEditAccount(r)}>View</TableActionButton>
-          {r.isActive && (
-            <TableActionButton onClick={() => setDeactivateTarget(r)} variant="danger">Deactivate</TableActionButton>
-          )}
-                    </span>
+                  {!r.isGroup && (
+                    <Link
+                      to={`/admin/finance/accounts/${r.id}`}
+                      className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0"
+                    >
+                      View
+                    </Link>
                   )}
                 </div>
               );

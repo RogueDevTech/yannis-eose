@@ -438,6 +438,38 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                     columns={previewColumns}
                     rows={preview.rows}
                     rowKey={(r) => r.staffId}
+                    renderMobileCard={(r) => (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-app-fg leading-snug truncate">{r.staffName}</p>
+                          <span className="shrink-0 text-sm font-semibold text-app-fg tabular-nums">
+                            <NairaPrice amount={r.totalPayout} />
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <RoleBadge role={r.staffRole} size="sm" />
+                        </div>
+                        <p className="text-xs text-app-fg-muted tabular-nums">
+                          Base <NairaPrice amount={r.baseSalary} />
+                          {r.performanceBonus > 0 ? (
+                            <>
+                              {' \u00b7 '}
+                              <span className="text-success-600 dark:text-success-400">
+                                Bonus <NairaPrice amount={r.performanceBonus} />
+                              </span>
+                            </>
+                          ) : null}
+                          {r.deductionsTotal > 0 ? (
+                            <>
+                              {' \u00b7 '}
+                              <span className="text-danger-600 dark:text-danger-400">
+                                −<NairaPrice amount={r.deductionsTotal} />
+                              </span>
+                            </>
+                          ) : null}
+                        </p>
+                      </div>
+                    )}
                   />
                 ) : (
                   <p className="text-xs text-app-fg-muted">

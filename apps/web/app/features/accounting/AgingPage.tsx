@@ -7,6 +7,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Tabs } from '~/components/ui/tabs';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 
 interface AgingRow {
   party: string;
@@ -56,6 +57,8 @@ export function AgingPage({ kind, parties, totals }: AgingPageProps) {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <Tabs
         variant="pill"

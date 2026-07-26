@@ -4,9 +4,12 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Modal } from '~/components/ui/modal';
+import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -42,6 +45,7 @@ function formatCategory(category: string): string {
 export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesContent, headerAction }: PayrollConfigRolesPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [archiveRole, setArchiveRole] = useState<PayRole | null>(null);
+  const [peekRole, setPeekRole] = useState<PayRole | null>(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [formulaFilter, setFormulaFilter] = useState('');
@@ -216,6 +220,37 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
         }
       />
 
+      <MobileDateFilterRow
+        hideDate
+        actionsSheetTitle="Payroll config"
+        actionsSheet={
+          <div className="space-y-3">
+            {canWrite && (
+              <Link
+                to="/hr/payroll/config/rules/new"
+                className="btn-primary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
+              >
+                + Pay Role
+              </Link>
+            )}
+            <FormSelect
+              label="Category"
+              name="category"
+              options={categoryOptions}
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            />
+            <FormSelect
+              label="Formula status"
+              name="formula"
+              options={FORMULA_FILTER_OPTIONS}
+              value={formulaFilter}
+              onChange={(e) => setFormulaFilter(e.target.value)}
+            />
+          </div>
+        }
+      />
+
       {tabsSlot}
 
       {!hideRolesContent && <>
@@ -274,8 +309,88 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
           rowKey={(r) => r.id}
           emptyTitle="No pay roles"
           emptyDescription=""
+          renderMobileCard={(row) => (
+            <button
+              type="button"
+              onClick={() => setPeekRole(row)}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.name}</p>
+                <span className="shrink-0 rounded-full border border-app-border px-2 py-0.5 text-2xs font-medium text-app-fg-muted whitespace-nowrap">
+                  {formatCategory(row.category)}
+                </span>
+              </div>
+              <p className="text-xs text-app-fg-muted">
+                {row.commissionPlanId ? 'Formula linked' : 'No formula'}
+                {row.perProductBonus ? ' · Per-product bonus' : ''}
+                {' · '}
+                <span className={`tabular-nums ${(row.staffCount ?? 0) > 0 ? 'font-medium text-app-fg' : ''}`}>
+                  {row.staffCount ?? 0}
+                </span>
+                {' staff'}
+              </p>
+            </button>
+          )}
         />
       )}
+
+      {/* Peek modal — mobile detail + actions */}
+      <Modal open={!!peekRole} onClose={() => setPeekRole(null)} maxWidth="max-w-sm" contentClassName="p-5 space-y-4">
+        {peekRole && (
+          <>
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">{peekRole.name}</h3>
+              <p className="text-sm text-app-fg-muted mt-1">{formatCategory(peekRole.category)}</p>
+            </div>
+            <dl className="text-sm space-y-2">
+              <div className="flex justify-between">
+                <dt className="text-app-fg-muted">Formula</dt>
+                <dd className="text-app-fg">{peekRole.commissionPlanId ? 'Linked' : 'None'}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-app-fg-muted">Per-product bonus</dt>
+                <dd className="text-app-fg">{peekRole.perProductBonus ? 'Yes' : 'No'}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-app-fg-muted">Staff assigned</dt>
+                <dd className="text-app-fg tabular-nums">{peekRole.staffCount ?? 0}</dd>
+              </div>
+            </dl>
+            <div className="flex flex-col gap-2 pt-2 border-t border-app-border">
+              <Link
+                to={`/hr/payroll/config/rules/${peekRole.id}`}
+                className="btn-primary h-10 flex items-center justify-center text-sm font-medium rounded-lg"
+                onClick={() => setPeekRole(null)}
+              >
+                {canWrite ? 'Edit formula' : 'View formula'}
+              </Link>
+              {canWrite && (
+                <Link
+                  to={`/hr/payroll/config/roles/${peekRole.id}/assign`}
+                  className="btn-secondary h-10 flex items-center justify-center text-sm font-medium rounded-lg"
+                  onClick={() => setPeekRole(null)}
+                >
+                  Assign staff
+                </Link>
+              )}
+              {canWrite && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full text-danger-600 dark:text-danger-400"
+                  onClick={() => {
+                    setPeekRole(null);
+                    setArchiveRole(peekRole);
+                  }}
+                >
+                  Archive
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </Modal>
 
       {/* Archive confirmation */}
       {archiveRole && (

@@ -170,7 +170,28 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
         />
       ) : (
         <>
-          <CompactTable columns={columns} rows={records} rowKey={(r) => r.id} />
+          <CompactTable
+            columns={columns}
+            rows={records}
+            rowKey={(r) => r.id}
+            renderMobileCard={(r) => (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-app-fg truncate">{r.vendorName}</span>
+                  {r.certificateGenerated ? (
+                    <StatusBadge status="Generated" variant="success" />
+                  ) : (
+                    <span className="text-xs text-app-fg-muted">Pending</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
+                  <span>{r.paymentDate}</span>
+                  <span>Gross <NairaPrice amount={Number(r.grossAmount)} className="ml-1 text-app-fg" /></span>
+                  <span>WHT <NairaPrice amount={Number(r.whtAmount)} className="ml-1 text-app-fg" /></span>
+                </div>
+              </div>
+            )}
+          />
           <Pagination
             page={pagination.page}
             totalPages={pagination.totalPages}
