@@ -172,7 +172,7 @@ export class AssetRegisterService {
       // Post the GL entry for disposal.
       const groupId = asset.groupId ?? null;
       const bankAcct = await this.resolveAccountByCode(tx, groupId, ACCT.BANK_PRIMARY);
-      const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEP_VEHICLES);
+      const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEPRECIATION);
       // The cost side: debit the fixed asset cost account. Pick the first
       // FIXED_ASSET leaf for the company (the specific sub-account doesn't
       // matter for the total — all roll up to Fixed Assets on the balance sheet).
@@ -327,7 +327,7 @@ export class AssetRegisterService {
 
         // Resolve GL accounts.
         const depExpenseAcct = await this.resolveAccountByCode(tx, groupId, ACCT.DEPRECIATION_FIXED);
-        const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEP_VEHICLES);
+        const accDepAcct = await this.resolveAccountByCode(tx, groupId, ACCT.ACC_DEPRECIATION);
 
         if (depExpenseAcct && accDepAcct) {
           // Create a journal entry header.

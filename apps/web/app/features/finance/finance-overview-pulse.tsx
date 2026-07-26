@@ -365,7 +365,7 @@ export function FinancePayrollSection({ payroll }: { payroll: FinancePayrollOver
                 {formatNaira(Math.round(pending.totalNet))}
               </p>
               <p className="text-xs text-app-fg-muted mt-0.5">
-                {pending.batchCount} pending batch(es) · {pending.staffCount} staff in filters
+                {pending.batchCount} pending batch(es) · {pending.staffCount} payout line(s)
               </p>
             </Link>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
@@ -374,7 +374,7 @@ export function FinancePayrollSection({ payroll }: { payroll: FinancePayrollOver
                 {formatNaira(Math.round(paid.totalNet))}
               </p>
               <p className="text-xs text-app-fg-muted mt-0.5">
-                {paid.batchCount} batch(es) · {paid.staffCount} staff
+                {paid.batchCount} batch(es) · {paid.staffCount} payout line(s)
               </p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">

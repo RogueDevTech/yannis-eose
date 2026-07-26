@@ -1,13 +1,23 @@
 import { useState } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Modal } from '~/components/ui/modal';
+import { Button } from '~/components/ui/button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
+import { TextInput } from '~/components/ui/text-input';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -110,11 +120,7 @@ function CreateReconciliationModal({
 
   const isSubmitting = fetcher.state !== 'idle';
 
-  // Close on success
-  const data = fetcher.data as { success?: boolean } | undefined;
-  if (data?.success && open) {
-    onClose();
-  }
+  useCloseOnFetcherSuccess(fetcher, onClose);
 
   const handleSubmit = () => {
     const validLines = lines.filter((l) => l.date && l.amount);
@@ -149,12 +155,12 @@ function CreateReconciliationModal({
             <select
               value={bankAccountId}
               onChange={(e) => setBankAccountId(e.target.value)}
-              className="h-10 w-full rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg md:h-9"
+              className="h-10 w-full rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark] md:h-9"
             >
               <option value="">Select account</option>
               {bankAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.code} — {a.name}
+                  {a.code} · {a.name.replace(/\s*[—–]\s*/g, ' · ')}
                 </option>
               ))}
             </select>
@@ -165,7 +171,7 @@ function CreateReconciliationModal({
               type="date"
               value={statementDate}
               onChange={(e) => setStatementDate(e.target.value)}
-              className="h-10 w-full rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg md:h-9"
+              className="h-10 w-full rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark] md:h-9"
             />
           </div>
           <div>
@@ -176,7 +182,7 @@ function CreateReconciliationModal({
               value={statementBalance}
               onChange={(e) => setStatementBalance(e.target.value)}
               placeholder="0.00"
-              className="h-10 w-full rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg md:h-9"
+              className="h-10 w-full rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark] md:h-9"
             />
           </div>
         </div>
@@ -186,7 +192,7 @@ function CreateReconciliationModal({
           <button
             type="button"
             onClick={addLine}
-            className="text-xs font-medium text-primary-600 hover:underline"
+            className="text-xs font-medium text-brand-600 hover:underline"
           >
             + Add row
           </button>
@@ -199,14 +205,14 @@ function CreateReconciliationModal({
                 type="date"
                 value={line.date}
                 onChange={(e) => updateLine(i, 'date', e.target.value)}
-                className="h-10 w-28 rounded-md border border-app-border bg-app-bg px-2 text-xs text-app-fg md:h-9"
+                className="h-10 w-28 rounded-lg border border-app-border bg-app-bg px-2 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark] md:h-9"
               />
               <input
                 type="text"
                 value={line.description}
                 onChange={(e) => updateLine(i, 'description', e.target.value)}
                 placeholder="Description"
-                className="h-10 min-w-0 flex-1 rounded-md border border-app-border bg-app-bg px-2 text-xs text-app-fg md:h-9"
+                className="h-10 min-w-0 flex-1 rounded-lg border border-app-border bg-app-bg px-2 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark] md:h-9"
               />
               <input
                 type="number"
@@ -214,7 +220,7 @@ function CreateReconciliationModal({
                 value={line.amount}
                 onChange={(e) => updateLine(i, 'amount', e.target.value)}
                 placeholder="Amount"
-                className="h-10 w-28 rounded-md border border-app-border bg-app-bg px-2 text-xs text-app-fg md:h-9"
+                className="h-10 w-28 rounded-lg border border-app-border bg-app-bg px-2 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark] md:h-9"
               />
               {lines.length > 1 && (
                 <button
@@ -236,7 +242,7 @@ function CreateReconciliationModal({
           <button
             type="button"
             onClick={onClose}
-            className="h-10 rounded-md border border-app-border px-4 text-sm text-app-fg md:h-9"
+            className="h-10 rounded-lg border border-app-border bg-app-bg px-4 text-sm text-app-fg hover:bg-app-hover md:h-9"
           >
             Cancel
           </button>
@@ -244,7 +250,7 @@ function CreateReconciliationModal({
             type="button"
             onClick={handleSubmit}
             disabled={isSubmitting}
-            className="h-10 rounded-md bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50 md:h-9"
+            className="h-10 rounded-md bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 md:h-9"
           >
             {isSubmitting ? 'Creating...' : 'Create'}
           </button>
@@ -262,28 +268,41 @@ function ReconciliationDetail({
   detail: ReconDetail;
 }) {
   const fetcher = useFetcher();
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [unmatchTarget, setUnmatchTarget] = useState<ReconLine | null>(null);
+  const [matchLineId, setMatchLineId] = useState<string | null>(null);
+  const [matchGlEntryId, setMatchGlEntryId] = useState('');
 
   const handleMatch = (lineId: string) => {
-    const glEntryId = prompt('Enter GL Entry ID to match:');
-    if (!glEntryId) return;
-    fetcher.submit(
-      { intent: 'matchLine', lineId, glEntryId },
-      { method: 'POST' },
-    );
+    setMatchLineId(lineId);
+    setMatchGlEntryId('');
   };
 
-  const handleUnmatch = (lineId: string) => {
+  const submitMatch = () => {
+    if (!matchLineId || !matchGlEntryId.trim()) return;
     fetcher.submit(
-      { intent: 'unmatchLine', lineId },
+      { intent: 'matchLine', lineId: matchLineId, glEntryId: matchGlEntryId.trim() },
       { method: 'POST' },
     );
+    setMatchLineId(null);
+    setMatchGlEntryId('');
   };
 
-  const handleComplete = () => {
+  const handleUnmatchConfirm = () => {
+    if (!unmatchTarget) return;
+    fetcher.submit(
+      { intent: 'unmatchLine', lineId: unmatchTarget.id },
+      { method: 'POST' },
+    );
+    setUnmatchTarget(null);
+  };
+
+  const handleCompleteConfirm = () => {
     fetcher.submit(
       { intent: 'completeReconciliation', reconciliationId: detail.id },
       { method: 'POST' },
     );
+    setShowCompleteConfirm(false);
   };
 
   const matchedCount = detail.lines.filter((l) => l.status === 'MATCHED').length;
@@ -338,44 +357,51 @@ function ReconciliationDetail({
       render: (r) =>
         detail.status === 'IN_PROGRESS' ? (
           r.status === 'UNMATCHED' ? (
-            <button
-              type="button"
-              onClick={() => handleMatch(r.id)}
-              className="text-xs font-medium text-primary-600 hover:underline"
-            >
+            <CompactTableActionButton onClick={() => handleMatch(r.id)} tone="brand">
               Match
-            </button>
+            </CompactTableActionButton>
           ) : (
-            <button
-              type="button"
-              onClick={() => handleUnmatch(r.id)}
-              className="text-xs font-medium text-danger-600 hover:underline"
-            >
+            <CompactTableActionButton onClick={() => setUnmatchTarget(r)} tone="danger">
               Unmatch
-            </button>
+            </CompactTableActionButton>
           )
         ) : null,
     },
   ];
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
-        title={`Reconciliation — ${detail.bankAccountName ?? 'Bank Account'}`}
+        title={`Reconciliation: ${(detail.bankAccountName ?? 'Bank Account').replace(/\s*[—–]\s*/g, ' · ')}`}
         description={`Statement date: ${detail.statementDate}`}
         backTo="/admin/finance/bank-reconciliation"
+        mobileInlineActions
         actions={
-          detail.status === 'IN_PROGRESS' ? (
-            <button
-              type="button"
-              onClick={handleComplete}
-              className="h-10 rounded-md bg-success-600 px-4 text-sm font-medium text-white hover:bg-success-700 md:h-9"
-            >
-              Complete
-            </button>
-          ) : (
-            <StatusBadge status="COMPLETED" label="Completed" variant="success" />
-          )
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Reconciliation tools"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                {detail.status === 'IN_PROGRESS' ? (
+                  <Button type="button" size="sm" onClick={() => setShowCompleteConfirm(true)}>
+                    Complete
+                  </Button>
+                ) : (
+                  <StatusBadge status="COMPLETED" label="Completed" variant="success" />
+                )}
+              </div>
+            }
+            sheet={
+              detail.status === 'IN_PROGRESS' ? (
+                <Button type="button" className="w-full" onClick={() => setShowCompleteConfirm(true)}>
+                  Complete
+                </Button>
+              ) : (
+                <StatusBadge status="COMPLETED" label="Completed" variant="success" />
+              )
+            }
+          />
         }
       />
 
@@ -390,7 +416,77 @@ function ReconciliationDetail({
       />
 
       <CompactTable columns={lineColumns} rows={detail.lines} rowKey={(r) => r.id} />
-    </>
+
+      <ConfirmActionModal
+        open={showCompleteConfirm}
+        onClose={() => setShowCompleteConfirm(false)}
+        title="Complete reconciliation"
+        description={
+          <>
+            Mark this bank reconciliation as complete? This locks matching for{' '}
+            <strong>{(detail.bankAccountName ?? 'this account').replace(/\s*[—–]\s*/g, ' · ')}</strong>{' '}
+            (statement date {detail.statementDate}).
+          </>
+        }
+        details={
+          <ul className="list-disc pl-4 space-y-1 text-sm">
+            <li>{matchedCount} of {detail.lines.length} lines matched</li>
+            {unmatchedCount > 0 ? (
+              <li>{unmatchedCount} unmatched line{unmatchedCount === 1 ? '' : 's'} will remain unmatched</li>
+            ) : (
+              <li>All lines are matched</li>
+            )}
+            <li>Completed reconciliations cannot be edited further</li>
+          </ul>
+        }
+        confirmLabel="Complete"
+        variant="warning"
+        loading={fetcher.state !== 'idle'}
+        onConfirm={handleCompleteConfirm}
+      />
+
+      <ConfirmActionModal
+        open={!!unmatchTarget}
+        onClose={() => setUnmatchTarget(null)}
+        title="Unmatch line"
+        description="Remove the GL match from this statement line? You can match it again later while the reconciliation is in progress."
+        details={
+          unmatchTarget ? (
+            <p className="text-sm">
+              {unmatchTarget.statementDescription ?? 'Statement line'}
+              {unmatchTarget.statementAmount !== null ? (
+                <> · <NairaPrice amount={unmatchTarget.statementAmount} /></>
+              ) : null}
+            </p>
+          ) : null
+        }
+        confirmLabel="Unmatch"
+        variant="warning"
+        loading={fetcher.state !== 'idle'}
+        onConfirm={handleUnmatchConfirm}
+      />
+
+      {/* Match GL entry modal */}
+      <Modal open={!!matchLineId} onClose={() => setMatchLineId(null)} maxWidth="max-w-sm" contentClassName="p-6 space-y-4">
+        <h3 className="text-base font-semibold text-app-fg">Match GL entry</h3>
+        <p className="text-sm text-app-fg-muted">Paste the GL entry ID to match against this statement line.</p>
+        <TextInput
+          type="text"
+          value={matchGlEntryId}
+          onChange={(e) => setMatchGlEntryId(e.target.value)}
+          placeholder="GL entry ID (UUID)"
+          autoFocus
+        />
+        <div className="flex gap-2">
+          <button type="button" onClick={submitMatch} disabled={!matchGlEntryId.trim() || fetcher.state !== 'idle'} className="btn-primary px-4 py-2 text-sm">
+            Match
+          </button>
+          <button type="button" onClick={() => setMatchLineId(null)} className="btn-secondary px-4 py-2 text-sm">
+            Cancel
+          </button>
+        </div>
+      </Modal>
+    </div>
   );
 }
 
@@ -416,7 +512,7 @@ export function BankReconciliationPage({
     {
       key: 'bankAccountName',
       header: 'Bank Account',
-      render: (r) => <span className="font-medium text-app-fg">{r.bankAccountName ?? '-'}</span>,
+      render: (r) => <span className="font-medium text-app-fg">{(r.bankAccountName ?? '-').replace(/\s*[—–]\s*/g, ' · ')}</span>,
     },
     {
       key: 'statementDate',
@@ -449,21 +545,46 @@ export function BankReconciliationPage({
         return <StatusBadge status={r.status} label={s.label} variant={s.variant} />;
       },
     },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      tight: true,
+      mobileShowLabel: false,
+      render: (r) => (
+        <div className="flex justify-end">
+          <CompactTableActionButton to={`?id=${r.id}`} tone="brand">
+            View
+          </CompactTableActionButton>
+        </div>
+      ),
+    },
   ];
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Bank Reconciliation"
         description="Match bank statements against ledger entries."
+        mobileInlineActions
         actions={
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="h-10 rounded-md bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700 md:h-9"
-          >
-            New Reconciliation
-          </button>
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Bank reconciliation tools"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
+                  New Reconciliation
+                </Button>
+              </div>
+            }
+            sheet={
+              <Button type="button" className="w-full" onClick={() => setShowCreate(true)}>
+                New Reconciliation
+              </Button>
+            }
+          />
         }
       />
 
@@ -479,6 +600,26 @@ export function BankReconciliationPage({
             rows={reconciliations}
             rowKey={(r) => r.id}
             rowHref={(r) => `?id=${r.id}`}
+            renderMobileCard={(r) => {
+              const s = RECON_STATUS[r.status] ?? { label: r.status, variant: 'info' as const };
+              return (
+                <Link
+                  to={`?id=${r.id}`}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-app-fg truncate">
+                      {(r.bankAccountName ?? 'Bank account').replace(/\s*[—–]\s*/g, ' · ')}
+                    </span>
+                    <StatusBadge status={r.status} label={s.label} variant={s.variant} />
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+                    <span>{r.statementDate}</span>
+                    <NairaPrice amount={r.statementBalance} className="font-medium text-app-fg" />
+                  </div>
+                </Link>
+              );
+            }}
           />
           <Pagination
             page={pagination.page}
@@ -492,6 +633,6 @@ export function BankReconciliationPage({
         onClose={() => setShowCreate(false)}
         bankAccounts={bankAccounts}
       />
-    </>
+    </div>
   );
 }

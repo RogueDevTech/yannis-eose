@@ -297,6 +297,8 @@ export function FormsPage({
             sheetTitle="Actions"
             triggerAriaLabel="Forms toolbar"
             saveFilterKey
+            filtersBadgeCount={productFilter ? 1 : 0}
+            onClearFilters={productFilter ? () => applyProductFilter('') : undefined}
             desktop={
               <>
                 <PageRefreshButton />
@@ -310,6 +312,24 @@ export function FormsPage({
                   </Button>
                 </BranchScopedLink>
               </>
+            }
+            filters={
+              products.length > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                  <SearchableSelect
+                    id="forms-product-filter-mobile"
+                    value={productFilter}
+                    onChange={applyProductFilter}
+                    options={[
+                      { value: '', label: 'All products' },
+                      ...products.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    placeholder="All products"
+                    searchPlaceholder="Search products…"
+                  />
+                </div>
+              ) : undefined
             }
             sheet={
               <BranchScopedLink
@@ -389,24 +409,6 @@ export function FormsPage({
                 wrapperClassName="w-full min-w-0 sm:w-48"
               />
             ) : null
-          }
-          sheetFilterBody={
-            products.length > 0 ? (
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                <SearchableSelect
-                  id="forms-product-filter-mobile"
-                  value={productFilter}
-                  onChange={applyProductFilter}
-                  options={[
-                    { value: '', label: 'All products' },
-                    ...products.map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                  placeholder="All products"
-                  searchPlaceholder="Search products…"
-                />
-              </div>
-            ) : <div />
           }
         />
       </div>

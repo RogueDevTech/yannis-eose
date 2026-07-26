@@ -124,12 +124,11 @@ export function defaultPayeBandConfig(): PayeBandConfig {
   return {
     taxFreeThreshold: 800_000,
     bands: [
-      { fromAmount: 0, toAmount: 800_000, rate: 0 },
-      { fromAmount: 800_000, toAmount: 3_000_000, rate: 15 },
-      { fromAmount: 3_000_000, toAmount: 12_000_000, rate: 18 },
-      { fromAmount: 12_000_000, toAmount: 25_000_000, rate: 21 },
-      { fromAmount: 25_000_000, toAmount: 50_000_000, rate: 23 },
-      { fromAmount: 50_000_000, toAmount: null, rate: 25 },
+      { fromAmount: 0, toAmount: 2_200_000, rate: 15 },
+      { fromAmount: 2_200_000, toAmount: 11_200_000, rate: 18 },
+      { fromAmount: 11_200_000, toAmount: 24_200_000, rate: 21 },
+      { fromAmount: 24_200_000, toAmount: 49_200_000, rate: 23 },
+      { fromAmount: 49_200_000, toAmount: null, rate: 25 },
     ],
     reliefs: [
       { name: 'Pension (8%)', basis: 'PERCENT_OF_GROSS', rate: 8 },

@@ -5,6 +5,7 @@ import { Modal } from '~/components/ui/modal';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -80,54 +81,127 @@ export function NotificationsPage({
   return (
     <div className="space-y-4">
       {embeddedInTabs ? (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-app-fg">All notifications</h2>
-            <p className="text-sm text-app-fg-muted mt-0.5">
-              {displayUnreadCount(unreadCount) > 0 ? `${displayUnreadCount(unreadCount)} unread` : 'All caught up'} · Page {pagination.page} of {pagination.totalPages || 1}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link
-              to={
-                unreadOnlyFilter
-                  ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
-                  : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
+        <PageHeader
+          title="All notifications"
+          description={
+            displayUnreadCount(unreadCount) > 0
+              ? `${displayUnreadCount(unreadCount)} unread · Page ${pagination.page} of ${pagination.totalPages || 1}`
+              : `All caught up · Page ${pagination.page} of ${pagination.totalPages || 1}`
+          }
+          mobileInlineActions
+          actions={
+            <PageHeaderMobileTools
+              sheetTitle="Actions"
+              triggerAriaLabel="Notification actions"
+              desktop={
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={
+                      unreadOnlyFilter
+                        ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
+                        : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
+                    }
+                    className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+                  >
+                    {unreadOnlyFilter ? 'Show all' : 'Unread only'}
+                  </Link>
+                  {displayUnreadCount(unreadCount) > 0 && (
+                    <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
+                      Mark all read
+                    </Button>
+                  )}
+                  <PageRefreshButton />
+                </div>
               }
-              className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-            >
-              {unreadOnlyFilter ? 'Show all' : 'Unread only'}
-            </Link>
-            {displayUnreadCount(unreadCount) > 0 && (
-              <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
-                Mark all read
-              </Button>
-            )}
-          </div>
-        </div>
+              sheet={({ closeSheet }) => (
+                <div className="flex flex-col gap-2">
+                  <Link
+                    to={
+                      unreadOnlyFilter
+                        ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
+                        : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
+                    }
+                    onClick={() => closeSheet()}
+                    className="inline-flex h-12 w-full items-center justify-center rounded-lg border border-app-border bg-app-elevated text-sm font-medium text-brand-600 dark:text-brand-400"
+                  >
+                    {unreadOnlyFilter ? 'Show all' : 'Unread only'}
+                  </Link>
+                  {displayUnreadCount(unreadCount) > 0 ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        markAllRead();
+                      }}
+                    >
+                      Mark all read
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+            />
+          }
+        />
       ) : (
         <PageHeader
           title="Notifications"
           description="Review unread and read system notifications."
+          mobileInlineActions
           actions={
-            <div className="flex items-center gap-2">
-              <Link
-                to={
-                  unreadOnlyFilter
-                    ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
-                    : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
-                }
-                className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-              >
-                {unreadOnlyFilter ? 'Show all' : 'Unread only'}
-              </Link>
-              {displayUnreadCount(unreadCount) > 0 && (
-                <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
-                  Mark all read
-                </Button>
+            <PageHeaderMobileTools
+              sheetTitle="Actions"
+              triggerAriaLabel="Notification actions"
+              desktop={
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={
+                      unreadOnlyFilter
+                        ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
+                        : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
+                    }
+                    className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+                  >
+                    {unreadOnlyFilter ? 'Show all' : 'Unread only'}
+                  </Link>
+                  {displayUnreadCount(unreadCount) > 0 && (
+                    <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
+                      Mark all read
+                    </Button>
+                  )}
+                  <PageRefreshButton />
+                </div>
+              }
+              sheet={({ closeSheet }) => (
+                <div className="flex flex-col gap-2">
+                  <Link
+                    to={
+                      unreadOnlyFilter
+                        ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
+                        : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
+                    }
+                    onClick={() => closeSheet()}
+                    className="inline-flex h-12 w-full items-center justify-center rounded-lg border border-app-border bg-app-elevated text-sm font-medium text-brand-600 dark:text-brand-400"
+                  >
+                    {unreadOnlyFilter ? 'Show all' : 'Unread only'}
+                  </Link>
+                  {displayUnreadCount(unreadCount) > 0 ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        markAllRead();
+                      }}
+                    >
+                      Mark all read
+                    </Button>
+                  ) : null}
+                </div>
               )}
-              <PageRefreshButton />
-            </div>
+            />
           }
         />
       )}

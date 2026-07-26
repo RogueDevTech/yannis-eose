@@ -9,7 +9,7 @@ import {
   getSessionCookie,
   requirePermissionOrRoles,
 } from '~/lib/api.server';
-import { PayrollReportsPage } from '~/features/hr/PayrollReportsPage';
+import { PayrollReportsPage, type PayrollReportsPageProps } from '~/features/hr/PayrollReportsPage';
 import { PayrollReportsLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { PayrollRegisterRow } from '~/features/hr/payroll-prd-types';
 
@@ -86,15 +86,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return {
       rows,
       costByBranch:
-        (costBranchRes.ok
+        ((costBranchRes.ok
           ? (costBranchRes.data as { result?: { data?: unknown[] } })?.result?.data
-          : []) ?? [],
+          : []) ?? []) as PayrollReportsPageProps['costByBranch'],
       costByRole:
-        (costRoleRes.ok
+        ((costRoleRes.ok
           ? (costRoleRes.data as { result?: { data?: unknown[] } })?.result?.data
-          : []) ?? [],
+          : []) ?? []) as PayrollReportsPageProps['costByRole'],
       trend:
-        (trendRes.ok ? (trendRes.data as { result?: { data?: unknown[] } })?.result?.data : []) ?? [],
+        ((trendRes.ok ? (trendRes.data as { result?: { data?: unknown[] } })?.result?.data : []) ?? []) as PayrollReportsPageProps['trend'],
       branches: (branchesRes.ok
         ? ((branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? [])
         : []),

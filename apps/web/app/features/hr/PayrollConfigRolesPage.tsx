@@ -136,6 +136,15 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Pay roles toolbar"
+            filtersBadgeCount={[categoryFilter, formulaFilter].filter(Boolean).length}
+            onClearFilters={
+              categoryFilter || formulaFilter
+                ? () => {
+                    setCategoryFilter('');
+                    setFormulaFilter('');
+                  }
+                : undefined
+            }
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
@@ -147,6 +156,24 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
                     + Pay Role
                   </Link>
                 )}
+              </div>
+            }
+            filters={
+              <div className="space-y-3">
+                <FormSelect
+                  label="Category"
+                  name="category"
+                  options={categoryOptions}
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                />
+                <FormSelect
+                  label="Formula status"
+                  name="formula"
+                  options={FORMULA_FILTER_OPTIONS}
+                  value={formulaFilter}
+                  onChange={(e) => setFormulaFilter(e.target.value)}
+                />
               </div>
             }
             sheet={({ closeSheet }) =>
@@ -167,6 +194,7 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
       <div className="list-panel">
       <ToolbarFiltersCollapsible
         className="!border-0"
+        hideMobileSheet
         badgeCount={[categoryFilter, formulaFilter].filter(Boolean).length}
         searchRow={
           <SearchInput
@@ -194,24 +222,6 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
               className="w-40"
             />
           </>
-        }
-        sheetFilterBody={
-          <div className="space-y-3">
-            <FormSelect
-              label="Category"
-              name="category"
-              options={categoryOptions}
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            />
-            <FormSelect
-              label="Formula status"
-              name="formula"
-              options={FORMULA_FILTER_OPTIONS}
-              value={formulaFilter}
-              onChange={(e) => setFormulaFilter(e.target.value)}
-            />
-          </div>
         }
       />
       </div>

@@ -1,5 +1,8 @@
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { Button } from '~/components/ui/button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -47,7 +50,6 @@ export function TaxReturnsPage({
 
   const onMonthChange = (value: string) => {
     if (!value) return;
-    // value = 'YYYY-MM'
     const [year, month] = value.split('-');
     const startDate = `${year}-${month}-01`;
     const lastDay = new Date(Number(year), Number(month), 0).getDate();
@@ -87,6 +89,26 @@ export function TaxReturnsPage({
     URL.revokeObjectURL(url);
   };
 
+  const monthInput = (inputId: string) => (
+    <div className="flex items-center gap-2">
+      <label htmlFor={inputId} className="text-sm text-app-fg-muted">Period</label>
+      <input
+        id={inputId}
+        type="month"
+        value={monthValue}
+        onChange={(e) => onMonthChange(e.target.value)}
+        className="h-10 md:h-9 w-full rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg"
+      />
+    </div>
+  );
+
+  const exportButton =
+    transactionCount > 0 ? (
+      <Button variant="primary" size="sm" onClick={handleExport}>
+        Export CSV (FIRS)
+      </Button>
+    ) : null;
+
   const columns: CompactTableColumn<VatTransaction>[] = [
     {
       key: 'postingDate',
@@ -124,31 +146,35 @@ export function TaxReturnsPage({
   ];
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="Tax Returns (VAT)"
         description="VAT summary for FIRS filing. Select a month to view output and input VAT."
+        mobileInlineActions
         actions={
-          transactionCount > 0 ? (
-            <button
-              onClick={handleExport}
-              className="rounded-lg bg-app-primary px-3 py-2 text-sm font-medium text-white hover:bg-app-primary/90"
-            >
-              Export CSV (FIRS)
-            </button>
-          ) : null
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Tax returns toolbar"
+            filters={monthInput('vat-month-mobile')}
+            desktop={
+              <>
+                <PageRefreshButton />
+                {exportButton}
+              </>
+            }
+            sheet={
+              exportButton ? (
+                <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
+                  Export CSV (FIRS)
+                </Button>
+              ) : null
+            }
+          />
         }
       />
 
-      <div className="flex items-center gap-2">
-        <label htmlFor="vat-month" className="text-sm text-app-fg-muted">Period</label>
-        <input
-          id="vat-month"
-          type="month"
-          value={monthValue}
-          onChange={(e) => onMonthChange(e.target.value)}
-          className="h-10 md:h-9 rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-fg"
-        />
+      <div className="hidden md:flex items-center gap-2">
+        {monthInput('vat-month')}
       </div>
 
       <OverviewStatStrip
@@ -197,6 +223,6 @@ export function TaxReturnsPage({
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }

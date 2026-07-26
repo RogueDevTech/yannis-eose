@@ -23,6 +23,16 @@ const EMPTY: TrialBalanceResponse = {
   totals: { totalDebit: 0, totalCredit: 0, balanced: true },
 };
 
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function monthStart(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
@@ -30,9 +40,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const asOfDate = url.searchParams.get('asOfDate') || '';
 
-  const shell = { filters: { asOfDate } };
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  const startDate = url.searchParams.get('startDate') || monthStart();
+  const endDate = url.searchParams.get('endDate') || today();
+
+  // Trial balance uses endDate as the "as of" date
+  const asOfDate = periodAllTime ? '' : endDate;
+
+  const shell = { filters: { startDate, endDate, periodAllTime } };
 
   const pageData = (async () => {
     const input: Record<string, unknown> = {};
@@ -44,7 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data: TrialBalanceResponse = res.ok
       ? ((res.data as { result?: { data?: TrialBalanceResponse } })?.result?.data ?? EMPTY)
       : EMPTY;
-    return { ...data, filters: { asOfDate } };
+    return { ...data, filters: { startDate, endDate, periodAllTime } };
   })();
 
   return defer({ shell, pageData });

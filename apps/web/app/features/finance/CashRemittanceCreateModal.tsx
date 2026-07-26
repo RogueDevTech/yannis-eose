@@ -4,7 +4,7 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { Textarea } from '~/components/ui/textarea';
 import { AmountInput } from '~/components/ui/amount-input';
-import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upload';
+// FileUpload removed — receipt attachment deferred to a future iteration.
 import { Checkbox } from '~/components/ui/checkbox';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
@@ -55,8 +55,7 @@ export function CashRemittanceCreateModal({
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
-  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
-  const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
+  const receiptUrls: string[] = [];
   const [notes, setNotes] = useState('');
   const [markReceivedNow, setMarkReceivedNow] = useState(true);
   const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
@@ -144,8 +143,8 @@ export function CashRemittanceCreateModal({
       setInlineError(multiLocationError);
       return;
     }
-    if (uploadState === 'uploading') {
-      setInlineError('Wait for the receipt upload to finish.');
+    if (totalAmount < 0) {
+      setInlineError('Net remittance amount cannot be negative. Fees exceed order total.');
       return;
     }
 
@@ -448,8 +447,7 @@ export function CashRemittanceCreateModal({
           disabled={
             submitting ||
             n === 0 ||
-            !!multiLocationError ||
-            uploadState === 'uploading'
+            !!multiLocationError
           }
           loading={submitting}
         >

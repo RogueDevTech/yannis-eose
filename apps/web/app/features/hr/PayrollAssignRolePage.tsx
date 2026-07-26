@@ -7,6 +7,7 @@ import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Button } from '~/components/ui/button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
 import {
@@ -101,6 +102,7 @@ export function PayrollAssignRolePage({
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<{ success?: boolean; error?: string; assignedCount?: number }>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showAssignConfirm, setShowAssignConfirm] = useState(false);
 
   useFetcherToast(fetcher.data, {
     successMessage: fetcher.data?.assignedCount
@@ -363,30 +365,58 @@ export function PayrollAssignRolePage({
 
       {canWrite && (
         <div className="border-t border-app-border pt-4">
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="bulkAssignPayRole" />
-            <input type="hidden" name="payRoleId" value={payRole.id} />
-            <input type="hidden" name="userIds" value={JSON.stringify(newSelections)} />
-            <div className="flex items-center gap-3">
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                disabled={newSelections.length === 0}
-                loading={fetcher.state === 'submitting'}
-                loadingText="Assigning..."
-              >
-                Assign {newSelections.length} staff
-              </Button>
-              {newSelections.length > 0 && (
-                <span className="text-xs text-app-fg-muted">
-                  {newSelections.length} new assignment{newSelections.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-          </fetcher.Form>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              disabled={newSelections.length === 0}
+              loading={fetcher.state === 'submitting'}
+              loadingText="Assigning..."
+              onClick={() => setShowAssignConfirm(true)}
+            >
+              Assign {newSelections.length} staff
+            </Button>
+            {newSelections.length > 0 && (
+              <span className="text-xs text-app-fg-muted">
+                {newSelections.length} new assignment{newSelections.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
         </div>
       )}
+
+      <ConfirmActionModal
+        open={showAssignConfirm}
+        onClose={() => setShowAssignConfirm(false)}
+        title="Assign pay role"
+        description={
+          <>
+            Assign <strong>{payRole.name}</strong> to {newSelections.length} staff member
+            {newSelections.length === 1 ? '' : 's'}?
+          </>
+        }
+        details={
+          <ul className="list-disc pl-4 space-y-1 text-sm">
+            <li>Staff already on another pay role will be moved to this role</li>
+            <li>Future payroll batches will use this role&apos;s rules for these staff</li>
+          </ul>
+        }
+        confirmLabel={`Assign ${newSelections.length} staff`}
+        variant="warning"
+        loading={fetcher.state === 'submitting'}
+        onConfirm={() => {
+          fetcher.submit(
+            {
+              intent: 'bulkAssignPayRole',
+              payRoleId: payRole.id,
+              userIds: JSON.stringify(newSelections),
+            },
+            { method: 'post' },
+          );
+          setShowAssignConfirm(false);
+        }}
+      />
     </div>
   );
 }

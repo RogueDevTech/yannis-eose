@@ -1,20 +1,25 @@
-import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { ConsolidatedToggle } from './ConsolidatedToggle';
 
 interface CashFlowRow {
   code: string;
   name: string;
+  accountType?: string | null;
   opening: number;
   inflow: number;
   outflow: number;
   closing: number;
 }
+
 
 export interface CashFlowPageProps {
   accounts: CashFlowRow[];
@@ -22,17 +27,9 @@ export interface CashFlowPageProps {
   period: { startDate: string | null; endDate: string | null };
 }
 
-export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFlowPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const setFilter = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setSearchParams(next);
-  };
+export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFlowPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string; periodAllTime?: boolean } }) {
   const columns: CompactTableColumn<CashFlowRow>[] = [
-    { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name}</span> },
+    { key: 'name', header: 'Account', render: (r) => <span className="text-app-fg">{r.name.replace(/\s*[—–]\s*/g, ' · ')}<RealMoneyTag accountType={r.accountType} /></span> },
     { key: 'opening', header: 'Opening', align: 'right', render: (r) => <NairaPrice amount={r.opening} zeroAsDash /> },
     { key: 'inflow', header: 'Inflow', align: 'right', render: (r) => <NairaPrice amount={r.inflow} zeroAsDash /> },
     { key: 'outflow', header: 'Outflow', align: 'right', render: (r) => <NairaPrice amount={r.outflow} zeroAsDash /> },
@@ -40,29 +37,33 @@ export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFl
   ];
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title={consolidated ? 'Consolidated Cash Flow' : 'Cash Flow'}
         description="Movement across bank and cash accounts over the period."
-        actions={<ConsolidatedToggle active={consolidated} />}
+        mobileInlineActions
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Cash flow toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters?.startDate}
+                  endDate={filters?.endDate}
+                  periodAllTime={filters?.periodAllTime}
+                  chrome="pill"
+                />
+                <ConsolidatedToggle active={consolidated} />
+              </>
+            }
+            sheet={<ConsolidatedToggle active={consolidated} />}
+          />
+        }
       />
 
-      <div className="flex items-center gap-3">
-        <label htmlFor="cf-from" className="text-sm text-app-fg-muted">From</label>
-        <DateInput
-          id="cf-from"
-          value={filters?.startDate ?? ''}
-          onChange={(e) => setFilter('startDate', e.target.value)}
-          wrapperClassName="w-44"
-        />
-        <label htmlFor="cf-to" className="text-sm text-app-fg-muted">To</label>
-        <DateInput
-          id="cf-to"
-          value={filters?.endDate ?? ''}
-          onChange={(e) => setFilter('endDate', e.target.value)}
-          wrapperClassName="w-44"
-        />
-      </div>
+      <MobileDateFilterRow startDate={filters?.startDate} endDate={filters?.endDate} />
 
       <OverviewStatStrip
         items={[
@@ -84,6 +85,6 @@ export function CashFlowPage({ accounts, totals, consolidated, filters }: CashFl
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }

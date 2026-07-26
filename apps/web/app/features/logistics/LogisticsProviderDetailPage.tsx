@@ -18,6 +18,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Pagination } from '~/components/ui/pagination';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -497,8 +498,16 @@ export function LogisticsProviderDetailPage({
             sheetTitle="Actions"
             triggerAriaLabel="Provider toolbar"
             saveFilterKey
+            filtersBadgeCount={shipmentFilter ? 1 : 0}
+            onClearFilters={shipmentFilter ? () => handleShipmentFilter('') : undefined}
             desktop={
               <div className="flex flex-wrap items-center gap-2">
+                <DateFilterBar
+                  startDate={dateFilters?.startDate ?? undefined}
+                  endDate={dateFilters?.endDate ?? undefined}
+                  periodAllTime={dateFilters?.periodAllTime}
+                  chrome="pill"
+                />
                 <PageRefreshButton />
                 <Button
                   type="button"
@@ -539,76 +548,59 @@ export function LogisticsProviderDetailPage({
                 )}
               </div>
             }
-            sheet={({ closeSheet }) => (
-              <div className="space-y-3">
-                <Button
-                  type="button"
-                  variant="secondary"
+            filters={
+              shipments.length > 0 ? (
+                <FormSelect
+                  label="Shipment"
+                  value={shipmentFilter ?? ''}
+                  onChange={(e) => handleShipmentFilter(e.target.value)}
                   className="w-full"
-                  onClick={() => {
-                    closeSheet();
-                    const totals = {
-                      received: totalReceived,
-                      sold: totalSold,
-                      transferredOut: totalTransferredOut,
-                      adjusted: totalAdjusted,
-                      writtenOff: totalWrittenOff,
-                      dispatched: totalDispatched,
-                      reserved: totalReserved,
-                      available: totalAvailable,
-                      qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
-                      qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
-                      amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
-                      amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
-                    };
-                    setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
-                  }}
                 >
-                  View report
-                </Button>
-                {shipments.length > 0 && (
-                  <FormSelect
-                    value={shipmentFilter ?? ''}
-                    onChange={(e) => { handleShipmentFilter(e.target.value); closeSheet(); }}
-                    className="w-full"
-                  >
-                    <option value="">All shipments</option>
-                    {shipments.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
-                      </option>
-                    ))}
-                  </FormSelect>
-                )}
-              </div>
+                  <option value="">All shipments</option>
+                  {shipments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
+                    </option>
+                  ))}
+                </FormSelect>
+              ) : undefined
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => {
+                  closeSheet();
+                  const totals = {
+                    received: totalReceived,
+                    sold: totalSold,
+                    transferredOut: totalTransferredOut,
+                    adjusted: totalAdjusted,
+                    writtenOff: totalWrittenOff,
+                    dispatched: totalDispatched,
+                    reserved: totalReserved,
+                    available: totalAvailable,
+                    qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
+                    qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
+                    amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
+                    amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
+                  };
+                  setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
+                }}
+              >
+                View report
+              </Button>
             )}
           />
         }
       />
 
-      <DateFilterBar
+      <MobileDateFilterRow
         startDate={dateFilters?.startDate ?? undefined}
         endDate={dateFilters?.endDate ?? undefined}
         periodAllTime={dateFilters?.periodAllTime}
-        chrome="pill"
       />
-
-      {shipments.length > 0 && (
-        <div className="md:hidden">
-          <FormSelect
-            value={shipmentFilter ?? ''}
-            onChange={(e) => handleShipmentFilter(e.target.value)}
-            className="w-full"
-          >
-            <option value="">All shipments</option>
-            {shipments.map((s) => (
-              <option key={s.id} value={s.id}>
-                SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}
-              </option>
-            ))}
-          </FormSelect>
-        </div>
-      )}
 
       {performance ? (
         <>

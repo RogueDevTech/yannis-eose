@@ -72,7 +72,7 @@ export async function action({ request }: ActionFunctionArgs) {
     };
     const res = await apiRequest<unknown>(
       '/trpc/generalLedger.recordWht',
-      { method: 'POST', cookie, body: JSON.stringify(input) },
+      { method: 'POST', cookie, body: input },
     );
     return json({ success: res.ok, error: res.ok ? null : 'Failed to record WHT deduction' });
   }
@@ -81,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const deductionId = String(form.get('deductionId') || '');
     const res = await apiRequest<unknown>(
       '/trpc/generalLedger.generateWhtCertificate',
-      { method: 'POST', cookie, body: JSON.stringify({ deductionId }) },
+      { method: 'POST', cookie, body: { deductionId } },
     );
     return json({ success: res.ok, error: res.ok ? null : 'Failed to generate certificate' });
   }

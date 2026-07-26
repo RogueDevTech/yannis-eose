@@ -60,10 +60,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/generalLedger.listAssets?input=${input}`,
       { method: 'GET', cookie },
     );
-    const data: ListResponse = res.ok
-      ? ((res.data as { result?: { data?: ListResponse } })?.result?.data ?? EMPTY)
-      : EMPTY;
-    return data;
+    if (!res.ok) return EMPTY;
+    const raw = (res.data as { result?: { data?: Record<string, unknown> } })?.result?.data;
+    if (!raw) return EMPTY;
+
+    // API returns { assets, pagination } — map to page's expected shape
+    const records = (raw.assets ?? raw.records ?? []) as AssetRow[];
+    const pag = (raw.pagination ?? EMPTY.pagination) as ListResponse['pagination'];
+
+    // Build summary from records if not provided by API
+    const summary = (raw.summary as ListResponse['summary'] | undefined) ?? {
+      totalAssets: pag.total,
+      totalCost: String(records.reduce((s, r) => s + Number(r.cost || 0), 0)),
+      totalAccumulatedDepreciation: String(records.reduce((s, r) => s + Number(r.accumulatedDepreciation || 0), 0)),
+      totalNbv: String(records.reduce((s, r) => s + Number(r.nbv || 0), 0)),
+    };
+
+    return { records, pagination: pag, summary };
   })();
 
   return defer({ shell, pageData });

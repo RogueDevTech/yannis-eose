@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { CompactTable } from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
@@ -49,12 +50,30 @@ export function CartOrderRoutingPage({ rules, branches, teams = [] }: Props) {
         title="Cart Order Routing"
         description="Configure which branch receives cart orders pulled from abandoned carts."
         backTo="/admin/settings"
-        actions={
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            Add rule
-          </Button>
-        }
         mobileInlineActions
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Cart routing actions"
+            showMobileRefresh={false}
+            desktop={
+              <Button size="sm" onClick={() => setShowCreate(true)}>
+                Add rule
+              </Button>
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                className="h-12 w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  setShowCreate(true);
+                }}
+              >
+                Add rule
+              </Button>
+            )}
+          />
+        }
       />
 
       <RulesTab

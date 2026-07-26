@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import {
@@ -40,8 +40,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const startDate = url.searchParams.get('startDate') || '';
-  const endDate = url.searchParams.get('endDate') || '';
+  const defaults = defaultThisMonthRange();
+  const startDate = url.searchParams.get('startDate') || defaults.startDate;
+  const endDate = url.searchParams.get('endDate') || defaults.endDate;
 
   const shell = { filters: { startDate, endDate } };
 

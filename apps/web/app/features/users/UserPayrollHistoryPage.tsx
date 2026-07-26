@@ -3,6 +3,9 @@ import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -28,6 +31,11 @@ export interface UserPayrollHistoryPageProps {
   userName: string;
   payouts: UserPayoutRecord[];
   adjustments: UserAdjustment[];
+  filters: {
+    startDate: string;
+    endDate: string;
+    periodAllTime: boolean;
+  };
 }
 
 function formatPeriod(start: string, end: string): string {
@@ -53,15 +61,22 @@ type PayslipFetcherData =
   | { ok: true; payslip: PayslipApiRow; error: null }
   | { ok: false; payslip: null; error: string };
 
+const TABS = [
+  { value: 'payouts', label: 'Payout history' },
+  { value: 'adjustments', label: 'Adjustments and bonuses' },
+];
+
 export function UserPayrollHistoryPage({
   userId,
   userName,
   payouts,
   adjustments,
+  filters,
 }: UserPayrollHistoryPageProps) {
   const payslipFetcher = useFetcher<PayslipFetcherData>();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [viewingPayoutId, setViewingPayoutId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'payouts' | 'adjustments'>('payouts');
 
   const openPayslip = useCallback(
     (payoutId: string) => {
@@ -222,116 +237,127 @@ export function UserPayrollHistoryPage({
         title="History"
         backTo={`/hr/users/${userId}`}
         mobileInlineActions
-        description={`Payout history and paid payslips for ${userName}.`}
+        description={`Payout and adjustment records for ${userName}.`}
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="History toolbar"
-            desktop={<PageRefreshButton />}
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
+              </div>
+            }
+            sheet={() => null}
           />
         }
       />
 
-      <div className="list-panel p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h3 className="text-sm font-semibold text-app-fg">Payout history</h3>
-          <p className="text-xs text-app-fg-muted mt-0.5">
-            Paid lines open the official payslip preview (same document as PDF download).
-          </p>
-        </div>
-        {payouts.length === 0 ? (
-          <div className="p-4">
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+      />
+
+      <Tabs
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as 'payouts' | 'adjustments')}
+        tabs={TABS}
+      />
+
+      {activeTab === 'payouts' && (
+        <>
+          {payouts.length === 0 ? (
             <EmptyState
               title="No payout records"
               description="Payouts appear after payroll batches include this staff member."
             />
-          </div>
-        ) : (
-          <CompactTable<UserPayoutRecord>
-            withCard={false}
-            columnVisibilityKey="hr.users.history.payouts"
-            columns={payoutColumns}
-            rows={payouts}
-            rowKey={(p) => p.id}
-            emptyTitle="No payout records"
-            emptyDescription=""
-            renderMobileCard={(p) => (
-              <button
-                type="button"
-                disabled={p.status !== 'PAID'}
-                onClick={() => p.status === 'PAID' && openPayslip(p.id)}
-                className="w-full text-left rounded-lg border border-app-border bg-app-elevated p-4 space-y-2 hover:bg-app-hover transition-colors disabled:hover:bg-app-elevated disabled:opacity-80"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-medium text-app-fg">{formatPeriod(p.periodStart, p.periodEnd)}</p>
-                  <StatusBadge status={p.status} size="sm" />
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-app-fg-muted">Net</span>
-                  <span className="font-semibold text-app-fg">
-                    <NairaPrice amount={Number(p.netAmount)} />
-                  </span>
-                </div>
-                {p.status === 'PAID' ? (
-                  <p className="text-xs text-app-fg-muted">Tap to view payslip</p>
-                ) : null}
-              </button>
-            )}
-          />
-        )}
-      </div>
+          ) : (
+            <CompactTable<UserPayoutRecord>
+              columnVisibilityKey="hr.users.history.payouts"
+              columns={payoutColumns}
+              rows={payouts}
+              rowKey={(p) => p.id}
+              emptyTitle="No payout records"
+              emptyDescription=""
+              renderMobileCard={(p) => (
+                <button
+                  type="button"
+                  disabled={p.status !== 'PAID'}
+                  onClick={() => p.status === 'PAID' && openPayslip(p.id)}
+                  className="w-full text-left rounded-lg border border-app-border bg-app-elevated p-4 space-y-2 hover:bg-app-hover transition-colors disabled:hover:bg-app-elevated disabled:opacity-80"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-app-fg">{formatPeriod(p.periodStart, p.periodEnd)}</p>
+                    <StatusBadge status={p.status} size="sm" />
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-app-fg-muted">Net</span>
+                    <span className="font-semibold text-app-fg">
+                      <NairaPrice amount={Number(p.netAmount)} />
+                    </span>
+                  </div>
+                  {p.status === 'PAID' ? (
+                    <p className="text-xs text-app-fg-muted">Tap to view payslip</p>
+                  ) : null}
+                </button>
+              )}
+            />
+          )}
+        </>
+      )}
 
-      <div className="list-panel p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h3 className="text-sm font-semibold text-app-fg">Adjustments and bonuses</h3>
-          <p className="text-xs text-app-fg-muted mt-0.5">Manual bonuses, clawbacks, and other earnings adjustments.</p>
-        </div>
-        {adjustments.length === 0 ? (
-          <div className="p-4">
+      {activeTab === 'adjustments' && (
+        <>
+          {adjustments.length === 0 ? (
             <EmptyState
               title="No adjustments"
               description="HR adjustments for this staff member will show here."
             />
-          </div>
-        ) : (
-          <CompactTable<UserAdjustment>
-            withCard={false}
-            columnVisibilityKey="hr.users.history.adjustments"
-            columns={adjustmentColumns}
-            rows={adjustments}
-            rowKey={(adj) => adj.id}
-            emptyTitle="No adjustments"
-            emptyDescription=""
-            renderMobileCard={(adj) => {
-              const isDeduction = adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK';
-              return (
-                <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <StatusBadge status={adj.type} label={adj.type.replace(/_/g, ' ')} size="sm" />
-                    <StatusBadge status={adj.status} size="sm" />
+          ) : (
+            <CompactTable<UserAdjustment>
+              columnVisibilityKey="hr.users.history.adjustments"
+              columns={adjustmentColumns}
+              rows={adjustments}
+              rowKey={(adj) => adj.id}
+              emptyTitle="No adjustments"
+              emptyDescription=""
+              renderMobileCard={(adj) => {
+                const isDeduction = adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK';
+                return (
+                  <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <StatusBadge status={adj.type} label={adj.type.replace(/_/g, ' ')} size="sm" />
+                      <StatusBadge status={adj.status} size="sm" />
+                    </div>
+                    <p className="text-sm text-app-fg-muted">{adj.reason || 'No reason'}</p>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-app-fg-muted">{formatShortDate(adj.createdAt)}</span>
+                      <span
+                        className={
+                          isDeduction
+                            ? 'font-semibold text-danger-600 dark:text-danger-400'
+                            : 'font-semibold text-success-600 dark:text-success-400'
+                        }
+                      >
+                        {isDeduction ? '' : '+'}
+                        <NairaPrice
+                          amount={isDeduction ? -Math.abs(Number(adj.amount)) : Number(adj.amount)}
+                        />
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-sm text-app-fg-muted">{adj.reason || 'No reason'}</p>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-app-fg-muted">{formatShortDate(adj.createdAt)}</span>
-                    <span
-                      className={
-                        isDeduction
-                          ? 'font-semibold text-danger-600 dark:text-danger-400'
-                          : 'font-semibold text-success-600 dark:text-success-400'
-                      }
-                    >
-                      {isDeduction ? '' : '+'}
-                      <NairaPrice
-                        amount={isDeduction ? -Math.abs(Number(adj.amount)) : Number(adj.amount)}
-                      />
-                    </span>
-                  </div>
-                </div>
-              );
-            }}
-          />
-        )}
-      </div>
+                );
+              }}
+            />
+          )}
+        </>
+      )}
 
       {viewingPdf ? (
         <PayslipPreviewModal

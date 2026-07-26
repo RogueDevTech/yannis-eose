@@ -8,6 +8,7 @@ import { authorizeUserDetailBundle } from '~/lib/hr-user-detail-bundle-access.se
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { UserPayrollHistoryPage } from '~/features/users/UserPayrollHistoryPage';
 import { UserPayrollHistoryLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
+import type { UserPayoutRecord, UserAdjustment } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [{ title: 'User History — Yannis EOSE' }];
 
@@ -78,6 +79,16 @@ function mapAdjustment(row: RawAdjustment): UserAdjustment {
   };
 }
 
+function currentMonthRange(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const startDate = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  const endDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { startDate, endDate };
+}
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const currentUser = await getCurrentUser(request);
   if (!currentUser) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
@@ -91,15 +102,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('User not found', { status: 404 });
   }
 
+  const url = new URL(request.url);
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  const defaults = currentMonthRange();
+  const startDate = url.searchParams.get('startDate') || defaults.startDate;
+  const endDate = url.searchParams.get('endDate') || defaults.endDate;
+
   const { profileUser, cookie } = gate;
   const opt = { method: 'GET' as const, cookie };
 
   const pageData = (async () => {
+    const payoutInput: Record<string, unknown> = { staffId: userId, page: 1, limit: 200 };
+    if (!periodAllTime) {
+      payoutInput.fromDate = startDate;
+      payoutInput.toDate = endDate;
+    }
+
     const [payoutsRes, adjustmentsRes] = await Promise.all([
       apiRequest<unknown>(
-        `/trpc/hr.listPayouts?input=${encodeURIComponent(
-          JSON.stringify({ staffId: userId, page: 1, limit: 50 }),
-        )}`,
+        `/trpc/hr.listPayouts?input=${encodeURIComponent(JSON.stringify(payoutInput))}`,
         opt,
       ),
       apiRequest<unknown>(
@@ -112,18 +133,43 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? ((payoutsRes.data as { result?: { data?: { payouts?: RawPayout[] } } })?.result?.data?.payouts ??
         [])
       : [];
-    const payouts = payoutPayload.map(mapPayout);
+    let payouts = payoutPayload.map(mapPayout);
+
+    // Client-side date filter fallback if the API doesn't support fromDate/toDate
+    if (!periodAllTime && payouts.length > 0) {
+      const start = new Date(startDate).getTime();
+      const end = new Date(endDate + 'T23:59:59').getTime();
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        payouts = payouts.filter((p) => {
+          const pStart = new Date(p.periodStart).getTime();
+          return pStart >= start && pStart <= end;
+        });
+      }
+    }
 
     const adjustmentsPayload = adjustmentsRes.ok ? extractTrpc(adjustmentsRes, null) : null;
-    const adjustments = Array.isArray(adjustmentsPayload)
+    let adjustments = Array.isArray(adjustmentsPayload)
       ? (adjustmentsPayload as RawAdjustment[]).map(mapAdjustment)
       : [];
+
+    // Client-side date filter for adjustments
+    if (!periodAllTime && adjustments.length > 0) {
+      const start = new Date(startDate).getTime();
+      const end = new Date(endDate + 'T23:59:59').getTime();
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        adjustments = adjustments.filter((a) => {
+          const created = new Date(a.createdAt).getTime();
+          return created >= start && created <= end;
+        });
+      }
+    }
 
     return {
       userId,
       userName: profileUser.name,
       payouts,
       adjustments,
+      filters: { startDate, endDate, periodAllTime },
     };
   })();
 
@@ -148,6 +194,7 @@ export default function UserHistoryRoute() {
           userName={data.userName}
           payouts={data.payouts}
           adjustments={data.adjustments}
+          filters={data.filters}
         />
       )}
     </CachedAwait>

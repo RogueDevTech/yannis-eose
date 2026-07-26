@@ -39,6 +39,7 @@ import {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaCalendarDate } from '../common/utils/date-range';
 
 type Drizzle = PostgresJsDatabase<typeof schema>;
 type Tx = Parameters<Parameters<Drizzle['transaction']>[0]>[0];
@@ -433,13 +434,13 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
    * lifecycle don't need to thread a tx. Non-fatal by contract: the caller wraps
    * this in try/catch — a missing account / fiscal year must never block delivery.
    *
-   *   Dr Debtors           totalAmount     (party CUSTOMER, remarks=customerName)
-   *   Cr Sale              totalAmount
-   *   Dr Cost of Goods Sold landedCost     (skipped if landedCost is 0/absent)
-   *   Cr Stock In Hand     landedCost
+   * `order.totalAmount` is VAT-inclusive COD receivable:
+   *   Dr Debtors           totalAmount
+   *   Cr Sale              totalAmount / 1.075   (when VAT account exists)
+   *   Cr VAT Output        residual 7.5%
+   *   Dr COGS / Cr Stock   landedCost (required when landedCost > 0)
    *
-   * Revenue is order.totalAmount; COGS is order.landedCost (FIFO — the number the
-   * client's ERPNext gets wrong by posting sale price). Idempotent per orderId.
+   * Without a VAT account, Sale is credited for the full totalAmount. Idempotent per orderId.
    */
   async postSalesInvoice(orderId: string, actor: Actor): Promise<{ posted: boolean; reason?: string }> {
     return withActor(this.db, actor, async (tx) => {
@@ -464,9 +465,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       const groupId = order.groupId ?? null;
 
-      const revenue = Number(order.totalAmount ?? 0);
+      const invoiceTotal = Number(order.totalAmount ?? 0);
       const cogs = Number(order.landedCost ?? 0);
-      if (revenue <= 0) return { posted: false, reason: 'zero-revenue' };
+      if (invoiceTotal <= 0) return { posted: false, reason: 'zero-revenue' };
 
       // Resolve posting accounts.
       const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', ACCT.AR_CUSTOMERS);
@@ -475,34 +476,40 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         return { posted: false, reason: 'missing-ar-or-sale-account' };
       }
 
-      const postingDate = (order.deliveredAt ?? new Date()).toISOString().slice(0, 10);
+      const postingDate = nigeriaCalendarDate(order.deliveredAt ?? new Date());
       const customer = order.customerName ?? undefined;
 
       const lines: PostVoucherLine[] = [
-        { accountId: debtors.id, debit: revenue, credit: 0, partyType: 'CUSTOMER', remarks: customer },
-        { accountId: sale.id, debit: 0, credit: revenue },
+        { accountId: debtors.id, debit: invoiceTotal, credit: 0, partyType: 'CUSTOMER', remarks: customer },
       ];
 
-      // VAT output — 7.5% Nigerian VAT on top of revenue. Only posts if the
-      // VAT account exists in the CoA (graceful degradation for companies that
-      // haven't seeded it or are VAT-exempt).
+      // VAT-inclusive split when VAT Output exists; otherwise full amount is sales.
       const vatAccount = await this.resolveAccountByCode(tx, groupId, ACCT.VAT_OUTPUT);
       if (vatAccount) {
-        const vatAmount = Math.round(revenue * 0.075 * 100) / 100; // 7.5%
+        const netSales = Math.round((invoiceTotal / 1.075) * 100) / 100;
+        const vatAmount = Math.round((invoiceTotal - netSales) * 100) / 100;
+        lines.push({ accountId: sale.id, debit: 0, credit: netSales });
         if (vatAmount > 0) {
-          lines.push({ accountId: debtors.id, debit: vatAmount, credit: 0, partyType: 'CUSTOMER', remarks: customer });
-          lines.push({ accountId: vatAccount.id, debit: 0, credit: vatAmount, remarks: 'VAT output 7.5%' });
+          lines.push({
+            accountId: vatAccount.id,
+            debit: 0,
+            credit: vatAmount,
+            remarks: 'VAT output 7.5% (inclusive)',
+          });
         }
+      } else {
+        lines.push({ accountId: sale.id, debit: 0, credit: invoiceTotal });
       }
 
-      // COGS pair — only when a FIFO cost is available.
+      // COGS pair — required when FIFO cost is available (fail closed).
       if (cogs > 0) {
         const cogsAcct = await this.resolveAccountByType(tx, groupId, 'COST_OF_GOODS_SOLD');
         const stock = await this.resolveAccountByType(tx, groupId, 'STOCK', ACCT.STOCK_FINISHED_GOODS);
-        if (cogsAcct && stock) {
-          lines.push({ accountId: cogsAcct.id, debit: cogs, credit: 0 });
-          lines.push({ accountId: stock.id, debit: 0, credit: cogs });
+        if (!cogsAcct || !stock) {
+          return { posted: false, reason: 'missing-cogs-or-stock-account' };
         }
+        lines.push({ accountId: cogsAcct.id, debit: cogs, credit: 0 });
+        lines.push({ accountId: stock.id, debit: 0, credit: cogs });
       }
 
       await this.postVoucher(tx, {
@@ -610,13 +617,18 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // so the entry still balances (never silently drop money).
       const deliveryFeePosted = deliveryFeeAcct ? totalDeliveryFee : 0;
       const discountPosted = discountAcct ? otherFees : 0;
-      const cashBanked = totalDebtors - deliveryFeePosted - discountPosted;
+      const cashBanked = Math.round((totalDebtors - deliveryFeePosted - discountPosted) * 100) / 100;
+      if (cashBanked < 0) {
+        return { posted: false, reason: 'negative-cash-banked' };
+      }
 
-      const postingDate = (rem.receivedAt ?? new Date()).toISOString().slice(0, 10);
+      const postingDate = nigeriaCalendarDate(rem.receivedAt ?? new Date());
 
-      const lines: PostVoucherLine[] = [
-        { accountId: bank.id, debit: cashBanked, credit: 0, remarks: 'Cash banked' },
-      ];
+      const lines: PostVoucherLine[] = [];
+      // Omit zero bank line — postVoucher rejects one-sided zero amounts.
+      if (cashBanked > 0) {
+        lines.push({ accountId: bank.id, debit: cashBanked, credit: 0, remarks: 'Cash banked' });
+      }
       if (deliveryFeeAcct && deliveryFeePosted > 0) {
         lines.push({ accountId: deliveryFeeAcct.id, debit: deliveryFeePosted, credit: 0 });
       }
@@ -709,7 +721,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const vatAmount = vatInput ? Math.round(landedValue * 0.075 * 100) / 100 : 0;
       const creditorsAmount = landedValue + vatAmount; // total owed to supplier includes VAT
 
-      const postingDate = (ship.verifiedAt ?? new Date()).toISOString().slice(0, 10);
+      const postingDate = nigeriaCalendarDate(ship.verifiedAt ?? new Date());
 
       const voucherLines: PostVoucherLine[] = [
         { accountId: stock.id, debit: landedValue, credit: 0 },
@@ -802,7 +814,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         return { posted: false, reason: 'missing-salary-or-payroll-payable-account' };
       }
 
-      const postingDate = (batch.financeProcessedAt ?? new Date()).toISOString().slice(0, 10);
+      const postingDate = nigeriaCalendarDate(batch.financeProcessedAt ?? new Date());
       const dept = batch.department ?? 'General';
 
       const lines: Array<{ accountId: string; debit: number; credit: number; remarks: string }> = [
@@ -811,17 +823,16 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       if (tax > 0) {
         const payePayable = await this.resolveAccountByCode(tx, groupId, ACCT.PAYE_PAYABLE);
-        if (payePayable) {
-          lines.push({ accountId: payePayable.id, debit: 0, credit: tax, remarks: `${dept} PAYE withheld` });
-          lines.push({
-            accountId: payrollPayable.id,
-            debit: 0,
-            credit: net > 0 ? net : amount - tax,
-            remarks: `${dept} payroll net payable`,
-          });
-        } else {
-          lines.push({ accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` });
+        if (!payePayable) {
+          return { posted: false, reason: 'missing-paye-payable-account' };
         }
+        lines.push({ accountId: payePayable.id, debit: 0, credit: tax, remarks: `${dept} PAYE withheld` });
+        lines.push({
+          accountId: payrollPayable.id,
+          debit: 0,
+          credit: net > 0 ? net : amount - tax,
+          remarks: `${dept} payroll net payable`,
+        });
       } else {
         lines.push({ accountId: payrollPayable.id, debit: 0, credit: amount, remarks: `${dept} payroll` });
       }
@@ -941,7 +952,6 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!ap || !bank) return { posted: false, reason: 'missing-accounts' };
 
       const whtRate = opts?.whtRate ?? 0;
-      const grossMinor = Math.round(amount * 100);
       let whtDeductionId: string | undefined;
 
       if (whtRate > 0) {
@@ -949,8 +959,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
         if (!whtPayable) return { posted: false, reason: 'missing-accounts' };
 
-        const whtMinor = Math.round(grossMinor * (whtRate / 100));
-        const netMinor = grossMinor - whtMinor;
+        const whtWithheld = Math.round(amount * (whtRate / 100) * 100) / 100;
+        const netPayment = Math.round((amount - whtWithheld) * 100) / 100;
 
         await this.postVoucher(tx, {
           groupId,
@@ -958,9 +968,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           voucherType: 'PAYMENT',
           voucherId: paymentId,
           lines: [
-            { accountId: ap.id, debit: grossMinor, credit: 0, partyType: 'SUPPLIER', remarks: `Payment to ${supplierName}` },
-            { accountId: bank.id, debit: 0, credit: netMinor, remarks: `Supplier payment net of WHT: ${supplierName}` },
-            { accountId: whtPayable.id, debit: 0, credit: whtMinor, remarks: `WHT ${whtRate}% withheld: ${supplierName}` },
+            { accountId: ap.id, debit: amount, credit: 0, partyType: 'SUPPLIER', remarks: `Payment to ${supplierName}` },
+            { accountId: bank.id, debit: 0, credit: netPayment, remarks: `Supplier payment net of WHT: ${supplierName}` },
+            { accountId: whtPayable.id, debit: 0, credit: whtWithheld, remarks: `WHT ${whtRate}% withheld: ${supplierName}` },
           ],
         });
 
@@ -992,8 +1002,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           voucherType: 'PAYMENT',
           voucherId: paymentId,
           lines: [
-            { accountId: ap.id, debit: grossMinor, credit: 0, partyType: 'SUPPLIER', remarks: `Payment to ${supplierName}` },
-            { accountId: bank.id, debit: 0, credit: grossMinor, remarks: `Supplier payment: ${supplierName}` },
+            { accountId: ap.id, debit: amount, credit: 0, partyType: 'SUPPLIER', remarks: `Payment to ${supplierName}` },
+            { accountId: bank.id, debit: 0, credit: amount, remarks: `Supplier payment: ${supplierName}` },
           ],
         });
       }
@@ -1025,15 +1035,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const apAgent = await this.resolveAccountByCode(tx, groupId, ACCT.AP_AGENT_COMMISSIONS);
       if (!commExp || !apAgent) return { posted: false, reason: 'missing-accounts' };
 
-      const minorAmount = Math.round(commissionAmount * 100);
       await this.postVoucher(tx, {
         groupId,
         postingDate: new Date().toISOString().slice(0, 10),
         voucherType: 'EXPENSE',
         voucherId,
         lines: [
-          { accountId: commExp.id, debit: minorAmount, credit: 0, remarks: `Delivery commission — ${agentName}` },
-          { accountId: apAgent.id, debit: 0, credit: minorAmount, partyType: 'AGENT', remarks: agentName },
+          { accountId: commExp.id, debit: commissionAmount, credit: 0, remarks: `Delivery commission — ${agentName}` },
+          { accountId: apAgent.id, debit: 0, credit: commissionAmount, partyType: 'AGENT', remarks: agentName },
         ],
       });
       return { posted: true };
@@ -1063,15 +1072,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!apAgent || !bank) return { posted: false, reason: 'missing-accounts' };
 
       const whtRate = opts?.whtRate ?? 0;
-      const grossMinor = Math.round(amount * 100);
       let whtDeductionId: string | undefined;
 
       if (whtRate > 0) {
         const whtPayable = await this.resolveAccountByCode(tx, groupId, ACCT.WHT_PAYABLE);
         if (!whtPayable) return { posted: false, reason: 'missing-accounts' };
 
-        const whtMinor = Math.round(grossMinor * (whtRate / 100));
-        const netMinor = grossMinor - whtMinor;
+        const whtWithheld = Math.round(amount * (whtRate / 100) * 100) / 100;
+        const netPayment = Math.round((amount - whtWithheld) * 100) / 100;
 
         await this.postVoucher(tx, {
           groupId,
@@ -1079,9 +1087,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           voucherType: 'PAYMENT',
           voucherId: paymentId,
           lines: [
-            { accountId: apAgent.id, debit: grossMinor, credit: 0, partyType: 'AGENT', remarks: `Commission paid: ${agentName}` },
-            { accountId: bank.id, debit: 0, credit: netMinor, remarks: `Agent commission net of WHT: ${agentName}` },
-            { accountId: whtPayable.id, debit: 0, credit: whtMinor, remarks: `WHT ${whtRate}% withheld: ${agentName}` },
+            { accountId: apAgent.id, debit: amount, credit: 0, partyType: 'AGENT', remarks: `Commission paid: ${agentName}` },
+            { accountId: bank.id, debit: 0, credit: netPayment, remarks: `Agent commission net of WHT: ${agentName}` },
+            { accountId: whtPayable.id, debit: 0, credit: whtWithheld, remarks: `WHT ${whtRate}% withheld: ${agentName}` },
           ],
         });
 
@@ -1110,8 +1118,8 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           voucherType: 'PAYMENT',
           voucherId: paymentId,
           lines: [
-            { accountId: apAgent.id, debit: grossMinor, credit: 0, partyType: 'AGENT', remarks: `Commission paid: ${agentName}` },
-            { accountId: bank.id, debit: 0, credit: grossMinor, remarks: `Agent commission payment: ${agentName}` },
+            { accountId: apAgent.id, debit: amount, credit: 0, partyType: 'AGENT', remarks: `Commission paid: ${agentName}` },
+            { accountId: bank.id, debit: 0, credit: amount, remarks: `Agent commission payment: ${agentName}` },
           ],
         });
       }
@@ -1146,15 +1154,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         : await this.resolveAccountByCode(tx, groupId, ACCT.AP_SUPPLIERS);
       if (!creditAcct) return { posted: false, reason: 'missing-credit-account' };
 
-      const minorCost = Math.round(cost * 100);
       await this.postVoucher(tx, {
         groupId,
         postingDate: new Date().toISOString().slice(0, 10),
         voucherType: 'JOURNAL_ENTRY',
         voucherId,
         lines: [
-          { accountId: assetAccountId, debit: minorCost, credit: 0, remarks: `Asset acquired: ${assetName}` },
-          { accountId: creditAcct.id, debit: 0, credit: minorCost, remarks: `Payment for asset: ${assetName}` },
+          { accountId: assetAccountId, debit: cost, credit: 0, remarks: `Asset acquired: ${assetName}` },
+          { accountId: creditAcct.id, debit: 0, credit: cost, remarks: `Payment for asset: ${assetName}` },
         ],
       });
       return { posted: true };
@@ -1184,15 +1191,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const deposits = await this.resolveAccountByCode(tx, groupId, ACCT.CUSTOMER_DEPOSITS);
       if (!bank || !deposits) return { posted: false, reason: 'missing-accounts' };
 
-      const minorAmount = Math.round(amount * 100);
       await this.postVoucher(tx, {
         groupId,
         postingDate: new Date().toISOString().slice(0, 10),
         voucherType: 'PAYMENT',
         voucherId: depositId,
         lines: [
-          { accountId: bank.id, debit: minorAmount, credit: 0, remarks: `Deposit from ${customerName}` },
-          { accountId: deposits.id, debit: 0, credit: minorAmount, partyType: 'CUSTOMER', remarks: customerName },
+          { accountId: bank.id, debit: amount, credit: 0, remarks: `Deposit from ${customerName}` },
+          { accountId: deposits.id, debit: 0, credit: amount, partyType: 'CUSTOMER', remarks: customerName },
         ],
       });
       return { posted: true };
@@ -1221,15 +1227,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const revenue = await this.resolveAccountByCode(tx, groupId, ACCT.PRODUCT_SALES);
       if (!deposits || !revenue) return { posted: false, reason: 'missing-accounts' };
 
-      const minorAmount = Math.round(amount * 100);
       await this.postVoucher(tx, {
         groupId,
         postingDate: new Date().toISOString().slice(0, 10),
         voucherType: 'SALES_INVOICE',
         voucherId,
         lines: [
-          { accountId: deposits.id, debit: minorAmount, credit: 0, remarks: `Deposit recognised on delivery — ${customerName}` },
-          { accountId: revenue.id, debit: 0, credit: minorAmount, remarks: `Revenue from deposit — ${customerName}` },
+          { accountId: deposits.id, debit: amount, credit: 0, remarks: `Deposit recognised on delivery — ${customerName}` },
+          { accountId: revenue.id, debit: 0, credit: amount, remarks: `Revenue from deposit — ${customerName}` },
         ],
       });
       return { posted: true };
@@ -1347,13 +1352,15 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           })
           .returning();
 
-        // Store the draft lines in the idempotencyKey field as JSON (reusing
-        // nullable text column to avoid schema change — lines are small).
+        // Stash draft lines in idempotencyKey. Include header id so identical
+        // line payloads never collide on (group_id, idempotency_key) UNIQUE.
         await tx
           .update(schema.journalEntries)
           .set({
-            idempotencyKey: JSON.stringify(
-              input.lines.map((l) => ({
+            idempotencyKey: JSON.stringify({
+              draftId: header!.id,
+              createdBy: actor.id,
+              lines: input.lines.map((l) => ({
                 accountId: l.accountId,
                 debit: l.debit ?? 0,
                 credit: l.credit ?? 0,
@@ -1361,7 +1368,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
                 partyId: l.partyId ?? null,
                 remarks: l.remarks ?? null,
               })),
-            ),
+            }),
             updatedAt: new Date(),
           })
           .where(eq(schema.journalEntries.id, header!.id));
@@ -1411,7 +1418,11 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
    * the stashed lines from idempotencyKey, runs them through postVoucher, and
    * flips status to POSTED. Sets approved_by/at for audit trail.
    */
-  async approveJournalEntry(input: ApproveJournalEntryInput, actor: Actor) {
+  async approveJournalEntry(
+    input: ApproveJournalEntryInput,
+    actor: Actor,
+    activeGroupId?: string | null,
+  ) {
     return withActor(this.db, actor, async (tx) => {
       const [header] = await tx
         .select()
@@ -1421,13 +1432,15 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!header) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
       }
+      if (activeGroupId !== undefined && activeGroupId !== null && header.groupId !== activeGroupId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Journal entry is outside your active company.' });
+      }
       if (header.status !== 'DRAFT') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `Cannot approve a journal entry with status "${header.status}". Only DRAFT entries can be approved.`,
         });
       }
-
       // Hydrate stashed lines from idempotencyKey.
       if (!header.idempotencyKey) {
         throw new TRPCError({
@@ -1437,12 +1450,31 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       }
 
       let lines: PostVoucherLine[];
+      let draftCreatedBy: string | null = null;
       try {
-        lines = JSON.parse(header.idempotencyKey) as PostVoucherLine[];
+        const parsed = JSON.parse(header.idempotencyKey) as
+          | PostVoucherLine[]
+          | { draftId?: string; createdBy?: string; lines: PostVoucherLine[] };
+        if (Array.isArray(parsed)) {
+          lines = parsed;
+        } else {
+          lines = parsed.lines;
+          draftCreatedBy = parsed.createdBy ?? null;
+        }
+        if (!Array.isArray(lines) || lines.length === 0) {
+          throw new Error('empty lines');
+        }
       } catch {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Draft journal entry has malformed stashed lines.',
+        });
+      }
+
+      if (draftCreatedBy && draftCreatedBy === actor.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You cannot approve a journal entry you created. Ask another finance approver.',
         });
       }
 
@@ -1525,6 +1557,26 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
   async postOpeningBalances(input: PostOpeningBalancesInput, actor: Actor) {
     return withActor(this.db, actor, async (tx) => {
       const groupId = input.groupId ?? null;
+
+      const alreadyPosted = await tx
+        .select({ id: schema.journalEntries.id })
+        .from(schema.journalEntries)
+        .where(
+          and(
+            groupId
+              ? eq(schema.journalEntries.groupId, groupId)
+              : isNull(schema.journalEntries.groupId),
+            eq(schema.journalEntries.description, 'Opening balances (cutover)'),
+            inArray(schema.journalEntries.status, ['POSTED', 'DRAFT']),
+          ),
+        )
+        .limit(1);
+      if (alreadyPosted[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Opening balances already posted for this company. Reverse the existing cutover entry before re-posting.',
+        });
+      }
 
       let totalDebitMinor = 0;
       let totalCreditMinor = 0;
@@ -1618,7 +1670,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Journal entry has no ledger lines to reverse.' });
       }
 
-      const postingDate = new Date().toISOString().slice(0, 10);
+      const postingDate = nigeriaCalendarDate();
       const reason = input.reason?.trim();
       const [reversalHeader] = await tx
         .insert(schema.journalEntries)
@@ -1961,13 +2013,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         code: schema.accounts.code,
         name: schema.accounts.name,
         rootType: schema.accounts.rootType,
+        accountType: schema.accounts.accountType,
         debit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
         credit: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
       })
       .from(schema.glEntries)
       .innerJoin(schema.accounts, eq(schema.glEntries.accountId, schema.accounts.id))
       .where(and(...conds))
-      .groupBy(schema.accounts.id, schema.accounts.code, schema.accounts.name, schema.accounts.rootType)
+      .groupBy(schema.accounts.id, schema.accounts.code, schema.accounts.name, schema.accounts.rootType, schema.accounts.accountType)
       .orderBy(schema.accounts.code);
 
     let totalDebitMinor = 0;
@@ -1984,6 +2037,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           code: r.code,
           name: r.name,
           rootType: r.rootType,
+          accountType: r.accountType,
           // Present net on the natural side.
           debit: netMinor > 0 ? netMinor / 100 : 0,
           credit: netMinor < 0 ? -netMinor / 100 : 0,
@@ -2015,7 +2069,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     groupId: string | null,
     rootTypes: string[],
     opts: { startDate?: string; endDate?: string },
-  ): Promise<Array<{ code: string; name: string; rootType: string; net: number }>> {
+  ): Promise<Array<{ code: string; name: string; rootType: string; accountType: string | null; net: number }>> {
     const conds: SQL[] = [this.groupEqOn(schema.glEntries.groupId, groupId)];
     if (opts.startDate) conds.push(gte(schema.glEntries.postingDate, opts.startDate));
     if (opts.endDate) conds.push(lte(schema.glEntries.postingDate, opts.endDate));
@@ -2026,19 +2080,21 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         code: schema.accounts.code,
         name: schema.accounts.name,
         rootType: schema.accounts.rootType,
+        accountType: schema.accounts.accountType,
         debit: sql<string>`COALESCE(SUM(${schema.glEntries.debit}), 0)`,
         credit: sql<string>`COALESCE(SUM(${schema.glEntries.credit}), 0)`,
       })
       .from(schema.glEntries)
       .innerJoin(schema.accounts, eq(schema.glEntries.accountId, schema.accounts.id))
       .where(and(...conds))
-      .groupBy(schema.accounts.code, schema.accounts.name, schema.accounts.rootType)
+      .groupBy(schema.accounts.code, schema.accounts.name, schema.accounts.rootType, schema.accounts.accountType)
       .orderBy(schema.accounts.code);
 
     return rows.map((r) => ({
       code: r.code,
       name: r.name,
       rootType: r.rootType,
+      accountType: r.accountType,
       net: Number(r.debit) - Number(r.credit),
     }));
   }
@@ -2053,10 +2109,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     // Income accounts carry credit balances (net < 0 in debit-positive terms).
     const income = rows
       .filter((r) => r.rootType === 'INCOME')
-      .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+      .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: -r.net }));
     const expense = rows
       .filter((r) => r.rootType === 'EXPENSE')
-      .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
+      .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: r.net }));
     const totalIncome = income.reduce((s, r) => s + r.amount, 0);
     const totalExpense = expense.reduce((s, r) => s + r.amount, 0);
 
@@ -2078,10 +2134,10 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       });
       const comparativeIncome = compRows
         .filter((r) => r.rootType === 'INCOME')
-        .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+        .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: -r.net }));
       const comparativeExpense = compRows
         .filter((r) => r.rootType === 'EXPENSE')
-        .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
+        .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: r.net }));
       const comparativeTotalIncome = comparativeIncome.reduce((s, r) => s + r.amount, 0);
       const comparativeTotalExpense = comparativeExpense.reduce((s, r) => s + r.amount, 0);
       comparative = {
@@ -2120,13 +2176,13 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
     const assets = bsRows
       .filter((r) => r.rootType === 'ASSET')
-      .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
+      .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: r.net }));
     const liabilities = bsRows
       .filter((r) => r.rootType === 'LIABILITY')
-      .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+      .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: -r.net }));
     const equity = bsRows
       .filter((r) => r.rootType === 'EQUITY')
-      .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+      .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: -r.net }));
 
     const totalAssets = assets.reduce((s, r) => s + r.amount, 0);
     const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
@@ -2160,13 +2216,13 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
       const comparativeAssets = compBsRows
         .filter((r) => r.rootType === 'ASSET')
-        .map((r) => ({ code: r.code, name: r.name, amount: r.net }));
+        .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: r.net }));
       const comparativeLiabilities = compBsRows
         .filter((r) => r.rootType === 'LIABILITY')
-        .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+        .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: -r.net }));
       const comparativeEquity = compBsRows
         .filter((r) => r.rootType === 'EQUITY')
-        .map((r) => ({ code: r.code, name: r.name, amount: -r.net }));
+        .map((r) => ({ code: r.code, name: r.name, accountType: r.accountType, amount: -r.net }));
 
       const comparativeTotalAssets = comparativeAssets.reduce((s, r) => s + r.amount, 0);
       const comparativeTotalLiabilities = comparativeLiabilities.reduce((s, r) => s + r.amount, 0);
@@ -2219,7 +2275,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     const groupId = input.groupId ?? null;
 
     const cashAccounts = await this.db
-      .select({ id: schema.accounts.id, code: schema.accounts.code, name: schema.accounts.name })
+      .select({ id: schema.accounts.id, code: schema.accounts.code, name: schema.accounts.name, accountType: schema.accounts.accountType })
       .from(schema.accounts)
       .where(
         and(
@@ -2233,6 +2289,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     const accountsOut: Array<{
       code: string;
       name: string;
+      accountType: string | null;
       opening: number;
       inflow: number;
       outflow: number;
@@ -2266,6 +2323,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       accountsOut.push({
         code: acc.code,
         name: acc.name,
+        accountType: acc.accountType,
         opening,
         inflow,
         outflow,
@@ -2327,6 +2385,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         compAccountsOut.push({
           code: acc.code,
           name: acc.name,
+          accountType: acc.accountType,
           opening,
           inflow,
           outflow,

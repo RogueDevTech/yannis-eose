@@ -1,8 +1,11 @@
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Tabs } from '~/components/ui/tabs';
 import { NairaPrice } from '~/components/ui/naira-price';
 
 interface AgingRow {
@@ -41,27 +44,28 @@ export function AgingPage({ kind, parties, totals }: AgingPageProps) {
   ];
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title={isAR ? 'Accounts Receivable Aging' : 'Accounts Payable Aging'}
         description={isAR ? 'Outstanding customer balances by age.' : 'Outstanding supplier balances by age.'}
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Aging toolbar"
+            desktop={<PageRefreshButton />}
+          />
+        }
       />
 
-      <div className="inline-flex rounded-lg border border-app-border p-0.5">
-        {(['RECEIVABLE', 'PAYABLE'] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setKind(k)}
-            className={[
-              'rounded-md px-3 py-1.5 text-sm font-medium',
-              kind === k ? 'bg-app-hover text-app-fg' : 'text-app-fg-muted',
-            ].join(' ')}
-          >
-            {k === 'RECEIVABLE' ? 'Receivable' : 'Payable'}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        variant="pill"
+        value={kind}
+        onChange={(v) => setKind(v as 'RECEIVABLE' | 'PAYABLE')}
+        tabs={[
+          { value: 'RECEIVABLE', label: 'Receivable' },
+          { value: 'PAYABLE', label: 'Payable' },
+        ]}
+      />
 
       <OverviewStatStrip
         items={[
@@ -74,8 +78,26 @@ export function AgingPage({ kind, parties, totals }: AgingPageProps) {
       {parties.length === 0 ? (
         <EmptyState title="Nothing outstanding" description={isAR ? 'No unpaid customer balances.' : 'No unpaid supplier balances.'} />
       ) : (
-        <CompactTable columns={columns} rows={parties} rowKey={(r) => r.party} />
+        <CompactTable
+          columns={columns}
+          rows={parties}
+          rowKey={(r) => r.party}
+          renderMobileCard={(r) => (
+            <div className="flex flex-col gap-1.5 py-3 px-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-app-fg truncate">{r.party}</span>
+                <NairaPrice amount={r.total} className="font-semibold text-app-fg shrink-0" />
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-app-muted">
+                <span>0–30d: <NairaPrice amount={r.b0_30} zeroAsDash /></span>
+                <span>31–60d: <NairaPrice amount={r.b31_60} zeroAsDash /></span>
+                <span>61–90d: <NairaPrice amount={r.b61_90} zeroAsDash /></span>
+                <span>90d+: <NairaPrice amount={r.b90plus} zeroAsDash /></span>
+              </div>
+            </div>
+          )}
+        />
       )}
-    </>
+    </div>
   );
 }

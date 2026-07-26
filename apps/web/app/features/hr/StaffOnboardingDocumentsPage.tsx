@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -172,10 +173,45 @@ export function StaffOnboardingDocumentsPage({
         mobileInlineActions
         description="Review staff onboarding documents."
         actions={
-          <>
-            <PageRefreshButton className="hidden md:inline-flex" />
-            <PageRefreshButton iconOnly className="md:hidden" />
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Filters"
+            triggerAriaLabel="Onboarding filters"
+            saveFilterKey
+            filtersBadgeCount={
+              [onboardingParam !== 'ALL' ? onboardingParam : '', sortByParam !== 'name' ? sortByParam : '', sortOrderParam !== 'asc' ? sortOrderParam : ''].filter(Boolean).length
+            }
+            onClearFilters={
+              onboardingParam !== 'ALL' || sortByParam !== 'name' || sortOrderParam !== 'asc'
+                ? () => patchParams({ onboarding: undefined, sortBy: undefined, sortOrder: undefined })
+                : undefined
+            }
+            desktop={<PageRefreshButton />}
+            filters={
+              <div className="space-y-3">
+                <FormSelect
+                  label="Onboarding"
+                  value={onboardingParam}
+                  onChange={(e) => patchParams({ onboarding: e.target.value === 'ALL' ? undefined : e.target.value })}
+                  options={[...ONBOARDING_OPTIONS]}
+                />
+                <FormSelect
+                  label="Sort"
+                  value={sortByParam}
+                  onChange={(e) => patchParams({ sortBy: e.target.value })}
+                  options={[...SORT_OPTIONS]}
+                />
+                <FormSelect
+                  label="Order"
+                  value={sortOrderParam}
+                  onChange={(e) => patchParams({ sortOrder: e.target.value })}
+                  options={[
+                    { value: 'asc', label: 'Ascending' },
+                    { value: 'desc', label: 'Descending' },
+                  ]}
+                />
+              </div>
+            }
+          />
         }
       />
 
@@ -273,31 +309,6 @@ export function StaffOnboardingDocumentsPage({
                 width="sort"
               />
             </>
-          }
-          sheetFilterBody={
-            <div className="space-y-3">
-              <FormSelect
-                label="Onboarding"
-                value={onboardingParam}
-                onChange={(e) => patchParams({ onboarding: e.target.value === 'ALL' ? undefined : e.target.value })}
-                options={[...ONBOARDING_OPTIONS]}
-              />
-              <FormSelect
-                label="Sort"
-                value={sortByParam}
-                onChange={(e) => patchParams({ sortBy: e.target.value })}
-                options={[...SORT_OPTIONS]}
-              />
-              <FormSelect
-                label="Order"
-                value={sortOrderParam}
-                onChange={(e) => patchParams({ sortOrder: e.target.value })}
-                options={[
-                  { value: 'asc', label: 'Ascending' },
-                  { value: 'desc', label: 'Descending' },
-                ]}
-              />
-            </div>
           }
         />
 

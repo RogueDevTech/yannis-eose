@@ -1323,14 +1323,14 @@ export function OrderDetailPage({
     skipErrorToast: addCommentModalOpen,
   });
   useFetcherToast(deliveredDeletionFetcher.data, {
-    successMessage: 'Deletion request submitted — awaiting approval',
+    successMessage: 'Deletion request submitted, awaiting approval',
   });
   useCloseOnFetcherSuccess(deliveredDeletionFetcher, () => {
     setDeliveredDeletionModalOpen(false);
     setDeliveredDeletionReason('');
   }, { intent: 'requestDeliveredOrderDeletion' });
   useFetcherToast(retrackRequestFetcher.data, {
-    successMessage: 'Retrack request submitted — awaiting HoCS + HoL approval',
+    successMessage: 'Retrack request submitted, awaiting approval',
   });
   useCloseOnFetcherSuccess(retrackRequestFetcher, () => {
     setRetrackRequestModalOpen(false);
@@ -2671,7 +2671,7 @@ export function OrderDetailPage({
                     <>
                       {hasPendingItemApproval && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
-                          Item/price change pending approval — cannot move forward
+                          Item/price change pending approval: cannot move forward
                         </p>
                       )}
                       <Button

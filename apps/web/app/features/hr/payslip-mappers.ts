@@ -91,7 +91,8 @@ export function toPayslipPdfInput(row: PayslipApiRow): PayslipPdfInput {
     deductionsTotal: Number(row.payout.deductionsTotal),
     grossPay: Number(row.payout.grossPay),
     payeTax: Number(row.payout.payeTax),
-    netPay: Number(row.payout.netPay),
+    // Cash to bank (after clawbacks); falls back to netPay when totalPayout unset.
+    netPay: Number(row.payout.totalPayout ?? row.payout.netPay),
     bonusLines: parseBonusLines(row.payout.bonusBreakdown),
   };
 }

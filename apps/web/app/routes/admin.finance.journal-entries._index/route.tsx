@@ -49,8 +49,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canApprove =
     isAdminLevel(user) || user.role === 'FINANCE_OFFICER';
 
+  const perms = (user as { permissions?: string[] }).permissions ?? [];
+  const canWrite = isAdminLevel(user) || user.role === 'FINANCE_OFFICER' || perms.includes('finance.ledger.write');
+
   const shell = {
-    canWrite: true,
+    canWrite,
     canApprove,
     filters: { status: status ?? '', search: search ?? '', startDate: startDate ?? '', endDate: endDate ?? '' },
   };

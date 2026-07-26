@@ -348,7 +348,7 @@ export function FollowUpPage({
           : (order) => (
               <span className="text-sm font-medium text-app-fg" title={order.customerName}>
                 {clipName(order.customerName)}
-                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
                 {order.isFollowUp && (
@@ -1006,7 +1006,7 @@ export function FollowUpPage({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-app-fg truncate" title={order.customerName}>
                   {clipName(order.customerName)}
-                  {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                  {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                     <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                   )}
                   {order.isFollowUp && (

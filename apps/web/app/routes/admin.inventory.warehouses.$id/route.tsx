@@ -218,6 +218,8 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
             sheetTitle="Warehouse shipment tools"
             sheetSubtitle={<span>Refresh and navigation</span>}
             triggerAriaLabel="Warehouse shipment toolbar"
+            filtersBadgeCount={data.status !== 'ALL' ? 1 : 0}
+            onClearFilters={data.status !== 'ALL' ? () => onStatusChange('ALL') : undefined}
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
@@ -227,6 +229,14 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
                   </Button>
                 </Link>
               </div>
+            }
+            filters={
+              <FormSelect
+                label="Status"
+                value={data.status}
+                onChange={(e) => onStatusChange(e.target.value)}
+                options={statusOptions}
+              />
             }
             sheet={
               <Link to="/admin/inventory/warehouses" className="btn-secondary btn-sm w-full justify-center">
@@ -239,6 +249,7 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
 
       <Card variant="default" padding="md">
         <ToolbarFiltersCollapsible
+          hideMobileSheet
           searchRow={
             <PageSearchControl
               value={data.search}
@@ -255,14 +266,6 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
             />
           }
           desktopInlineFilters={
-            <FormSelect
-              label="Status"
-              value={data.status}
-              onChange={(e) => onStatusChange(e.target.value)}
-              options={statusOptions}
-            />
-          }
-          sheetFilterBody={
             <FormSelect
               label="Status"
               value={data.status}

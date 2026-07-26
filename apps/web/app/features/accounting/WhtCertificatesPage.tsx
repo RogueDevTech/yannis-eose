@@ -1,13 +1,25 @@
 import { useState } from 'react';
 import { useSearchParams, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { Button } from '~/components/ui/button';
+import { TextInput } from '~/components/ui/text-input';
+import { AmountInput } from '~/components/ui/amount-input';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Modal } from '~/components/ui/modal';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
 
 export interface WhtDeductionRow {
@@ -31,16 +43,11 @@ export interface WhtCertificatesPageProps {
 export function WhtCertificatesPage({ records, pagination, filters }: WhtCertificatesPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showModal, setShowModal] = useState(false);
+  const [generateTarget, setGenerateTarget] = useState<WhtDeductionRow | null>(null);
   const recordFetcher = useFetcher();
   const certFetcher = useFetcher();
 
-  const onDateChange = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    next.set('page', '1');
-    setSearchParams(next);
-  };
+  useCloseOnFetcherSuccess(recordFetcher, () => setShowModal(false));
 
   const onPageChange = (page: number) => {
     const next = new URLSearchParams(searchParams);
@@ -51,6 +58,12 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
   const totalGross = records.reduce((s, r) => s + Number(r.grossAmount), 0);
   const totalWht = records.reduce((s, r) => s + Number(r.whtAmount), 0);
   const totalNet = records.reduce((s, r) => s + Number(r.netAmount), 0);
+
+  const recordWhtButton = (
+    <Button variant="primary" size="sm" onClick={() => setShowModal(true)}>
+      Record WHT
+    </Button>
+  );
 
   const columns: CompactTableColumn<WhtDeductionRow>[] = [
     {
@@ -94,55 +107,52 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
         r.certificateGenerated ? (
           <StatusBadge status="Generated" variant="success" />
         ) : (
-          <certFetcher.Form method="post">
-            <input type="hidden" name="intent" value="generateCertificate" />
-            <input type="hidden" name="deductionId" value={r.id} />
-            <button
-              type="submit"
-              className="rounded bg-app-primary px-2 py-1 text-xs font-medium text-white hover:bg-app-primary/90"
-            >
-              Generate
-            </button>
-          </certFetcher.Form>
+          <CompactTableActionButton tone="brand" onClick={() => setGenerateTarget(r)}>
+            Generate
+          </CompactTableActionButton>
         ),
     },
   ];
 
   return (
-    <>
+    <div className="space-y-4">
       <PageHeader
         title="WHT Certificates"
         description="Record withholding tax deductions and generate FIRS certificates."
+        mobileInlineActions
         actions={
-          <button
-            onClick={() => setShowModal(true)}
-            className="rounded-lg bg-app-primary px-3 py-2 text-sm font-medium text-white hover:bg-app-primary/90"
-          >
-            Record WHT
-          </button>
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="WHT certificates toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  chrome="pill"
+                />
+                {recordWhtButton}
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                variant="primary"
+                size="sm"
+                className="h-12 w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  setShowModal(true);
+                }}
+              >
+                Record WHT
+              </Button>
+            )}
+          />
         }
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <label htmlFor="wht-start" className="text-sm text-app-fg-muted">From</label>
-          <DateInput
-            id="wht-start"
-            value={filters.startDate}
-            onChange={(e) => onDateChange('startDate', e.target.value)}
-            wrapperClassName="w-44"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label htmlFor="wht-end" className="text-sm text-app-fg-muted">To</label>
-          <DateInput
-            id="wht-end"
-            value={filters.endDate}
-            onChange={(e) => onDateChange('endDate', e.target.value)}
-            wrapperClassName="w-44"
-          />
-        </div>
-      </div>
+      <MobileDateFilterRow startDate={filters.startDate} endDate={filters.endDate} />
 
       <OverviewStatStrip
         items={[
@@ -169,82 +179,110 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
         </>
       )}
 
+      <ConfirmActionModal
+        open={!!generateTarget}
+        onClose={() => setGenerateTarget(null)}
+        title="Generate WHT certificate"
+        description={
+          generateTarget
+            ? `Generate a FIRS withholding tax certificate for ${generateTarget.vendorName}?`
+            : ''
+        }
+        details={
+          generateTarget ? (
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>
+                WHT <NairaPrice amount={Number(generateTarget.whtAmount)} /> of{' '}
+                <NairaPrice amount={Number(generateTarget.grossAmount)} /> gross
+              </li>
+              <li>Payment date {generateTarget.paymentDate}</li>
+            </ul>
+          ) : null
+        }
+        confirmLabel="Generate"
+        variant="warning"
+        loading={certFetcher.state !== 'idle'}
+        onConfirm={() => {
+          if (!generateTarget) return;
+          certFetcher.submit(
+            { intent: 'generateCertificate', deductionId: generateTarget.id },
+            { method: 'post' },
+          );
+          setGenerateTarget(null);
+        }}
+      />
+
       <Modal open={showModal} onClose={() => setShowModal(false)}>
         <div className="p-4 md:p-6">
           <h2 className="mb-4 text-lg font-semibold text-app-fg">Record WHT Deduction</h2>
           <recordFetcher.Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="recordWht" />
+            <TextInput
+              id="vendorName"
+              name="vendorName"
+              label="Vendor Name"
+              required
+            />
             <div>
-              <label htmlFor="vendorName" className="block text-sm font-medium text-app-fg">Vendor Name</label>
-              <input
-                id="vendorName"
-                name="vendorName"
-                type="text"
-                required
-                className="mt-1 block w-full rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg"
-              />
-            </div>
-            <div>
-              <label htmlFor="grossAmount" className="block text-sm font-medium text-app-fg">Gross Amount</label>
-              <input
+              <label htmlFor="grossAmount" className="block text-sm font-medium text-app-fg mb-1">
+                Gross Amount
+              </label>
+              <AmountInput
                 id="grossAmount"
                 name="grossAmount"
-                type="number"
-                step="0.01"
-                min="0.01"
                 required
-                className="mt-1 block w-full rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg"
+                prefix="₦"
               />
             </div>
+            <TextInput
+              id="whtRate"
+              name="whtRate"
+              label="WHT Rate (%)"
+              type="number"
+              step="0.01"
+              defaultValue="5"
+              required
+            />
+            <TextInput
+              id="paymentDate"
+              name="paymentDate"
+              label="Payment Date"
+              type="date"
+              required
+            />
             <div>
-              <label htmlFor="whtRate" className="block text-sm font-medium text-app-fg">WHT Rate (%)</label>
-              <input
-                id="whtRate"
-                name="whtRate"
-                type="number"
-                step="0.01"
-                defaultValue="5"
-                required
-                className="mt-1 block w-full rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg"
-              />
-            </div>
-            <div>
-              <label htmlFor="paymentDate" className="block text-sm font-medium text-app-fg">Payment Date</label>
-              <input
-                id="paymentDate"
-                name="paymentDate"
-                type="date"
-                required
-                className="mt-1 block w-full rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg"
-              />
-            </div>
-            <div>
-              <label htmlFor="description" className="block text-sm font-medium text-app-fg">Description</label>
+              <label htmlFor="description" className="block text-sm font-medium text-app-fg mb-1">
+                Description
+              </label>
               <textarea
                 id="description"
                 name="description"
                 rows={2}
-                className="mt-1 block w-full rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg"
+                className="block w-full rounded-lg border border-app-border bg-app-bg px-3 py-2 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500 dark:[color-scheme:dark]"
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => setShowModal(false)}
-                className="rounded-lg border border-app-border px-3 py-2 text-sm text-app-fg hover:bg-app-bg-hover"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                className="rounded-lg bg-app-primary px-4 py-2 text-sm font-medium text-white hover:bg-app-primary/90"
+                variant="primary"
+                size="sm"
+                loading={recordFetcher.state !== 'idle'}
+                loadingText="Saving..."
               >
                 Record
-              </button>
+              </Button>
             </div>
           </recordFetcher.Form>
         </div>
       </Modal>
-    </>
+    </div>
   );
 }
