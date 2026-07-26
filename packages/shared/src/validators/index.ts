@@ -409,6 +409,9 @@ export {
   repostPayrollBatchSchema,
   financialKPIsSchema,
   getAccountLedgerSchema,
+  listAccountMappingsSchema,
+  updateAccountMappingSchema,
+  resetAccountMappingSchema,
 } from './general-ledger';
 
 export type {
@@ -438,6 +441,9 @@ export type {
   FinancialKPIsInput,
   FinancialKPIs,
   GetAccountLedgerInput,
+  ListAccountMappingsInput,
+  UpdateAccountMappingInput,
+  ResetAccountMappingInput,
 } from './general-ledger';
 
 // Asset register validators (Phase 4A)

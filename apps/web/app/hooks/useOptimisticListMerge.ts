@@ -76,6 +76,17 @@ export function useOptimisticListMerge<T>(
   // refresh). Without this guard, any `revalidatorState !== 'idle'` keeps
   // phantom optimistic rows alive indefinitely.
   const didMutateRef = useRef(false);
+  /**
+   * `fetcher.formData` clears once the fetcher returns to `idle`, but the
+   * route revalidator often keeps running after that. Keep the last FormData
+   * so synthetic rows stay visible until fresh loader data lands.
+   */
+  const lastFormDataRef = useRef<FormData | null>(null);
+  useEffect(() => {
+    if (fetcher.formData) {
+      lastFormDataRef.current = fetcher.formData;
+    }
+  }, [fetcher.formData]);
   useEffect(() => {
     if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
       didMutateRef.current = true;
@@ -86,6 +97,7 @@ export function useOptimisticListMerge<T>(
       // the same tick) can use it.
       const id = setTimeout(() => {
         didMutateRef.current = false;
+        lastFormDataRef.current = null;
       }, 500);
       return () => clearTimeout(id);
     }
@@ -118,7 +130,7 @@ export function useOptimisticListMerge<T>(
       if (!succeeded) return [];
     }
 
-    const fd = fetcher.formData;
+    const fd = fetcher.formData ?? lastFormDataRef.current;
     if (!fd) return [];
     const intent = fd.get('intent')?.toString() ?? '';
     if (!intent) return [];

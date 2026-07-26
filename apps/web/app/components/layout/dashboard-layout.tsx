@@ -419,6 +419,12 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
+      {
+        label: 'Account Mappings',
+        href: '/admin/finance/account-mappings',
+        icon: SidebarIcons.settings,
+        permission: 'finance.ledger.write',
+      },
     ],
   },
   {

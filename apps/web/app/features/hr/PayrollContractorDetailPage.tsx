@@ -24,6 +24,8 @@ import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fe
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import type { HistoryEntry } from '~/features/orders/types';
 import type { BranchOption, ContractorPayoutRow, PayrollContractor } from './payroll-prd-types';
+import { DateTimeText } from '~/components/ui/date-time-text';
+import { formatDateOnly, formatOrderTimestamp } from '~/lib/format-date';
 import { DEPT_LABEL } from './payroll-constants';
 import type { PayrollDepartment } from './types';
 
@@ -44,15 +46,8 @@ function formatPeriod(month: string): string {
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return 'Not set';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString('en-NG', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  // Prefer timestamp helper: toLocaleDateString silently drops hour/minute options.
+  return formatOrderTimestamp(iso);
 }
 
 function timeAgo(iso: string): string {
@@ -256,13 +251,14 @@ export function PayrollContractorDetailPage({
       {
         key: 'paid',
         header: 'Paid',
-        render: (row) => (
-          <span className="text-app-fg-muted tabular-nums">
-            {row.disbursementDate || row.financeProcessedAt
-              ? formatDate(row.disbursementDate ?? row.financeProcessedAt)
-              : 'Not paid'}
-          </span>
-        ),
+        render: (row) =>
+          row.financeProcessedAt ? (
+            <DateTimeText at={row.financeProcessedAt} className="text-sm" />
+          ) : row.disbursementDate ? (
+            <span className="text-sm text-app-fg tabular-nums">{formatDateOnly(row.disbursementDate)}</span>
+          ) : (
+            <span className="text-app-fg-muted">Not paid</span>
+          ),
       },
       {
         key: 'actions',
@@ -398,10 +394,14 @@ export function PayrollContractorDetailPage({
                     <StatusBadge status={row.payoutStatus || row.batchStatus} />
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-app-fg-muted">
-                      {row.disbursementDate || row.financeProcessedAt
-                        ? formatDate(row.disbursementDate ?? row.financeProcessedAt)
-                        : 'Not paid'}
+                    <span>
+                      {row.financeProcessedAt ? (
+                        <DateTimeText at={row.financeProcessedAt} className="text-sm" />
+                      ) : row.disbursementDate ? (
+                        formatDateOnly(row.disbursementDate)
+                      ) : (
+                        <span className="text-app-fg-muted">Not paid</span>
+                      )}
                     </span>
                     <span className="font-semibold text-app-fg">
                       <NairaPrice amount={Number(row.monthlyFee || row.totalPayout)} />

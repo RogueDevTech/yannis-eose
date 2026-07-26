@@ -75,6 +75,7 @@ export interface VatReturnSummary {
 export interface VatTransaction {
   id: string;
   postingDate: string;
+  createdAt?: string | Date | null;
   voucherType: string;
   voucherId: string;
   debit: number;

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { defer, json, redirect } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>(
-        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)' }))}`,
+        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)', status: 'POSTED' }))}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -95,7 +95,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to post opening balances') }, { status: 400 });
     }
-    return redirect('/admin/finance/accounts');
+    return json({ success: true });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });

@@ -65,6 +65,17 @@ export function useOptimisticListPatches<T extends { id: string }>(
   // useOptimisticListMerge to prevent unrelated background revalidations
   // (e.g. CachedAwait on-mount refresh) from keeping phantom patches alive.
   const didMutateRef = useRef(false);
+  /**
+   * `fetcher.formData` is cleared once the fetcher returns to `idle`, but the
+   * route revalidator often keeps running after that. Keep the last FormData
+   * so patches stay overlaid until the fresh loader data lands.
+   */
+  const lastFormDataRef = useRef<FormData | null>(null);
+  useEffect(() => {
+    if (fetcher.formData) {
+      lastFormDataRef.current = fetcher.formData;
+    }
+  }, [fetcher.formData]);
   useEffect(() => {
     if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
       didMutateRef.current = true;
@@ -72,6 +83,7 @@ export function useOptimisticListPatches<T extends { id: string }>(
     if (fetcher.state === 'idle') {
       const id = setTimeout(() => {
         didMutateRef.current = false;
+        lastFormDataRef.current = null;
       }, 500);
       return () => clearTimeout(id);
     }
@@ -91,7 +103,7 @@ export function useOptimisticListPatches<T extends { id: string }>(
       if (!succeeded) return [];
     }
 
-    const fd = fetcher.formData;
+    const fd = fetcher.formData ?? lastFormDataRef.current;
     if (!fd) return [];
     const intent = fd.get('intent')?.toString() ?? '';
     if (!intent) return [];

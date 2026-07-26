@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -12,12 +13,16 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { Tabs } from '~/components/ui/tabs';
 import { SearchableSelect, type SearchableSelectOption } from '~/components/ui/searchable-select';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import {
+  applyOptimisticPatches,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { DateTimeText } from '~/components/ui/date-time-text';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -54,10 +59,10 @@ export interface ExpenseSubmissionsPageProps {
 // ── Constants ────────────────────────────────────────────────────────
 
 const STATUS_TABS = [
+  { value: 'all', label: 'All' },
   { value: 'PENDING', label: 'Pending' },
   { value: 'APPROVED', label: 'Approved' },
   { value: 'REJECTED', label: 'Rejected' },
-  { value: 'all', label: 'All' },
 ];
 
 // ── Component ────────────────────────────────────────────────────────
@@ -69,7 +74,7 @@ export function ExpenseSubmissionsPage({
   canWrite,
 }: ExpenseSubmissionsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('status') || 'PENDING';
+  const activeTab = searchParams.get('status') || 'all';
   const searchQuery = searchParams.get('q') ?? '';
 
   // Modal state
@@ -96,6 +101,29 @@ export function ExpenseSubmissionsPage({
     setSelectedGlAccountId('');
   });
   useCloseOnFetcherSuccess(rejectFetcher, () => setRejectTarget(null));
+
+  const buildApprovePatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'approveExpense') return null;
+    const id = fd.get('expenseId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { status: 'APPROVED' as const } }];
+  }, []);
+  const buildRejectPatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'rejectExpense') return null;
+    const id = fd.get('expenseId')?.toString();
+    if (!id) return null;
+    const rejectionReason = fd.get('reason')?.toString() ?? null;
+    return [{ id, patch: { status: 'REJECTED' as const, rejectionReason } }];
+  }, []);
+
+  const approvePatches = useOptimisticListPatches<ExpenseRow>(approveFetcher, buildApprovePatches);
+  const rejectPatches = useOptimisticListPatches<ExpenseRow>(rejectFetcher, buildRejectPatches);
+  const displayExpenses = useMemo(() => {
+    const afterApprove = applyOptimisticPatches(expenses, approvePatches);
+    const patched = applyOptimisticPatches(afterApprove, rejectPatches);
+    if (activeTab === 'all') return patched;
+    return patched.filter((e) => e.status === activeTab);
+  }, [expenses, approvePatches, rejectPatches, activeTab]);
 
   // ── Tab handler ──────────────────────────────────────────────────
 
@@ -139,23 +167,23 @@ export function ExpenseSubmissionsPage({
   }
 
   const filteredExpenses = useMemo(() => {
-    if (!searchQuery.trim()) return expenses;
+    if (!searchQuery.trim()) return displayExpenses;
     const lower = searchQuery.toLowerCase();
-    return expenses.filter(
+    return displayExpenses.filter(
       (e) =>
         e.vendorName.toLowerCase().includes(lower) ||
         e.description.toLowerCase().includes(lower),
     );
-  }, [expenses, searchQuery]);
+  }, [displayExpenses, searchQuery]);
 
   // ── Stat strip ────────────────────────────────────────────────────
 
   const statItems = useMemo((): OverviewStatStripItem[] => {
-    const total = expenses.length;
-    const pendingAmount = expenses
+    const total = displayExpenses.length;
+    const pendingAmount = displayExpenses
       .filter((e) => e.status === 'PENDING')
       .reduce((sum, e) => sum + parseFloat(e.amount || '0'), 0);
-    const approvedAmount = expenses
+    const approvedAmount = displayExpenses
       .filter((e) => e.status === 'APPROVED')
       .reduce((sum, e) => sum + parseFloat(e.amount || '0'), 0);
     return [
@@ -171,7 +199,7 @@ export function ExpenseSubmissionsPage({
         plainValue: true,
       },
     ];
-  }, [expenses]);
+  }, [displayExpenses]);
 
   // ── Columns ────────────────────────────────────────────────────────
 
@@ -215,15 +243,7 @@ export function ExpenseSubmissionsPage({
       {
         key: 'createdAt',
         header: 'Submitted',
-        render: (r) => (
-          <span className="text-app-fg text-xs">
-            {new Date(r.createdAt).toLocaleDateString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              year: 'numeric',
-            })}
-          </span>
-        ),
+        render: (r) => <DateTimeText at={r.createdAt} className="text-xs" />,
       },
       {
         key: 'status',
@@ -272,14 +292,8 @@ export function ExpenseSubmissionsPage({
           <StatusBadge status={r.status} />
         </div>
         <div className="text-xs text-app-fg-muted truncate">{r.description}</div>
-        <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-          <span>
-            {new Date(r.createdAt).toLocaleDateString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              year: 'numeric',
-            })}
-          </span>
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <DateTimeText at={r.createdAt} className="text-xs" />
           <NairaPrice amount={r.amount} className="font-medium" />
         </div>
       </button>
@@ -316,9 +330,9 @@ export function ExpenseSubmissionsPage({
             triggerAriaLabel="Expense actions"
           />
         }
-      >
-        <Tabs value={activeTab} onChange={handleTabChange} tabs={STATUS_TABS} variant="pill" />
-      </PageHeader>
+      />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip items={statItems} />
 
@@ -328,6 +342,12 @@ export function ExpenseSubmissionsPage({
           onApply={handleSearchApply}
           placeholder="Search by vendor or description..."
           title="Search Expenses"
+        />
+        <FormSelect
+          value={activeTab}
+          onChange={(e) => handleTabChange(e.target.value)}
+          options={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
+          wrapperClassName="w-36"
         />
       </div>
 
@@ -372,13 +392,7 @@ export function ExpenseSubmissionsPage({
               </div>
               <div className="flex justify-between gap-2">
                 <dt className="text-app-fg-muted">Submitted</dt>
-                <dd className="text-app-fg">
-                  {new Date(viewTarget.createdAt).toLocaleDateString('en-GB', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
-                </dd>
+                <dd><DateTimeText at={viewTarget.createdAt} /></dd>
               </div>
               <div>
                 <dt className="text-app-fg-muted mb-0.5">Description</dt>
@@ -402,13 +416,7 @@ export function ExpenseSubmissionsPage({
               {viewTarget.approvedAt && (
                 <div className="flex justify-between gap-2">
                   <dt className="text-app-fg-muted">Approved</dt>
-                  <dd className="text-app-fg">
-                    {new Date(viewTarget.approvedAt).toLocaleDateString('en-GB', {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                  </dd>
+                  <dd><DateTimeText at={viewTarget.approvedAt} /></dd>
                 </div>
               )}
               {viewTarget.rejectionReason && (

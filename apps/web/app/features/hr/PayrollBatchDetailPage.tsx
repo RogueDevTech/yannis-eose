@@ -28,6 +28,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { formatRole } from '~/features/users/types';
 import type { PayrollBatch, ViewerInfo } from './types';
+import { formatOrderTimestampShort } from '~/lib/format-date';
 import { ADMIN_ROLES, DEPT_LABEL } from './payroll-constants';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -84,9 +85,8 @@ function formatMonth(periodMonth: string): string {
 }
 
 function formatTimelineDate(at: string): string | null {
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' });
+  const label = formatOrderTimestampShort(at);
+  return label === '—' ? null : label;
 }
 
 function canReview(viewer: ViewerInfo): boolean {

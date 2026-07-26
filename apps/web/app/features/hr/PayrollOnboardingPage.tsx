@@ -22,6 +22,7 @@ import {
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
+import { DateTimeText } from '~/components/ui/date-time-text';
 import type { PayrollOnboardingQueueItem } from './payroll-prd-types';
 
 interface PayrollOnboardingPageProps {
@@ -119,15 +120,7 @@ export function PayrollOnboardingPage({ queue, canWrite }: PayrollOnboardingPage
         key: 'created',
         header: 'Joined',
         nowrap: true,
-        render: (row) => (
-          <span className="text-sm text-app-fg-muted">
-            {new Date(row.createdAt).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </span>
-        ),
+        render: (row) => <DateTimeText at={row.createdAt} className="text-sm" />,
       },
       {
         key: 'actions',

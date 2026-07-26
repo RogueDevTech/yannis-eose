@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -23,12 +23,19 @@ import { FormSelect } from '~/components/ui/form-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import {
+  applyOptimisticPatches,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+import { DateTimeText } from '~/components/ui/date-time-text';
 import { JournalEntryViewModal } from './JournalEntryViewModal';
 
 export interface JournalEntryRow {
   id: string;
   entryNumber: number;
   postingDate: string;
+  /** Wall-clock when the JE was recorded (has time). Posting date is date-only. */
+  createdAt?: string | null;
   description: string;
   totalDebit: string;
   status: 'POSTED' | 'CANCELLED' | 'DRAFT';
@@ -74,10 +81,30 @@ export function JournalEntriesPage({
     setRejectTarget(null);
   });
 
-  const postedTotal = records
+  const buildStatusPatches = useCallback((fd: FormData, intent: string) => {
+    const id = fd.get('journalEntryId')?.toString();
+    if (!id) return null;
+    if (intent === 'approveEntry') {
+      return [{ id, patch: { status: 'POSTED' as const } }];
+    }
+    if (intent === 'rejectEntry' || intent === 'reverseEntry') {
+      return [{ id, patch: { status: 'CANCELLED' as const } }];
+    }
+    return null;
+  }, []);
+
+  const statusPatches = useOptimisticListPatches<JournalEntryRow>(fetcher, buildStatusPatches);
+  const displayRecords = useMemo(() => {
+    const patched = applyOptimisticPatches(records, statusPatches);
+    const statusFilter = filters?.status;
+    if (!statusFilter) return patched;
+    return patched.filter((r) => r.status === statusFilter);
+  }, [records, statusPatches, filters?.status]);
+
+  const postedTotal = displayRecords
     .filter((r) => r.status === 'POSTED')
     .reduce((s, r) => s + Number(r.totalDebit), 0);
-  const draftCount = records.filter((r) => r.status === 'DRAFT').length;
+  const draftCount = displayRecords.filter((r) => r.status === 'DRAFT').length;
 
   const columns: CompactTableColumn<JournalEntryRow>[] = [
     {
@@ -85,7 +112,11 @@ export function JournalEntriesPage({
       header: 'JE #',
       render: (r) => <span className="font-mono text-xs text-app-fg-muted">#{r.entryNumber}</span>,
     },
-    { key: 'postingDate', header: 'Date', render: (r) => <span className="text-app-fg">{r.postingDate}</span> },
+    {
+      key: 'postingDate',
+      header: 'Date',
+      render: (r) => <DateTimeText at={r.createdAt} dateOnly={r.postingDate} />,
+    },
     {
       key: 'description',
       header: 'Description',
@@ -221,7 +252,7 @@ export function JournalEntriesPage({
         />
       )}
 
-      {records.length === 0 ? (
+      {displayRecords.length === 0 ? (
         <EmptyState
           title="No journal entries yet"
           description="Create a balanced entry to post to the ledger."
@@ -237,7 +268,7 @@ export function JournalEntriesPage({
         <>
           <CompactTable
             columns={columns}
-            rows={records}
+            rows={displayRecords}
             rowKey={(r) => r.id}
             renderMobileCard={(r) => (
               <button
@@ -250,8 +281,8 @@ export function JournalEntriesPage({
                   <StatusBadge status={r.status} />
                 </div>
                 <p className="text-sm font-medium text-app-fg truncate">{r.description}</p>
-                <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                  <span>{r.postingDate}</span>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <DateTimeText at={r.createdAt} dateOnly={r.postingDate} />
                   <NairaPrice amount={r.totalDebit} className="font-medium text-app-fg" />
                 </div>
               </button>
