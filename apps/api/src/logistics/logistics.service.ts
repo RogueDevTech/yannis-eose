@@ -43,6 +43,7 @@ import type {
   ApproveDeliveryConfirmationInput,
   RejectDeliveryConfirmationInput,
   DisputeDeliveryRemittanceInput,
+  GetCashLedgerStatementInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -3613,6 +3614,449 @@ export class LogisticsService {
       });
     }
     return out;
+  }
+
+  /**
+   * Period-scoped cash statement for one logistics location, or all locations
+   * under a partner. No rider aggregation — location / partner only.
+   */
+  async getCashLedgerStatement(
+    input: GetCashLedgerStatementInput,
+    actor: SessionUser,
+    groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') &&
+      !!actor.logisticsLocationId &&
+      (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+    const canListGlobal =
+      isAdminLevel(actor) ||
+      hasFinanceAccess(actor) ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create') ||
+      this.actorHasAnyPermission(actor, 'finance.read');
+    if (!isTplCaller && !canListGlobal) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot generate a cash statement' });
+    }
+
+    const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
+    const num = (v: unknown) => {
+      const n = Number(v ?? 0);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const orderRef = (orderNumber: number | null) =>
+      orderNumber != null ? `YNS-${String(orderNumber).padStart(5, '0')}` : '';
+
+    type LocRow = {
+      id: string;
+      name: string;
+      providerId: string;
+      providerName: string | null;
+    };
+
+    let locations: LocRow[] = [];
+    let resolvedProviderId: string | null = null;
+    let resolvedProviderName = 'Unknown partner';
+    if (input.logisticsLocationId) {
+      if (isTplCaller && !canListGlobal && actor.logisticsLocationId !== input.logisticsLocationId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own location statement' });
+      }
+      const rows = await this.db
+        .select({
+          id: schema.logisticsLocations.id,
+          name: schema.logisticsLocations.name,
+          providerId: schema.logisticsLocations.providerId,
+          providerName: schema.logisticsProviders.name,
+        })
+        .from(schema.logisticsLocations)
+        .leftJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(eq(schema.logisticsLocations.id, input.logisticsLocationId))
+        .limit(1);
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics location not found' });
+      }
+      if (groupId) {
+        const providerGroup = await this.db
+          .select({ groupId: schema.logisticsProviders.groupId })
+          .from(schema.logisticsProviders)
+          .where(eq(schema.logisticsProviders.id, rows[0].providerId))
+          .limit(1);
+        const g = providerGroup[0]?.groupId;
+        if (g != null && g !== groupId) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics location not found' });
+        }
+      }
+      locations = [{ ...rows[0], providerName: rows[0].providerName ?? null }];
+      resolvedProviderId = rows[0].providerId;
+      resolvedProviderName = rows[0].providerName ?? 'Unknown partner';
+    } else {
+      const providerId = input.providerId!;
+      const providerRows = await this.db
+        .select({
+          id: schema.logisticsProviders.id,
+          name: schema.logisticsProviders.name,
+          groupId: schema.logisticsProviders.groupId,
+        })
+        .from(schema.logisticsProviders)
+        .where(eq(schema.logisticsProviders.id, providerId))
+        .limit(1);
+      if (!providerRows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics partner not found' });
+      }
+      if (groupId && providerRows[0].groupId != null && providerRows[0].groupId !== groupId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics partner not found' });
+      }
+      if (isTplCaller && !canListGlobal) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Partner rollup statements require finance access',
+        });
+      }
+      resolvedProviderId = providerRows[0].id;
+      resolvedProviderName = providerRows[0].name;
+      const locRows = await this.db
+        .select({
+          id: schema.logisticsLocations.id,
+          name: schema.logisticsLocations.name,
+          providerId: schema.logisticsLocations.providerId,
+          providerName: schema.logisticsProviders.name,
+        })
+        .from(schema.logisticsLocations)
+        .leftJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(eq(schema.logisticsLocations.providerId, providerId))
+        .orderBy(asc(schema.logisticsLocations.name));
+      locations = locRows.map((r) => ({ ...r, providerName: r.providerName ?? null }));
+    }
+
+    const dateScope = input.dateScope ?? 'createdAt';
+    const dateScopeCol = dateScope === 'deliveredAt' ? schema.orders.deliveredAt : schema.orders.createdAt;
+    const providerName = resolvedProviderName;
+    const providerId = resolvedProviderId;
+
+    type EmptySummary = {
+      awaitingCash: string;
+      awaitingCount: number;
+      pendingCash: string;
+      pendingCount: number;
+      remittedCash: string;
+      remittedCount: number;
+      disputedCash: string;
+      disputedCount: number;
+      deliveryFees: string;
+      commitmentFees: string;
+      posFees: string;
+      failedDeliveryCosts: string;
+      discounts: string;
+      waybillCosts: string;
+      batchFeesTotal: string;
+      netOwedToFinance: string;
+    };
+    const emptySummary = (): EmptySummary => ({
+      awaitingCash: '0.00',
+      awaitingCount: 0,
+      pendingCash: '0.00',
+      pendingCount: 0,
+      remittedCash: '0.00',
+      remittedCount: 0,
+      disputedCash: '0.00',
+      disputedCount: 0,
+      deliveryFees: '0.00',
+      commitmentFees: '0.00',
+      posFees: '0.00',
+      failedDeliveryCosts: '0.00',
+      discounts: '0.00',
+      waybillCosts: '0.00',
+      batchFeesTotal: '0.00',
+      netOwedToFinance: '0.00',
+    });
+
+    const locationSections = await Promise.all(
+      locations.map(async (loc) => {
+        const awaitingConditions: SQL[] = [
+          eq(schema.orders.status, 'DELIVERED'),
+          isNull(schema.orders.deletedAt),
+          eq(schema.orders.logisticsLocationId, loc.id),
+          sql`NOT EXISTS (SELECT 1 FROM ${schema.deliveryRemittanceOrders} WHERE ${schema.deliveryRemittanceOrders.orderId} = ${schema.orders.id})`,
+        ];
+        if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+          awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
+        } else if (effectiveBranchIds && effectiveBranchIds.length === 0) {
+          awaitingConditions.push(sql`false`);
+        }
+        if (input.startDate) awaitingConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
+        if (input.endDate) awaitingConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
+
+        const batchConditions: SQL[] = [eq(schema.deliveryRemittances.logisticsLocationId, loc.id)];
+        if (input.startDate) {
+          batchConditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
+        }
+        if (input.endDate) {
+          batchConditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
+        }
+
+        const [awaitingRows, batchRows] = await Promise.all([
+          this.db
+            .select({
+              id: schema.orders.id,
+              orderNumber: schema.orders.orderNumber,
+              deliveredAt: schema.orders.deliveredAt,
+              totalAmount: schema.orders.totalAmount,
+              deliveryFee: schema.orders.deliveryFee,
+            })
+            .from(schema.orders)
+            .where(and(...awaitingConditions))
+            .orderBy(desc(schema.orders.deliveredAt)),
+          this.db
+            .select()
+            .from(schema.deliveryRemittances)
+            .where(and(...batchConditions))
+            .orderBy(desc(schema.deliveryRemittances.sentAt)),
+        ]);
+
+        const remittanceIds = batchRows.map((b) => b.id);
+        const orderLineRows =
+          remittanceIds.length > 0
+            ? await this.db
+                .select({
+                  orderId: schema.orders.id,
+                  orderNumber: schema.orders.orderNumber,
+                  deliveredAt: schema.orders.deliveredAt,
+                  totalAmount: schema.orders.totalAmount,
+                  deliveryFee: schema.orders.deliveryFee,
+                  remittanceId: schema.deliveryRemittances.id,
+                  remittanceStatus: schema.deliveryRemittances.status,
+                  sentAt: schema.deliveryRemittances.sentAt,
+                })
+                .from(schema.deliveryRemittanceOrders)
+                .innerJoin(
+                  schema.deliveryRemittances,
+                  eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
+                )
+                .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+                .where(inArray(schema.deliveryRemittanceOrders.deliveryRemittanceId, remittanceIds))
+                .orderBy(desc(schema.deliveryRemittances.sentAt), desc(schema.orders.deliveredAt))
+            : [];
+
+        const orderAggByRemittance = new Map<
+          string,
+          { count: number; net: number; deliveryFees: number; gross: number }
+        >();
+        for (const line of orderLineRows) {
+          const net = num(line.totalAmount) - num(line.deliveryFee);
+          const prev = orderAggByRemittance.get(line.remittanceId) ?? {
+            count: 0,
+            net: 0,
+            deliveryFees: 0,
+            gross: 0,
+          };
+          prev.count += 1;
+          prev.net += net;
+          prev.deliveryFees += num(line.deliveryFee);
+          prev.gross += num(line.totalAmount);
+          orderAggByRemittance.set(line.remittanceId, prev);
+        }
+
+        const awaitingOrders = awaitingRows.map((o) => {
+          const gross = num(o.totalAmount);
+          const deliveryFee = num(o.deliveryFee);
+          return {
+            orderId: o.id,
+            orderNumber: o.orderNumber,
+            orderRef: orderRef(o.orderNumber),
+            deliveredAt: o.deliveredAt?.toISOString() ?? null,
+            gross: money(gross),
+            deliveryFee: money(deliveryFee),
+            net: money(gross - deliveryFee),
+          };
+        });
+
+        const batches = batchRows.map((b) => {
+          const agg = orderAggByRemittance.get(b.id) ?? {
+            count: 0,
+            net: 0,
+            deliveryFees: 0,
+            gross: 0,
+          };
+          const commitmentFee = num(b.commitmentFee);
+          const posFee = num(b.posFee);
+          const failedDeliveryCost = num(b.failedDeliveryCost);
+          const discount = num(b.discount);
+          const waybillCost = num(b.waybillCost);
+          const batchFeesTotal =
+            commitmentFee + posFee + failedDeliveryCost + discount + waybillCost;
+          return {
+            id: b.id,
+            sentAt: b.sentAt.toISOString(),
+            status: b.status,
+            orderCount: agg.count,
+            grossNets: money(agg.net),
+            deliveryFeeTotal: money(agg.deliveryFees),
+            commitmentFee: money(commitmentFee),
+            posFee: money(posFee),
+            failedDeliveryCost: money(failedDeliveryCost),
+            discount: money(discount),
+            waybillCost: money(waybillCost),
+            batchFeesTotal: money(batchFeesTotal),
+          };
+        });
+
+        const orderLines = orderLineRows.map((line) => {
+          const gross = num(line.totalAmount);
+          const deliveryFee = num(line.deliveryFee);
+          return {
+            orderId: line.orderId,
+            orderNumber: line.orderNumber,
+            orderRef: orderRef(line.orderNumber),
+            remittanceId: line.remittanceId,
+            remittanceStatus: line.remittanceStatus,
+            sentAt: line.sentAt.toISOString(),
+            deliveredAt: line.deliveredAt?.toISOString() ?? null,
+            gross: money(gross),
+            deliveryFee: money(deliveryFee),
+            net: money(gross - deliveryFee),
+          };
+        });
+
+        let awaitingCash = 0;
+        let awaitingDeliveryFees = 0;
+        for (const o of awaitingOrders) {
+          awaitingCash += num(o.net);
+          awaitingDeliveryFees += num(o.deliveryFee);
+        }
+
+        let pendingCash = 0;
+        let pendingCount = 0;
+        let remittedCash = 0;
+        let remittedCount = 0;
+        let disputedCash = 0;
+        let disputedCount = 0;
+        let batchDeliveryFees = 0;
+        let commitmentFees = 0;
+        let posFees = 0;
+        let failedDeliveryCosts = 0;
+        let discounts = 0;
+        let waybillCosts = 0;
+
+        for (const b of batches) {
+          const net = num(b.grossNets);
+          batchDeliveryFees += num(b.deliveryFeeTotal);
+          commitmentFees += num(b.commitmentFee);
+          posFees += num(b.posFee);
+          failedDeliveryCosts += num(b.failedDeliveryCost);
+          discounts += num(b.discount);
+          waybillCosts += num(b.waybillCost);
+          if (b.status === 'SENT') {
+            pendingCash += net;
+            pendingCount += b.orderCount;
+          } else if (b.status === 'RECEIVED') {
+            remittedCash += net;
+            remittedCount += b.orderCount;
+          } else if (b.status === 'DISPUTED') {
+            disputedCash += net;
+            disputedCount += b.orderCount;
+          }
+        }
+
+        const batchFeesTotal =
+          commitmentFees + posFees + failedDeliveryCosts + discounts + waybillCosts;
+        const deliveryFees = awaitingDeliveryFees + batchDeliveryFees;
+        const summary: EmptySummary = {
+          awaitingCash: money(awaitingCash),
+          awaitingCount: awaitingOrders.length,
+          pendingCash: money(pendingCash),
+          pendingCount,
+          remittedCash: money(remittedCash),
+          remittedCount,
+          disputedCash: money(disputedCash),
+          disputedCount,
+          deliveryFees: money(deliveryFees),
+          commitmentFees: money(commitmentFees),
+          posFees: money(posFees),
+          failedDeliveryCosts: money(failedDeliveryCosts),
+          discounts: money(discounts),
+          waybillCosts: money(waybillCosts),
+          batchFeesTotal: money(batchFeesTotal),
+          netOwedToFinance: money(awaitingCash + pendingCash),
+        };
+
+        return {
+          logisticsLocationId: loc.id,
+          locationName: loc.name,
+          providerName: loc.providerName,
+          summary,
+          awaitingOrders,
+          batches,
+          orderLines,
+        };
+      }),
+    );
+
+    const rollup = emptySummary();
+    let awaitingCash = 0;
+    let pendingCash = 0;
+    let remittedCash = 0;
+    let disputedCash = 0;
+    let deliveryFees = 0;
+    let commitmentFees = 0;
+    let posFees = 0;
+    let failedDeliveryCosts = 0;
+    let discounts = 0;
+    let waybillCosts = 0;
+    for (const section of locationSections) {
+      const s = section.summary;
+      rollup.awaitingCount += s.awaitingCount;
+      rollup.pendingCount += s.pendingCount;
+      rollup.remittedCount += s.remittedCount;
+      rollup.disputedCount += s.disputedCount;
+      awaitingCash += num(s.awaitingCash);
+      pendingCash += num(s.pendingCash);
+      remittedCash += num(s.remittedCash);
+      disputedCash += num(s.disputedCash);
+      deliveryFees += num(s.deliveryFees);
+      commitmentFees += num(s.commitmentFees);
+      posFees += num(s.posFees);
+      failedDeliveryCosts += num(s.failedDeliveryCosts);
+      discounts += num(s.discounts);
+      waybillCosts += num(s.waybillCosts);
+    }
+    const batchFeesTotal =
+      commitmentFees + posFees + failedDeliveryCosts + discounts + waybillCosts;
+    rollup.awaitingCash = money(awaitingCash);
+    rollup.pendingCash = money(pendingCash);
+    rollup.remittedCash = money(remittedCash);
+    rollup.disputedCash = money(disputedCash);
+    rollup.deliveryFees = money(deliveryFees);
+    rollup.commitmentFees = money(commitmentFees);
+    rollup.posFees = money(posFees);
+    rollup.failedDeliveryCosts = money(failedDeliveryCosts);
+    rollup.discounts = money(discounts);
+    rollup.waybillCosts = money(waybillCosts);
+    rollup.batchFeesTotal = money(batchFeesTotal);
+    rollup.netOwedToFinance = money(awaitingCash + pendingCash);
+
+    const scope = input.logisticsLocationId ? ('location' as const) : ('provider' as const);
+    return {
+      header: {
+        scope,
+        providerId,
+        providerName,
+        logisticsLocationId: input.logisticsLocationId ?? null,
+        locationName: scope === 'location' ? (locations[0]?.name ?? null) : null,
+        startDate: input.startDate ?? null,
+        endDate: input.endDate ?? null,
+        dateScope,
+        generatedAt: new Date().toISOString(),
+      },
+      summary: rollup,
+      locations: locationSections,
+    };
   }
 
   /**

@@ -199,7 +199,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   type BundleData = {
     remittances: { records: DeliveryRemittanceListItem[]; pagination: { total: number; totalPages?: number }; summary?: SummaryData };
-    locations: Array<{ id: string; name: string; providerName?: string | null }>;
+    locations: Array<{ id: string; name: string; providerId?: string | null; providerName?: string | null }>;
     users: Array<{ id: string; name: string; role: string }>;
   };
   const bundle = bundleRes.ok
@@ -221,6 +221,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locations = (bundle?.locations ?? []).map((l) => ({
     id: l.id,
     name: l.name,
+    providerId: l.providerId ?? null,
     providerName: l.providerName ?? null,
   }));
 

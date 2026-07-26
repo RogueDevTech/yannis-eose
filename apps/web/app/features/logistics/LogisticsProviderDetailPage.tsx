@@ -35,6 +35,7 @@ import {
 } from '~/features/inventory/types';
 import type { Location } from './types';
 import type { LogisticsProviderDetailRecord, LogisticsProviderRow } from './team-types';
+import { CashStatementExportModal } from '~/features/finance/CashStatementExportModal';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -411,6 +412,7 @@ export function LogisticsProviderDetailPage({
   const [detailTab, setDetailTab] = useState<'inventory' | 'movements'>('inventory');
   const [reportModal, setReportModal] = useState<{ name: string; row: StockBreakdownRow & { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string; qtyAwaitingRemittance: number; amountAwaitingRemittance: string } } | null>(null);
   const [reportView, setReportView] = useState<'summary' | 'breakdown'>('summary');
+  const [showCashStatementModal, setShowCashStatementModal] = useState(false);
 
   // Aggregate stock totals from location breakdown for Performance strip
   const totalReceived = locationBreakdown.reduce((acc, l) => acc + l.received, 0);
@@ -534,6 +536,13 @@ export function LogisticsProviderDetailPage({
                 >
                   View report
                 </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowCashStatementModal(true)}
+                >
+                  Cash statement
+                </Button>
                 {shipments.length > 0 && (
                   <FormSelect
                     value={shipmentFilter ?? ''}
@@ -568,36 +577,64 @@ export function LogisticsProviderDetailPage({
               ) : undefined
             }
             sheet={({ closeSheet }) => (
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                onClick={() => {
-                  closeSheet();
-                  const totals = {
-                    received: totalReceived,
-                    sold: totalSold,
-                    transferredOut: totalTransferredOut,
-                    adjusted: totalAdjusted,
-                    writtenOff: totalWrittenOff,
-                    dispatched: totalDispatched,
-                    reserved: totalReserved,
-                    available: totalAvailable,
-                    qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
-                    qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
-                    amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
-                    amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
-                    qtyAwaitingRemittance: 0,
-                    amountAwaitingRemittance: '0',
-                  };
-                  setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
-                }}
-              >
-                View report
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    closeSheet();
+                    const totals = {
+                      received: totalReceived,
+                      sold: totalSold,
+                      transferredOut: totalTransferredOut,
+                      adjusted: totalAdjusted,
+                      writtenOff: totalWrittenOff,
+                      dispatched: totalDispatched,
+                      reserved: totalReserved,
+                      available: totalAvailable,
+                      qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
+                      qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
+                      amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
+                      amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
+                      qtyAwaitingRemittance: 0,
+                      amountAwaitingRemittance: '0',
+                    };
+                    setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
+                  }}
+                >
+                  View report
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    closeSheet();
+                    setShowCashStatementModal(true);
+                  }}
+                >
+                  Cash statement
+                </Button>
+              </>
             )}
           />
         }
+      />
+
+      <CashStatementExportModal
+        open={showCashStatementModal}
+        onClose={() => setShowCashStatementModal(false)}
+        locations={locations.map((l) => ({
+          id: l.id,
+          name: l.name,
+          providerId: provider.id,
+          providerName: provider.name,
+        }))}
+        initialProviderId={provider.id}
+        startDate={dateFilters?.startDate ?? ''}
+        endDate={dateFilters?.endDate ?? ''}
+        periodAllTime={dateFilters?.periodAllTime ?? false}
       />
 
       <MobileDateFilterRow

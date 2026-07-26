@@ -256,3 +256,20 @@ export const disputeDeliveryRemittanceSchema = z.object({
   disputeReason: z.string().min(10, 'Dispute reason must be at least 10 characters').max(1000),
 });
 export type DisputeDeliveryRemittanceInput = z.infer<typeof disputeDeliveryRemittanceSchema>;
+
+/**
+ * Logistics cash statement (quick ledger) for one location or one partner rollup.
+ * Exactly one of logisticsLocationId / providerId is required.
+ */
+export const getCashLedgerStatementSchema = z
+  .object({
+    logisticsLocationId: z.string().uuid().optional(),
+    providerId: z.string().uuid().optional(),
+    startDate: z.string().date().optional(),
+    endDate: z.string().date().optional(),
+    dateScope: z.enum(['createdAt', 'deliveredAt']).optional().default('createdAt'),
+  })
+  .refine((v) => Boolean(v.logisticsLocationId) !== Boolean(v.providerId), {
+    message: 'Provide exactly one of logisticsLocationId or providerId',
+  });
+export type GetCashLedgerStatementInput = z.infer<typeof getCashLedgerStatementSchema>;

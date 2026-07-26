@@ -121,9 +121,15 @@ export function AdminErrorBoundary({
   // Non-network unexpected error — keep the previous full-page treatment so the
   // user gets the dramatic "Something went wrong" hint with the technical detail
   // visible and the auto-refresh countdown running.
+  const clientDetail =
+    !isResponse && _error instanceof Error
+      ? _error.message
+      : !isResponse && _error != null
+        ? String(_error)
+        : undefined;
   return (
     <GenericErrorWithProgressBar
-      errorData={isResponse ? errorData : undefined}
+      errorData={isResponse ? errorData : clientDetail}
       variant="server"
       homePath={homePath}
       homeLabel={homeLabel}

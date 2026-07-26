@@ -136,6 +136,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
               </>
             }
+            sheet={
+              <p className="text-sm text-app-fg-muted text-center py-1">
+                Date range and refresh are on the toolbar. Use Save filters below to remember this view.
+              </p>
+            }
           />
         }
       />

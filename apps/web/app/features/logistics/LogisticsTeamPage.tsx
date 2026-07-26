@@ -26,6 +26,7 @@ import { Modal } from '~/components/ui/modal';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { formatNaira } from '~/lib/format-amount';
+import { CashStatementExportModal } from '~/features/finance/CashStatementExportModal';
 
 export interface LogisticsTeamPageProps {
   providers: LogisticsProviderRow[];
@@ -369,6 +370,27 @@ export function LogisticsTeamPage({
   const [reportLocation, setReportLocation] = useState<LogisticsLocationRow | null>(null);
   const [showAggregateReport, setShowAggregateReport] = useState(false);
   const [viewType, setViewType] = useState<'company' | 'location'>('company');
+  const [cashStatementOpen, setCashStatementOpen] = useState(false);
+  const [cashStatementPrefill, setCashStatementPrefill] = useState<{
+    providerId?: string | null;
+    locationId?: string | null;
+  }>({});
+
+  const statementLocations = useMemo(
+    () =>
+      locationRows.map((l) => ({
+        id: l.locationId,
+        name: l.locationName,
+        providerId: l.providerId,
+        providerName: l.providerName,
+      })),
+    [locationRows],
+  );
+
+  function openCashStatement(prefill?: { providerId?: string | null; locationId?: string | null }) {
+    setCashStatementPrefill(prefill ?? {});
+    setCashStatementOpen(true);
+  }
 
   // Client-side search for locations (providers are filtered server-side)
   const filteredLocations = useMemo(() => {
@@ -564,6 +586,12 @@ export function LogisticsTeamPage({
             <TableActionButton onClick={() => setReportProvider(p)} variant="neutral">
               Report
             </TableActionButton>
+            <TableActionButton
+              onClick={() => openCashStatement({ providerId: p.providerId })}
+              variant="neutral"
+            >
+              Cash statement
+            </TableActionButton>
             <TableActionButton to={`/admin/logistics/team/${p.providerId}${listQuerySuffix}`} variant="primary">
               Details
             </TableActionButton>
@@ -685,6 +713,12 @@ export function LogisticsTeamPage({
           <TableActionButton onClick={() => setReportLocation(l)} variant="neutral">
             Report
           </TableActionButton>
+          <TableActionButton
+            onClick={() => openCashStatement({ locationId: l.locationId, providerId: l.providerId })}
+            variant="neutral"
+          >
+            Cash statement
+          </TableActionButton>
           <TableActionButton to={`/admin/logistics/team/${l.providerId}?locationId=${l.locationId}${listQuerySuffix ? `&${listQuerySuffix.substring(1)}` : ''}`} variant="primary">
             Details
           </TableActionButton>
@@ -738,10 +772,55 @@ export function LogisticsTeamPage({
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowAggregateReport(true)}>
                   Generate report
                 </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => openCashStatement()}>
+                  Cash statement
+                </Button>
               </>
             }
+            sheet={({ closeSheet }) => (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowAggregateReport(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    openCashStatement();
+                  }}
+                >
+                  Cash statement
+                </Button>
+              </>
+            )}
           />
         }
+      />
+
+      <CashStatementExportModal
+        open={cashStatementOpen}
+        onClose={() => {
+          setCashStatementOpen(false);
+          setCashStatementPrefill({});
+        }}
+        locations={statementLocations}
+        initialProviderId={cashStatementPrefill.locationId ? null : cashStatementPrefill.providerId ?? null}
+        initialLocationId={cashStatementPrefill.locationId ?? null}
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
 
       <MobileDateFilterRow

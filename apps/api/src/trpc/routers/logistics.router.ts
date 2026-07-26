@@ -15,6 +15,7 @@ import {
   markDeliveryRemittanceReceivedSchema,
   getDeliveryRemittanceSchema,
   disputeDeliveryRemittanceSchema,
+  getCashLedgerStatementSchema,
   submitDeliveryConfirmationSchema,
   listDeliveryConfirmationRequestsSchema,
   approveDeliveryConfirmationSchema,
@@ -393,6 +394,18 @@ export const logisticsRouter = router({
       return getLogisticsService().listDeliveryRemittanceEligibleOrders(
         input ?? { page: 1, limit: 100 },
         ctx.user,
+        ctx.effectiveBranchIds,
+      );
+    }),
+
+  /** Location or partner cash statement for Finance partner reconciliation. */
+  getCashLedgerStatement: authedProcedure
+    .input(getCashLedgerStatementSchema)
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getCashLedgerStatement(
+        input,
+        ctx.user,
+        ctx.activeGroupId,
         ctx.effectiveBranchIds,
       );
     }),

@@ -2,9 +2,9 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import { useLocation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SaveFilterPrefsButton } from '~/components/ui/save-filter-prefs-button';
 import { useFilterPreferences } from '~/hooks/useFilterPreferences';
+import { registerMobileActionsOpener } from '~/lib/mobile-actions-bridge';
 
 export type PageHeaderMobileToolsSheetRender = (api: { closeSheet: () => void }) => ReactNode;
 
@@ -36,9 +36,8 @@ export interface PageHeaderMobileToolsProps {
 
 /**
  * Desktop: renders `desktop` actions inline.
- * Mobile: renders nothing inline with the header title. Instead, a labeled
- * "Actions" button is rendered via `MobileActionsRow` below the header,
- * alongside date filter and refresh.
+ * Mobile: owns the Actions sheet modal; the visible Actions button lives in
+ * `MobileDateFilterRow` and opens this sheet via the mobile-actions bridge.
  */
 export function PageHeaderMobileTools({
   desktop,
@@ -56,27 +55,30 @@ export function PageHeaderMobileTools({
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const closeSheet = useCallback(() => setOpen(false), []);
-
-  // Expose opener on window so MobileDateFilterRow can trigger it
-  useEffect(() => {
-    (window as any).__openMobileActionsSheet = () => setOpen(true);
-    return () => { delete (window as any).__openMobileActionsSheet; };
-  }, []);
+  const openSheet = useCallback(() => setOpen(true), []);
   const { pathname } = useLocation();
+
   const resolvedFilterKey = saveFilterKey === true
     ? pathname.replace(/^\//, '').replace(/\//g, '.')
     : typeof saveFilterKey === 'string' ? saveFilterKey : null;
-
-  const filterPrefs = useFilterPreferences(resolvedFilterKey ?? '__noop__');
-  const hasSavedPrefs = resolvedFilterKey ? filterPrefs.hasSavedPrefs : false;
-  const filtersChanged = resolvedFilterKey ? filterPrefs.hasChanges : false;
 
   const sheetContent = typeof sheet === 'function' ? sheet({ closeSheet }) : sheet;
   const hasSheet = sheetContent != null && sheetContent !== false;
   const filtersContent =
     typeof filters === 'function' ? filters({ closeSheet }) : filters;
   const hasFilters = filtersContent != null && filtersContent !== false;
-  const hasSheetOrFilters = hasSheet || hasFilters;
+  // saveFilterKey alone must still open a mobile Actions sheet (Save filters).
+  const hasSheetOrFilters = hasSheet || hasFilters || !!resolvedFilterKey;
+
+  // Register opener only when there is something to show in the sheet.
+  useEffect(() => {
+    if (!hasSheetOrFilters) return;
+    return registerMobileActionsOpener(openSheet);
+  }, [hasSheetOrFilters, openSheet]);
+
+  const filterPrefs = useFilterPreferences(resolvedFilterKey ?? '__noop__');
+  const hasSavedPrefs = resolvedFilterKey ? filterPrefs.hasSavedPrefs : false;
+  const filtersChanged = resolvedFilterKey ? filterPrefs.hasChanges : false;
 
   return (
     <>
@@ -86,8 +88,17 @@ export function PageHeaderMobileTools({
         {resolvedFilterKey && <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} filtersChanged={filtersChanged} />}
       </div>
 
-      {/* Mobile: marker for MobileDateFilterRow detection + event listener for open */}
-      <span data-mobile-actions-trigger className="hidden" aria-hidden />
+      {/* Marker kept for diagnostics / optional DOM checks */}
+      {hasSheetOrFilters ? (
+        <span
+          data-mobile-actions-trigger
+          data-trigger-label={triggerAriaLabel}
+          data-filters-badge={filtersBadgeCount > 0 ? String(filtersBadgeCount) : undefined}
+          className="hidden"
+          aria-hidden
+        />
+      ) : null}
+
       {hasSheetOrFilters ? (
         <Modal
           open={open}
@@ -122,6 +133,11 @@ export function PageHeaderMobileTools({
             {resolvedFilterKey && (
               <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} className="w-full" />
             )}
+            {onClearFilters && filtersBadgeCount > 0 ? (
+              <Button type="button" variant="secondary" className="w-full" onClick={() => { onClearFilters(); closeSheet(); }}>
+                Clear filters
+              </Button>
+            ) : null}
           </div>
           <div className="border-t border-app-border p-3 pt-2">
             <Button type="button" variant="primary" className="w-full" onClick={() => setOpen(false)}>

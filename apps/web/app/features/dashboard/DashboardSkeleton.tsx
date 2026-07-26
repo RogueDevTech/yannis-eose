@@ -76,6 +76,7 @@ export function SuperAdminDashboardLoadingShell({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Dashboard date range"
+            saveFilterKey
             desktop={
               <>
                 <PageRefreshButton />
@@ -86,6 +87,11 @@ export function SuperAdminDashboardLoadingShell({
                   chrome="pill"
                 />
               </>
+            }
+            sheet={
+              <p className="text-sm text-app-fg-muted text-center py-1">
+                Date range and refresh are on the toolbar. Use Save filters below to remember this view.
+              </p>
             }
           />
         }

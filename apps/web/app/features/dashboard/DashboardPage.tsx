@@ -135,7 +135,6 @@ export function DashboardPage({
         actionsSheet={
           hasTeamFilter ? (
             <FormSelect
-              label="Team"
               value={searchParams.get('teamId') || ''}
               onChange={(e) => {
                 setSearchParams((p) => {

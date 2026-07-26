@@ -226,6 +226,7 @@ export {
   markDeliveryRemittanceReceivedSchema,
   getDeliveryRemittanceSchema,
   disputeDeliveryRemittanceSchema,
+  getCashLedgerStatementSchema,
 } from './logistics';
 
 export type {
@@ -249,6 +250,7 @@ export type {
   MarkDeliveryRemittanceReceivedInput,
   GetDeliveryRemittanceInput,
   DisputeDeliveryRemittanceInput,
+  GetCashLedgerStatementInput,
 } from './logistics';
 
 // Marketing validators

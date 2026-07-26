@@ -29,7 +29,9 @@ interface PageHeaderProps {
   backTo?: string;
   /** Right-side action buttons / controls */
   actions?: React.ReactNode;
-  /** Keep compact mobile actions on the title row; description stays below. */
+  /** Keep compact mobile actions on the title row; description stays below.
+   *  IMPORTANT: actions are mounted once (not twice). Double-mounting broke
+   *  PageHeaderMobileTools window openers on mobile. */
   mobileInlineActions?: boolean;
   /** Extra content below title/description (e.g. filter bar) */
   children?: React.ReactNode;
@@ -59,13 +61,15 @@ export function PageHeader({
        * `<PageHeaderMobileTools>` inside `actions` to collapse buttons into a
        * kebab sheet on top of this layout.
        */}
-      <div className="flex flex-col gap-3 md:flex-row md:flex-nowrap md:items-start md:gap-3">
-        <div
-          className={[
-            'min-w-0 md:flex-1',
-            mobileInlineActions && actions ? 'relative pr-20 md:pr-0' : '',
-          ].join(' ')}
-        >
+      <div
+        className={[
+          'flex flex-col gap-3 md:flex-row md:flex-nowrap md:items-start md:gap-3',
+          // relative only so the off-flow mobile tools mount can anchor; title
+          // keeps full width on mobile (Actions live in MobileDateFilterRow).
+          mobileInlineActions && actions ? 'relative' : '',
+        ].join(' ')}
+      >
+        <div className="min-w-0 w-full md:flex-1">
           <div className="flex items-center gap-2 min-w-0">
             {backTo && (
               <Link
@@ -79,13 +83,8 @@ export function PageHeader({
                 </svg>
               </Link>
             )}
-            <h1 className="min-w-0 text-xl font-bold text-app-fg md:truncate">{title}</h1>
+            <h1 className="min-w-0 flex-1 text-xl font-bold text-app-fg md:truncate">{title}</h1>
           </div>
-          {actions && mobileInlineActions ? (
-            <div className="absolute right-0 top-0 flex shrink-0 items-center justify-end md:hidden">
-              {actions}
-            </div>
-          ) : null}
           {description && (
             // CEO directive 2026-05-19: hide page-description on mobile across
             // every admin surface — title + filters carry enough context, and
@@ -95,16 +94,21 @@ export function PageHeader({
           )}
         </div>
 
-        {actions && (
+        {actions ? (
           <div
             className={[
-              mobileInlineActions ? 'hidden md:flex' : 'flex',
-              'flex-wrap items-center gap-2 md:shrink-0 md:justify-end',
+              // mobileInlineActions: keep a single mount for PageHeaderMobileTools
+              // (sheet/bridge). On mobile it is off-flow so the title uses full
+              // width; visible Actions live in MobileDateFilterRow. Desktop uses
+              // the normal right-side actions row.
+              mobileInlineActions
+                ? 'absolute right-0 top-0 flex shrink-0 items-center justify-end md:static md:flex md:flex-wrap md:gap-2 md:justify-end'
+                : 'flex flex-wrap items-center gap-2 md:shrink-0 md:justify-end',
             ].join(' ')}
           >
             {actions}
           </div>
-        )}
+        ) : null}
       </div>
 
       {children && <div>{children}</div>}

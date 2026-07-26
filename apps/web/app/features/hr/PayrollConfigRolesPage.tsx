@@ -224,30 +224,26 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
         hideDate
         actionsSheetTitle="Payroll config"
         actionsSheet={
-          <div className="space-y-3">
+          <>
+            <FormSelect
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              options={categoryOptions}
+            />
+            <FormSelect
+              value={formulaFilter}
+              onChange={(e) => setFormulaFilter(e.target.value)}
+              options={FORMULA_FILTER_OPTIONS}
+            />
             {canWrite && (
               <Link
                 to="/hr/payroll/config/rules/new"
-                className="btn-primary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
+                className="btn-secondary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
               >
                 + Pay Role
               </Link>
             )}
-            <FormSelect
-              label="Category"
-              name="category"
-              options={categoryOptions}
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            />
-            <FormSelect
-              label="Formula status"
-              name="formula"
-              options={FORMULA_FILTER_OPTIONS}
-              value={formulaFilter}
-              onChange={(e) => setFormulaFilter(e.target.value)}
-            />
-          </div>
+          </>
         }
       />
 

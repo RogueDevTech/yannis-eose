@@ -46,9 +46,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ((accountsRes.data as { result?: { data?: AccountRow[] } })?.result?.data ?? [])
       : [];
     const jePayload = jeRes.ok
-      ? (jeRes.data as { result?: { data?: { entries?: unknown[] } } })?.result?.data
+      ? (jeRes.data as { result?: { data?: { records?: unknown[] } } })?.result?.data
       : null;
-    const hasOpeningBalances = (jePayload?.entries?.length ?? 0) > 0;
+    const hasOpeningBalances = (jePayload?.records?.length ?? 0) > 0;
     return { accounts, hasOpeningBalances };
   })();
 

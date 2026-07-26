@@ -25,15 +25,49 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {
-    const input = encodeURIComponent(JSON.stringify({ includeInactive: false }));
-    const res = await apiRequest<unknown>(
-      `/trpc/generalLedger.listAccounts?input=${input}`,
-      { method: 'GET', cookie },
-    );
-    const accounts: AccountOpt[] = res.ok
-      ? ((res.data as { result?: { data?: AccountOpt[] } })?.result?.data ?? [])
+    const [accountsRes, jeRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listAccounts?input=${encodeURIComponent(JSON.stringify({ includeInactive: false }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)' }))}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
+    const accounts: AccountOpt[] = accountsRes.ok
+      ? ((accountsRes.data as { result?: { data?: AccountOpt[] } })?.result?.data ?? [])
       : [];
-    return { accounts };
+
+    // Check if opening balances already posted
+    const jePayload = jeRes.ok
+      ? (jeRes.data as { result?: { data?: { records?: Array<{ id: string; postingDate: string }> } } })?.result?.data
+      : null;
+    const existingJE = jePayload?.records?.[0] ?? null;
+
+    // If posted, fetch the GL lines for that JE to pre-fill
+    let postedLines: Array<{ accountId: string; debit: number; credit: number }> = [];
+    if (existingJE) {
+      const detailRes = await apiRequest<unknown>(
+        `/trpc/generalLedger.getJournalEntry?input=${encodeURIComponent(JSON.stringify({ journalEntryId: existingJE.id }))}`,
+        { method: 'GET', cookie },
+      );
+      if (detailRes.ok) {
+        const detail = (detailRes.data as { result?: { data?: { lines?: Array<{ accountId: string; debit: string; credit: string }> } } })?.result?.data;
+        postedLines = (detail?.lines ?? []).map((l) => ({
+          accountId: l.accountId,
+          debit: Number(l.debit) || 0,
+          credit: Number(l.credit) || 0,
+        }));
+      }
+    }
+
+    return {
+      accounts,
+      alreadyPosted: !!existingJE,
+      postedDate: existingJE?.postingDate ?? null,
+      postedLines,
+    };
   })();
 
   return defer({ pageData });
@@ -71,7 +105,14 @@ export default function OpeningBalancesRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<OpeningBalancesLoadingShell />} deferredKey="pageData">
-      {(data) => <OpeningBalancesPage accounts={data.accounts} />}
+      {(data) => (
+        <OpeningBalancesPage
+          accounts={data.accounts}
+          alreadyPosted={data.alreadyPosted}
+          postedDate={data.postedDate}
+          postedLines={data.postedLines}
+        />
+      )}
     </CachedAwait>
   );
 }
