@@ -42,10 +42,36 @@ const PAYROLL_VIEWER_ROLES = [
   'HEAD_OF_LOGISTICS',
 ];
 
+/** Map a calendar day to payroll period month (`YYYY-MM-01`). */
+function periodMonthFromYmd(ymd: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  return `${ymd.slice(0, 7)}-01`;
+}
+
+/** Return current month boundaries as YYYY-MM-DD strings. */
+function currentMonthRange(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const startDate = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  const endDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { startDate, endDate };
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect('/auth');
   const cookie = getSessionCookie(request);
+
+  const url = new URL(request.url);
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  const defaults = currentMonthRange();
+  const startDate = url.searchParams.get('startDate') || defaults.startDate;
+  const endDate = url.searchParams.get('endDate') || defaults.endDate;
+
+  const fromMonth = periodAllTime ? undefined : (periodMonthFromYmd(startDate) ?? undefined);
+  const toMonth = periodAllTime ? undefined : (periodMonthFromYmd(endDate) ?? undefined);
 
   let allowedByRoleOrPermission = false;
   try {
@@ -66,8 +92,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const pageData = (async (): Promise<HRStreamData> => {
+    const bundleInput: Record<string, string> = {};
+    if (fromMonth) bundleInput.fromMonth = fromMonth;
+    if (toMonth) bundleInput.toMonth = toMonth;
+
     const bundleRes = await apiRequest<unknown>(
-      `/trpc/hr.payrollPageBundle?input=${encodeURIComponent(JSON.stringify({}))}`,
+      `/trpc/hr.payrollPageBundle?input=${encodeURIComponent(JSON.stringify(bundleInput))}`,
       { method: 'GET', cookie },
     );
 
@@ -88,6 +118,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       id: user.id,
       role: user.role,
       currentBranchId: user.currentBranchId ?? null,
+      permissions: user.permissions ?? [],
       prepareDepartments: (prepareAccessData?.departments ?? []) as ViewerInfo['prepareDepartments'],
       prepareBranchIds: (prepareAccessData?.branches ?? []).map((b) => b.id),
     };
@@ -98,7 +129,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       monthlyPayrolls: bundle?.payrolls?.byMonth ?? [],
       branches: bundle?.branches ?? prepareAccessData?.branches ?? [],
       viewer,
-    } satisfies HRStreamData;
+      filters: { startDate, endDate, periodAllTime },
+    };
   })();
 
   return defer({ pageData });
@@ -191,9 +223,7 @@ export async function action({ request }: ActionFunctionArgs) {
       method: 'POST', cookie,
       body: {
         batchId: formData.get('batchId')?.toString() ?? '',
-        financeReference: formData.get('financeReference')?.toString() ?? '',
         disbursementDate: formData.get('disbursementDate')?.toString() || undefined,
-        proofOfPaymentUrl: formData.get('proofOfPaymentUrl')?.toString() || undefined,
       },
     });
     if (!res.ok) return json({ error: extractError(res, 'Failed to mark batch paid') }, { status: safeStatus(res.status) });
@@ -236,6 +266,7 @@ export default function HRPayrollIndexRoute() {
           monthlyPayrolls={data.monthlyPayrolls}
           branches={data.branches}
           viewer={data.viewer}
+          filters={data.filters}
         />
       )}
     </CachedAwait>

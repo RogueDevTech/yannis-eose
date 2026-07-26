@@ -249,7 +249,7 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
       key: 'name',
       header: 'Branch',
       render: (b) => (
-        <Link to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline">
+        <Link to={`/admin/branches/${b.id}?backTo=${encodeURIComponent(`/admin/settings/branch-groups/${group.id}`)}`} className="text-sm font-medium text-app-fg hover:underline">
           {b.name}
         </Link>
       ),

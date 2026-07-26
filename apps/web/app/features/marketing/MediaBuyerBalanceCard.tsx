@@ -75,7 +75,7 @@ export function MediaBuyerBalanceCard({
               <Link
                 to={`/hr/users/${row.userId}`}
                 prefetch="intent"
-                className="text-xs font-semibold text-app-fg truncate block hover:text-brand-600 dark:hover:text-brand-400"
+                className="text-xs font-semibold text-app-fg truncate block hover:underline"
               >
                 {row.name}
               </Link>
@@ -96,7 +96,7 @@ export function MediaBuyerBalanceCard({
                 <Link
                   to={ordersHref}
                   prefetch="intent"
-                  className="font-semibold tabular-nums text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
+                  className="font-semibold tabular-nums text-app-fg hover:underline"
                 >
                   {row.totalOrders.toLocaleString()}
                 </Link>
@@ -175,7 +175,7 @@ export function MediaBuyerBalanceCard({
           <Link
             to={`/hr/users/${row.userId}`}
             prefetch="intent"
-            className="text-sm font-medium text-app-fg truncate block hover:text-brand-600 dark:hover:text-brand-400"
+            className="text-sm font-medium text-app-fg truncate block hover:underline"
           >
             {row.name}
           </Link>
@@ -203,7 +203,7 @@ export function MediaBuyerBalanceCard({
             <Link
               to={buildOrdersHref(row.userId, ordersDateFilters)}
               prefetch="intent"
-              className="font-medium tabular-nums text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
+              className="font-medium tabular-nums text-app-fg hover:underline"
             >
               {row.totalOrders.toLocaleString()}
             </Link>

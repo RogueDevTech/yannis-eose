@@ -1,17 +1,15 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getCurrentUser, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayrollBatchDetailPage, type BatchDetail } from '~/features/hr/PayrollBatchDetailPage';
+import { PayrollBatchDetailLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { ViewerInfo, BranchOption } from '~/features/hr/types';
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  const title = data?.detail?.batch
-    ? `${data.detail.batch.department} Payroll — Yannis EOSE`
-    : 'Payroll Batch — Yannis EOSE';
-  return [{ title }];
-};
+export const meta: MetaFunction = () => [{ title: 'Payroll Batch — Yannis EOSE' }];
 
 const PAYROLL_VIEWER_ROLES = [
   'SUPER_ADMIN',
@@ -31,38 +29,45 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const batchId = params['id'];
   if (!batchId) throw new Response('Batch ID required', { status: 400 });
 
-  const [batchRes, prepareRes, branchesRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/hr.getBatch?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/hr.payrollPrepareAccess', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
-  ]);
+  const pageData = (async () => {
+    const [batchRes, prepareRes, branchesRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/hr.getBatch?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/hr.payrollPrepareAccess', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
+    ]);
 
-  if (!batchRes.ok) throw new Response('Batch not found', { status: 404 });
-  const detail = (batchRes.data as { result?: { data?: BatchDetail } })?.result?.data ?? null;
-  if (!detail) throw new Response('Batch not found', { status: 404 });
+    if (!batchRes.ok) throw new Response('Batch not found', { status: 404 });
+    const detail = (batchRes.data as { result?: { data?: BatchDetail } })?.result?.data ?? null;
+    if (!detail) throw new Response('Batch not found', { status: 404 });
 
-  const prepareData = prepareRes.ok
-    ? (prepareRes.data as { result?: { data?: { departments: string[]; branches: BranchOption[] } } })?.result?.data
-    : null;
+    const prepareData = prepareRes.ok
+      ? (prepareRes.data as { result?: { data?: { departments: string[]; branches: BranchOption[] } } })?.result?.data
+      : null;
 
-  const branchRows = branchesRes.ok
-    ? (branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? []
-    : [];
-  const branchName = branchRows.find((b) => b.id === detail.batch.branchId)?.name ?? detail.batch.branchId.slice(0, 8);
+    const branchRows = branchesRes.ok
+      ? (branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? []
+      : [];
+    const branchName = branchRows.find((b) => b.id === detail.batch.branchId)?.name ?? detail.batch.branchId.slice(0, 8);
 
-  const viewer: ViewerInfo = {
-    id: user.id,
-    role: user.role,
-    currentBranchId: user.currentBranchId ?? null,
-    prepareDepartments: (prepareData?.departments ?? []) as ViewerInfo['prepareDepartments'],
-    prepareBranchIds: (prepareData?.branches ?? []).map((b) => b.id),
-  };
+    const viewer: ViewerInfo = {
+      id: user.id,
+      role: user.role,
+      currentBranchId: user.currentBranchId ?? null,
+      prepareDepartments: (prepareData?.departments ?? []) as ViewerInfo['prepareDepartments'],
+      prepareBranchIds: (prepareData?.branches ?? []).map((b) => b.id),
+    };
 
-  return json({ detail, branchName, viewer });
+    return { detail, branchName, viewer };
+  })();
+
+  return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -104,9 +109,7 @@ export async function action({ request }: ActionFunctionArgs) {
       method: 'POST', cookie,
       body: {
         batchId: formData.get('batchId')?.toString() ?? '',
-        financeReference: formData.get('financeReference')?.toString() ?? '',
         disbursementDate: formData.get('disbursementDate')?.toString() || undefined,
-        proofOfPaymentUrl: formData.get('proofOfPaymentUrl')?.toString() || undefined,
       },
     });
     if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to mark batch paid') }, { status: safeStatus(res.status) });
@@ -147,12 +150,21 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PayrollBatchDetailRoute() {
-  const { detail, branchName, viewer } = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <PayrollBatchDetailPage
-      detail={detail as BatchDetail}
-      branchName={branchName}
-      viewer={viewer as ViewerInfo}
-    />
+    <CachedAwait
+      resolve={pageData}
+      fallback={<PayrollBatchDetailLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
+      {(data) => (
+        <PayrollBatchDetailPage
+          detail={data.detail as BatchDetail}
+          branchName={data.branchName}
+          viewer={data.viewer as ViewerInfo}
+        />
+      )}
+    </CachedAwait>
   );
 }

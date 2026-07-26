@@ -9,7 +9,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -76,7 +76,7 @@ export function GeneralLedgerPage({
 }: GeneralLedgerLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [detailEntry, setDetailEntry] = useState<GeneralLedgerEntry | null>(null);
-  const [searchQuery, setSearchQuery] = useState(searchFilter ?? searchParams.get('search') ?? '');
+  const appliedSearch = searchFilter ?? searchParams.get('search') ?? '';
   const [showExport, setShowExport] = useState(false);
 
 
@@ -322,39 +322,20 @@ export function GeneralLedgerPage({
         />
       </div>
 
-      <form
-        method="get"
-        className="flex min-w-0 w-full gap-2 items-center"
-        onSubmit={(e) => {
-          e.preventDefault();
+      <PageSearchControl
+        value={appliedSearch}
+        placeholder="Search by description..."
+        title="Search ledger"
+        onApply={(query) => {
           setSearchParams((p) => {
             const next = new URLSearchParams(p);
             next.set('page', '1');
-            if (searchQuery.trim()) next.set('search', searchQuery.trim());
+            if (query) next.set('search', query);
             else next.delete('search');
             return next;
           });
         }}
-      >
-        <SearchInput
-          name="search"
-          placeholder="Search by description..."
-          value={searchQuery}
-          onChange={(val) => {
-            setSearchQuery(val);
-            if (!val.trim() && searchParams.get('search')) {
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.delete('search');
-                next.set('page', '1');
-                return next;
-              });
-            }
-          }}
-          withSubmitButton
-          wrapperClassName="min-w-0 w-full flex-1"
-        />
-      </form>
+      />
 
       {entries.length === 0 ? (
         <EmptyState

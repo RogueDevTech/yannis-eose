@@ -12,7 +12,12 @@ import {
   CSTeamLoadingShell,
 } from '~/features/cs/CSDeferredLoadingShells';
 import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
-import { DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
+import {
+  AdminQuickDashboardLoadingShell,
+  DashboardSkeleton,
+  SuperAdminDashboardLoadingShell,
+} from '~/features/dashboard/DashboardSkeleton';
+import { isAdminLevel } from '~/lib/rbac';
 import {
   DeliveryRemittanceDetailLoadingShell,
   DeliveryRemittancesLoadingShell,
@@ -26,6 +31,12 @@ import {
   GeneratePayrollLoadingShell,
   HRUsersListLoadingShell,
   MonthlyPayrollsLoadingShell,
+  PayrollAssignRoleLoadingShell,
+  PayrollBatchDetailLoadingShell,
+  PayrollConfigLoadingShell,
+  PayrollContractorDetailLoadingShell,
+  PayrollPayslipsLoadingShell,
+  PayrollReportsLoadingShell,
   StaffOnboardingDocsLoadingShell,
   UserCreateEditLoadingShell,
   UserOnboardingLoadingShell,
@@ -68,7 +79,11 @@ import { UserDetailShellSkeleton } from '~/features/users/UserDetailShellSkeleto
 
 interface ShellEntry {
   match: RegExp;
-  render: (match: RegExpMatchArray, sp: URLSearchParams) => ReactNode;
+  render: (
+    match: RegExpMatchArray,
+    sp: URLSearchParams,
+    ctx?: { userName?: string; role?: string | null },
+  ) => ReactNode;
 }
 
 // URL-driven date-filter defaults used by most shells. The transition skeleton only
@@ -268,6 +283,13 @@ const entries: ShellEntry[] = [
   // NavProgressBar at the top covers the brief deferred-loader window.
   { match: /^\/hr\/users$/, render: () => <HRUsersListLoadingShell /> },
   { match: /^\/hr\/payroll\/generate$/, render: () => <GeneratePayrollLoadingShell /> },
+  { match: /^\/hr\/payroll\/reports$/, render: () => <PayrollReportsLoadingShell /> },
+  { match: /^\/hr\/payroll\/payslips$/, render: () => <PayrollPayslipsLoadingShell /> },
+  { match: /^\/hr\/payroll\/contractors\/[^/]+$/, render: () => <PayrollContractorDetailLoadingShell /> },
+  { match: /^\/hr\/payroll\/contractors$/, render: () => <PayrollConfigLoadingShell /> },
+  { match: /^\/hr\/payroll\/config\/roles\/[^/]+\/assign$/, render: () => <PayrollAssignRoleLoadingShell /> },
+  { match: /^\/hr\/payroll\/config\//, render: () => <PayrollConfigLoadingShell /> },
+  { match: /^\/hr\/payroll-batch\/[^/]+$/, render: () => <PayrollBatchDetailLoadingShell /> },
   { match: /^\/hr\/payroll$/, render: () => <MonthlyPayrollsLoadingShell /> },
   { match: /^\/hr\/plans$/, render: () => <CommissionPlansLoadingShell /> },
   {
@@ -304,6 +326,7 @@ const entries: ShellEntry[] = [
             location: sp.get('location') ?? '',
             sentBy: sp.get('sentBy') ?? '',
             eligibleQ: sp.get('q') ?? '',
+            remittanceSearch: sp.get('rq') ?? '',
           }}
         />
       );
@@ -624,7 +647,27 @@ const entries: ShellEntry[] = [
   },
   { match: /^\/admin\/settings\/role-templates$/, render: () => <RoleTemplatesLoadingShell /> },
   { match: /^\/admin\/ceo$/, render: () => <CEODashboardSkeleton /> },
-  { match: /^\/admin$/, render: () => <DashboardSkeleton /> },
+  {
+    match: /^\/admin$/,
+    render: (_m, sp, ctx) => {
+      const periodAllTime = sp.get('period') === 'all_time';
+      const filters = {
+        startDate: periodAllTime ? '' : (sp.get('startDate') ?? ''),
+        endDate: periodAllTime ? '' : (sp.get('endDate') ?? ''),
+        periodAllTime,
+      };
+      const userName = ctx?.userName ?? 'Admin';
+      const role = ctx?.role ?? null;
+      // Mirror admin._index loader variant selection so Skeleton #1 == #2.
+      if (role === 'SUPER_ADMIN' || role === 'SUPPORT') {
+        return <SuperAdminDashboardLoadingShell userName={userName} filters={filters} />;
+      }
+      if (role && isAdminLevel({ role })) {
+        return <AdminQuickDashboardLoadingShell userName={userName} role={role} />;
+      }
+      return <DashboardSkeleton userName={userName} filters={filters} />;
+    },
+  },
 ];
 
 /**
@@ -635,11 +678,12 @@ const entries: ShellEntry[] = [
 export function getShellForPath(
   pathname: string,
   search: string = '',
+  ctx?: { userName?: string; role?: string | null },
 ): ReactNode | null {
   const sp = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   for (const entry of entries) {
     const m = pathname.match(entry.match);
-    if (m) return entry.render(m, sp);
+    if (m) return entry.render(m, sp, ctx);
   }
   return null;
 }

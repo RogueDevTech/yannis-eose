@@ -1,14 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
-import { Modal } from '~/components/ui/modal';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
-import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import type { CommissionPlan } from './types';
 import type { PayRole } from './payroll-prd-types';
 import {
@@ -18,12 +18,40 @@ import {
 import type { PayrollFormula } from '@yannis/shared';
 
 interface PayrollRuleBuilderPageProps {
-  payRole: PayRole;
+  payRole: PayRole | null;
   plan: CommissionPlan | null;
   canWrite: boolean;
 }
 
+const CATEGORY_OPTIONS = [
+  { value: 'CS_CLOSER', label: 'CS Closer' },
+  { value: 'HEAD_OF_CS', label: 'Head of CS' },
+  { value: 'MEDIA_BUYER', label: 'Media Buyer' },
+  { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+  { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
+  { value: 'STOCK_MANAGER', label: 'Stock Manager' },
+  { value: 'TPL_MANAGER', label: 'TPL Manager' },
+  { value: 'TPL_RIDER', label: 'TPL Rider' },
+  { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+  { value: 'HR_MANAGER', label: 'HR Manager' },
+  { value: 'SUPER_ADMIN', label: 'Super Admin' },
+  { value: 'ADMIN', label: 'Admin' },
+  { value: 'BRANCH_ADMIN', label: 'Branch Admin' },
+  { value: 'AUDITOR', label: 'Auditor' },
+  { value: 'CONTRACTOR', label: 'Contractor' },
+  { value: 'CS', label: 'CS (legacy)' },
+  { value: 'MEDIA_BUYING', label: 'Media Buying (legacy)' },
+  { value: 'LOGISTICS', label: 'Logistics (legacy)' },
+  { value: 'OPERATIONS', label: 'Operations (legacy)' },
+  { value: 'SUPPORT', label: 'Support (legacy)' },
+  { value: 'LEADERSHIP', label: 'Leadership (legacy)' },
+  { value: 'FINANCE', label: 'Finance (legacy)' },
+  { value: 'HR_ADMIN', label: 'HR & Admin (legacy)' },
+  { value: 'STOCK_MANAGEMENT', label: 'Stock Management (legacy)' },
+];
+
 export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleBuilderPageProps) {
+  const isCreate = !payRole;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const archiveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const previewFetcher = useFetcher<{ preview?: FormulaPreviewResult; error?: string }>();
@@ -31,14 +59,16 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   const initialRules = (plan?.rules ?? {}) as PayrollFormula;
   const [showArchive, setShowArchive] = useState(false);
 
-  useFetcherToast(fetcher.data, { successMessage: 'Formula saved' });
+  // Role metadata state
+  const [reportsToRequired, setReportsToRequired] = useState(payRole?.reportsToRequired ?? false);
+  const [perProductBonus, setPerProductBonus] = useState(payRole?.perProductBonus ?? false);
 
-  useCloseOnFetcherSuccess(fetcher, () => undefined, {
-    intent: plan ? 'saveFormulaConfig' : 'saveFormulaConfig',
+  useFetcherToast(fetcher.data, {
+    successMessage: isCreate ? 'Pay role created' : 'Formula saved',
   });
 
   const effectiveLabel = useMemo(() => {
-    if (!plan) return 'No linked commission plan yet';
+    if (!plan) return null;
     const from = new Date(plan.effectiveFrom).toLocaleDateString('en-NG', {
       month: 'short',
       day: 'numeric',
@@ -47,7 +77,7 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
     const to = plan.effectiveTo
       ? new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
       : 'Ongoing';
-    return `${plan.planName} · Effective ${from}: ${to}`;
+    return `${plan.planName} \u00b7 Effective ${from}: ${to}`;
   }, [plan]);
 
   const handlePreview = useCallback(
@@ -68,13 +98,19 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   const previewResult =
     previewFetcher.data && 'preview' in previewFetcher.data ? previewFetcher.data.preview ?? null : null;
 
+  const intent = isCreate ? 'createPayRoleWithFormula' : 'saveFormulaConfig';
+
   return (
     <div className="space-y-3">
       <PageHeader
-        title={`Formula: ${payRole.name}`}
+        title={isCreate ? 'Create pay role' : payRole.name}
         backTo="/hr/payroll/config/roles"
         mobileInlineActions
-        description={`${payRole.category.replace(/_/g, ' ')} \u00b7 ${effectiveLabel}`}
+        description={
+          isCreate
+            ? 'Define a pay role and its formula rules.'
+            : effectiveLabel ?? undefined
+        }
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
@@ -84,27 +120,85 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
         }
       />
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-app-fg-muted">
-        <FlagRow
-          label="Reports-to required"
-          active={payRole.reportsToRequired}
-          hint="Staff assigned this role must have a manager set. Used for roles where bonus formulas factor in team performance."
-        />
-        <FlagRow
-          label="Per-product bonus"
-          active={payRole.perProductBonus}
-          hint="Bonus tiers are evaluated per product instead of total deliveries. e.g. 10 deliveries of Product A and 5 of Product B are calculated separately."
-        />
-      </div>
+      <ModalFetcherInlineError message={surface.errorMatchingIntent(intent)} />
 
-      <ModalFetcherInlineError message={surface.errorMatchingIntent('saveFormulaConfig')} />
-
-      <fetcher.Form method="post" className="space-y-3">
-        <input type="hidden" name="intent" value="saveFormulaConfig" />
-        <input type="hidden" name="payRoleId" value={payRole.id} />
-        <input type="hidden" name="planName" value={plan?.planName ?? `${payRole.name} Formula`} />
+      <fetcher.Form method="post" className="space-y-5">
+        <input type="hidden" name="intent" value={intent} />
+        {payRole && <input type="hidden" name="payRoleId" value={payRole.id} />}
+        <input type="hidden" name="planName" value={plan?.planName ?? (payRole ? `${payRole.name} Formula` : 'Formula')} />
         <input type="hidden" name="effectiveFrom" value={new Date().toISOString().slice(0, 10)} />
+        <input type="hidden" name="reportsToRequired" value={String(reportsToRequired)} />
+        <input type="hidden" name="perProductBonus" value={String(perProductBonus)} />
 
+        {/* ── Role metadata ────────────────────────────────── */}
+        {canWrite ? (
+          <div className="card p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-app-fg">Role details</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextInput
+                label="Name"
+                name="name"
+                required
+                minLength={2}
+                maxLength={200}
+                defaultValue={payRole?.name ?? ''}
+                placeholder="e.g. Sales Closer (CS)"
+              />
+              <FormSelect
+                label="Category"
+                name="category"
+                required
+                defaultValue={payRole?.category ?? ''}
+                placeholder="Select category..."
+                options={CATEGORY_OPTIONS}
+              />
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reportsToRequired}
+                  onChange={(e) => setReportsToRequired(e.target.checked)}
+                  className="mt-0.5 rounded border-app-border text-brand-600 focus:ring-brand-500"
+                />
+                <div>
+                  <span className="text-sm text-app-fg">Reports-to required</span>
+                  <p className="text-xs text-app-fg-muted mt-0.5">
+                    Staff must have a manager set for team DR formulas.
+                  </p>
+                </div>
+              </label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perProductBonus}
+                  onChange={(e) => setPerProductBonus(e.target.checked)}
+                  className="mt-0.5 rounded border-app-border text-brand-600 focus:ring-brand-500"
+                />
+                <div>
+                  <span className="text-sm text-app-fg">Per-product bonus</span>
+                  <p className="text-xs text-app-fg-muted mt-0.5">
+                    Bonus tiers evaluated per product instead of total deliveries.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+        ) : (
+          <div className="card p-4 space-y-2">
+            <h3 className="text-sm font-semibold text-app-fg">{payRole?.name}</h3>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-app-fg-muted">
+              <span className={reportsToRequired ? 'text-success-600 dark:text-success-400' : ''}>
+                {reportsToRequired ? '\u2713' : '\u2717'} Reports-to required
+              </span>
+              <span className={perProductBonus ? 'text-success-600 dark:text-success-400' : ''}>
+                {perProductBonus ? '\u2713' : '\u2717'} Per-product bonus
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Formula tiers ────────────────────────────────── */}
         {canWrite ? (
           <PayrollFormulaTierBuilder
             initialFormula={initialRules}
@@ -124,17 +218,21 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
         {canWrite ? (
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving…">
-              Save formula (new version)
+              {isCreate ? 'Create pay role' : 'Save formula (new version)'}
             </Button>
-            <div className="flex-1" />
-            <Button variant="danger" size="sm" onClick={() => setShowArchive(true)}>
-              Archive pay role
-            </Button>
+            {!isCreate && (
+              <>
+                <div className="flex-1" />
+                <Button variant="danger" size="sm" onClick={() => setShowArchive(true)}>
+                  Archive pay role
+                </Button>
+              </>
+            )}
           </div>
         ) : null}
       </fetcher.Form>
 
-      {showArchive && (
+      {showArchive && payRole && (
         <ConfirmActionModal
           open
           title="Archive pay role"
@@ -152,35 +250,5 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
         />
       )}
     </div>
-  );
-}
-
-function FlagRow({ label, active, hint }: { label: string; active: boolean; hint: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <div className="flex items-center gap-1.5">
-        <span className={active ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>
-          {active ? '\u2713' : '\u2717'} {label}
-        </span>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="text-app-fg-muted hover:text-app-fg shrink-0"
-          aria-label={`Info about ${label}`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
-      </div>
-      {open && (
-        <Modal open onClose={() => setOpen(false)} maxWidth="max-w-sm" contentClassName="p-5 space-y-3">
-          <h4 className="text-base font-semibold text-app-fg">{label}</h4>
-          <p className="text-sm text-app-fg-muted">{hint}</p>
-          <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Close</Button>
-        </Modal>
-      )}
-    </>
   );
 }

@@ -391,55 +391,55 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Chart of Accounts',
         href: '/admin/finance/accounts',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.chartOfAccounts,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Opening Balances',
         href: '/admin/finance/opening-balances',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.scale,
         permission: 'finance.ledger.write',
       },
       {
         label: 'Journal Entries',
         href: '/admin/finance/journal-entries',
-        icon: SidebarIcons.remittances,
+        icon: SidebarIcons.journal,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'General Ledger',
         href: '/admin/finance/general-ledger',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.journal,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Trial Balance',
         href: '/admin/finance/trial-balance',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.scale,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Profit & Loss',
         href: '/admin/finance/profit-loss',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.trendUp,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Balance Sheet',
         href: '/admin/finance/balance-sheet',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.scale,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Cash Flow',
         href: '/admin/finance/cash-flow',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.trendUp,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
@@ -460,35 +460,35 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Bank Reconciliation',
         href: '/admin/finance/bank-reconciliation',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.bank,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Tax Returns',
         href: '/admin/finance/tax-returns',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.calculator,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'WHT Certificates',
         href: '/admin/finance/wht-certificates',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.calculator,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Aging',
         href: '/admin/finance/aging',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.clock,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
       {
         label: 'Budget Report',
         href: '/admin/finance/budget-report',
-        icon: SidebarIcons.finance,
+        icon: SidebarIcons.campaigns,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
       },
@@ -497,15 +497,25 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'HR',
     items: [
-      // Payroll (Monthly Batches): HR + admins via permission, Heads + Finance via explicit role
-      // allow-list. Heads see only their dept's batches; Finance sees PENDING_FINANCE+. See
-      // CLAUDE.md → "Payroll Workflow".
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
+      {
+        label: 'Staff Onboarding',
+        href: '/hr/staff-onboarding-documents',
+        icon: SidebarIcons.orders,
+        permission: 'hr.onboarding.read',
+      },
       {
         label: 'Payroll',
         href: '/hr/payroll',
         icon: SidebarIcons.hr,
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
+      },
+      {
+        label: 'Payroll Config',
+        href: '/hr/payroll/config/roles',
+        icon: SidebarIcons.settings,
+        permission: 'payroll.config.read',
       },
       {
         label: 'Payslips',
@@ -520,25 +530,11 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
       },
       {
-        label: 'Payroll Config',
-        href: '/hr/payroll/config/roles',
-        icon: SidebarIcons.settings,
-        permission: 'payroll.config.read',
-      },
-      {
-        label: 'Onboarding Queue',
-        href: '/hr/payroll/onboarding',
-        icon: SidebarIcons.orders,
-        permission: 'hr.write',
-      },
-      {
         label: 'Contractors',
         href: '/hr/payroll/contractors',
         icon: SidebarIcons.users,
         permission: 'payroll.config.read',
       },
-      // Commission Plans: friendlier label for HoCS / HoLogistics who don't see "Payroll Config"
-      // (CEO directive 2026-04-26). Admin-level roles already see the page via "Payroll Config".
       {
         label: 'Commission Plans',
         href: '/hr/payroll/config/roles',
@@ -546,18 +542,6 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
         excludeRoles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'],
-      },
-      // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
-      // Head of Marketing / Head of CS hold `users.read` for other features but must not see
-      // this link — they manage their team from the Marketing / Sales team pages instead.
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
-      // Permission-first: link appears only with hr.onboarding.* on the session (or admin-class).
-      // Do not add HR_MANAGER (or any role) as a sidebar bypass — grant the caps via template / overrides.
-      {
-        label: 'Staff Onboarding',
-        href: '/hr/staff-onboarding-documents',
-        icon: SidebarIcons.orders,
-        permission: 'hr.onboarding.read',
       },
     ],
   },
@@ -1619,10 +1603,14 @@ function DashboardLayoutInner({
                   fall through to `<Outlet />` and let the old page linger — `NavProgressBar`
                   + the in-route Suspense fallback own the rest. Gated on cache miss so
                   `cachedClientLoader` revisits never flash a skeleton over cached data. */}
-              {showTransitionSkeleton
+                {showTransitionSkeleton
                 ? (getShellForPath(
                     navigation.location!.pathname,
                     navigation.location!.search,
+                    {
+                      userName: user?.name ?? undefined,
+                      role: user?.role ?? null,
+                    },
                   ) ?? <Outlet />)
                 : <Outlet />}
             </BranchGroupsCatalogProvider>

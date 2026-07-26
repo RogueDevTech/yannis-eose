@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Form, Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -23,7 +23,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { EmptyState } from '~/components/ui/empty-state';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -306,17 +306,21 @@ export function WarehousesPage({
       <ToolbarFiltersCollapsible
         className="!border-0 !px-0 md:!px-4"
         searchRow={
-          <Form method="get" replace className="min-w-0 flex-1">
-            <SearchInput
-              name="search"
-              defaultValue={search}
-              placeholder="Search by warehouse name…"
-              aria-label="Search warehouses"
-              withSubmitButton
-              wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
-            />
-            <input type="hidden" name="page" value="1" />
-          </Form>
+          <PageSearchControl
+            value={search}
+            placeholder="Search by warehouse name…"
+            title="Search warehouses"
+            aria-label="Search warehouses"
+            onApply={(query) => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                if (query) next.set('search', query);
+                else next.delete('search');
+                next.set('page', '1');
+                return next;
+              }, { replace: true, preventScrollReset: true });
+            }}
+          />
         }
         desktopInlineFilters={
           <div className="relative">

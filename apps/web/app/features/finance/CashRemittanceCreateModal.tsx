@@ -15,6 +15,7 @@ import type { OrderInvoice } from '~/features/orders/types';
 
 export interface EligibleOrder {
   id: string;
+  orderNumber: number | null;
   customerName: string;
   totalAmount: string | null;
   /** Delivery fee already set on the order (e.g. by CS closer). */

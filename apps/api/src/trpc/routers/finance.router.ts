@@ -295,63 +295,118 @@ export const financeRouter = router({
         includeProductBreakdown: true,
       };
 
-      const [profit, remit, payroll, approvals, branches, buyers, fundingSummary, byProduct, byLocation] = await Promise.all([
-        getFinanceService().getProfitReport(profitInput, ctx.effectiveBranchIds),
-        getLogisticsService()
-          .listDeliveryRemittances({
-            page: 1,
-            limit: 1,
-            dateScope: input.dateScope ?? 'createdAt',
-            ...(input.startDate && { startDate: input.startDate }),
-            ...(input.endDate && { endDate: input.endDate }),
-          }, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds)
-          .catch(() => null),
-        getPayrollBatchService()
-          .listMonthlyPayrolls({ status: 'PENDING_FINANCE' as const }, ctx.user)
-          .catch(() => null),
-        getFinanceService()
-          .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 }, ctx.effectiveBranchIds)
-          .catch(() => null),
-        listBranchesForUser({ ...ctx.user, activeGroupId: ctx.activeGroupId }).catch(() => [] as Array<{ id: string; name: string }>),
-        getUsersService()
-          .list(
-            {
-              page: 1,
-              limit: 200,
-              role: 'MEDIA_BUYER',
-              status: 'ACTIVE',
-              sortBy: 'createdAt',
-              sortOrder: 'desc',
-              includeBranchMemberships: false,
-            },
-            ctx.user,
-            ctx.currentBranchId,
-            ctx.effectiveBranchIds,
-          )
-          .catch(() => null),
-        // Scope to HoM receivers only (Finance disburses to HoM, not MBs) and
-        // respect date filters so the summary matches the selected period.
-        getMarketingService()
-          .getFundingSummary(input.branchId ?? null, {
-            restrictToReceiverRole: 'HEAD_OF_MARKETING',
-            startDate: input.startDate,
-            endDate: input.endDate,
-          }, ctx.effectiveBranchIds)
-          .catch(() => ({ totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 })),
-        getLogisticsService()
-          .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
-          .catch(() => []),
-        getLogisticsService()
-          .deliveredOrdersByLocation(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
-          .catch(() => []),
-      ]);
+      const toPeriodMonth = (raw?: string): string | undefined => {
+        if (!raw) return undefined;
+        const day = raw.slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}/.test(day)) return undefined;
+        return `${day.slice(0, 7)}-01`;
+      };
+      const fromMonth = toPeriodMonth(input.startDate);
+      const toMonth = toPeriodMonth(input.endDate);
+
+      const [profit, remit, payrollOverview, approvals, branches, buyers, fundingSummary, byProduct, byLocation] =
+        await Promise.all([
+          getFinanceService().getProfitReport(profitInput, ctx.effectiveBranchIds),
+          getLogisticsService()
+            .listDeliveryRemittances(
+              {
+                page: 1,
+                limit: 1,
+                dateScope: input.dateScope ?? 'createdAt',
+                ...(input.startDate && { startDate: input.startDate }),
+                ...(input.endDate && { endDate: input.endDate }),
+              },
+              ctx.user,
+              ctx.activeGroupId,
+              ctx.effectiveBranchIds,
+            )
+            .catch(() => null),
+          getPayrollBatchService()
+            .getFinanceOverviewPayroll(
+              {
+                fromMonth,
+                toMonth,
+                ...(input.branchId && { branchId: input.branchId }),
+              },
+              ctx.user,
+              ctx.effectiveBranchIds,
+            )
+            .catch(() => null),
+          getFinanceService()
+            .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 }, ctx.effectiveBranchIds)
+            .catch(() => null),
+          listBranchesForUser({ ...ctx.user, activeGroupId: ctx.activeGroupId }).catch(
+            () => [] as Array<{ id: string; name: string }>,
+          ),
+          getUsersService()
+            .list(
+              {
+                page: 1,
+                limit: 200,
+                role: 'MEDIA_BUYER',
+                status: 'ACTIVE',
+                sortBy: 'createdAt',
+                sortOrder: 'desc',
+                includeBranchMemberships: false,
+              },
+              ctx.user,
+              ctx.currentBranchId,
+              ctx.effectiveBranchIds,
+            )
+            .catch(() => null),
+          // Scope to HoM receivers only (Finance disburses to HoM, not MBs) and
+          // respect date filters so the summary matches the selected period.
+          getMarketingService()
+            .getFundingSummary(
+              input.branchId ?? null,
+              {
+                restrictToReceiverRole: 'HEAD_OF_MARKETING',
+                startDate: input.startDate,
+                endDate: input.endDate,
+              },
+              ctx.effectiveBranchIds,
+            )
+            .catch(() => ({
+              totalSent: '0',
+              totalCompleted: '0',
+              totalDisputed: '0',
+              sentCount: 0,
+              completedCount: 0,
+              disputedCount: 0,
+            })),
+          getLogisticsService()
+            .deliveredOrdersByProduct(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
+            .catch(() => []),
+          getLogisticsService()
+            .deliveredOrdersByLocation(input.branchId, input.startDate, input.endDate, ctx.effectiveBranchIds)
+            .catch(() => []),
+        ]);
+
+      const emptyPayrollTotals = {
+        batchCount: 0,
+        staffCount: 0,
+        totalGross: 0,
+        totalNet: 0,
+        totalTax: 0,
+      };
 
       return {
         profit,
         remittanceSummary:
           (remit as { summary?: Record<string, string | number> } | null)?.summary ?? null,
-        payrollBatchCount:
-          (payroll as { batches?: unknown[] } | null)?.batches?.length ?? 0,
+        payroll: payrollOverview ?? {
+          pendingFinance: emptyPayrollTotals,
+          periodCost: emptyPayrollTotals,
+          paidInPeriod: emptyPayrollTotals,
+          byPayRole: [] as Array<{
+            label: string;
+            totalGross: number;
+            totalNet: number;
+            headcount: number;
+          }>,
+        },
+        /** @deprecated use payroll.pendingFinance.batchCount — kept for older clients */
+        payrollBatchCount: payrollOverview?.pendingFinance.batchCount ?? 0,
         approvalsPendingCount:
           (approvals as { pagination?: { total?: number } } | null)?.pagination?.total ?? 0,
         branches: (branches ?? []).map((b) => ({ id: b.id, name: b.name })),

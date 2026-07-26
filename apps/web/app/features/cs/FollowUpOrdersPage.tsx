@@ -4,7 +4,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { CompactTable } from '~/components/ui/compact-table';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Pagination } from '~/components/ui/pagination';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -200,11 +200,11 @@ export function FollowUpOrdersPage({
 
       {/* ── Search + bulk actions ─────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
-        <SearchInput
+        <PageSearchControl
           value={searchFilter}
-          onChange={(v) => updateParam('search', v)}
           placeholder="Search by name, order ID, or closer..."
-          wrapperClassName="flex-1 min-w-[12rem]"
+          title="Search orders"
+          onApply={(query) => updateParam('search', query)}
         />
         {!isCloser && selectedOrderIds.size > 0 && (
           <button

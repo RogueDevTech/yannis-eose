@@ -21,12 +21,11 @@ function utcCalendarMonth(year: number, monthIndex0: number) {
   };
 }
 
-function nextUtcMonth(year: number, monthIndex0: number) {
-  if (monthIndex0 === 11) return utcCalendarMonth(year + 1, 0);
-  return utcCalendarMonth(year, monthIndex0 + 1);
-}
-
-/** POST-mount slice for the Earnings tab — never blocks shell load. */
+/**
+ * POST-mount slice for the Earnings tab — never blocks shell load.
+ * Accepts optional `?year=YYYY&month=M` (1-indexed) to fetch a specific month.
+ * Defaults to the current calendar month when omitted.
+ */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const userId = params['userId'];
   if (!userId) return json({ ok: false as const, error: 'User id required' });
@@ -37,18 +36,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const { cookie } = gate;
   const opt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
+  const url = new URL(request.url);
   const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const current = utcCalendarMonth(y, m);
-  const upcoming = nextUtcMonth(y, m);
+  const currentYear = now.getUTCFullYear();
+  const currentMonth0 = now.getUTCMonth(); // 0-indexed
 
-  const previewInput = (period: { periodStart: string; periodEnd: string }) =>
-    encodeURIComponent(JSON.stringify({ staffId: userId, periodStart: period.periodStart, periodEnd: period.periodEnd }));
+  const qYear = parseInt(url.searchParams.get('year') ?? '', 10);
+  const qMonth = parseInt(url.searchParams.get('month') ?? '', 10); // 1-indexed from URL
+  const targetYear = Number.isFinite(qYear) ? qYear : currentYear;
+  const targetMonth0 = Number.isFinite(qMonth) ? qMonth - 1 : currentMonth0;
 
-  const [currentRes, nextRes, paidRes] = await Promise.all([
-    apiRequest<unknown>(`/trpc/hr.previewPayout?input=${previewInput(current)}`, opt),
-    apiRequest<unknown>(`/trpc/hr.previewPayout?input=${previewInput(upcoming)}`, opt),
+  const isCurrentMonth = targetYear === currentYear && targetMonth0 === currentMonth0;
+
+  const period = utcCalendarMonth(targetYear, targetMonth0);
+
+  const previewInput = encodeURIComponent(
+    JSON.stringify({ staffId: userId, periodStart: period.periodStart, periodEnd: period.periodEnd }),
+  );
+
+  const [previewRes, paidRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/hr.previewPayout?input=${previewInput}`, opt),
     apiRequest<unknown>(
       `/trpc/hr.listPayouts?input=${encodeURIComponent(
         JSON.stringify({ staffId: userId, status: 'PAID' as const, limit: 1, page: 1 }),
@@ -57,18 +64,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ),
   ]);
 
-  const currentPreview = extractTrpc(currentRes, null) as StaffPayoutEstimate | null;
-  const nextPreview = extractTrpc(nextRes, null) as StaffPayoutEstimate | null;
+  const preview = extractTrpc(previewRes, null) as StaffPayoutEstimate | null;
   const paidPayload = extractTrpc(paidRes, null) as { payouts?: unknown[] } | null;
   const firstPaid = paidPayload?.payouts?.[0] as Record<string, unknown> | undefined;
   let lastPaidPayout: UserPaidPayoutSnapshot | null = null;
   if (
     firstPaid &&
+    typeof firstPaid['id'] === 'string' &&
     typeof firstPaid['periodStart'] === 'string' &&
     typeof firstPaid['periodEnd'] === 'string' &&
     typeof firstPaid['totalPayout'] !== 'undefined'
   ) {
     lastPaidPayout = {
+      id: String(firstPaid['id']),
       periodStart: String(firstPaid['periodStart']),
       periodEnd: String(firstPaid['periodEnd']),
       totalPayout: String(firstPaid['totalPayout']),
@@ -79,8 +87,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return secondaryCacheJson({
     ok: true as const,
-    currentMonth: { ...current, preview: currentPreview },
-    nextMonth: { ...upcoming, preview: nextPreview },
+    month: { ...period, preview, year: targetYear, monthIndex1: targetMonth0 + 1 },
+    isCurrentMonth,
     lastPaidPayout,
     generatedAt: new Date().toISOString(),
   });

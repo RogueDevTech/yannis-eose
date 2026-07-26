@@ -20,10 +20,11 @@ import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { TextInput } from '~/components/ui/text-input';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 
 const SHELL_PAGINATION_FOOTER = (
   <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -244,10 +245,6 @@ export function InventoryOverviewLoadingShell() {
   const currentLocation = rawLocation || 'ALL';
   const currentShipment = rawShipment || 'ALL';
 
-  const [searchInput, setSearchInput] = useState(serverSearch);
-  useEffect(() => {
-    setSearchInput(serverSearch);
-  }, [serverSearch]);
 
   const updateLevelsParam = useCallback(
     (key: 'productId' | 'locationId' | 'shipmentId' | 'sort' | 'search', value: string) => {
@@ -358,7 +355,6 @@ export function InventoryOverviewLoadingShell() {
         }
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total Stock', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Reserved', value: <StatValuePulse className="min-w-[2.5rem]" /> },
@@ -376,88 +372,88 @@ export function InventoryOverviewLoadingShell() {
         ]}
       />
 
-      {/* Desktop filters */}
-      <div className="hidden md:flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <SearchableSelect
-          id="levels-product-filter-shell"
-          value={currentProduct}
-          onChange={(v) => updateLevelsParam('productId', v)}
-          wrapperClassName="w-full sm:w-48"
-          placeholder="All products"
-          searchPlaceholder="Search products…"
-          options={productOptions}
-        />
-        <SearchableSelect
-          id="levels-location-filter-shell"
-          value={currentLocation}
-          onChange={(v) => updateLevelsParam('locationId', v)}
-          wrapperClassName="w-full min-w-0 sm:w-48"
-          placeholder="All locations"
-          searchPlaceholder="Search locations…"
-          options={locationOptions}
-        />
-        <SearchableSelect
-          id="levels-shipment-filter-shell"
-          value={currentShipment}
-          onChange={(v) => updateLevelsParam('shipmentId', v)}
-          wrapperClassName="w-full min-w-0 sm:w-52"
-          placeholder="All shipments"
-          searchPlaceholder="Search SHIP ref…"
-          options={shipmentOptions}
-        />
-        <form
-          method="get"
-          className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitSearch(searchInput);
-          }}
-        >
-          <SearchInput
-            name="search"
+      {/* Filters outside table chrome — matches InventoryPage ToolbarFiltersCollapsible. */}
+      <ToolbarFiltersCollapsible
+        hideMobileSheet
+        badgeCount={
+          (currentProduct !== 'ALL' ? 1 : 0) +
+          (currentLocation !== 'ALL' ? 1 : 0) +
+          (currentShipment !== 'ALL' ? 1 : 0) +
+          (serverSortBy !== 'updatedAt' || serverSortDir !== 'desc' ? 1 : 0)
+        }
+        searchRow={
+          <PageSearchControl
+            value={serverSearch}
             placeholder="Search by product name…"
-            value={searchInput}
-            onChange={(val) => {
-              setSearchInput(val);
-              if (val === '') submitSearch('');
-            }}
-            withSubmitButton
-            wrapperClassName="w-full"
+            title="Search stock levels"
+            onApply={submitSearch}
           />
-        </form>
-        <SortMenu
-          value={{ sortBy: serverSortBy, sortDir: serverSortDir }}
-          onChange={(next) => updateLevelsSort(next.sortBy as 'available' | 'updatedAt', next.sortDir)}
-          defaultValue={{ sortBy: 'updatedAt', sortDir: 'desc' }}
-          options={[
-            {
-              value: 'updatedAt',
-              label: 'Last updated',
-              description: 'Most recently changed inventory rows.',
-              ascLabel: 'Oldest first',
-              descLabel: 'Newest first',
-              defaultDir: 'desc',
-            },
-            {
-              value: 'available',
-              label: 'Available units',
-              description: 'Stock count minus units reserved on open orders.',
-              ascLabel: 'Lowest first',
-              descLabel: 'Highest first',
-              defaultDir: 'desc',
-            },
-          ]}
-        />
-        {hasActiveFilters ? (
-          <button
-            type="button"
-            onClick={resetLevelsFilters}
-            className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
-          >
-            Reset
-          </button>
-        ) : null}
-      </div>
+        }
+        desktopInlineFilters={
+          <>
+            <SearchableSelect
+              id="levels-product-filter-shell"
+              value={currentProduct}
+              onChange={(v) => updateLevelsParam('productId', v)}
+              wrapperClassName="w-full sm:w-48"
+              placeholder="All products"
+              searchPlaceholder="Search products…"
+              options={productOptions}
+            />
+            <SearchableSelect
+              id="levels-location-filter-shell"
+              value={currentLocation}
+              onChange={(v) => updateLevelsParam('locationId', v)}
+              wrapperClassName="w-full min-w-0 sm:w-48"
+              placeholder="All locations"
+              searchPlaceholder="Search locations…"
+              options={locationOptions}
+            />
+            <SearchableSelect
+              id="levels-shipment-filter-shell"
+              value={currentShipment}
+              onChange={(v) => updateLevelsParam('shipmentId', v)}
+              wrapperClassName="w-full min-w-0 sm:w-52"
+              placeholder="All shipments"
+              searchPlaceholder="Search SHIP ref…"
+              options={shipmentOptions}
+            />
+            <SortMenu
+              value={{ sortBy: serverSortBy, sortDir: serverSortDir }}
+              onChange={(next) => updateLevelsSort(next.sortBy as 'available' | 'updatedAt', next.sortDir)}
+              defaultValue={{ sortBy: 'updatedAt', sortDir: 'desc' }}
+              options={[
+                {
+                  value: 'updatedAt',
+                  label: 'Last updated',
+                  description: 'Most recently changed inventory rows.',
+                  ascLabel: 'Oldest first',
+                  descLabel: 'Newest first',
+                  defaultDir: 'desc',
+                },
+                {
+                  value: 'available',
+                  label: 'Available units',
+                  description: 'Stock count minus units reserved on open orders.',
+                  ascLabel: 'Lowest first',
+                  descLabel: 'Highest first',
+                  defaultDir: 'desc',
+                },
+              ]}
+            />
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={resetLevelsFilters}
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
+              >
+                Reset
+              </button>
+            ) : null}
+          </>
+        }
+        sheetFilterBody={null}
+      />
 
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
@@ -476,9 +472,8 @@ export function InventoryOverviewLoadingShell() {
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block list-panel">
+      <div className="hidden md:block">
         <CompactTable<{ id: string }>
-          withCard={false}
           columns={inventoryLevelsShellColumns()}
           rows={levelRows}
           rowKey={(r) => r.id}
@@ -503,7 +498,6 @@ export function InventoryLevelDetailLoadingShell() {
         <div className="h-4 w-36 rounded bg-app-hover animate-pulse" aria-hidden />
       </div>
       <OverviewStatStrip
-        mobileGrid
         tileClassName="min-w-[7rem]"
         items={[
           { label: 'Stock', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -544,7 +538,6 @@ export function WarehousesListLoadingShell() {
         }
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Active warehouses', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Warehouses with stock available', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -552,6 +545,31 @@ export function WarehousesListLoadingShell() {
           { label: 'Total available units', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
+
+      {/* Filters panel — matches WarehousesPage list-panel toolbar. */}
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0 !px-0 md:!px-4"
+          hideMobileSheet
+          searchRow={
+            <PageSearchControl
+              value=""
+              onApply={() => {}}
+              placeholder="Search by warehouse name…"
+              title="Search warehouses"
+              aria-label="Search warehouses"
+            />
+          }
+          desktopInlineFilters={
+            <div
+              className="h-9 w-full min-w-0 sm:w-40 rounded-md border border-app-border bg-app-hover animate-pulse"
+              aria-hidden
+            />
+          }
+          sheetFilterBody={<div className="space-y-3" />}
+        />
+      </div>
+
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -610,8 +628,31 @@ export function WarehouseShipmentsLoadingShell() {
           />
         }
       />
-      <div className="list-panel overflow-x-auto">
-        <div className="h-10 w-full max-w-sm m-3 rounded bg-app-hover animate-pulse" aria-hidden />
+      {/* Card chrome matches live warehouse shipments route (filters + table co-wrapped). */}
+      <div className="card overflow-x-auto">
+        <ToolbarFiltersCollapsible
+          searchRow={
+            <PageSearchControl
+              value=""
+              onApply={() => {}}
+              placeholder="Search shipments…"
+              title="Search shipments"
+              aria-label="Search shipments"
+            />
+          }
+          desktopInlineFilters={
+            <div
+              className="h-9 w-full min-w-0 sm:w-40 rounded-md border border-app-border bg-app-hover animate-pulse"
+              aria-hidden
+            />
+          }
+          sheetFilterBody={
+            <div
+              className="h-9 w-full rounded-md border border-app-border bg-app-hover animate-pulse"
+              aria-hidden
+            />
+          }
+        />
         <CompactTable<{ id: string }>
           withCard={false}
           columns={SHIPMENTS_SHELL_COLS}
@@ -637,7 +678,7 @@ const SHIPMENT_STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = 
 
 /** Global standalone shipments list — GET filter form from URL; stats pulse; table pulse. */
 export function ShipmentsListLoadingShell() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const rows = shellPulsePlaceholderRows('ship_list', 8);
 
   const rawStatus = (searchParams.get('status') ?? '').trim();
@@ -683,7 +724,6 @@ export function ShipmentsListLoadingShell() {
       />
 
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Created', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -722,12 +762,19 @@ export function ShipmentsListLoadingShell() {
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <SearchInput
-              name="search"
-              defaultValue={search}
+            <PageSearchControl
+              value={search}
               placeholder="Search label, supplier, or supplier ref…"
-              wrapperClassName="w-full"
-              withSubmitButton={false}
+              title="Search shipments"
+              onApply={(query) => {
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  if (query) next.set('search', query);
+                  else next.delete('search');
+                  next.set('page', '1');
+                  return next;
+                }, { replace: true });
+              }}
             />
             <div className="flex shrink-0 items-center gap-2">
               <button type="submit" className="btn-primary btn-sm">
@@ -1013,16 +1060,11 @@ export function CategoriesLoadingShell() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rows = shellPulsePlaceholderRows('categories', 8);
   const search = searchParams.get('search') ?? '';
-  const [draft, setDraft] = useState(search);
 
-  useEffect(() => {
-    setDraft(search);
-  }, [search]);
-
-  const applySearch = () => {
+  const applySearch = (query: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (draft.trim()) next.set('search', draft.trim());
+      if (query) next.set('search', query);
       else next.delete('search');
       return next;
     }, { replace: true });
@@ -1052,7 +1094,6 @@ export function CategoriesLoadingShell() {
       />
 
       <OverviewStatStrip
-        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Total Categories', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -1060,21 +1101,12 @@ export function CategoriesLoadingShell() {
         ]}
       />
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          applySearch();
-        }}
-        className="flex items-center gap-2"
-      >
-        <SearchInput
-          value={draft}
-          onChange={setDraft}
-          placeholder="Search categories or brand names..."
-          withSubmitButton
-          wrapperClassName="flex-1 min-w-0"
-        />
-      </form>
+      <PageSearchControl
+        value={search}
+        placeholder="Search categories or brand names..."
+        title="Search categories"
+        onApply={applySearch}
+      />
 
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">

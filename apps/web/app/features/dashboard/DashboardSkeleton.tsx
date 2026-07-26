@@ -1,5 +1,5 @@
 import { Link } from '@remix-run/react';
-import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -15,12 +15,47 @@ function dashboardGreeting(): string {
   return 'Good evening';
 }
 
+const FUNNEL_LABELS = [
+  'Total',
+  'Unassigned',
+  'Assigned',
+  'Unconfirmed',
+  'Confirmed',
+  'Delivered',
+  'Remitted',
+  'CR',
+  'DR',
+  'Deleted',
+] as const;
+
+function pulseStrip(labels: readonly string[], tileClassName = '!py-2.5') {
+  return (
+    <OverviewStatStrip
+      tileClassName={tileClassName}
+      items={labels.map((label) => ({
+        label,
+        value: <StatValuePulse className="min-w-[2.25rem]" />,
+      }))}
+    />
+  );
+}
+
+function SectionStrip({ title, labels }: { title: string; labels: readonly string[] }) {
+  return (
+    <div>
+      <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+        {title}
+      </h2>
+      {pulseStrip(labels)}
+    </div>
+  );
+}
+
 /**
  * Loading shell for the Super-Admin executive dashboard (`SuperAdminDashboard`).
- * Mirrors that layout exactly — ROAS hero, Key Metrics, Revenue Generated,
- * Quick Navigation — so there's no flash of the *quick* dashboard layout
- * while `dashboard.ceoOverview` resolves. CEO 2026-05-19: the prior fallback
- * (`AdminQuickDashboardLoadingShell`) was the wrong shell for this variant.
+ * Mirrors that layout: date filters, matrix strips (ROAS → funnels → spend →
+ * profit → remittance), then quick nav. Used for both the route-transition
+ * shell and the in-route CachedAwait fallback so they do not flash different UI.
  */
 export function SuperAdminDashboardLoadingShell({
   userName,
@@ -45,9 +80,11 @@ export function SuperAdminDashboardLoadingShell({
               <>
                 <PageRefreshButton />
                 <DateFilterBar
-                    startDate={filters?.startDate ?? ''}
-                    endDate={filters?.endDate ?? ''}
-                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                  chrome="pill"
+                />
               </>
             }
           />
@@ -60,68 +97,34 @@ export function SuperAdminDashboardLoadingShell({
         periodAllTime={filters?.periodAllTime ?? false}
       />
 
-      {/* ROAS hero */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-1">
-              ROAS on Ad Spend
-            </p>
-            <p className="text-4xl sm:text-5xl font-bold tabular-nums">
-              <StatValuePulse className="inline-block min-w-[5rem]" />
-            </p>
-            <p className="text-sm text-app-fg-muted mt-1">Revenue / Ad Spend</p>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full sm:w-auto">
-            {['Revenue', 'Ad Spend', 'Profit'].map((label) => (
-              <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
-                <p className="text-mini font-medium text-app-fg-muted">{label}</p>
-                <p className="mt-1">
-                  <StatValuePulse />
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
+      {pulseStrip(['ROAS', 'Delivered revenue', 'Ad spend', 'Deep analysis'])}
+
+      <SectionStrip title="Total Orders" labels={FUNNEL_LABELS} />
+
+      <div className="space-y-4">
+        <SectionStrip title="Order Funnel" labels={FUNNEL_LABELS} />
+        <SectionStrip title="Cart Orders" labels={FUNNEL_LABELS} />
+        <SectionStrip title="Offline Orders" labels={FUNNEL_LABELS} />
       </div>
 
-      {/* Marketing Spend */}
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Marketing Spend
-        </h2>
-        <div className="card p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
-          {['Total Ad Spend', 'Total Orders', 'Cost Per Acquisition'].map((label) => (
-            <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
-              <p className="text-mini font-medium text-app-fg-muted">{label}</p>
-              <p className="mt-1">
-                <StatValuePulse />
-              </p>
-            </div>
-          ))}
-        </div>
+      <SectionStrip title="Follow-Up Orders" labels={FUNNEL_LABELS} />
+      <SectionStrip title="Delivered Follow-Up" labels={FUNNEL_LABELS} />
+
+      <SectionStrip
+        title="Marketing Spend"
+        labels={['Total Ad Spend', 'Marketing Orders', 'Cost Per Acquisition']}
+      />
+
+      <div className="space-y-4">
+        <SectionStrip
+          title="Revenue & Profit"
+          labels={['Revenue', 'Total Expenses', 'True Profit', 'Margin']}
+        />
+        <SectionStrip title="Remittance" labels={['Remitted', 'Awaiting Remittance']} />
       </div>
 
-      {/* Revenue Generated */}
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Revenue Generated
-        </h2>
-        <div className="card p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-          {["Today's Revenue", "This Week's Revenue", "This Month's Revenue", 'Active Staff'].map((label) => (
-            <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
-              <p className="text-mini font-medium text-app-fg-muted">{label}</p>
-              <p className="mt-1">
-                <StatValuePulse />
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick Navigation */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {['Sales Queue', 'Logistics', 'Marketing', 'Finance'].map((label) => (
+        {['Sales Orders', 'Logistics', 'Marketing', 'Finance'].map((label) => (
           <div key={label} className="card text-center py-4">
             <span className="text-sm font-medium text-app-fg">{label}</span>
           </div>
@@ -133,10 +136,6 @@ export function SuperAdminDashboardLoadingShell({
 
 /**
  * Admin quick-overview skeleton — mirrors AdminQuickDashboard layout exactly.
- * The chrome (page header with greeting, two cards with their links and labels,
- * Executive Overview link, quick-jump grid) is rendered identically; only the
- * eight numbers (4 marketing + 4 CS) are pulsing StatValuePulse placeholders.
- * No layout shift when the loader resolves.
  */
 export function AdminQuickDashboardLoadingShell({
   userName,
@@ -146,16 +145,11 @@ export function AdminQuickDashboardLoadingShell({
   role: string;
 }) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const greeting = (() => {
-    const h = new Date().getHours();
-    if (h < 12) return 'Good morning';
-    if (h < 17) return 'Good afternoon';
-    return 'Good evening';
-  })();
+  const greeting = dashboardGreeting();
 
   const description = isSuperAdminOnly({ role })
     ? 'Quick snapshot: open the Executive Overview for the full picture.'
-    : 'Quick snapshot of today.';
+    : "Quick snapshot of today's performance.";
 
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
@@ -165,15 +159,19 @@ export function AdminQuickDashboardLoadingShell({
         description={description}
         actions={
           <>
-            <span className="hidden md:inline-flex"><PageRefreshButton /></span>
-            <span className="md:hidden"><PageRefreshButton iconOnly /></span>
+            <span className="hidden md:inline-flex">
+              <PageRefreshButton />
+            </span>
+            <span className="md:hidden">
+              <PageRefreshButton iconOnly />
+            </span>
           </>
         }
       />
 
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Orders today</h2>
+          <h2 className="text-base font-semibold text-app-fg">Order Funnel</h2>
           <Link
             to="/admin/sales/orders"
             prefetch="intent"
@@ -183,12 +181,10 @@ export function AdminQuickDashboardLoadingShell({
           </Link>
         </div>
         <OverviewStatStrip
-          mobileGrid
           embedded
           showScrollControls={false}
           items={[
             { label: 'Total', value: <StatValuePulse className="min-w-[2.25rem]" /> },
-            { label: 'Offline', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Unconfirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -196,6 +192,7 @@ export function AdminQuickDashboardLoadingShell({
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'CR', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'DR', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Cart Abandonment', value: <StatValuePulse className="min-w-[2rem]" /> },
           ]}
         />
       </div>
@@ -240,7 +237,7 @@ export function AdminQuickDashboardLoadingShell({
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { to: '/admin/sales/queue', label: 'Sales Queue' },
+          { to: '/admin/sales/orders', label: 'Sales Orders' },
           { to: '/admin/logistics/orders', label: 'Logistics' },
           { to: '/admin/marketing', label: 'Marketing' },
           { to: '/admin/finance/overview', label: 'Finance' },
@@ -260,33 +257,64 @@ export function AdminQuickDashboardLoadingShell({
 
 /**
  * Loading skeleton for the role-based dashboard (non-admin variant).
- * Shows header and stat card placeholders (pulse only).
+ * Header + date row + matrix funnel strip so it does not flash the old tile grid.
  */
-export function DashboardSkeleton() {
+export function DashboardSkeleton({
+  userName = 'User',
+  filters,
+}: {
+  userName?: string;
+  filters?: { startDate: string; endDate: string; periodAllTime?: boolean };
+} = {}) {
+  const firstName = userName?.split(' ')[0] ?? 'User';
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="h-8 w-56 rounded bg-app-hover animate-pulse" />
-          <div className="h-4 w-72 rounded bg-app-hover mt-2 animate-pulse" />
-        </div>
-        <div className="h-9 w-44 rounded-lg bg-app-hover animate-pulse shrink-0" />
-      </div>
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title={`${dashboardGreeting()}, ${firstName}`}
+        mobileInlineActions
+        description="Your dashboard overview."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Dashboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                  chrome="pill"
+                />
+              </>
+            }
+          />
+        }
+      />
 
-      <OverviewStatStripSkeleton count={7} />
+      <MobileDateFilterRow
+        startDate={filters?.startDate ?? ''}
+        endDate={filters?.endDate ?? ''}
+        periodAllTime={filters?.periodAllTime ?? false}
+      />
 
-      {/* Content cards placeholder */}
+      <SectionStrip title="Orders" labels={FUNNEL_LABELS} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card animate-pulse">
-          <div className="h-5 w-32 rounded bg-app-hover mb-4" />
-          <div className="h-40 rounded-lg bg-app-hover" />
-        </div>
-        <div className="card animate-pulse">
-          <div className="h-5 w-40 rounded bg-app-hover mb-4" />
-          <div className="space-y-3">
+        <div className="card space-y-3">
+          <h2 className="text-sm font-semibold text-app-fg">Activity</h2>
+          <div className="space-y-2">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-4 w-full rounded bg-app-hover" />
+              <div key={i} className="h-4 w-full rounded bg-app-border/60 animate-pulse" />
+            ))}
+          </div>
+        </div>
+        <div className="card space-y-3">
+          <h2 className="text-sm font-semibold text-app-fg">Shortcuts</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-16 rounded-lg bg-app-border/40 animate-pulse" />
             ))}
           </div>
         </div>

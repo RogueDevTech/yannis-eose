@@ -96,7 +96,7 @@ function FollowUpGroupsBody({ groups, closers, deferredLoading = false }: Props)
         header: 'Group',
         hideable: false,
         render: (g) => (
-          <button type="button" onClick={() => setPeekGroup(g)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline text-left">
+          <button type="button" onClick={() => setPeekGroup(g)} className="text-sm font-medium text-app-fg hover:underline text-left">
             {g.name}
           </button>
         ),

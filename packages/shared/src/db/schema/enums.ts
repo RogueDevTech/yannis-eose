@@ -224,6 +224,73 @@ export const payrollDepartmentEnum = pgEnum('payroll_department', [
   'MARKETING',
   'LOGISTICS',
   'HR',
+  'OPERATIONS',
+  'FINANCE',
+  'SUPPORT',
+]);
+
+export const payrollPayRoleCategoryEnum = pgEnum('payroll_pay_role_category', [
+  // Legacy department-level categories (kept for existing rows)
+  'CS',
+  'MEDIA_BUYING',
+  'LOGISTICS',
+  'OPERATIONS',
+  'SUPPORT',
+  'LEADERSHIP',
+  'CONTRACTOR',
+  'FINANCE',
+  'HR_ADMIN',
+  'STOCK_MANAGEMENT',
+  // Per-role categories (maps 1:1 to user_role values)
+  'SUPER_ADMIN',
+  'ADMIN',
+  'BRANCH_ADMIN',
+  'HEAD_OF_MARKETING',
+  'MEDIA_BUYER',
+  'HEAD_OF_CS',
+  'CS_CLOSER',
+  'FINANCE_OFFICER',
+  'HEAD_OF_LOGISTICS',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'HR_MANAGER',
+  'AUDITOR',
+]);
+
+export const payrollEmploymentTypeEnum = pgEnum('payroll_employment_type', [
+  'STAFF',
+  'CONTRACTOR_AGENCY',
+]);
+
+export const payrollSalaryBasisEnum = pgEnum('payroll_salary_basis', [
+  'FORMULA_BASED',
+  'FLAT_RATE',
+]);
+
+export const payrollTaxStatusEnum = pgEnum('payroll_tax_status', [
+  'STANDARD_PAYE',
+  'EMPLOYER_SUBSIDIZED_PAYE',
+  'GROSS_NO_DEDUCTION',
+]);
+
+export const payrollOnboardingStatusEnum = pgEnum('payroll_onboarding_status', [
+  'NOT_APPLICABLE',
+  'PENDING_APPROVAL',
+  'ACTIVE',
+]);
+
+export const payrollBatchScopeTypeEnum = pgEnum('payroll_batch_scope_type', [
+  'ALL_BRANCHES',
+  'BRANCHES',
+  'EMPLOYEES',
+  'DEPARTMENT',
+]);
+
+export const payrollPayslipLineStatusEnum = pgEnum('payroll_payslip_line_status', [
+  'OK',
+  'NEEDS_ATTENTION',
+  'MANUALLY_OVERRIDDEN',
 ]);
 
 export const recordStatusEnum = pgEnum('record_status', [

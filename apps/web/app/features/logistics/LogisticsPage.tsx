@@ -28,7 +28,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
@@ -1362,7 +1362,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         ]}
       />
 
+      <div className="list-panel">
       <ToolbarFiltersCollapsible
+        className="!border-0"
         hideMobileSheet
         badgeCount={
           activeTab === 'locations'
@@ -1375,17 +1377,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             : () => { setFilterProviderStatus(''); setFilterProviderHasStock(''); }
         }
         searchRow={
-          <SearchInput
+          <PageSearchControl
             value={search}
-            onChange={setSearch}
-            clearable
-            withSubmitButton
             placeholder={
               activeTab === 'providers'
                 ? 'Search by name, contact, or coverage…'
                 : 'Search by name, address, or company…'
             }
-            wrapperClassName="w-full min-w-0 flex-1"
+            title={activeTab === 'providers' ? 'Search companies' : 'Search locations'}
+            onApply={setSearch}
           />
         }
         desktopInlineFilters={
@@ -1555,6 +1555,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           )
         }
       />
+      </div>
 
       {/* Content */}
       {activeTab === 'providers' && (

@@ -10,6 +10,7 @@ import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { uuidv7 } from 'uuidv7';
 
 /** Valid values for the order_timeline_events.event_type enum.
  *  Cart order timeline uses plain text — filter before copying to orders. */
@@ -1751,7 +1752,7 @@ export class CartOrdersService {
           id, triggered_by, triggered_by_user_id, started_at, finished_at,
           total_pulled, error_message
         ) VALUES (
-          gen_random_uuid(), '${triggeredBy}',
+          '${uuidv7()}', '${triggeredBy}',
           ${actorId ? `'${actorId}'` : 'NULL'},
           '${startedAt.toISOString()}'::timestamptz,
           now(),

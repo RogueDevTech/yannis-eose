@@ -6,7 +6,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -157,11 +157,11 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
           ]}
           className="w-32"
         />
-        <SearchInput
+        <PageSearchControl
           value={filters.search}
-          onChange={(v) => setFilter('search', v)}
           placeholder="Search description"
-          className="max-w-xs"
+          title="Search ledger"
+          onApply={(query) => setFilter('search', query)}
         />
       </div>
 

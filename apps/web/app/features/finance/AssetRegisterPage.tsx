@@ -13,7 +13,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Tabs } from '~/components/ui/tabs';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -290,13 +290,11 @@ export function AssetRegisterPage({
       >
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <Tabs value={activeTab} onChange={handleTabChange} tabs={STATUS_TABS} variant="pill" />
-          <SearchInput
+          <PageSearchControl
             value={searchQuery}
-            onChange={handleSearch}
-            debounceMs={300}
+            onApply={handleSearch}
             placeholder="Search assets..."
-            clearable
-            wrapperClassName="w-full md:w-64"
+            title="Search assets"
           />
         </div>
       </PageHeader>

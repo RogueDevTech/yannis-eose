@@ -156,7 +156,7 @@ export type SetSettlementConfigInput = z.infer<typeof setSettlementConfigSchema>
 // Payroll Batch Validators (multi-stage monthly workflow)
 // ============================================
 
-export const payrollDepartmentSchema = z.enum(['CS', 'MARKETING', 'LOGISTICS', 'HR']);
+export const payrollDepartmentSchema = z.enum(['CS', 'MARKETING', 'LOGISTICS', 'HR', 'OPERATIONS', 'FINANCE', 'SUPPORT']);
 export type PayrollDepartment = z.infer<typeof payrollDepartmentSchema>;
 
 export const payrollBatchStatusSchema = z.enum([
@@ -170,10 +170,17 @@ export type PayrollBatchStatus = z.infer<typeof payrollBatchStatusSchema>;
 /** First day of the month, e.g. "2026-04-01". */
 const periodMonthSchema = z.string().regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01');
 
+export const payrollBatchScopeTypeSchema = z.enum(['ALL_BRANCHES', 'BRANCHES', 'EMPLOYEES', 'DEPARTMENT']);
+
 export const generateBatchSchema = z.object({
   branchId: z.string().uuid(),
   department: payrollDepartmentSchema,
   periodMonth: periodMonthSchema,
+  scopeType: payrollBatchScopeTypeSchema.default('DEPARTMENT').optional(),
+  scopeBranchIds: z.array(z.string().uuid()).optional(),
+  scopeEmployeeIds: z.array(z.string().uuid()).optional(),
+  includeContractors: z.boolean().default(false).optional(),
+  runLabel: z.string().max(200).optional(),
 });
 export type GenerateBatchInput = z.infer<typeof generateBatchSchema>;
 
@@ -204,7 +211,10 @@ export type RejectBatchInput = z.infer<typeof rejectBatchSchema>;
 
 export const markBatchPaidSchema = z.object({
   batchId: z.string().uuid(),
-  financeReference: z.string().min(2).max(200),
+  /** Optional: payroll is multi-line disbursement, not a single payment ref. */
+  financeReference: z.string().max(200).optional(),
+  disbursementDate: z.string().date().optional(),
+  proofOfPaymentUrl: z.string().url().optional(),
 });
 export type MarkBatchPaidInput = z.infer<typeof markBatchPaidSchema>;
 

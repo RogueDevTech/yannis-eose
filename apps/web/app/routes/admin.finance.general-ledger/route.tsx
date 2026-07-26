@@ -4,7 +4,6 @@ import { useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
-  requireAccountingEnabled,
   requirePermissionOrRoles,
   parsePerPage,
   defaultThisMonthRange,
@@ -30,7 +29,6 @@ const EMPTY: ListResponse = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  requireAccountingEnabled();
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.ledger.read',

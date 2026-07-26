@@ -74,7 +74,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
     <>
       <PageHeader title="New Journal Entry" backTo="/admin/finance/journal-entries" />
 
-      <div className="space-y-4 max-w-3xl">
+      <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <DateInput
             label="Posting date"

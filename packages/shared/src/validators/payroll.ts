@@ -144,6 +144,7 @@ export const saveTaxBandConfigSchema = z.object({
 });
 
 export const payrollPayRoleCategorySchema = z.enum([
+  // Legacy department-level categories (kept for existing rows)
   'CS',
   'MEDIA_BUYING',
   'LOGISTICS',
@@ -151,6 +152,24 @@ export const payrollPayRoleCategorySchema = z.enum([
   'SUPPORT',
   'LEADERSHIP',
   'CONTRACTOR',
+  'FINANCE',
+  'HR_ADMIN',
+  'STOCK_MANAGEMENT',
+  // Per-role categories (maps 1:1 to user_role values)
+  'SUPER_ADMIN',
+  'ADMIN',
+  'BRANCH_ADMIN',
+  'HEAD_OF_MARKETING',
+  'MEDIA_BUYER',
+  'HEAD_OF_CS',
+  'CS_CLOSER',
+  'FINANCE_OFFICER',
+  'HEAD_OF_LOGISTICS',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'HR_MANAGER',
+  'AUDITOR',
 ]);
 
 export const createPayRoleSchema = z.object({
@@ -168,6 +187,7 @@ export const updatePayRoleSchema = createPayRoleSchema.partial().extend({
 
 export const createContractorSchema = z.object({
   name: z.string().min(2).max(200),
+  jobTitle: z.string().max(200).optional(),
   branchId: z.string().uuid().optional(),
   monthlyFee: z.coerce.number().min(0),
   bankName: z.string().optional(),
@@ -180,6 +200,16 @@ export const createContractorSchema = z.object({
 export const updateContractorSchema = createContractorSchema.partial().extend({
   id: z.string().uuid(),
   active: z.boolean().optional(),
+});
+
+export const getContractorSchema = z.object({
+  id: z.string().uuid(),
+});
+
+export const listContractorPayoutsSchema = z.object({
+  contractorId: z.string().uuid(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(20),
 });
 
 export const overridePayslipLineSchema = z.object({
@@ -212,16 +242,25 @@ export const updatePayrollProfileSchema = z.object({
   flatMonthlyAmount: z.coerce.number().min(0).optional(),
 });
 
+export const bulkAssignPayRoleSchema = z.object({
+  userIds: z.array(z.string().uuid()).min(1).max(200),
+  payRoleId: z.string().uuid(),
+  employmentType: z.enum(['STAFF', 'CONTRACTOR_AGENCY']).default('STAFF'),
+  salaryBasis: z.enum(['FORMULA_BASED', 'FLAT_RATE']).default('FORMULA_BASED'),
+  taxStatus: z.enum(['STANDARD_PAYE', 'EMPLOYER_SUBSIDIZED_PAYE', 'GROSS_NO_DEDUCTION']).default('STANDARD_PAYE'),
+  crmLinked: z.boolean().default(true),
+});
+
 export const markBatchPaidExtendedSchema = z.object({
   batchId: z.string().uuid(),
-  financeReference: z.string().min(2).max(200),
+  financeReference: z.string().max(200).optional(),
   disbursementDate: z.string().date().optional(),
   proofOfPaymentUrl: z.string().url().optional(),
 });
 
 export const generateBatchExtendedSchema = z.object({
   branchId: z.string().uuid(),
-  department: z.enum(['CS', 'MARKETING', 'LOGISTICS', 'HR']).optional(),
+  department: z.enum(['CS', 'MARKETING', 'LOGISTICS', 'HR', 'OPERATIONS', 'FINANCE', 'SUPPORT']).optional(),
   periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/),
   scopeType: z.enum(['ALL_BRANCHES', 'BRANCHES', 'EMPLOYEES', 'DEPARTMENT']).default('DEPARTMENT'),
   scopeBranchIds: z.array(z.string().uuid()).optional(),
@@ -248,8 +287,11 @@ export type SaveProductTierConfigInput = z.infer<typeof saveProductTierConfigSch
 export type SaveTaxBandConfigInput = z.infer<typeof saveTaxBandConfigSchema>;
 export type CreateContractorInput = z.infer<typeof createContractorSchema>;
 export type UpdateContractorInput = z.infer<typeof updateContractorSchema>;
+export type GetContractorInput = z.infer<typeof getContractorSchema>;
+export type ListContractorPayoutsInput = z.infer<typeof listContractorPayoutsSchema>;
 
 export const payrollRegisterSchema = z.object({
+
   batchId: z.string().uuid().optional(),
   fromMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
   toMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
@@ -300,6 +342,17 @@ export const exportPayRunDraftSchema = z.object({
   batchId: z.string().uuid(),
 });
 
-export const exportBankUploadSchema = z.object({
-  batchId: z.string().uuid(),
-});
+export const exportBankUploadSchema = z
+  .object({
+    batchId: z.string().uuid().optional(),
+    batchIds: z.array(z.string().uuid()).min(1).max(50).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.batchId && !val.batchIds?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide batchId or batchIds',
+        path: ['batchIds'],
+      });
+    }
+  });

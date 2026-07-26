@@ -8,6 +8,15 @@ import { renderToPipeableStream } from "react-dom/server";
 
 const ABORT_DELAY = 15_000;
 
+/**
+ * How long Remix single-fetch waits for deferred promises to settle before
+ * rejecting them with "Server Timeout". The default is 4950ms which is too
+ * short for page-bundle loaders that fan out 10+ parallel API calls.
+ * Set slightly below ABORT_DELAY so rejections flush before the React stream
+ * aborts.
+ */
+export const streamTimeout = ABORT_DELAY - 50;
+
 export default function handleRequest(
   request: Request,
   responseStatusCode: number,

@@ -20,6 +20,7 @@ import {
   cashFlowSchema,
   agingSchema,
   postOpeningBalancesSchema,
+  repostPayrollBatchSchema,
   financialKPIsSchema,
   createAssetSchema,
   listAssetsSchema,
@@ -321,6 +322,18 @@ export const generalLedgerRouter = router({
         { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId) },
         { id: ctx.user.id },
       );
+    }),
+
+  /** Idempotent repair for paid batches that missed payroll GL auto-post. */
+  repostPayrollBatch: permissionProcedure('finance.ledger.write')
+    .input(repostPayrollBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().postPayrollBatch(input.batchId, { id: ctx.user.id });
+    }),
+
+  backfillPaidPayrollGl: permissionProcedure('finance.ledger.write')
+    .mutation(async ({ ctx }) => {
+      return getGeneralLedgerService().backfillPaidPayrollGlPosts({ id: ctx.user.id });
     }),
 
   // ─── Chart of Accounts seeding (admin / on-demand) ───────────────────────

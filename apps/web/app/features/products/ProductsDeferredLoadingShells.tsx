@@ -8,7 +8,9 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Tabs } from '~/components/ui/tabs';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 
 function productsHubShellColumns(): CompactTableColumn<{ id: string }>[] {
   return [
@@ -108,7 +110,6 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
         }
       />
       <OverviewStatStrip
-        mobileGrid
         items={[
           { label: 'Products', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Active', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -124,6 +125,38 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
           { value: 'offers', label: 'Offers' },
         ]}
       />
+
+      {/* Filters panel — matches ProductsListPage (filters alone in list-panel). */}
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0 !px-0 md:!px-4"
+          hideMobileSheet
+          searchRow={
+            <PageSearchControl
+              value=""
+              onApply={() => {}}
+              placeholder="Search by name..."
+              title="Search products"
+            />
+          }
+          desktopInlineFilters={
+            <div
+              className="h-9 w-full min-w-0 sm:w-40 rounded-md border border-app-border bg-app-hover animate-pulse"
+              aria-hidden
+            />
+          }
+          sheetFilterBody={
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+              <div
+                className="h-9 w-full rounded-md border border-app-border bg-app-hover animate-pulse"
+                aria-hidden
+              />
+            </div>
+          }
+        />
+      </div>
+
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -146,7 +179,7 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
         ))}
       </div>
 
-      {/* Desktop table */}
+      {/* Desktop table — CompactTable owns its card chrome (same as live list). */}
       <div className="hidden md:block">
         <CompactTable<{ id: string }>
           columns={productsHubShellColumns()}

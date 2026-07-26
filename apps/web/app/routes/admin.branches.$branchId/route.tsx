@@ -30,7 +30,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { RoleBadge, formatRoleLabel } from '~/components/ui/role-badge';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Pagination } from '~/components/ui/pagination';
@@ -1176,7 +1176,6 @@ function BranchMembersPanel({
   // The panel is rendered inside a department's detail view (already filtered
   // to that dept's members), so the dept-filter pills the panel used to show
   // were always showing a single locked option. Removed (CEO 2026-05-10).
-  const [searchDraft, setSearchDraft] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   // Backend-search fetcher — fires when the applied query is non-empty. Falls back to
   // the in-memory `members` prop when search is cleared so the initial paint
@@ -1291,25 +1290,13 @@ function BranchMembersPanel({
       <div className="space-y-2">
         <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-start md:gap-3">
           <div className="min-w-0 w-full md:flex-1">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setAppliedSearch(searchDraft.trim());
-              }}
-            >
-              <SearchInput
-                value={searchDraft}
-                onChange={(v) => {
-                  setSearchDraft(v);
-                  if (v.trim() === '') setAppliedSearch('');
-                }}
-                placeholder="Search by name or email…"
-                aria-label="Search members by name or email"
-                controlSize="sm"
-                withSubmitButton
-                wrapperClassName="w-full"
-              />
-            </form>
+            <PageSearchControl
+              value={appliedSearch}
+              onApply={setAppliedSearch}
+              placeholder="Search by name or email…"
+              title="Search members"
+              aria-label="Search members by name or email"
+            />
             {isSearching && isFetcherBusy ? (
               <p className="mt-1 text-mini text-app-fg-muted">Searching…</p>
             ) : isSearching && fetcherError ? (
@@ -1440,7 +1427,7 @@ function BranchMembersPanel({
                   const isSupervisor = supervisorUserIds?.has(m.userId) ?? false;
                   return (
                     <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 truncate">{m.name}</Link>
+                      <Link to={`/hr/users/${m.userId}`} className="font-medium text-app-fg hover:underline truncate">{m.name}</Link>
                       {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
                       {isSupervisor && (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded text-micro font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
@@ -1498,7 +1485,7 @@ function BranchMembersPanel({
                   <div className="flex items-center gap-2">
                     {rowSelection}
                     <div className="flex-1 min-w-0">
-                      <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 truncate block">{m.name}</Link>
+                      <Link to={`/hr/users/${m.userId}`} className="font-medium text-app-fg hover:underline truncate block">{m.name}</Link>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                         {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
                         {isSupervisor && (
@@ -1601,7 +1588,7 @@ function buildBranchTeamMemberColumns(
     {
       key: 'member',
       header: 'Member',
-      render: (m) => <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">{m.name}</Link>,
+      render: (m) => <Link to={`/hr/users/${m.userId}`} className="font-medium text-app-fg hover:underline">{m.name}</Link>,
     },
     {
       key: 'role',

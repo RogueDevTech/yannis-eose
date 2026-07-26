@@ -153,6 +153,8 @@ export interface UserCreateLoaderData {
   branchGroups?: Array<{ id: string; name: string }>;
   /** Viewer's role — drives group-section visibility in the branch picker. */
   viewerRole?: string;
+  /** Payroll pay roles for profile dropdown on edit user. */
+  payRoles?: Array<{ id: string; name: string; category: string }>;
 }
 
 // ─── User Detail Page Types ──────────────────────────────
@@ -171,6 +173,12 @@ export interface UserDetail {
   /** Product IDs from user_product_assignments (for edit form + save diff). */
   assignedProductIds?: string[];
   commissionPlanId: string | null;
+  payRoleId?: string | null;
+  employmentType?: string | null;
+  salaryBasis?: string | null;
+  taxStatus?: string | null;
+  reportsToUserId?: string | null;
+  crmLinked?: boolean | null;
   primaryBranchId: string | null;
   roleTemplateId?: string | null;
   scopeGlobal?: boolean;
@@ -227,6 +235,7 @@ export interface StaffPayoutEstimate {
 
 /** Narrow shape for last paid row on the earnings outlook card (from `hr.listPayouts`). */
 export interface UserPaidPayoutSnapshot {
+  id: string;
   periodStart: string;
   periodEnd: string;
   totalPayout: string;

@@ -51,6 +51,7 @@ import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
@@ -2011,14 +2012,13 @@ export class LogisticsService {
     // Phase 3 — when a remittance is created already RECEIVED, post its cash
     // settlement to the ledger too (same non-fatal, idempotent contract).
     if (result.markReceivedNow) {
-      try {
-        const posted = await this.generalLedger.postRemittanceSettlement(result.remittance.id, actor);
-        if (!posted.posted && posted.reason && posted.reason !== 'already-posted') {
-          this.logger.warn(`Remittance GL not posted for ${result.remittance.id}: ${posted.reason}`);
-        }
-      } catch (err) {
-        this.logger.warn(`Remittance GL posting for ${result.remittance.id} failed: ${err instanceof Error ? err.message : err}`);
-      }
+      await runGlPostWithFinanceAlert(
+        this.notifications,
+        this.logger,
+        'Remittance settlement (create)',
+        result.remittance.id,
+        () => this.generalLedger.postRemittanceSettlement(result.remittance.id, actor),
+      );
     }
 
     // Note: per-order order:status_changed socket events are intentionally not
@@ -3213,14 +3213,13 @@ export class LogisticsService {
     // Phase 3 — post the cash settlement to the general ledger (Dr Bank + fees /
     // Cr Debtors per order), nets the AR raised at delivery. Non-fatal + idempotent:
     // a ledger hiccup must never undo a confirmed remittance.
-    try {
-      const res = await this.generalLedger.postRemittanceSettlement(remittance.id, actor);
-      if (!res.posted && res.reason && res.reason !== 'already-posted') {
-        this.logger.warn(`Remittance GL not posted for ${remittance.id}: ${res.reason}`);
-      }
-    } catch (err) {
-      this.logger.warn(`Remittance GL posting for ${remittance.id} failed: ${err instanceof Error ? err.message : err}`);
-    }
+    await runGlPostWithFinanceAlert(
+      this.notifications,
+      this.logger,
+      'Remittance settlement (received)',
+      remittance.id,
+      () => this.generalLedger.postRemittanceSettlement(remittance.id, actor),
+    );
 
     this.notifications
       .createForLocation(remittance.logisticsLocationId, {
@@ -3507,6 +3506,7 @@ export class LogisticsService {
       this.db
         .select({
           id: schema.orders.id,
+          orderNumber: schema.orders.orderNumber,
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
           deliveredAt: schema.orders.deliveredAt,
@@ -3540,6 +3540,7 @@ export class LogisticsService {
     return {
       orders: orders.map((o) => ({
         id: o.id,
+        orderNumber: o.orderNumber ?? null,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
         deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,
@@ -3674,6 +3675,7 @@ export class LogisticsService {
 
     let orders: Array<{
       id: string;
+      orderNumber: number | null;
       customerName: string;
       totalAmount: string | null;
       deliveryFee: string | null;
@@ -3698,6 +3700,7 @@ export class LogisticsService {
       const orderRows = await this.db
         .select({
           id: schema.orders.id,
+          orderNumber: schema.orders.orderNumber,
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
           deliveryFee: schema.orders.deliveryFee,
@@ -3720,6 +3723,7 @@ export class LogisticsService {
         .where(inArray(schema.orders.id, orderIds));
       orders = orderRows.map((o) => ({
         id: o.id,
+        orderNumber: o.orderNumber ?? null,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
         deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,

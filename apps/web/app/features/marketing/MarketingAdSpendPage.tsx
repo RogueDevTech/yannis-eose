@@ -25,7 +25,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -230,7 +230,6 @@ export function MarketingAdSpendPage({
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [selectedCategory, setSelectedCategory] = useState(categoryFilter || 'AD_SPEND');
-  const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaignIdFilter || 'ALL');
   const [selectedMediaBuyerId, setSelectedMediaBuyerId] = useState(mediaBuyerIdFilter || 'ALL');
@@ -460,11 +459,10 @@ export function MarketingAdSpendPage({
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
-    setSearchQuery(searchFilter || '');
     setSelectedProductId(productIdFilter || 'ALL');
     setSelectedCampaignId(campaignIdFilter || 'ALL');
     setSelectedMediaBuyerId(mediaBuyerIdFilter || 'ALL');
-  }, [statusFilter, searchFilter, productIdFilter, campaignIdFilter, mediaBuyerIdFilter]);
+  }, [statusFilter, productIdFilter, campaignIdFilter, mediaBuyerIdFilter]);
 
   useEffect(() => {
     if (!showAdSpendForm) {
@@ -666,9 +664,8 @@ export function MarketingAdSpendPage({
     return mediaBuyersForFilter.filter((b) => memberSet.has(b.id));
   }, [selectedTeamId, marketingTeams, mediaBuyersForFilter]);
 
-  const handleAdSpendSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchParams(getListParams({ search: searchQuery.trim() || undefined, page: 1 }));
+  const applyAdSpendSearch = (query: string) => {
+    setSearchParams(getListParams({ search: query || undefined, page: 1 }));
   };
 
   const handleLogAdSpendSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -1525,15 +1522,12 @@ export function MarketingAdSpendPage({
           hideMobileSheet
           badgeCount={adSpendToolbarFilterBadge}
           searchRow={
-            <form onSubmit={handleAdSpendSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-              <SearchInput
-                value={searchQuery}
-                onChange={(val) => setSearchQuery(val)}
-                placeholder="Search ads…"
-                withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
-              />
-            </form>
+            <PageSearchControl
+              value={searchFilter || ''}
+              placeholder="Search ads…"
+              title="Search ads"
+              onApply={applyAdSpendSearch}
+            />
           }
           desktopInlineFilters={
             <>

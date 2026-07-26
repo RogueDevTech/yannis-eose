@@ -7,7 +7,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Pagination } from '~/components/ui/pagination';
@@ -152,7 +152,6 @@ export function FollowUpPage({
   const [selectAllMatchingCapped, setSelectAllMatchingCapped] = useState(false);
   const [selectAllMatchingError, setSelectAllMatchingError] = useState<string | null>(null);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState(filters.search);
   const [convertCartPrefill, setConvertCartPrefill] = useState<CartPrefill | null>(null);
   const [peekOrder, setPeekOrder] = useState<FollowUpPageData['orders'][number] | null>(null);
   const [customDateModalOpen, setCustomDateModalOpen] = useState(false);
@@ -278,10 +277,10 @@ export function FollowUpPage({
     setCustomDateModalOpen(false);
   };
 
-  const handleSearchSubmit = () => {
+  const applySearch = (query: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
-      if (searchQuery.trim()) next.set('search', searchQuery.trim());
+      if (query) next.set('search', query);
       else next.delete('search');
       next.set('page', '1');
       return next;
@@ -709,13 +708,11 @@ export function FollowUpPage({
           />
         </div>
         <div className="flex-1">
-          <SearchInput
-            value={searchQuery}
-            onChange={setSearchQuery}
+          <PageSearchControl
+            value={filters.search}
             placeholder={isCartView ? 'Search customer name…' : 'Search customer…'}
-            controlSize="sm"
-            withSubmitButton
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSearchSubmit(); } }}
+            title="Search customers"
+            onApply={applySearch}
           />
         </div>
       </div>

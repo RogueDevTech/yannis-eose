@@ -28,14 +28,20 @@ import { humanizeZodIssuesString } from '~/lib/api-error';
 import { clearLoaderCache } from '~/lib/loader-cache';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestamp } from '~/lib/format-date';
+import { Spinner } from '~/components/ui/spinner';
+import { PayslipPreviewModal } from '~/components/ui/payslip-preview-modal';
+import { downloadPayslipPdf } from '~/lib/payslip-pdf';
+import {
+  payslipFilename,
+  toPayslipPdfInput,
+  type PayslipApiRow,
+} from '~/features/hr/payslip-mappers';
 import type {
   UserDetail,
   UserDetailPageProps,
   UserCreateProduct,
   UserCreateLocation,
   UserCreateCommissionPlan,
-  UserPayoutRecord,
-  UserAdjustment,
   UserAuditEntry,
   UserMarketingMetrics,
   PendingEmailChange,
@@ -65,7 +71,6 @@ const UserDetailEarningsOutlookCard = lazy(() =>
 import { useFetcherToast } from '~/components/ui/toast';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
-import { Spinner } from '~/components/ui/spinner';
 import { DescriptionList, type DescriptionItem } from '~/components/ui/description-list';
 
 // ─── Constants ──────────────────────────────────────────
@@ -115,8 +120,6 @@ export function UserDetailPage({
   roleTemplates,
   locations,
   plans,
-  payouts,
-  adjustments,
   auditLog,
   pendingEmailChange,
   financeActivity,
@@ -176,7 +179,6 @@ export function UserDetailPage({
     | 'marketing'
     | 'funding'
     | 'permissions'
-    | 'payroll'
     | 'earnings'
     | 'finance'
     | 'activity';
@@ -341,8 +343,6 @@ export function UserDetailPage({
   >();
   const activityFetcher = useFetcher<{
     ok: boolean;
-    payouts: UserPayoutRecord[];
-    adjustments: UserAdjustment[];
     auditLog: UserAuditEntry[];
     financeActivity: { approvals: UserApprovalRecord[]; total: number } | null;
     error?: string;
@@ -350,21 +350,28 @@ export function UserDetailPage({
   const earningsFetcher = useFetcher<{
     ok: boolean;
     error?: string;
-    currentMonth?: {
+    month?: {
       periodLabel: string;
       periodStart: string;
       periodEnd: string;
       preview: StaffPayoutEstimate | null;
+      year: number;
+      monthIndex1: number;
     };
-    nextMonth?: {
-      periodLabel: string;
-      periodStart: string;
-      periodEnd: string;
-      preview: StaffPayoutEstimate | null;
-    };
+    isCurrentMonth?: boolean;
     lastPaidPayout?: UserPaidPayoutSnapshot | null;
     generatedAt?: string;
   }>();
+  const [earningsMonth, setEarningsMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const payslipFetcher = useFetcher<
+    | { ok: true; payslip: PayslipApiRow; error: null }
+    | { ok: false; payslip: null; error: string }
+  >();
+  const [viewingPayslipId, setViewingPayslipId] = useState<string | null>(null);
+  const [downloadingPayslipId, setDownloadingPayslipId] = useState<string | null>(null);
 
   // When page-bundle data is available, skip client-side resource route fetchers.
   const hasBundleCore = !!(bundleProducts || bundleRoleTemplates || bundleLocations || bundlePlans);
@@ -394,7 +401,7 @@ export function UserDetailPage({
   }, [isMarketingRole, user.id, hasBundleMarketing]);
 
   useEffect(() => {
-    if (openModal !== 'payroll' && openModal !== 'activity' && openModal !== 'finance') return;
+    if (openModal !== 'activity' && openModal !== 'finance') return;
     if (activityFetcher.data?.ok) return;
     void activityFetcher.load(`/api/hr-user-detail-activity-bundle/${user.id}`);
   }, [openModal, user.id]);
@@ -402,8 +409,12 @@ export function UserDetailPage({
   useEffect(() => {
     if (!showEarningsTab) return;
     if (openModal !== 'earnings') return;
-    void earningsFetcher.load(`/api/hr-user-detail-earnings/${user.id}`);
-  }, [openModal, user.id, showEarningsTab]);
+    const [yStr, mStr] = earningsMonth.split('-');
+    const y = Number(yStr);
+    const m = Number(mStr);
+    if (!y || !m) return;
+    void earningsFetcher.load(`/api/hr-user-detail-earnings/${user.id}?year=${y}&month=${m}`);
+  }, [openModal, user.id, showEarningsTab, earningsMonth]);
 
   const coreBundle = coreFetcher.data?.ok ? coreFetcher.data : null;
   const activityBundle = activityFetcher.data?.ok ? activityFetcher.data : null;
@@ -418,10 +429,6 @@ export function UserDetailPage({
     bundleLocations ?? coreBundle?.locations ?? locations ?? Promise.resolve([] as UserCreateLocation[]);
   const plansResolved =
     bundlePlans ?? coreBundle?.plans ?? plans ?? Promise.resolve([] as UserCreateCommissionPlan[]);
-  const payoutsResolved =
-    activityBundle?.payouts ?? payouts ?? Promise.resolve([] as UserPayoutRecord[]);
-  const adjustmentsResolved =
-    activityBundle?.adjustments ?? adjustments ?? Promise.resolve([] as UserAdjustment[]);
   const auditLogResolved =
     activityBundle?.auditLog ?? auditLog ?? Promise.resolve([] as UserAuditEntry[]);
   const pushStatusResolved =
@@ -597,156 +604,6 @@ export function UserDetailPage({
     'HEAD_OF_LOGISTICS',
     'STOCK_MANAGER',
   ].includes(user.role);
-
-  const payoutColumns = useMemo(
-    (): CompactTableColumn<UserPayoutRecord>[] => [
-      {
-        key: 'period',
-        header: 'Period',
-        render: (p) => (
-          <span className="text-sm">
-            {new Date(p.periodStart).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-            })}
-            {' — '}
-            {new Date(p.periodEnd).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </span>
-        ),
-      },
-      {
-        key: 'gross',
-        header: 'Gross',
-        align: 'right',
-        render: (p) => (
-          <span className="text-right text-sm text-app-fg">
-            {formatNaira(Number(p.grossAmount))}
-          </span>
-        ),
-      },
-      {
-        key: 'deductions',
-        header: 'Deductions',
-        align: 'right',
-        render: (p) => (
-          <span className="text-right text-sm text-danger-600 dark:text-danger-400">
-            {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
-          </span>
-        ),
-      },
-      {
-        key: 'net',
-        header: 'Net',
-        align: 'right',
-        render: (p) => (
-          <span className="text-right text-sm font-semibold text-app-fg">
-            {formatNaira(Number(p.netAmount))}
-          </span>
-        ),
-      },
-      {
-        key: 'status',
-        header: 'Status',
-        render: (p) => (
-          <span
-            className={
-              p.status === 'PAID'
-                ? 'badge-success'
-                : p.status === 'PENDING'
-                  ? 'badge-warning'
-                  : 'badge'
-            }
-          >
-            {p.status}
-          </span>
-        ),
-      },
-    ],
-    [],
-  );
-
-  const adjustmentColumns = useMemo(
-    (): CompactTableColumn<UserAdjustment>[] => [
-      {
-        key: 'type',
-        header: 'Type',
-        render: (adj) => (
-          <span
-            className={
-              adj.type === 'BONUS' || adj.type === 'ADD_ON' ? 'badge-success' : 'badge-danger'
-            }
-          >
-            {adj.type.replace(/_/g, ' ')}
-          </span>
-        ),
-      },
-      {
-        key: 'amount',
-        header: 'Amount',
-        align: 'right',
-        render: (adj) => (
-          <span
-            className={`text-right text-sm font-medium ${
-              adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
-                ? 'text-danger-600 dark:text-danger-400'
-                : 'text-success-600 dark:text-success-400'
-            }`}
-          >
-            {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
-              ? formatNaira(-Math.abs(Number(adj.amount)))
-              : `+${formatNaira(Number(adj.amount))}`}
-          </span>
-        ),
-      },
-      {
-        key: 'reason',
-        header: 'Reason',
-        render: (adj) => (
-          <span
-            className="text-sm text-app-fg-muted max-w-[200px] truncate"
-            title={adj.reason ?? undefined}
-          >
-            {adj.reason || '—'}
-          </span>
-        ),
-        cellTitle: (adj) => adj.reason ?? undefined,
-      },
-      {
-        key: 'status',
-        header: 'Status',
-        render: (adj) => (
-          <span
-            className={
-              adj.status === 'APPROVED'
-                ? 'badge-success'
-                : adj.status === 'PENDING'
-                  ? 'badge-warning'
-                  : 'badge'
-            }
-          >
-            {adj.status}
-          </span>
-        ),
-      },
-      {
-        key: 'date',
-        header: 'Date',
-        render: (adj) => (
-          <span className="text-sm text-app-fg-muted">
-            {new Date(adj.createdAt).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-            })}
-          </span>
-        ),
-      },
-    ],
-    [],
-  );
 
   const financeApprovalColumns = useMemo(
     (): CompactTableColumn<UserApprovalRecord>[] => [
@@ -1451,7 +1308,7 @@ export function UserDetailPage({
           />
         )}
         {showPayrollTab && (
-          <SectionCard label="Payroll" onClick={() => setOpenModal('payroll')} />
+          <SectionCard label="Payslips & history" linkTo={`/hr/users/${user.id}/history`} />
         )}
         {showEarningsTab && (
           <SectionCard
@@ -1661,65 +1518,10 @@ export function UserDetailPage({
         </Modal>
       )}
 
-      {/* ─── Payroll modal ─────────────────────────────── */}
-      {openModal === 'payroll' && (
-        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-4xl">
-          <div className="p-4 space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-app-fg">Payroll</h2>
-              <button
-                type="button"
-                onClick={() => setOpenModal(null)}
-                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <DeferredSection resolve={payoutsResolved} skeleton="table">
-              {(payoutList) => (
-                <div className="list-panel">
-                  <div className="px-4 py-3 border-b border-app-border">
-                    <h3 className="text-sm font-semibold text-app-fg">Payout History</h3>
-                  </div>
-                  <CompactTable<UserPayoutRecord>
-                    caption="Payout history"
-                    columns={payoutColumns}
-                    rows={payoutList}
-                    rowKey={(p) => p.id}
-                    withCard={false}
-                    className="min-w-[640px]"
-                    emptyTitle="No payout records found"
-                  />
-                </div>
-              )}
-            </DeferredSection>
-            <DeferredSection resolve={adjustmentsResolved} skeleton="table">
-              {(adjList) => (
-                <div className="list-panel">
-                  <div className="px-4 py-3 border-b border-app-border">
-                    <h3 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h3>
-                  </div>
-                  <CompactTable<UserAdjustment>
-                    caption="Adjustments and bonuses"
-                    columns={adjustmentColumns}
-                    rows={adjList}
-                    rowKey={(adj) => adj.id}
-                    withCard={false}
-                    className="min-w-[720px]"
-                    emptyTitle="No adjustments found"
-                  />
-                </div>
-              )}
-            </DeferredSection>
-          </div>
-        </Modal>
-      )}
-
       {/* ─── Earnings outlook modal ────────────────────── */}
       {openModal === 'earnings' && showEarningsTab && (
-        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-3xl">
-          <div className="p-4 space-y-6">
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-lg">
+          <div className="p-4 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-app-fg">Earnings outlook</h2>
               <button
@@ -1731,12 +1533,15 @@ export function UserDetailPage({
                 ×
               </button>
             </div>
-            <div className="rounded-lg border border-app-border bg-app-hover/40 px-4 py-3 text-xs text-app-fg-muted">
-              <p>
-                These figures are a <strong className="text-app-fg">running estimate</strong> from
-                your attributed orders and commission plan — they update as you deliver. HR still
-                finalises amounts in payroll batches; bonuses and adjustments may change the final
-                payout.
+            <div className="flex items-center gap-2">
+              <input
+                type="month"
+                value={earningsMonth}
+                onChange={(e) => setEarningsMonth(e.target.value)}
+                className="h-10 md:h-9 flex-1 rounded-lg border border-app-border bg-app-bg px-3 text-sm text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <p className="text-xs text-app-fg-muted shrink-0">
+                Estimate only
               </p>
             </div>
             {(() => {
@@ -1760,28 +1565,17 @@ export function UserDetailPage({
               }
               return (
                 <>
-                  <div className="grid gap-6 lg:grid-cols-2">
-                    {ep.currentMonth ? (
-                      <Suspense fallback={<Spinner className="mx-auto my-8" />}>
-                        <UserDetailEarningsOutlookCard
-                          heading="This month (so far)"
-                          periodLabel={ep.currentMonth.periodLabel}
-                          preview={ep.currentMonth.preview}
-                        />
-                      </Suspense>
-                    ) : null}
-                    {ep.nextMonth ? (
-                      <Suspense fallback={<Spinner className="mx-auto my-8" />}>
-                        <UserDetailEarningsOutlookCard
-                          heading="Next calendar month (early outlook)"
-                          periodLabel={ep.nextMonth.periodLabel}
-                          preview={ep.nextMonth.preview}
-                        />
-                      </Suspense>
-                    ) : null}
-                  </div>
+                  {ep.month ? (
+                    <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+                      <UserDetailEarningsOutlookCard
+                        heading={ep.isCurrentMonth ? 'This month (so far)' : ep.month.periodLabel}
+                        periodLabel={ep.isCurrentMonth ? ep.month.periodLabel : ''}
+                        preview={ep.month.preview}
+                      />
+                    </Suspense>
+                  ) : null}
                   {ep.lastPaidPayout ? (
-                    <div className="card p-4 space-y-2">
+                    <div className="card p-4 space-y-3">
                       <h3 className="text-sm font-semibold text-app-fg">Last paid payroll</h3>
                       <p className="text-xs text-app-fg-muted">
                         Period{' '}
@@ -1789,7 +1583,7 @@ export function UserDetailPage({
                           month: 'short',
                           day: 'numeric',
                         })}{' '}
-                        —{' '}
+                        to{' '}
                         {new Date(ep.lastPaidPayout.periodEnd).toLocaleDateString('en-NG', {
                           month: 'short',
                           day: 'numeric',
@@ -1799,18 +1593,116 @@ export function UserDetailPage({
                       <p className="text-lg font-bold text-app-fg">
                         {formatNaira(Number(ep.lastPaidPayout.totalPayout))}
                       </p>
-                      <p className="text-xs text-app-fg-muted">
-                        After Finance marks a batch paid, your next cycle starts fresh —
-                        open <strong>Payroll</strong> for full history.
-                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {ep.lastPaidPayout.id ? (
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() => {
+                              setViewingPayslipId(ep.lastPaidPayout!.id);
+                              void payslipFetcher.load(`/api/hr-payslip/${ep.lastPaidPayout!.id}`);
+                            }}
+                          >
+                            View payslip
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setOpenModal(null);
+                            navigate(`/hr/users/${user.id}/history`);
+                          }}
+                        >
+                          All payslips
+                        </Button>
+                      </div>
                     </div>
-                  ) : null}
+                  ) : (
+                    <p className="text-xs text-app-fg-muted">
+                      Paid payslips appear here after Finance marks a payroll batch paid.{' '}
+                      <Link
+                        to={`/hr/users/${user.id}/history`}
+                        className="font-medium text-app-fg hover:underline"
+                        onClick={() => setOpenModal(null)}
+                      >
+                        Open history
+                      </Link>
+                    </p>
+                  )}
                 </>
               );
             })()}
           </div>
         </Modal>
       )}
+
+      {(() => {
+        const row =
+          payslipFetcher.data?.ok &&
+          viewingPayslipId &&
+          payslipFetcher.data.payslip?.payout.id === viewingPayslipId
+            ? payslipFetcher.data.payslip
+            : null;
+        const pdf = row ? toPayslipPdfInput(row) : null;
+        const busy =
+          !!viewingPayslipId &&
+          (payslipFetcher.state === 'loading' ||
+            payslipFetcher.state === 'submitting' ||
+            !payslipFetcher.data ||
+            (payslipFetcher.data.ok && payslipFetcher.data.payslip.payout.id !== viewingPayslipId));
+        const err =
+          !!viewingPayslipId &&
+          payslipFetcher.state === 'idle' &&
+          payslipFetcher.data &&
+          !payslipFetcher.data.ok
+            ? payslipFetcher.data.error
+            : null;
+        if (pdf) {
+          return (
+            <PayslipPreviewModal
+              payslip={pdf}
+              title={`View · ${pdf.employeeName} · ${pdf.periodLabel}`}
+              downloading={downloadingPayslipId === row?.payout.id}
+              onDownload={
+                row
+                  ? () => {
+                      void (async () => {
+                        setDownloadingPayslipId(row.payout.id);
+                        try {
+                          await downloadPayslipPdf(toPayslipPdfInput(row), payslipFilename(row));
+                        } finally {
+                          setDownloadingPayslipId(null);
+                        }
+                      })();
+                    }
+                  : undefined
+              }
+              onClose={() => setViewingPayslipId(null)}
+            />
+          );
+        }
+        if (!viewingPayslipId) return null;
+        return (
+          <Modal
+            open
+            onClose={() => setViewingPayslipId(null)}
+            maxWidth="max-w-md"
+            contentClassName="p-6 space-y-4"
+          >
+            <h2 className="text-base font-semibold text-app-fg">Payslip</h2>
+            {busy ? (
+              <div className="flex justify-center py-10">
+                <Spinner />
+              </div>
+            ) : (
+              <InlineNotification variant="danger" message={err ?? 'Payslip could not be loaded.'} />
+            )}
+          </Modal>
+        );
+      })()}
 
       {/* ─── Finance Activity modal ────────────────────── */}
       {openModal === 'finance' && showFinanceTab && (

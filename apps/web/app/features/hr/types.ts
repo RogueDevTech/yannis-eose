@@ -57,7 +57,7 @@ export interface PayoutSummary {
 // ── Payroll Batches (multi-stage monthly workflow) ─────────────
 
 export type PayrollBatchStatus = 'DRAFT' | 'PENDING_HR' | 'PENDING_FINANCE' | 'PAID';
-export type PayrollDepartment = 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR';
+export type PayrollDepartment = 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT';
 
 export interface PayrollBatch {
   id: string;
@@ -102,6 +102,7 @@ export interface ViewerInfo {
   id: string;
   role: string;
   currentBranchId: string | null;
+  permissions?: string[];
   prepareDepartments?: PayrollDepartment[];
   prepareBranchIds?: string[];
 }
@@ -129,4 +130,9 @@ export interface HRStreamData {
   monthlyPayrolls: MonthlyPayrollGroup[];
   branches: BranchOption[];
   viewer: ViewerInfo;
+  filters: {
+    startDate: string;
+    endDate: string;
+    periodAllTime: boolean;
+  };
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { useFetcher, useNavigate } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { formatRoleLabel } from '~/components/ui/role-badge';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -19,6 +19,8 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -29,7 +31,9 @@ import { TextInput } from '~/components/ui/text-input';
 import type { Adjustment, HRUser, HRStreamData } from './types';
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
+import { PayrollBankPayExportModal } from './PayrollBankPayExportModal';
 import { ADMIN_ROLES, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
+import { hasFinanceAccess } from '~/lib/rbac';
 
 const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 
@@ -53,11 +57,14 @@ export function HRPage({
   monthlyPayrolls,
   branches,
   viewer,
+  filters,
 }: HRStreamData) {
+  const navigate = useNavigate();
   const fetcher = useFetcher();
   const hrSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
+  const [showBankPayExport, setShowBankPayExport] = useState(false);
   const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -98,6 +105,26 @@ export function HRPage({
 
   const isAdmin = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
   const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER';
+  const canExportBankPay =
+    isAdmin ||
+    hasFinanceAccess(viewer) ||
+    (viewer.permissions ?? []).includes('finance.disburse');
+
+  const showGenerateButton = useMemo(() => {
+    const generatableDepartments = ADMIN_ROLES.has(viewer.role)
+      ? ALL_DEPARTMENTS
+      : viewer.prepareDepartments?.length
+        ? viewer.prepareDepartments
+        : viewer.role === 'HR_MANAGER'
+          ? ['LOGISTICS', 'HR']
+          : ALL_DEPARTMENTS.filter((d) => DEPT_OWNER_ROLE[d] === viewer.role);
+    const generatableBranches = ADMIN_ROLES.has(viewer.role)
+      ? branches
+      : viewer.prepareBranchIds?.length
+        ? branches.filter((b) => viewer.prepareBranchIds?.includes(b.id))
+        : branches.filter((b) => b.id === viewer.currentBranchId);
+    return generatableDepartments.length > 0 && generatableBranches.length > 0;
+  }, [viewer, branches]);
 
   return (
     <div className="space-y-4">
@@ -113,6 +140,17 @@ export function HRPage({
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  chrome="pill"
+                />
+                {canExportBankPay ? (
+                  <Button variant="secondary" size="sm" onClick={() => setShowBankPayExport(true)}>
+                    Export bank pay
+                  </Button>
+                ) : null}
                 {isHrOrFinance ? (
                   <Button
                     variant="primary"
@@ -122,25 +160,64 @@ export function HRPage({
                     + Add-on
                   </Button>
                 ) : null}
+                {showGenerateButton ? (
+                  <Button variant="primary" size="sm" onClick={() => navigate('/hr/payroll/generate')}>
+                    + Generate Monthly Batch
+                  </Button>
+                ) : null}
               </div>
             }
-            sheet={({ closeSheet }) =>
-              isHrOrFinance ? (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowAddAdjustment(true);
-                  }}
-                >
-                  + Add-on
-                </Button>
-              ) : null
-            }
+            sheet={({ closeSheet }) => (
+              <div className="space-y-2">
+                {canExportBankPay ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowBankPayExport(true);
+                    }}
+                  >
+                    Export bank pay
+                  </Button>
+                ) : null}
+                {isHrOrFinance ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowAddAdjustment(true);
+                    }}
+                  >
+                    + Add-on
+                  </Button>
+                ) : null}
+                {showGenerateButton ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      navigate('/hr/payroll/generate');
+                    }}
+                  >
+                    + Generate Monthly Batch
+                  </Button>
+                ) : null}
+              </div>
+            )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       {actionError &&
@@ -287,7 +364,6 @@ export function HRPage({
         <MonthlyPayrolls
           monthlyPayrolls={monthlyPayrolls}
           branches={branches}
-          viewer={viewer}
         />
       )}
 
@@ -432,6 +508,15 @@ export function HRPage({
           )}
         </DeferredSection>
       )}
+
+      {canExportBankPay ? (
+        <PayrollBankPayExportModal
+          open={showBankPayExport}
+          onClose={() => setShowBankPayExport(false)}
+          monthlyPayrolls={monthlyPayrolls}
+          branches={branches}
+        />
+      ) : null}
     </div>
   );
 }

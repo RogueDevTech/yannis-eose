@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useFetcher, useNavigate } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { DateInput } from '~/components/ui/date-input';
 import { NumberInput } from '~/components/ui/number-input';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -84,9 +84,12 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
           onChange={(e) => setPostingDate(e.target.value)}
           wrapperClassName="w-44"
         />
-        <div className="flex-1 min-w-[200px]">
-          <SearchInput value={search} onChange={setSearch} placeholder="Filter accounts" />
-        </div>
+        <PageSearchControl
+          value={search}
+          onApply={setSearch}
+          placeholder="Filter accounts"
+          title="Filter accounts"
+        />
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-app-border">

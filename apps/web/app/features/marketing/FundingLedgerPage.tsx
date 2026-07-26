@@ -9,7 +9,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -66,7 +66,16 @@ export function FundingLedgerPage({
 }: FundingLedgerLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [detailEntry, setDetailEntry] = useState<FundingLedgerEntry | null>(null);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') ?? '');
+  const appliedSearch = searchParams.get('search') ?? '';
+  const applySearch = (query: string) => {
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (query) next.set('search', query);
+      else next.delete('search');
+      return next;
+    });
+  };
   const [showExport, setShowExport] = useState(false);
 
   const columns = useMemo(
@@ -327,38 +336,12 @@ export function FundingLedgerPage({
             badgeCount={(entryTypeFilter !== 'all' ? 1 : 0) + (mediaBuyers.length > 1 && selectedUserId ? 1 : 0)}
             desktopInlineFilters={
               <>
-                <form
-                  className="contents"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.set('page', '1');
-                      if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                      else next.delete('search');
-                      return next;
-                    });
-                  }}
-                >
-                  <SearchInput
-                    name="search"
-                    placeholder="Search by name or description..."
-                    value={searchQuery}
-                    onChange={(val) => {
-                      setSearchQuery(val);
-                      if (!val.trim() && searchParams.get('search')) {
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.delete('search');
-                          next.set('page', '1');
-                          return next;
-                        });
-                      }
-                    }}
-                    withSubmitButton
-                    wrapperClassName="w-full sm:min-w-[280px]"
-                  />
-                </form>
+                <PageSearchControl
+                  value={appliedSearch}
+                  placeholder="Search by name or description..."
+                  title="Search ledger"
+                  onApply={applySearch}
+                />
                 {mediaBuyers.length > 1 && (
                   <SearchableSelect
                     id="ledger-user-filter"
@@ -397,37 +380,12 @@ export function FundingLedgerPage({
               <>
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Search</span>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                        else next.delete('search');
-                        return next;
-                      });
-                    }}
-                  >
-                    <SearchInput
-                      name="search"
-                      placeholder="Search..."
-                      value={searchQuery}
-                      onChange={(val) => {
-                        setSearchQuery(val);
-                        if (!val.trim() && searchParams.get('search')) {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.delete('search');
-                            next.set('page', '1');
-                            return next;
-                          });
-                        }
-                      }}
-                      withSubmitButton
-                      wrapperClassName="w-full"
-                    />
-                  </form>
+                  <PageSearchControl
+                    value={appliedSearch}
+                    placeholder="Search..."
+                    title="Search ledger"
+                    onApply={applySearch}
+                  />
                 </div>
                 {mediaBuyers.length > 1 && (
                   <div className="space-y-1.5">

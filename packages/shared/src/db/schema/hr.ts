@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, numeric, jsonb, timestamp, integer, date } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, integer, date, boolean } from 'drizzle-orm/pg-core';
 import { branchGroups } from './branch-groups';
 import {
   payoutStatusEnum,
@@ -6,10 +6,14 @@ import {
   userRoleEnum,
   payrollBatchStatusEnum,
   payrollDepartmentEnum,
+  payrollPayRoleCategoryEnum,
+  payrollBatchScopeTypeEnum,
+  payrollPayslipLineStatusEnum,
 } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { branches } from './branches';
+import { products } from './products';
 
 // Table 17: commission_plans — JSONB commission rules
 export const commissionPlans = pgTable('commission_plans', {
@@ -18,6 +22,8 @@ export const commissionPlans = pgTable('commission_plans', {
   groupId: uuid('group_id').references(() => branchGroups.id),
   /** When NULL, the plan is not a role default — staff must reference it via `users.commission_plan_id`. */
   role: userRoleEnum('role'),
+  /** Optional link to payroll pay role library entry. */
+  payRoleId: uuid('pay_role_id'),
   planName: text('plan_name').notNull(),
   rules: jsonb('rules').notNull(),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),
@@ -25,6 +31,74 @@ export const commissionPlans = pgTable('commission_plans', {
   createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+/** Pay role library — drives formula assignment per PRD Section 7.3. */
+export const payrollPayRoles = pgTable('payroll_pay_roles', {
+  id: uuidv7Pk(),
+  groupId: uuid('group_id').references(() => branchGroups.id),
+  name: text('name').notNull(),
+  category: payrollPayRoleCategoryEnum('category').notNull(),
+  reportsToRequired: boolean('reports_to_required').default(false).notNull(),
+  perProductBonus: boolean('per_product_bonus').default(false).notNull(),
+  commissionPlanId: uuid('commission_plan_id').references(() => commissionPlans.id),
+  active: boolean('active').default(true).notNull(),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+/** Product DR tier tables for CS per-product bonuses — Section 7.2. */
+export const payrollProductTierConfigs = pgTable('payroll_product_tier_configs', {
+  id: uuidv7Pk(),
+  groupId: uuid('group_id').references(() => branchGroups.id),
+  productId: uuid('product_id').references(() => products.id),
+  productName: text('product_name').notNull(),
+  branchIds: uuid('branch_ids').array(),
+  active: boolean('active').default(true).notNull(),
+  tierRows: jsonb('tier_rows').notNull().default([]),
+  effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),
+  effectiveTo: timestamp('effective_to', { withTimezone: true }),
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+/** Versioned PAYE band configuration — Section 7.5. */
+export const payrollTaxBandConfigs = pgTable('payroll_tax_band_configs', {
+  id: uuidv7Pk(),
+  groupId: uuid('group_id').references(() => branchGroups.id),
+  label: text('label').default('Default PAYE').notNull(),
+  taxFreeThreshold: numeric('tax_free_threshold', { precision: 14, scale: 2 }).default('800000').notNull(),
+  bands: jsonb('bands').notNull().default([]),
+  reliefs: jsonb('reliefs').notNull().default([]),
+  effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),
+  effectiveTo: timestamp('effective_to', { withTimezone: true }),
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+/** External agency contractors — fixed monthly fee, no PAYE. */
+export const payrollContractors = pgTable('payroll_contractors', {
+  id: uuidv7Pk(),
+  groupId: uuid('group_id').references(() => branchGroups.id),
+  name: text('name').notNull(),
+  branchId: uuid('branch_id').references(() => branches.id),
+  monthlyFee: numeric('monthly_fee', { precision: 14, scale: 2 }).notNull(),
+  bankName: text('bank_name'),
+  bankCode: text('bank_code'),
+  accountNumber: text('account_number'),
+  accountName: text('account_name'),
+  bankVerified: boolean('bank_verified').default(false).notNull(),
+  active: boolean('active').default(true).notNull(),
+  jobTitle: text('job_title'),
+  notes: text('notes'),
   ...temporalColumns,
   ...timestampColumns,
 });
@@ -50,6 +124,12 @@ export const payrollBatches = pgTable('payroll_batches', {
   department: payrollDepartmentEnum('department').notNull(),
   status: payrollBatchStatusEnum('status').default('DRAFT').notNull(),
 
+  scopeType: payrollBatchScopeTypeEnum('scope_type').default('DEPARTMENT'),
+  scopeBranchIds: uuid('scope_branch_ids').array(),
+  scopeEmployeeIds: uuid('scope_employee_ids').array(),
+  includeContractors: boolean('include_contractors').default(false).notNull(),
+  runLabel: text('run_label'),
+
   /** Head/HR who initially generated the batch (null = system auto-generated). */
   preparedBy: uuid('prepared_by').references(() => users.id),
   preparedAt: timestamp('prepared_at', { withTimezone: true }),
@@ -68,6 +148,8 @@ export const payrollBatches = pgTable('payroll_batches', {
   financeProcessedBy: uuid('finance_processed_by').references(() => users.id),
   /** Free-form payment reference (bank transfer ID, cheque number, batch payout reference). */
   financeReference: text('finance_reference'),
+  disbursementDate: date('disbursement_date'),
+  proofOfPaymentUrl: text('proof_of_payment_url'),
 
   /** Last rejection note — clears on next forward transition; see audit history for full trail. */
   rejectionReason: text('rejection_reason'),
@@ -77,19 +159,21 @@ export const payrollBatches = pgTable('payroll_batches', {
   /** Denormalised summary for the monthly list view; recomputed on every payout edit. */
   staffCount: integer('staff_count').default(0).notNull(),
   totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).default('0').notNull(),
+  totalGross: numeric('total_gross', { precision: 14, scale: 2 }).default('0').notNull(),
+  totalTax: numeric('total_tax', { precision: 14, scale: 2 }).default('0').notNull(),
+  totalNet: numeric('total_net', { precision: 14, scale: 2 }).default('0').notNull(),
 
   ...temporalColumns,
   ...timestampColumns,
 });
 
-// Table 18: payout_records — staff settlement periods
+// Table 18: payout_records — staff settlement periods (PayslipLine snapshot)
 export const payoutRecords = pgTable('payout_records', {
   id: uuidv7Pk(),
   /** Parent batch — null only on legacy rows from before payroll batches existed. */
   batchId: uuid('batch_id').references(() => payrollBatches.id),
-  staffId: uuid('staff_id')
-    .notNull()
-    .references(() => users.id),
+  staffId: uuid('staff_id').references(() => users.id),
+  contractorId: uuid('contractor_id').references(() => payrollContractors.id),
   periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
   periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
   baseSalary: numeric('base_salary', { precision: 12, scale: 2 }).default('0').notNull(),
@@ -97,6 +181,18 @@ export const payoutRecords = pgTable('payout_records', {
   addOnsTotal: numeric('add_ons_total', { precision: 12, scale: 2 }).default('0').notNull(),
   deductionsTotal: numeric('deductions_total', { precision: 12, scale: 2 }).default('0').notNull(),
   totalPayout: numeric('total_payout', { precision: 12, scale: 2 }).default('0').notNull(),
+  /** PRD PayslipLine extended fields */
+  metricsSnapshot: jsonb('metrics_snapshot'),
+  bonusBreakdown: jsonb('bonus_breakdown'),
+  allowancesTotal: numeric('allowances_total', { precision: 12, scale: 2 }).default('0').notNull(),
+  grossPay: numeric('gross_pay', { precision: 12, scale: 2 }).default('0').notNull(),
+  payeTax: numeric('paye_tax', { precision: 12, scale: 2 }).default('0').notNull(),
+  employerPayeSubsidy: numeric('employer_paye_subsidy', { precision: 12, scale: 2 }).default('0').notNull(),
+  netPay: numeric('net_pay', { precision: 12, scale: 2 }).default('0').notNull(),
+  lineStatus: payrollPayslipLineStatusEnum('line_status').default('OK'),
+  overrideReason: text('override_reason'),
+  manualAdjustments: jsonb('manual_adjustments').default([]),
+  payRoleName: text('pay_role_name'),
   status: payoutStatusEnum('status').default('DRAFT').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,

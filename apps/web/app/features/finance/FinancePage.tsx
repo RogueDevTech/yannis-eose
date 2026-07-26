@@ -9,13 +9,20 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Tabs } from '~/components/ui/tabs';
 import { FinanceCashRemittanceSection, FinancePayrollSection, FinanceDisbursementSection } from './finance-overview-pulse';
-import { FinanceKPIDashboard } from './finance-kpi-dashboard';
 import type { FinanceOverviewLoaderData } from './types';
 
-type FinanceTab = 'remittance' | 'disbursements' | 'payroll' | 'kpis';
+type FinanceTab = 'remittance' | 'disbursements' | 'payroll';
 
 export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
-  const { pulse, filters, branches = [], fundingSummary, byProduct = [], byLocation = [], kpis } = data;
+  const {
+    pulse,
+    payrollOverview,
+    filters,
+    branches = [],
+    fundingSummary,
+    byProduct = [],
+    byLocation = [],
+  } = data;
   const [, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<FinanceTab>('remittance');
@@ -132,7 +139,6 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
           { value: 'remittance', label: 'Cash remittance' },
           { value: 'disbursements', label: 'Disbursements' },
           { value: 'payroll', label: 'Payroll' },
-          { value: 'kpis', label: 'Health KPIs' },
         ]}
       />
 
@@ -145,17 +151,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
       )}
 
       {activeTab === 'payroll' && (
-        <FinancePayrollSection pulse={pulse} />
-      )}
-
-      {activeTab === 'kpis' && kpis && (
-        <FinanceKPIDashboard kpis={kpis} />
-      )}
-
-      {activeTab === 'kpis' && !kpis && (
-        <p className="text-sm text-app-muted py-8 text-center">
-          No GL data available. Post journal entries to see financial health KPIs.
-        </p>
+        <FinancePayrollSection payroll={payrollOverview} />
       )}
     </div>
   );

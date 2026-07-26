@@ -1049,6 +1049,13 @@ export class UsersService {
         visibleOrderStatuses: schema.users.visibleOrderStatuses,
         restrictProductAccess: schema.users.restrictProductAccess,
         commissionPlanId: schema.users.commissionPlanId,
+        payRoleId: schema.users.payRoleId,
+        employmentType: schema.users.employmentType,
+        salaryBasis: schema.users.salaryBasis,
+        taxStatus: schema.users.taxStatus,
+        reportsToUserId: schema.users.reportsToUserId,
+        crmLinked: schema.users.crmLinked,
+        onboardingPayrollStatus: schema.users.onboardingPayrollStatus,
         primaryBranchId: schema.users.primaryBranchId,
         roleTemplateId: schema.users.roleTemplateId,
         scopeGlobal: schema.users.scopeGlobal,
@@ -1365,6 +1372,7 @@ export class UsersService {
           payoutBankCode: schema.users.payoutBankCode,
           isTeamSupervisor: schema.users.isTeamSupervisor,
           userNumber: schema.users.userNumber,
+          payRoleId: schema.users.payRoleId,
         })
         .from(schema.users)
         .where(whereClause)

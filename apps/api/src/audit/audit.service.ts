@@ -45,6 +45,8 @@ const AUDITABLE_TABLES = [
   'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
   'invoices', 'approval_requests', 'budgets', 'settlement_configs',
   'commission_plans', 'payout_records', 'earnings_adjustments',
+  'payroll_batches', 'payroll_pay_roles', 'payroll_product_tier_configs',
+  'payroll_tax_band_configs', 'payroll_contractors',
   'stock_reconciliations',
   'email_change_requests', 'user_product_assignments',
   'permission_requests', 'system_settings',
@@ -137,6 +139,7 @@ const HISTORY_TABLES_WITH_BRANCH_ID = new Set<string>([
   'inventory_levels',
   'commission_plans',
   'payout_records',
+  'payroll_batches',
   'logistics_locations',
   'branch_teams',
 ]);

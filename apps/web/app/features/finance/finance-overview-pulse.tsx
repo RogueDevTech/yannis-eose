@@ -5,7 +5,12 @@ import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { formatNaira } from '~/lib/format-amount';
 import { RemittanceInfoIcon as InfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
-import type { FinanceOverviewPulse, FundingSummary, RemittanceBreakdownRow } from './types';
+import type {
+  FinanceOverviewPulse,
+  FinancePayrollOverview,
+  FundingSummary,
+  RemittanceBreakdownRow,
+} from './types';
 
 export function FinanceCashRemittanceSection({
   pulse,
@@ -336,38 +341,107 @@ function BreakdownList({
   );
 }
 
-export function FinancePayrollSection({ pulse }: { pulse: FinanceOverviewPulse }) {
+export function FinancePayrollSection({ payroll }: { payroll: FinancePayrollOverview }) {
+  const pending = payroll.pendingFinance;
+  const paid = payroll.paidInPeriod;
+  const period = payroll.periodCost;
+  const maxRoleNet = Math.max(...payroll.byPayRole.map((r) => r.totalNet), 1);
+
   return (
-    <Card>
-      <CardHeader
-        title="Payroll"
-        description="Payroll batches and approval requests awaiting finance action."
-      />
-      <CardBody className="-mt-2">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Link
-            to="/hr/payroll"
-            className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
-          >
-            <p className="text-xs font-medium text-app-fg-muted">Payroll awaiting Finance</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
-              {pulse.payrollPendingFinanceCount}
+    <div className="space-y-4">
+      <Card>
+        <CardHeader
+          title="Payroll"
+          description="Payroll cost for the selected period and branch (pay-role lines from payroll batches)."
+        />
+        <CardBody className="-mt-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Link
+              to="/hr/payroll"
+              className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
+            >
+              <p className="text-xs font-medium text-app-fg-muted">Awaiting Finance</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
+                {formatNaira(Math.round(pending.totalNet))}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                {pending.batchCount} pending batch(es) · {pending.staffCount} staff in filters
+              </p>
+            </Link>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Paid in period</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-success-600 dark:text-success-400">
+                {formatNaira(Math.round(paid.totalNet))}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                {paid.batchCount} batch(es) · {paid.staffCount} staff
+              </p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Period gross</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
+                {formatNaira(Math.round(period.totalGross))}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                Pending Finance + Paid in filters
+              </p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
+              <p className="text-xs font-medium text-app-fg-muted">Period PAYE</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
+                {formatNaira(Math.round(period.totalTax))}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-0.5">
+                Tax on pending + paid batches
+              </p>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Cost by pay role"
+          description="Net pay from payout lines in the selected period, grouped by pay role on each payslip."
+        />
+        <CardBody className="-mt-2">
+          {payroll.byPayRole.length === 0 ? (
+            <p className="text-sm text-app-fg-muted py-4 text-center">
+              No payroll lines in this period yet.
             </p>
-            <p className="text-xs text-app-fg-muted mt-0.5">Batch(es) in PENDING_FINANCE</p>
-          </Link>
-          <Link
-            to="/admin/finance/disbursements"
-            className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
-          >
-            <p className="text-xs font-medium text-app-fg-muted">Approval inbox</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
-              {pulse.approvalsPendingCount}
-            </p>
-            <p className="text-xs text-app-fg-muted mt-0.5">Finance approval request(s) pending</p>
-          </Link>
-        </div>
-      </CardBody>
-    </Card>
+          ) : (
+            <div className="space-y-2 max-h-[20rem] overflow-y-auto">
+              {payroll.byPayRole.map((row) => {
+                const pct = Math.min(100, (row.totalNet / maxRoleNet) * 100);
+                return (
+                  <div key={row.label}>
+                    <div className="flex items-center justify-between gap-2 text-xs mb-1">
+                      <span className="min-w-0 truncate font-medium text-app-fg" title={row.label}>
+                        {row.label}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="tabular-nums text-app-fg-muted">
+                          {row.headcount} line(s)
+                        </span>
+                        <span className="font-semibold tabular-nums text-app-fg">
+                          {formatNaira(Math.round(row.totalNet))}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-app-border">
+                      <div
+                        className="h-full rounded-full bg-brand-500/70 dark:bg-brand-600/75"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+    </div>
   );
 }
 

@@ -15,7 +15,7 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { Pagination } from '~/components/ui/pagination';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -397,12 +397,11 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
       {/* Filters + Search + Smart Pick */}
       <div className="space-y-2">
         <div className="flex flex-wrap items-end gap-2">
-          <SearchInput
+          <PageSearchControl
             value={search}
-            onChange={(v) => { setSearch(v); setPage(1); }}
             placeholder="Search by name, order ID, or closer..."
-            withSubmitButton
-            wrapperClassName="min-w-0 flex-1 max-w-sm"
+            title="Search orders"
+            onApply={(query) => { setSearch(query); setPage(1); }}
           />
           <FormSelect
             value={statusFilter}

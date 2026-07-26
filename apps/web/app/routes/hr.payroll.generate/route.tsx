@@ -1,7 +1,7 @@
-import { useLoaderData, Await } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   getCurrentUser,
@@ -127,6 +127,8 @@ export async function action({ request }: ActionFunctionArgs) {
         branchId: formData.get('branchId')?.toString() ?? '',
         department: formData.get('department')?.toString() ?? '',
         periodMonth,
+        includeContractors: formData.get('includeContractors') === 'on',
+        runLabel: formData.get('runLabel')?.toString() || undefined,
       },
     });
     if (!res.ok) {
@@ -179,10 +181,13 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function HrPayrollGenerateRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<GeneratePayrollLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => <PayrollGeneratePage branches={data.branches} viewer={data.viewer} />}
-      </Await>
-    </Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<GeneratePayrollLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
+      {(data) => <PayrollGeneratePage branches={data.branches} viewer={data.viewer} />}
+    </CachedAwait>
   );
 }

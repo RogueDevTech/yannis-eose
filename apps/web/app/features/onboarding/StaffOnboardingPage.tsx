@@ -907,7 +907,7 @@ export function StaffOnboardingPage({
           <Card>
             <CardHeader
               title="Payout bank details"
-              description="Where Finance sends your payroll. Required before review."
+              description="Where Finance sends your payroll. Bank, bank code, account name, and account number are required before review."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Bank" hint="Pick from the list. Bank code fills in automatically.">
@@ -927,9 +927,20 @@ export function StaffOnboardingPage({
               </FormField>
               <FormField
                 label="Bank code"
-                hint={bankCode ? `Auto-filled from ${bankName || 'selected bank'}` : '3-digit CBN code'}
+                hint={
+                  bankCode
+                    ? `Auto-filled from ${bankName || 'selected bank'}. Edit if Finance needs a different code.`
+                    : 'Required. Pick a bank above or type the CBN/NIBSS code.'
+                }
               >
-                <TextInput value={bankCode} disabled readOnly placeholder="—" />
+                <TextInput
+                  name="payoutBankCodeVisible"
+                  value={bankCode}
+                  onChange={(e) => setBankCode(e.target.value.trim())}
+                  placeholder="e.g. 058"
+                  maxLength={20}
+                  inputMode="numeric"
+                />
               </FormField>
               <FormField label="Account name" hint="As it appears on your bank statement">
                 <TextInput

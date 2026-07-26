@@ -23,7 +23,7 @@ export function UserDetailEarningsOutlookCard({
     <div className="card p-0 overflow-hidden">
       <div className="px-4 py-3 border-b border-app-border">
         <h3 className="text-sm font-semibold text-app-fg">{heading}</h3>
-        <p className="text-xs text-app-fg-muted mt-0.5">{periodLabel}</p>
+        {periodLabel ? <p className="text-xs text-app-fg-muted mt-0.5">{periodLabel}</p> : null}
       </div>
       <div className="p-4">
         {!preview ? (

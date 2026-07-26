@@ -91,11 +91,14 @@ interface StatusBadgeProps {
   variant?: BadgeVariant;
   /** Custom display label — defaults to formatted status string */
   label?: string;
+  /** @deprecated Default is now dot+text. Kept for backward compat (no-op). */
   showDot?: boolean;
   /** Render only a colored dot (no text/border). Tooltip shows status on tap/hover. */
   dotOnly?: boolean;
-  /** Dot + colored text, no pill background/border. */
+  /** @deprecated Default is now dot+text. Kept for backward compat (no-op). */
   textOnly?: boolean;
+  /** Opt-in outlined pill style (background + border, no dot). */
+  pill?: boolean;
   size?: BadgeSize;
   className?: string;
 }
@@ -116,33 +119,25 @@ const textColorClasses: Record<BadgeVariant, string> = {
   brand: 'text-brand-600 dark:text-brand-400',
 };
 
+const dotSizeClasses: Record<BadgeSize, string> = {
+  sm: 'w-1 h-1',
+  md: 'w-1.5 h-1.5',
+  lg: 'w-2 h-2',
+};
+
 export function StatusBadge({
   status,
   variant,
   label,
-  showDot = false,
+  showDot: _showDot,
   dotOnly = false,
-  textOnly = false,
+  textOnly: _textOnly,
+  pill = false,
   size = 'md',
   className = '',
 }: StatusBadgeProps) {
   const resolvedVariant = variant ?? STATUS_VARIANT_MAP[status.toLowerCase()] ?? 'neutral';
   const displayLabel = label ?? ORDER_STATUS_LABELS[status] ?? formatStatusLabel(status);
-
-  if (textOnly) {
-    return (
-      <span
-        className={[
-          'inline-flex items-center gap-1.5 text-xs font-medium',
-          textColorClasses[resolvedVariant],
-          className,
-        ].filter(Boolean).join(' ')}
-      >
-        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dotColorClasses[resolvedVariant]}`} />
-        {displayLabel}
-      </span>
-    );
-  }
 
   if (dotOnly) {
     return (
@@ -160,26 +155,35 @@ export function StatusBadge({
     );
   }
 
+  // Pill variant — outlined badge with background (opt-in)
+  if (pill) {
+    return (
+      <span
+        className={[
+          'inline-flex items-center rounded-full font-medium leading-none',
+          variantClasses[resolvedVariant],
+          sizeClasses[size],
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {displayLabel}
+      </span>
+    );
+  }
+
+  // Default: dot + colored text (no pill background)
   return (
     <span
       className={[
-        'inline-flex items-center rounded-full font-medium leading-none',
-        variantClasses[resolvedVariant],
+        'inline-flex items-center font-medium whitespace-nowrap',
         sizeClasses[size],
+        textColorClasses[resolvedVariant],
         className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      ].filter(Boolean).join(' ')}
     >
-      {showDot && (
-        <span
-          className={[
-            'rounded-full shrink-0',
-            dotColorClasses[resolvedVariant],
-            size === 'lg' ? 'w-2 h-2' : 'w-1.5 h-1.5',
-          ].join(' ')}
-        />
-      )}
+      <span className={`inline-block rounded-full shrink-0 ${dotSizeClasses[size]} ${dotColorClasses[resolvedVariant]}`} />
       {displayLabel}
     </span>
   );

@@ -71,7 +71,7 @@ function getGreeting() {
 export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuickDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
   const statusCounts = data.statusCounts ?? {};
-  const offlineCount = data.offlineCount ?? 0;
+
   const cartCounts = data.cartOrdersCounts ?? {};
   const cartTotal = Object.entries(cartCounts).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
 
@@ -127,22 +127,6 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
   // DR = delivered / total
   const delivered = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
   const deliveryRate = total > 0 ? (delivered / total) * 100 : 0;
-
-  const csPipelineItems = PIPELINE_KEYS.map((status) => {
-    let value = statusCounts[status] ?? 0;
-    if (status === 'DELIVERED') {
-      value += statusCounts['REMITTED'] ?? 0;
-    }
-    if (status === 'CONFIRMED' && confirmedAbsorbsSubstages) {
-      for (const sub of CONFIRMED_SUBSTAGES) value += statusCounts[sub] ?? 0;
-    }
-    return {
-      label: STATUS_LABELS[status] ?? formatStatus(status),
-      value,
-      valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
-      to: salesLink({ status }),
-    };
-  });
 
   const pipelineItems = PIPELINE_KEYS.map((status) => {
     let value = statusCounts[status] ?? 0;
@@ -215,53 +199,6 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
               value: cartTotal,
               valueClassName: 'text-orange-600 dark:text-orange-400',
               to: cartOrdersLink(),
-            },
-          ]}
-        />
-      </div>
-
-      {/* CS Order Funnel */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-app-fg">CS Order Funnel</h2>
-          <Link
-            to={salesLink()}
-            prefetch="intent"
-            className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-          >
-            View all →
-          </Link>
-        </div>
-        <OverviewStatStrip
-          mobileGrid
-          embedded
-          showScrollControls={false}
-          items={[
-            {
-              label: 'Total',
-              value: total,
-              valueClassName: 'text-app-fg',
-              to: salesLink(),
-            },
-            ...csPipelineItems,
-            {
-              label: 'CR',
-              value: `${confirmationRate.toFixed(1)}%`,
-              valueClassName: confirmationRateColorClass(confirmationRate),
-              title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
-            },
-            {
-              label: 'DR',
-              value: `${deliveryRate.toFixed(1)}%`,
-              valueClassName: deliveryRateColorClass(deliveryRate),
-              title: 'Delivery Rate — delivered / total orders',
-            },
-            {
-              label: 'Offline',
-              value: offlineCount,
-              valueClassName: offlineCount > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-app-fg',
-              title: 'Orders created manually via offline order',
-              to: salesLink({ orderSource: 'offline' }),
             },
           ]}
         />

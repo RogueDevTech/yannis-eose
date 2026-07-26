@@ -7,7 +7,7 @@ import { csOrdersStatPulseStripItems } from '~/features/cs/CSDeferredLoadingShel
 export function CSQueueDataSkeleton() {
   return (
     <div className="space-y-4">
-      <OverviewStatStrip mobileGrid items={csOrdersStatPulseStripItems()} />
+      <OverviewStatStrip items={csOrdersStatPulseStripItems()} />
 
       {/* Live carts card */}
       <div className="card">

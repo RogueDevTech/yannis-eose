@@ -27,7 +27,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Tabs } from '~/components/ui/tabs';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { FilteredTotalsRow } from '~/components/ui/filtered-totals-row';
@@ -396,26 +396,18 @@ export function DisbursementsPage({
   // Optimistic filter state: switch tab/filter immediately, then fetch in background
   const [optimisticStatus, setOptimisticStatus] = useState(filters.status || 'ALL');
   const [optimisticReceiver, setOptimisticReceiver] = useState(filters.receiver || 'ALL');
-  // Search input is intentionally NOT optimistic — we only fire on submit so the user gets a
-  // single, debounce-free query against the server. Prefilled from the URL on mount/back-nav.
-  const [searchQuery, setSearchQuery] = useState(filters.search || '');
   const [showExportModal, setShowExportModal] = useState(false);
   const [fundingFlowRecord, setFundingFlowRecord] = useState<DisbursementRecord | null>(null);
-  const [balancesSearchQuery, setBalancesSearchQuery] = useState(filters.balancesSearch || '');
   const [balancesRoleFilter, setBalancesRoleFilter] = useState(filters.balancesRole || 'ALL');
   const [balancesStatusFilter, setBalancesStatusFilter] = useState(filters.balancesStatus || 'ALL');
   useEffect(() => {
     setOptimisticStatus(filters.status || 'ALL');
     setOptimisticReceiver(filters.receiver || 'ALL');
-    setSearchQuery(filters.search || '');
-    setBalancesSearchQuery(filters.balancesSearch || '');
     setBalancesRoleFilter(filters.balancesRole || 'ALL');
     setBalancesStatusFilter(filters.balancesStatus || 'ALL');
   }, [
     filters.status,
     filters.receiver,
-    filters.search,
-    filters.balancesSearch,
     filters.balancesRole,
     filters.balancesStatus,
   ]);
@@ -436,11 +428,11 @@ export function DisbursementsPage({
   const disbursementsFilterBadge =
     (optimisticStatus !== 'ALL' ? 1 : 0) +
     (optimisticReceiver !== 'ALL' ? 1 : 0) +
-    (searchQuery.trim() ? 1 : 0);
+    ((filters.search || '').trim() ? 1 : 0);
   const balancesFilterBadge =
     (balancesRoleFilter !== 'ALL' ? 1 : 0) +
     (balancesStatusFilter !== 'ALL' ? 1 : 0) +
-    (balancesSearchQuery.trim() ? 1 : 0);
+    ((filters.balancesSearch || '').trim() ? 1 : 0);
   const activeFilterBadge =
     mainTab === 'disbursements' ? disbursementsFilterBadge
     : mainTab === 'balances' ? balancesFilterBadge
@@ -495,27 +487,22 @@ export function DisbursementsPage({
     });
   };
 
-  /** Submit handler — fires on form submit so we don't hit the server on every keystroke.
-   * Server-side search matches against sender name, receiver name, or row ID. */
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  /** Apply search — server-side match against sender name, receiver name, or row ID. */
+  const applySearch = (query: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
-      const q = searchQuery.trim();
-      if (q) next.set('search', q);
+      if (query) next.set('search', query);
       else next.delete('search');
       return next;
     });
   };
 
-  const handleBalancesSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const applyBalancesSearch = (query: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('balancesPage', '1');
-      const q = balancesSearchQuery.trim();
-      if (q) next.set('balancesSearch', q);
+      if (query) next.set('balancesSearch', query);
       else next.delete('balancesSearch');
       return next;
     });
@@ -1008,7 +995,7 @@ export function DisbursementsPage({
         initialFilters={{
           status: optimisticStatus !== 'ALL' ? optimisticStatus : undefined,
           receiverId: optimisticReceiver !== 'ALL' ? optimisticReceiver : undefined,
-          search: searchQuery || undefined,
+          search: filters.search || undefined,
         }}
       />
 
@@ -1081,19 +1068,13 @@ export function DisbursementsPage({
               hideMobileSheet
               badgeCount={disbursementsFilterBadge}
               searchRow={
-                <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-                  <SearchInput
-                    type="search"
-                    value={searchQuery}
-                    onChange={(v) => setSearchQuery(v)}
-                    placeholder="Search by sender, receiver, or ID..."
-                    controlSize="sm"
-                    clearable
-                    withSubmitButton
-                    wrapperClassName="flex-1 min-w-0"
-                    aria-label="Search disbursements"
-                  />
-                </form>
+                <PageSearchControl
+                  value={filters.search || ''}
+                  placeholder="Search by sender, receiver, or ID..."
+                  title="Search disbursements"
+                  aria-label="Search disbursements"
+                  onApply={applySearch}
+                />
               }
               desktopInlineFilters={
                 <>
@@ -1297,19 +1278,13 @@ export function DisbursementsPage({
               hideMobileSheet
               badgeCount={balancesFilterBadge}
               searchRow={
-                <form onSubmit={handleBalancesSearchSubmit} className="flex min-w-0 flex-1 gap-2">
-                  <SearchInput
-                    type="search"
-                    value={balancesSearchQuery}
-                    onChange={(v) => setBalancesSearchQuery(v)}
-                    placeholder="Search recipient name..."
-                    controlSize="sm"
-                    clearable
-                    withSubmitButton
-                    wrapperClassName="flex-1 min-w-0"
-                    aria-label="Search recipient balances"
-                  />
-                </form>
+                <PageSearchControl
+                  value={filters.balancesSearch || ''}
+                  placeholder="Search recipient name..."
+                  title="Search balances"
+                  aria-label="Search recipient balances"
+                  onApply={applyBalancesSearch}
+                />
               }
               desktopInlineFilters={
                 <>
