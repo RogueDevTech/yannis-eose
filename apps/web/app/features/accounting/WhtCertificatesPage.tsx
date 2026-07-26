@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -9,6 +9,11 @@ import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import {
+  applyOptimisticPatches,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -21,11 +26,14 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { Modal } from '~/components/ui/modal';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
+import { DateTimeText } from '~/components/ui/date-time-text';
+import { optimisticId } from '~/lib/optimistic';
 
 export interface WhtDeductionRow {
   id: string;
   vendorName: string;
   paymentDate: string;
+  createdAt?: string | null;
   grossAmount: string;
   whtRate: string;
   whtAmount: string;
@@ -44,10 +52,51 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
   const [searchParams, setSearchParams] = useSearchParams();
   const [showModal, setShowModal] = useState(false);
   const [generateTarget, setGenerateTarget] = useState<WhtDeductionRow | null>(null);
-  const recordFetcher = useFetcher();
-  const certFetcher = useFetcher();
+  const recordFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const certFetcher = useFetcher<{ success?: boolean; error?: string }>();
 
   useCloseOnFetcherSuccess(recordFetcher, () => setShowModal(false));
+  useCloseOnFetcherSuccess(certFetcher, () => setGenerateTarget(null));
+
+  const buildRecordRows = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'recordWht') return null;
+    const vendorName = fd.get('vendorName')?.toString()?.trim();
+    const paymentDate = fd.get('paymentDate')?.toString()?.trim();
+    const grossAmount = Number(fd.get('grossAmount') || 0);
+    const whtRate = Number(fd.get('whtRate') || 5);
+    if (!vendorName || !paymentDate || !(grossAmount > 0)) return null;
+    const whtAmount = (grossAmount * whtRate) / 100;
+    const netAmount = grossAmount - whtAmount;
+    const description = fd.get('description')?.toString()?.trim() || null;
+    return [
+      {
+        id: optimisticId('wht'),
+        vendorName,
+        paymentDate,
+        createdAt: new Date().toISOString(),
+        grossAmount: String(grossAmount),
+        whtRate: String(whtRate),
+        whtAmount: String(whtAmount),
+        netAmount: String(netAmount),
+        description,
+        certificateGenerated: false,
+      } satisfies WhtDeductionRow,
+    ];
+  }, []);
+
+  const buildCertPatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'generateCertificate') return null;
+    const id = fd.get('deductionId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { certificateGenerated: true } }];
+  }, []);
+
+  const optimisticRecords = useOptimisticListMerge<WhtDeductionRow>(recordFetcher, buildRecordRows);
+  const certPatches = useOptimisticListPatches<WhtDeductionRow>(certFetcher, buildCertPatches);
+  const displayRecords = useMemo(() => {
+    const merged = [...optimisticRecords, ...records];
+    return applyOptimisticPatches(merged, certPatches);
+  }, [optimisticRecords, records, certPatches]);
 
   const onPageChange = (page: number) => {
     const next = new URLSearchParams(searchParams);
@@ -55,9 +104,9 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
     setSearchParams(next);
   };
 
-  const totalGross = records.reduce((s, r) => s + Number(r.grossAmount), 0);
-  const totalWht = records.reduce((s, r) => s + Number(r.whtAmount), 0);
-  const totalNet = records.reduce((s, r) => s + Number(r.netAmount), 0);
+  const totalGross = displayRecords.reduce((s, r) => s + Number(r.grossAmount), 0);
+  const totalWht = displayRecords.reduce((s, r) => s + Number(r.whtAmount), 0);
+  const totalNet = displayRecords.reduce((s, r) => s + Number(r.netAmount), 0);
 
   const recordWhtButton = (
     <Button variant="primary" size="sm" onClick={() => setShowModal(true)}>
@@ -74,7 +123,7 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
     {
       key: 'paymentDate',
       header: 'Date',
-      render: (r) => <span className="text-sm text-app-fg-muted">{r.paymentDate}</span>,
+      render: (r) => <DateTimeText at={r.createdAt} dateOnly={r.paymentDate} className="text-sm" />,
     },
     {
       key: 'grossAmount',
@@ -163,7 +212,7 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
         ]}
       />
 
-      {records.length === 0 ? (
+      {displayRecords.length === 0 ? (
         <EmptyState
           title="No WHT deductions recorded"
           description="Record a withholding tax deduction to start tracking."
@@ -172,7 +221,7 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
         <>
           <CompactTable
             columns={columns}
-            rows={records}
+            rows={displayRecords}
             rowKey={(r) => r.id}
             renderMobileCard={(r) => (
               <div className="space-y-1">
@@ -185,7 +234,7 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
-                  <span>{r.paymentDate}</span>
+                  <DateTimeText at={r.createdAt} dateOnly={r.paymentDate} className="text-xs" />
                   <span>Gross <NairaPrice amount={Number(r.grossAmount)} className="ml-1 text-app-fg" /></span>
                   <span>WHT <NairaPrice amount={Number(r.whtAmount)} className="ml-1 text-app-fg" /></span>
                 </div>
@@ -229,7 +278,6 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
             { intent: 'generateCertificate', deductionId: generateTarget.id },
             { method: 'post' },
           );
-          setGenerateTarget(null);
         }}
       />
 

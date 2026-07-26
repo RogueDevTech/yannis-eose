@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -19,6 +19,12 @@ import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import {
+  applyOptimisticPatches,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+import { DateTimeText } from '~/components/ui/date-time-text';
+import { formatDateOnly } from '~/lib/format-date';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -268,11 +274,72 @@ function ReconciliationDetail({
 }: {
   detail: ReconDetail;
 }) {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [unmatchTarget, setUnmatchTarget] = useState<ReconLine | null>(null);
   const [matchLineId, setMatchLineId] = useState<string | null>(null);
   const [matchGlEntryId, setMatchGlEntryId] = useState('');
+
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setMatchLineId(null);
+    setMatchGlEntryId('');
+    setUnmatchTarget(null);
+    setShowCompleteConfirm(false);
+  });
+
+  const buildLinePatches = useCallback((fd: FormData, intent: string) => {
+    if (intent === 'matchLine') {
+      const id = fd.get('lineId')?.toString();
+      const glEntryId = fd.get('glEntryId')?.toString()?.trim();
+      if (!id || !glEntryId) return null;
+      return [{ id, patch: { status: 'MATCHED' as const, glEntryId } }];
+    }
+    if (intent === 'unmatchLine') {
+      const id = fd.get('lineId')?.toString();
+      if (!id) return null;
+      return [
+        {
+          id,
+          patch: {
+            status: 'UNMATCHED' as const,
+            glEntryId: null,
+            glDate: null,
+            glDescription: null,
+            glAmount: null,
+            matchedAt: null,
+          },
+        },
+      ];
+    }
+    return null;
+  }, []);
+
+  const linePatches = useOptimisticListPatches<ReconLine>(fetcher, buildLinePatches);
+  const displayLines = useMemo(
+    () => applyOptimisticPatches(detail.lines, linePatches),
+    [detail.lines, linePatches],
+  );
+
+  const buildStatusPatches = useCallback(
+    (fd: FormData, intent: string) => {
+      if (intent !== 'completeReconciliation') return null;
+      const id = fd.get('reconciliationId')?.toString();
+      if (!id || id !== detail.id) return null;
+      return [{ id, patch: { status: 'COMPLETED' as const } }];
+    },
+    [detail.id],
+  );
+  const statusPatches = useOptimisticListPatches<{ id: string; status: ReconDetail['status'] }>(
+    fetcher,
+    buildStatusPatches,
+  );
+  const displayStatus = useMemo(() => {
+    const patched = applyOptimisticPatches(
+      [{ id: detail.id, status: detail.status }],
+      statusPatches,
+    );
+    return patched[0]?.status ?? detail.status;
+  }, [detail.id, detail.status, statusPatches]);
 
   const handleMatch = (lineId: string) => {
     setMatchLineId(lineId);
@@ -285,8 +352,6 @@ function ReconciliationDetail({
       { intent: 'matchLine', lineId: matchLineId, glEntryId: matchGlEntryId.trim() },
       { method: 'POST' },
     );
-    setMatchLineId(null);
-    setMatchGlEntryId('');
   };
 
   const handleUnmatchConfirm = () => {
@@ -295,7 +360,6 @@ function ReconciliationDetail({
       { intent: 'unmatchLine', lineId: unmatchTarget.id },
       { method: 'POST' },
     );
-    setUnmatchTarget(null);
   };
 
   const handleCompleteConfirm = () => {
@@ -303,11 +367,10 @@ function ReconciliationDetail({
       { intent: 'completeReconciliation', reconciliationId: detail.id },
       { method: 'POST' },
     );
-    setShowCompleteConfirm(false);
   };
 
-  const matchedCount = detail.lines.filter((l) => l.status === 'MATCHED').length;
-  const unmatchedCount = detail.lines.filter((l) => l.status === 'UNMATCHED').length;
+  const matchedCount = displayLines.filter((l) => l.status === 'MATCHED').length;
+  const unmatchedCount = displayLines.filter((l) => l.status === 'UNMATCHED').length;
 
   const lineColumns: CompactTableColumn<ReconLine>[] = [
     {
@@ -356,7 +419,7 @@ function ReconciliationDetail({
       key: 'actions',
       header: '',
       render: (r) =>
-        detail.status === 'IN_PROGRESS' ? (
+        displayStatus === 'IN_PROGRESS' ? (
           r.status === 'UNMATCHED' ? (
             <CompactTableActionButton onClick={() => handleMatch(r.id)} tone="brand">
               Match
@@ -384,7 +447,7 @@ function ReconciliationDetail({
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                {detail.status === 'IN_PROGRESS' ? (
+                {displayStatus === 'IN_PROGRESS' ? (
                   <Button type="button" size="sm" onClick={() => setShowCompleteConfirm(true)}>
                     Complete
                   </Button>
@@ -394,7 +457,7 @@ function ReconciliationDetail({
               </div>
             }
             sheet={
-              detail.status === 'IN_PROGRESS' ? (
+              displayStatus === 'IN_PROGRESS' ? (
                 <Button type="button" className="w-full" onClick={() => setShowCompleteConfirm(true)}>
                   Complete
                 </Button>
@@ -409,7 +472,7 @@ function ReconciliationDetail({
       <MobileDateFilterRow
         hideDate
         actionsSheet={
-          detail.status === 'IN_PROGRESS' ? (
+          displayStatus === 'IN_PROGRESS' ? (
             <Button type="button" className="w-full" onClick={() => setShowCompleteConfirm(true)}>
               Complete
             </Button>
@@ -423,14 +486,14 @@ function ReconciliationDetail({
           { label: 'Statement Balance', value: <NairaPrice amount={detail.statementBalance} /> },
           { label: 'GL Balance', value: <NairaPrice amount={detail.glBalance} /> },
           { label: 'Difference', value: <NairaPrice amount={detail.difference} colorize /> },
-          { label: 'Matched', value: `${matchedCount} / ${detail.lines.length}` },
+          { label: 'Matched', value: `${matchedCount} / ${displayLines.length}` },
           { label: 'Unmatched', value: String(unmatchedCount) },
         ]}
       />
 
       <CompactTable
         columns={lineColumns}
-        rows={detail.lines}
+        rows={displayLines}
         rowKey={(r) => r.id}
         renderMobileCard={(r) => {
           const s = LINE_STATUS[r.status] ?? { label: r.status, variant: 'warning' as const };
@@ -462,7 +525,7 @@ function ReconciliationDetail({
         }
         details={
           <ul className="list-disc pl-4 space-y-1 text-sm">
-            <li>{matchedCount} of {detail.lines.length} lines matched</li>
+            <li>{matchedCount} of {displayLines.length} lines matched</li>
             {unmatchedCount > 0 ? (
               <li>{unmatchedCount} unmatched line{unmatchedCount === 1 ? '' : 's'} will remain unmatched</li>
             ) : (
@@ -549,7 +612,12 @@ export function BankReconciliationPage({
     {
       key: 'statementDate',
       header: 'Statement Date',
-      render: (r) => <span className="text-sm">{r.statementDate}</span>,
+      render: (r) => <span className="text-sm tabular-nums">{formatDateOnly(r.statementDate)}</span>,
+    },
+    {
+      key: 'createdAt',
+      header: 'Created',
+      render: (r) => <DateTimeText at={r.createdAt} className="text-sm" />,
     },
     {
       key: 'statementBalance',
@@ -655,8 +723,8 @@ export function BankReconciliationPage({
                     </span>
                     <StatusBadge status={r.status} label={s.label} variant={s.variant} />
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                    <span>{r.statementDate}</span>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <DateTimeText at={r.createdAt} dateOnly={r.statementDate} className="text-xs" />
                     <NairaPrice amount={r.statementBalance} className="font-medium text-app-fg" />
                   </div>
                 </Link>

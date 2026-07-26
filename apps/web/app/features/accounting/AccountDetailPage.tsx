@@ -21,6 +21,7 @@ import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { DateTimeText } from '~/components/ui/date-time-text';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -39,12 +40,14 @@ export interface AccountInfo {
 export interface LedgerEntryRow {
   id: string;
   postingDate: string;
+  createdAt?: string | null;
   journalEntryNumber: number | null;
   description: string;
   debit: string;
   credit: string;
   runningBalance: string;
   voucherType: string;
+  journalStatus?: string | null;
 }
 
 export interface AccountDetailPageProps {
@@ -117,9 +120,7 @@ export function AccountDetailPage({
       key: 'postingDate',
       header: 'Date',
       render: (r) => (
-        <span className="text-xs tabular-nums text-app-fg-muted whitespace-nowrap">
-          {r.postingDate}
-        </span>
+        <DateTimeText at={r.createdAt} dateOnly={r.postingDate} className="text-xs" />
       ),
     },
     {
@@ -141,8 +142,11 @@ export function AccountDetailPage({
       key: 'description',
       header: 'Description',
       render: (r) => (
-        <span className="text-sm text-app-fg truncate max-w-[200px] md:max-w-[300px] block">
-          {r.description || '\u2014'}
+        <span className={`text-sm truncate max-w-[200px] md:max-w-[300px] block ${r.journalStatus === 'CANCELLED' ? 'text-app-fg-muted line-through' : 'text-app-fg'}`}>
+          {r.description || 'No description'}
+          {r.journalStatus === 'CANCELLED' && (
+            <StatusBadge status="CANCELLED" size="sm" className="ml-1.5 no-underline" />
+          )}
         </span>
       ),
     },
@@ -150,13 +154,17 @@ export function AccountDetailPage({
       key: 'debit',
       header: 'Debit',
       align: 'right',
-      render: (r) => <NairaPrice amount={r.debit} zeroAsDash className="tabular-nums" />,
+      render: (r) => Number(r.debit) > 0
+        ? <span className="text-danger-600 dark:text-danger-400 tabular-nums"><NairaPrice amount={r.debit} /></span>
+        : <span className="text-app-fg-muted">-</span>,
     },
     {
       key: 'credit',
       header: 'Credit',
       align: 'right',
-      render: (r) => <NairaPrice amount={r.credit} zeroAsDash className="tabular-nums" />,
+      render: (r) => Number(r.credit) > 0
+        ? <span className="text-success-600 dark:text-success-400 tabular-nums"><NairaPrice amount={r.credit} /></span>
+        : <span className="text-app-fg-muted">-</span>,
     },
     {
       key: 'runningBalance',
@@ -176,7 +184,7 @@ export function AccountDetailPage({
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-xs tabular-nums text-app-fg-muted">{r.postingDate}</span>
+            <DateTimeText at={r.createdAt} dateOnly={r.postingDate} className="text-xs" />
             {r.journalEntryNumber ? (
               <Link
                 to={`/admin/finance/journal-entries?search=${encodeURIComponent(formatJeNumber(r.journalEntryNumber))}`}

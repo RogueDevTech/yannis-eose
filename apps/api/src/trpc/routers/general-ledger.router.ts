@@ -47,6 +47,9 @@ import {
   consolidatedPLSchema,
   consolidatedBSSchema,
   consolidatedCFSchema,
+  listAccountMappingsSchema,
+  updateAccountMappingSchema,
+  resetAccountMappingSchema,
 } from '@yannis/shared';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
@@ -560,5 +563,32 @@ export const generalLedgerRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Consolidated reports require admin access.' });
       }
       return getGeneralLedgerService().consolidatedCashFlow(input.startDate, input.endDate);
+    }),
+
+  // ─── GL Account Mappings ─────────────────────────────────────────────────
+  listAccountMappings: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(listAccountMappingsSchema)
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().listAccountMappings(
+        resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role),
+      );
+    }),
+
+  updateAccountMapping: permissionProcedure('finance.ledger.write')
+    .input(updateAccountMappingSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().updateAccountMapping(
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
+        { id: ctx.user.id },
+      );
+    }),
+
+  resetAccountMapping: permissionProcedure('finance.ledger.write')
+    .input(resetAccountMappingSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().resetAccountMapping(
+        { ...input, groupId: resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role) },
+        { id: ctx.user.id },
+      );
     }),
 });

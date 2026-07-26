@@ -38,7 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>(
-        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)' }))}`,
+        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)', status: 'POSTED' }))}`,
         { method: 'GET', cookie },
       ),
     ]);

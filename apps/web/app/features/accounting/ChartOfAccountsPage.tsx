@@ -16,6 +16,12 @@ import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import {
+  applyOptimisticPatches,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+import { optimisticId } from '~/lib/optimistic';
 import { useFetcherToast } from '~/components/ui/toast';
 
 export interface AccountRow {
@@ -109,7 +115,7 @@ export function ChartOfAccountsPage({
   canWrite,
   hasOpeningBalances = false,
 }: ChartOfAccountsPageProps) {
-  const accounts = Array.isArray(accountsProp) ? accountsProp : [];
+  const serverAccounts = Array.isArray(accountsProp) ? accountsProp : [];
   const [createOpen, setCreateOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<AccountRow | null>(null);
@@ -121,7 +127,7 @@ export function ChartOfAccountsPage({
   const [statusFilter, setStatusFilter] = useState('active');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
     // Start with only the first top-level group (Assets) expanded
-    for (const a of accounts) {
+    for (const a of serverAccounts) {
       if (a.isGroup && !a.parentAccountId) return new Set([a.id]);
     }
     return new Set<string>();
@@ -148,6 +154,56 @@ export function ChartOfAccountsPage({
     setParentId('');
   });
   useCloseOnFetcherSuccess(editFetcher, () => setEditAccount(null));
+
+  const buildCreateRows = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'createAccount') return null;
+    const code = fd.get('code')?.toString()?.trim();
+    const name = fd.get('name')?.toString()?.trim();
+    const rootType = fd.get('rootType')?.toString()?.trim();
+    if (!code || !name || !rootType) return null;
+    const accountType = fd.get('accountType')?.toString()?.trim() || null;
+    const parentAccountId = fd.get('parentAccountId')?.toString()?.trim() || null;
+    const isGroup = fd.get('isGroup') === 'true';
+    return [
+      {
+        id: optimisticId('account'),
+        code,
+        name,
+        rootType,
+        accountType,
+        isGroup,
+        parentAccountId,
+        balance: '0',
+        isActive: true,
+      } satisfies AccountRow,
+    ];
+  }, []);
+
+  const buildEditPatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'updateAccount') return null;
+    const id = fd.get('accountId')?.toString();
+    const name = fd.get('name')?.toString()?.trim();
+    if (!id || !name) return null;
+    return [{ id, patch: { name } }];
+  }, []);
+  const buildDeactivatePatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'deactivateAccount') return null;
+    const id = fd.get('accountId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { isActive: false } }];
+  }, []);
+
+  const optimisticCreated = useOptimisticListMerge<AccountRow>(createFetcher, buildCreateRows);
+  const editPatches = useOptimisticListPatches<AccountRow>(editFetcher, buildEditPatches);
+  const deactivatePatches = useOptimisticListPatches<AccountRow>(
+    deactivateFetcher,
+    buildDeactivatePatches,
+  );
+  const accounts = useMemo(() => {
+    const merged = [...optimisticCreated, ...serverAccounts];
+    const afterEdit = applyOptimisticPatches(merged, editPatches);
+    return applyOptimisticPatches(afterEdit, deactivatePatches);
+  }, [optimisticCreated, serverAccounts, editPatches, deactivatePatches]);
 
   // Apply status filter first (active/inactive/all)
   const statusFiltered = useMemo(() => {

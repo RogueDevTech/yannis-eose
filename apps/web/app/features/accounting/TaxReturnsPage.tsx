@@ -8,10 +8,12 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { DateTimeText } from '~/components/ui/date-time-text';
 
 export interface VatTransaction {
   id: string;
   postingDate: string;
+  createdAt?: string | null;
   voucherType: string;
   voucherId: string;
   debit: number;
@@ -114,7 +116,7 @@ export function TaxReturnsPage({
     {
       key: 'postingDate',
       header: 'Date',
-      render: (r) => <span className="text-sm text-app-fg-muted">{r.postingDate}</span>,
+      render: (r) => <DateTimeText at={r.createdAt} dateOnly={r.postingDate} className="text-sm" />,
     },
     {
       key: 'voucherType',
@@ -221,7 +223,7 @@ export function TaxReturnsPage({
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-app-fg">{VOUCHER_LABELS[r.voucherType] ?? r.voucherType}</span>
-                  <span className="text-xs text-app-fg-muted">{r.postingDate}</span>
+                  <DateTimeText at={r.createdAt} dateOnly={r.postingDate} className="text-xs" />
                 </div>
                 <div className="flex items-center justify-between gap-4 text-xs text-app-fg-muted">
                   <span>Input <NairaPrice amount={r.debit} zeroAsDash className="ml-1 text-app-fg" /></span>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { useFetcher, useRevalidator } from '@remix-run/react';
+import { useFetcher, useLocation, useRevalidator } from '@remix-run/react';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 
 /**
  * Edge-triggered close-on-success for modal-driven `fetcher.Form` submissions.
@@ -54,6 +55,7 @@ export function useCloseOnFetcherSuccess(
   },
 ): void {
   const { revalidate, state: revalidatorState } = useRevalidator();
+  const location = useLocation();
   const lastHandledRef = useRef<unknown>(fetcher.data);
   const revalidateOnIdle = options?.revalidateOnIdle ?? true;
   const intentFilter = options?.intent;
@@ -63,6 +65,13 @@ export function useCloseOnFetcherSuccess(
    * the time `fetcher.data` flips. Stamp it while we still can.
    */
   const lastSubmittedIntentRef = useRef<string | null>(null);
+  /**
+   * Remix's automatic post-action revalidation often hits `cachedClientLoader`
+   * and returns a stale full-cache hit before this effect can invalidate.
+   * If the revalidator is already busy when success lands, queue a second
+   * pass once it returns to idle so the invalidated cache is actually fetched.
+   */
+  const pendingFreshRevalidateRef = useRef(false);
   useEffect(() => {
     if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
       const inFlight = fetcher.formData?.get('intent');
@@ -90,10 +99,34 @@ export function useCloseOnFetcherSuccess(
 
     onSuccess(data as { success: true } & Record<string, unknown>);
 
-    if (revalidateOnIdle && revalidatorState === 'idle') {
-      revalidate();
+    if (revalidateOnIdle) {
+      // Drop full-loader cache so the next clientLoader cannot serve the
+      // pre-mutation snapshot (common on accounting/payroll CachedAwait routes).
+      invalidateCachedLoader(location.pathname);
+      if (revalidatorState === 'idle') {
+        revalidate();
+      } else {
+        pendingFreshRevalidateRef.current = true;
+      }
     }
     // We deliberately key on `fetcher.data` (and the surrounding deps) — NOT
     // on a derived boolean — so reference equality is the trigger.
-  }, [fetcher.data, onSuccess, revalidate, revalidatorState, revalidateOnIdle, intentFilter]);
+  }, [
+    fetcher.data,
+    onSuccess,
+    revalidate,
+    revalidatorState,
+    revalidateOnIdle,
+    intentFilter,
+    location.pathname,
+  ]);
+
+  useEffect(() => {
+    if (!revalidateOnIdle) return;
+    if (!pendingFreshRevalidateRef.current) return;
+    if (revalidatorState !== 'idle') return;
+    pendingFreshRevalidateRef.current = false;
+    invalidateCachedLoader(location.pathname);
+    revalidate();
+  }, [revalidatorState, revalidateOnIdle, location.pathname, revalidate]);
 }

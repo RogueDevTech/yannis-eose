@@ -121,12 +121,19 @@ export function invalidateCachedLoader(pathname: string): void {
     }
   }
   // Also drop the full-loader cache so clientLoader doesn't serve stale
-  // route shape after explicit invalidation.
+  // route shape after explicit invalidation. Flag matching keys so the next
+  // clientLoader call (Remix's post-mutation revalidate) bypasses any race
+  // that re-populated the entry before this delete ran.
   for (const k of [...fullCache.keys()]) {
     if (k === pathname || k.startsWith(`${pathname}?`)) {
       fullCache.delete(k);
+      inFlightRevalidations.add(k);
     }
   }
+  // Path may not be in fullCache yet (first visit) but a concurrent cache-hit
+  // revalidate already flagged a key — still force a fresh pass for the bare
+  // pathname and common query variants by flagging the pathname itself.
+  inFlightRevalidations.add(pathname);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -237,8 +244,13 @@ const cachedClientLoaderImpl = async (
 
   // If flagged for revalidation, always go to the server — no TTL, so even
   // slow responses (10s+) still land fresh data.
-  if (inFlightRevalidations.has(key)) {
-    inFlightRevalidations.delete(key);
+  // `invalidateCachedLoader(pathname)` also flags the bare pathname so every
+  // query variant of that route bypasses after a mutation.
+  const flaggedExact = inFlightRevalidations.has(key);
+  const flaggedPath = inFlightRevalidations.has(url.pathname);
+  if (flaggedExact || flaggedPath) {
+    if (flaggedExact) inFlightRevalidations.delete(key);
+    if (flaggedPath) inFlightRevalidations.delete(url.pathname);
     const fresh = await args.serverLoader();
     return fresh;
   }
