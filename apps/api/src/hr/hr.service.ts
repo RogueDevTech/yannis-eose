@@ -50,12 +50,19 @@ export class HrService {
       });
     }
 
+    if (!groupId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Select a company before managing commission plans. Plans are fully company-isolated.',
+      });
+    }
+
     return withActor(this.db, { id: actor.id }, async (tx) => {
       const rows = await tx
         .insert(schema.commissionPlans)
         .values({
           role: input.role,
-          groupId: groupId ?? null,
+          groupId,
           planName: input.planName,
           rules: input.rules,
           effectiveFrom: new Date(input.effectiveFrom),
@@ -72,10 +79,16 @@ export class HrService {
     });
   }
 
-  async updateCommissionPlan(input: UpdateCommissionPlanInput, actor: SessionUser) {
+  async updateCommissionPlan(input: UpdateCommissionPlanInput, actor: SessionUser, groupId?: string | null) {
     const manageable = getManageableRolesForViewer(actor);
     if (!manageable) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not allowed to manage commission plans.' });
+    }
+    if (!groupId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Select a company before managing commission plans. Plans are fully company-isolated.',
+      });
     }
 
     return withActor(this.db, { id: actor.id }, async (tx) => {
@@ -84,11 +97,16 @@ export class HrService {
       const existingRows = await tx
         .select({ role: schema.commissionPlans.role, rules: schema.commissionPlans.rules })
         .from(schema.commissionPlans)
-        .where(eq(schema.commissionPlans.id, input.planId))
+        .where(
+          and(
+            eq(schema.commissionPlans.id, input.planId),
+            eq(schema.commissionPlans.groupId, groupId),
+          ),
+        )
         .limit(1);
       const existing = existingRows[0];
       if (!existing) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found' });
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found in this company' });
       }
       if (existing.role != null && !manageable.includes(existing.role)) {
         throw new TRPCError({
@@ -112,11 +130,16 @@ export class HrService {
       const rows = await tx
         .update(schema.commissionPlans)
         .set(updateFields)
-        .where(eq(schema.commissionPlans.id, input.planId))
+        .where(
+          and(
+            eq(schema.commissionPlans.id, input.planId),
+            eq(schema.commissionPlans.groupId, groupId),
+          ),
+        )
         .returning();
 
       if (!rows[0]) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found' });
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found in this company' });
       }
       return rows[0];
     });
@@ -125,10 +148,11 @@ export class HrService {
   async listCommissionPlans(input: ListCommissionPlansInput, viewer: SessionUser, groupId?: string | null) {
     const conditions = [];
 
-    // Group isolation — only show plans from the active branch group.
-    if (groupId) {
-      conditions.push(or(eq(schema.commissionPlans.groupId, groupId), isNull(schema.commissionPlans.groupId))!);
+    // Exact company isolation — never include null/global shared plans.
+    if (!groupId) {
+      return { plans: [], pagination: { page: input.page, limit: input.limit, total: 0 }, manageableRoles: [] as string[] };
     }
+    conditions.push(eq(schema.commissionPlans.groupId, groupId));
 
     // Auto-scope by viewer: Heads only see plans for their dept; admins/HR see everything.
     const manageable = getManageableRolesForViewer(viewer);
@@ -898,6 +922,12 @@ export class HrService {
   // ============================================
 
   async setSettlementConfig(input: SetSettlementConfigInput, actorId: string, groupId?: string | null) {
+    if (!groupId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Select a company before managing settlement config. Config is fully company-isolated.',
+      });
+    }
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .insert(schema.settlementConfigs)
@@ -905,7 +935,7 @@ export class HrService {
           windowType: input.windowType,
           startDay: input.startDay,
           createdBy: actorId,
-          groupId: groupId ?? null,
+          groupId,
         })
         .returning();
 
@@ -918,11 +948,11 @@ export class HrService {
   }
 
   async getActiveSettlementConfig(groupId?: string | null) {
-    const conditions = groupId ? [or(eq(schema.settlementConfigs.groupId, groupId), isNull(schema.settlementConfigs.groupId))!] : [];
+    if (!groupId) return null;
     const rows = await this.db
       .select()
       .from(schema.settlementConfigs)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(eq(schema.settlementConfigs.groupId, groupId))
       .orderBy(desc(schema.settlementConfigs.createdAt))
       .limit(1);
 
@@ -930,11 +960,11 @@ export class HrService {
   }
 
   async listSettlementConfigs(groupId?: string | null) {
-    const conditions = groupId ? [or(eq(schema.settlementConfigs.groupId, groupId), isNull(schema.settlementConfigs.groupId))!] : [];
+    if (!groupId) return [];
     return this.db
       .select()
       .from(schema.settlementConfigs)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(eq(schema.settlementConfigs.groupId, groupId))
       .orderBy(desc(schema.settlementConfigs.createdAt));
   }
 
@@ -942,8 +972,8 @@ export class HrService {
    * Calculate the current settlement period based on the active config.
    * Returns { periodStart, periodEnd } in ISO date strings.
    */
-  async getCurrentSettlementPeriod(): Promise<{ periodStart: string; periodEnd: string; windowType: string } | null> {
-    const config = await this.getActiveSettlementConfig();
+  async getCurrentSettlementPeriod(groupId?: string | null): Promise<{ periodStart: string; periodEnd: string; windowType: string } | null> {
+    const config = await this.getActiveSettlementConfig(groupId);
     if (!config) return null;
 
     const now = new Date();

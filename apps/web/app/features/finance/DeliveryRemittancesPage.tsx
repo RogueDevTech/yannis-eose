@@ -353,7 +353,7 @@ export function DeliveryRemittancesPage({
     });
   };
 
-  const s = summary as Record<string, unknown>;
+  const s = summary as unknown as Record<string, unknown>;
   // Use remittedOnlyCount (orders with status=REMITTED in the orders table) as the
   // canonical count for both the tab pill and stat strip so the numbers always match.
   const receivedOrderCount = Number(s.remittedOnlyCount ?? s.receivedOrderCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);

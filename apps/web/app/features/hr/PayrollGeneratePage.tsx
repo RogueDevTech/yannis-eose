@@ -377,6 +377,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                 type="checkbox"
                 checked={includeContractors}
                 onChange={(e) => setIncludeContractors(e.target.checked)}
+                className="rounded border-app-border text-brand-600 focus:ring-brand-500"
               />
               <span>Include agency contractors</span>
             </label>

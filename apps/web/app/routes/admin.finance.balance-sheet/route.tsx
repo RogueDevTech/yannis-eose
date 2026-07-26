@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { BalanceSheetPage, type BalanceSheetPageProps } from '~/features/accounting/BalanceSheetPage';
@@ -29,8 +29,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const asOfDate = url.searchParams.get('asOfDate') || '';
+  const defaults = defaultThisMonthRange();
+  const startDate = url.searchParams.get('startDate') || defaults.startDate;
+  const endDate = url.searchParams.get('endDate') || defaults.endDate;
   const consolidated = url.searchParams.get('consolidated') === 'true';
+
+  // Balance sheet is point-in-time: use endDate as the "as of" date so the
+  // DateFilterBar preset (e.g. "This month") maps to end-of-period.
+  const asOfDate = endDate;
 
   const pageData = (async () => {
     if (consolidated) {
@@ -43,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const data = res.ok
         ? ((res.data as { result?: { data?: BalanceSheetPageProps } })?.result?.data ?? EMPTY)
         : EMPTY;
-      return { ...data, consolidated: true, filters: { asOfDate } };
+      return { ...data, consolidated: true, filters: { startDate, endDate } };
     }
 
     const input: Record<string, unknown> = {};
@@ -55,7 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data = res.ok
       ? ((res.data as { result?: { data?: BalanceSheetPageProps } })?.result?.data ?? EMPTY)
       : EMPTY;
-    return { ...data, consolidated: false, filters: { asOfDate } };
+    return { ...data, consolidated: false, filters: { startDate, endDate } };
   })();
 
   return defer({ pageData });

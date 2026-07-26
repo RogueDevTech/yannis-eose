@@ -11,6 +11,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -126,7 +127,7 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
       align: 'right',
       hideOnMobile: true,
       render: (r) =>
-        Number(r.totalDebit) > 0 ? <NairaPrice amount={r.totalDebit} /> : null,
+        Number(r.totalDebit) > 0 ? <NairaPrice amount={r.totalDebit} className="text-danger-600 dark:text-danger-400" /> : null,
     },
     {
       key: 'credit',
@@ -134,7 +135,7 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
       align: 'right',
       hideOnMobile: true,
       render: (r) =>
-        Number(r.totalCredit) > 0 ? <NairaPrice amount={r.totalCredit} /> : null,
+        Number(r.totalCredit) > 0 ? <NairaPrice amount={r.totalCredit} className="text-success-600 dark:text-success-400" /> : null,
     },
     {
       key: 'status',
@@ -168,21 +169,6 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
           <PageHeaderMobileTools
             sheetTitle="Filters"
             triggerAriaLabel="General ledger toolbar"
-            filtersBadgeCount={filterBadgeCount}
-            onClearFilters={
-              filterBadgeCount > 0
-                ? () => {
-                    setFilter('status', '');
-                    setFilter('search', '');
-                  }
-                : undefined
-            }
-            filters={
-              <>
-                {statusSelect}
-                {searchControl}
-              </>
-            }
             desktop={
               <>
                 <PageRefreshButton />
@@ -213,10 +199,12 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
         ]}
       />
 
-      <div className="hidden md:flex flex-wrap items-end gap-2">
-        {statusSelect}
-        {searchControl}
-      </div>
+      <ToolbarFiltersCollapsible
+        badgeCount={filterBadgeCount}
+        searchRow={searchControl}
+        desktopInlineFilters={statusSelect}
+        sheetFilterBody={statusSelect}
+      />
 
       {records.length === 0 ? (
         <EmptyState

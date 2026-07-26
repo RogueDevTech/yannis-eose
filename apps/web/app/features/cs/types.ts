@@ -18,6 +18,7 @@ export interface CloserWorkloadOrderItem {
 
 export interface CloserWorkloadOrder {
   id: string;
+  orderNumber?: number | null;
   status: string;
   customerName: string;
   createdAt: string;
@@ -35,6 +36,7 @@ export interface InactiveAgent {
 
 export interface CSOrder {
   id: string;
+  orderNumber?: number | null;
   /** Set on API list rows — needed for branch-scoped mutations when session has no `currentBranchId`. */
   branchId?: string | null;
   customerName: string;

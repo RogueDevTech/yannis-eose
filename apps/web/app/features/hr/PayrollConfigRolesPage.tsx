@@ -4,7 +4,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -197,10 +197,11 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
         hideMobileSheet
         badgeCount={[categoryFilter, formulaFilter].filter(Boolean).length}
         searchRow={
-          <SearchInput
+          <PageSearchControl
             value={search}
-            onChange={setSearch}
+            onApply={setSearch}
             placeholder="Search pay roles"
+            title="Search pay roles"
           />
         }
         desktopInlineFilters={
@@ -239,11 +240,13 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
 
       {filteredRoles.length === 0 ? (
         <EmptyState
-          title={search || categoryFilter || formulaFilter ? 'No matching pay roles' : 'No pay roles configured'}
+          title={search || categoryFilter || formulaFilter ? 'No matching pay roles' : 'No pay roles for this company'}
           description={
             search || categoryFilter || formulaFilter
               ? 'Try adjusting your filters.'
-              : canWrite ? 'Create your first pay role to get started.' : 'Pay roles are seeded during payroll setup. Contact your administrator if this list is empty.'
+              : canWrite
+                ? 'Select a company in the header, then create a pay role or run payroll config seed for that company.'
+                : 'Pay roles are company-specific. Select a company in the header, or contact your administrator.'
           }
         />
       ) : (

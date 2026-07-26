@@ -6,6 +6,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageNotification } from '~/components/ui/page-notification';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { formatNaira } from '~/lib/format-amount';
@@ -945,7 +946,7 @@ function TimeTravelPanel({
   onPreviewImage?: (url: string) => void;
 }) {
   const fetcher = useFetcher();
-  const [ttTable, setTtTable] = useState(AUDITABLE_TABLES[0]);
+  const [ttTable, setTtTable] = useState(AUDITABLE_TABLES[0] ?? '');
   const [ttRecordId, setTtRecordId] = useState('');
   const [ttTimestamp, setTtTimestamp] = useState('');
   // Time-travel resolves names/roles AS OF the user-selected timestamp. Fall back to "now" while
@@ -1162,6 +1163,16 @@ export function AuditPage({
 
   const totalPages = Math.ceil(total / filters.limit);
 
+  const statStrip = useMemo<OverviewStatStripItem[]>(() => {
+    const uniqueActors = new Set(rows.map((r) => r.changedBy ?? '__system__')).size;
+    const uniqueTables = new Set(rows.map((r) => r.tableName)).size;
+    return [
+      { label: 'Total entries', value: total.toLocaleString('en-NG') },
+      { label: 'Actors (this page)', value: uniqueActors.toLocaleString('en-NG') },
+      { label: 'Tables (this page)', value: uniqueTables.toLocaleString('en-NG') },
+    ];
+  }, [total, rows]);
+
   // Polling interval — trigger revalidate every POLL_INTERVAL_MS
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1332,6 +1343,8 @@ export function AuditPage({
         periodAllTime={filters.periodAllTime ?? false}
       />
 
+      <OverviewStatStrip items={statStrip} />
+
       {error && !dismissedError && (
         <PageNotification
           variant="error"
@@ -1425,11 +1438,6 @@ export function AuditPage({
         ]}
         defaultColumns={['timestamp', 'table', 'description', 'actor', 'recordId', 'validTo']}
       />
-
-      {/* Results count */}
-      <p className="text-sm text-app-fg-muted">
-        {total} {total === 1 ? 'entry' : 'entries'} found
-      </p>
 
       {/* Audit log table — rows render immediately, actor names stream in */}
       <TableLoadingOverlay show={isFilterLoading}>

@@ -48,7 +48,9 @@ function isDateLike(s: string): boolean {
 
 function parseSpreadsheet(buffer: ArrayBuffer): { rows: ParsedRow[]; productHeaders: string[] } {
   const wb = read(buffer, { type: 'array' });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const firstSheetName = wb.SheetNames[0];
+  if (!firstSheetName) return { rows: [], productHeaders: [] };
+  const sheet = wb.Sheets[firstSheetName];
   if (!sheet) return { rows: [], productHeaders: [] };
   const data = utils.sheet_to_json<string[]>(sheet, { header: 1 }) as unknown[][];
 
@@ -115,8 +117,8 @@ function parseSpreadsheet(buffer: ArrayBuffer): { rows: ParsedRow[]; productHead
     for (let p = 0; p < productHeaders.length; p++) {
       const cellVal = row[PRODUCT_START_COL + p];
       const qty = typeof cellVal === 'number' ? cellVal : parseInt(String(cellVal ?? ''), 10);
-      if (qty > 0) {
-        items.push({ productHeader: productHeaders[p], quantity: qty });
+      if (qty > 0 && productHeaders[p]) {
+        items.push({ productHeader: productHeaders[p]!, quantity: qty });
       }
     }
     if (items.length === 0) continue;
@@ -125,11 +127,11 @@ function parseSpreadsheet(buffer: ArrayBuffer): { rows: ParsedRow[]; productHead
     const existingIdx = rows.findIndex((r) => r.agentName === agentName);
     if (existingIdx >= 0) {
       // Merge: add quantities for matching products, append new products
-      const existing = rows[existingIdx];
+      const existing = rows[existingIdx]!;
       for (const item of items) {
         const matchIdx = existing.items.findIndex((e) => e.productHeader === item.productHeader);
         if (matchIdx >= 0) {
-          existing.items[matchIdx].quantity += item.quantity;
+          existing.items[matchIdx]!.quantity += item.quantity;
         } else {
           existing.items.push(item);
         }
@@ -340,9 +342,9 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
     setIsImporting(false);
     setImportDone(true);
     if (failed === 0) {
-      toast({ variant: 'success', title: `${created} transfer(s) imported successfully` });
+      toast.success(`${created} transfer(s) imported successfully`);
     } else {
-      toast({ variant: 'error', title: `${failed} of ${total} transfer(s) failed` });
+      toast.error(`${failed} of ${total} transfer(s) failed`);
     }
   }, [selectedFromLocation, readyRows, toast]);
 

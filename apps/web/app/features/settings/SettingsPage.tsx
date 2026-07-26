@@ -12,6 +12,7 @@ import { useFontScale } from '~/hooks/useFontScale';
 import { APP_THEMES, previewRgb, THEME_PREVIEW_BRAND_HEX, THEME_PREVIEW_RGB } from '~/lib/theme';
 import { FONT_SCALES } from '~/lib/font-scale';
 import { isNotificationSoundEnabled, setNotificationSoundEnabled } from '~/lib/notification-sound-preference';
+import { isAdminLevel } from '~/lib/rbac';
 import { playNotificationSound } from '~/lib/notification-sound';
 import { SettingsPushPanel } from './SettingsPushPanel';
 import { PageHeader } from '~/components/ui/page-header';
@@ -299,7 +300,7 @@ export function SettingsPage({
   const installAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // Treat SUPER_ADMIN, ADMIN, and SUPPORT identically for settings visibility (System + OrgEmails tabs).
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT';
+  const isSuperAdmin = isAdminLevel(user);
 
   const allowedTabs = useMemo((): SettingsTabId[] => {
     return isSuperAdmin
@@ -1408,7 +1409,7 @@ export function SettingsPage({
               </div>
 
               {/* Company Groups — multi-company boundary. Admin-level only. */}
-              {(user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT') && (
+              {isAdminLevel(user) && (
               <div className="card lg:col-span-2">
                 <Link
                   to="/admin/settings/branch-groups"

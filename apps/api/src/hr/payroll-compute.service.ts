@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
@@ -197,7 +197,8 @@ export class PayrollComputeService {
         and(
           eq(schema.payrollProductTierConfigs.active, true),
           or(isNull(schema.payrollProductTierConfigs.effectiveTo), gte(schema.payrollProductTierConfigs.effectiveTo, new Date())),
-          groupId ? or(eq(schema.payrollProductTierConfigs.groupId, groupId), isNull(schema.payrollProductTierConfigs.groupId)) : undefined,
+          // Exact company only — never fall back to null/global shared tiers.
+          groupId ? eq(schema.payrollProductTierConfigs.groupId, groupId) : sql`false`,
         ),
       );
 
@@ -219,7 +220,8 @@ export class PayrollComputeService {
       .where(
         and(
           or(isNull(schema.payrollTaxBandConfigs.effectiveTo), gte(schema.payrollTaxBandConfigs.effectiveTo, new Date())),
-          groupId ? or(eq(schema.payrollTaxBandConfigs.groupId, groupId), isNull(schema.payrollTaxBandConfigs.groupId)) : undefined,
+          // Exact company only — never fall back to null/global shared bands.
+          groupId ? eq(schema.payrollTaxBandConfigs.groupId, groupId) : sql`false`,
         ),
       )
       .orderBy(desc(schema.payrollTaxBandConfigs.effectiveFrom))

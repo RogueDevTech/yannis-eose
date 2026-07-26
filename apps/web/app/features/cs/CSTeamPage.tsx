@@ -1237,7 +1237,7 @@ export function CSTeamPage({
           <Link to="/admin/sales/queue" prefetch="intent" className="text-brand-500 hover:text-brand-600">
             Live activities
           </Link>
-          {' — '}dashboard with workloads, unassigned orders, and leaderboard.
+{': '}dashboard with workloads, unassigned orders, and leaderboard.
         </p>
       </div>
 

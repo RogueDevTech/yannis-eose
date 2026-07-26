@@ -19,7 +19,7 @@ export interface ToolbarFiltersCollapsibleProps {
   /** Selects / chips shown inline at `breakpoint` and up (same row as search). */
   desktopInlineFilters: ReactNode;
   /** Stacked controls inside the mobile sheet (full-width selects, etc.). */
-  sheetFilterBody: ReactNode;
+  sheetFilterBody?: ReactNode;
   /**
    * Suppress the mobile **Filters** trigger + bottom sheet. Use when the page has
    * moved `sheetFilterBody` into `PageHeaderMobileTools` `filters` so there is one

@@ -141,7 +141,7 @@ interface MarketingOrdersPageProps {
   personalSecondary?: MarketingOrdersSecondaryPayload;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
-  filters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
   /**
@@ -256,9 +256,7 @@ export function MarketingOrdersPage({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders cancelled',
     successMessage: `${purgeFetcher.data?.deleted ?? 0} cancelled${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Cancel failed',
   });
 
   useEffect(() => {

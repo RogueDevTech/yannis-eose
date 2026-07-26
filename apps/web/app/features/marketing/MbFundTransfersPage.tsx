@@ -508,8 +508,8 @@ function CreateTransferModal({
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || !receiverId || !amount}>
-            {busy ? 'Sending...' : 'Send'}
+          <Button type="submit" disabled={busy || !receiverId || !amount} loading={busy} loadingText="Sending...">
+            Send
           </Button>
         </div>
       </form>
@@ -681,8 +681,8 @@ function RejectTransferModal({
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" variant="danger" disabled={busy || !reason.trim()}>
-            {busy ? 'Rejecting...' : 'Reject'}
+          <Button type="submit" variant="danger" disabled={busy || !reason.trim()} loading={busy} loadingText="Rejecting...">
+            Reject
           </Button>
         </div>
       </form>

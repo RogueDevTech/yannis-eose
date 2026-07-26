@@ -389,7 +389,7 @@ function BundleComponentsEditor({
               <div className="w-20 shrink-0">
                 <NumberInput
                   value={row.quantity}
-                  onChange={(v) => updateRow(i, 'quantity', v ?? 1)}
+                  onValueChange={(v: number) => updateRow(i, 'quantity', v ?? 1)}
                   min={1}
                   max={999}
                   placeholder="Qty"
@@ -434,7 +434,7 @@ function BundleComponentsEditor({
       </div>
 
       {fetcher.data && 'error' in fetcher.data && fetcher.data.error && (
-        <InlineNotification variant="error">{fetcher.data.error}</InlineNotification>
+        <InlineNotification variant="danger" message={String(fetcher.data.error)} />
       )}
     </div>
   );

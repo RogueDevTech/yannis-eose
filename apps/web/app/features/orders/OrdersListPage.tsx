@@ -196,7 +196,7 @@ export interface OrdersListPageProps {
   totalPages: number;
   page: number;
   limit: number;
-  statusCounts: Record<string, number>;
+  statusCounts?: Record<string, number>;
   statusFilter?: string;
   /**
    * Statuses to omit from the status filter dropdown for this surface.
@@ -336,7 +336,7 @@ function OrdersListPageImpl({
   totalPages,
   page,
   limit,
-  statusCounts,
+  statusCounts = {},
   statusFilter,
   excludeStatuses,
   searchFilter,
@@ -434,9 +434,7 @@ function OrdersListPageImpl({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders deleted',
     successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Delete failed',
   });
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);

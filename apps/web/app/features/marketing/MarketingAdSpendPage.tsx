@@ -1791,6 +1791,7 @@ export function MarketingAdSpendPage({
                     variant="danger"
                     size="sm"
                     loading={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'rejectAdSpend' && fetcher.formData?.get('adSpendId') === adSpendDetailModal.id}
+                    loadingText="Rejecting..."
                     disabled={fetcher.state !== 'idle'}
                   >
                     Confirm reject
@@ -1948,6 +1949,7 @@ export function MarketingAdSpendPage({
                     fetcher.formData?.get('intent') === 'approveAdSpend' &&
                     fetcher.formData?.get('adSpendId') === confirmApprove.id
                   }
+                  loadingText="Approving..."
                 >
                   Approve
                 </Button>

@@ -11,6 +11,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { Modal } from '~/components/ui/modal';
@@ -138,7 +139,6 @@ export function JournalEntriesPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Journal entries tools"
-            saveFilterKey
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 {filters ? (
@@ -156,29 +156,6 @@ export function JournalEntriesPage({
                   </Link>
                 ) : null}
               </div>
-            }
-            filters={
-              filters ? (
-                <>
-                  <FormSelect
-                    label="Status"
-                    value={filters.status}
-                    onChange={(e) => setFilter('status', e.target.value)}
-                    options={[
-                      { value: '', label: 'All' },
-                      { value: 'POSTED', label: 'Posted' },
-                      { value: 'DRAFT', label: 'Draft' },
-                      { value: 'CANCELLED', label: 'Cancelled' },
-                    ]}
-                  />
-                  <PageSearchControl
-                    value={filters.search}
-                    placeholder="Search description"
-                    title="Search journal entries"
-                    onApply={(query) => setFilter('search', query)}
-                  />
-                </>
-              ) : undefined
             }
             sheet={
               canWrite ? (
@@ -204,26 +181,44 @@ export function JournalEntriesPage({
       ) : null}
 
       {filters && (
-        <div className="hidden md:flex flex-wrap items-end gap-2">
-          <FormSelect
-            label="Status"
-            value={filters.status}
-            onChange={(e) => setFilter('status', e.target.value)}
-            options={[
-              { value: '', label: 'All' },
-              { value: 'POSTED', label: 'Posted' },
-              { value: 'DRAFT', label: 'Draft' },
-              { value: 'CANCELLED', label: 'Cancelled' },
-            ]}
-            className="w-32"
-          />
-          <PageSearchControl
-            value={filters.search}
-            placeholder="Search description"
-            title="Search journal entries"
-            onApply={(query) => setFilter('search', query)}
-          />
-        </div>
+        <ToolbarFiltersCollapsible
+          badgeCount={[filters.status, filters.search].filter(Boolean).length}
+          searchRow={
+            <PageSearchControl
+              value={filters.search}
+              placeholder="Search description"
+              title="Search journal entries"
+              onApply={(query) => setFilter('search', query)}
+            />
+          }
+          desktopInlineFilters={
+            <FormSelect
+              label=""
+              value={filters.status}
+              onChange={(e) => setFilter('status', e.target.value)}
+              options={[
+                { value: '', label: 'All statuses' },
+                { value: 'POSTED', label: 'Posted' },
+                { value: 'DRAFT', label: 'Draft' },
+                { value: 'CANCELLED', label: 'Cancelled' },
+              ]}
+              className="w-36"
+            />
+          }
+          sheetFilterBody={
+            <FormSelect
+              label="Status"
+              value={filters.status}
+              onChange={(e) => setFilter('status', e.target.value)}
+              options={[
+                { value: '', label: 'All statuses' },
+                { value: 'POSTED', label: 'Posted' },
+                { value: 'DRAFT', label: 'Draft' },
+                { value: 'CANCELLED', label: 'Cancelled' },
+              ]}
+            />
+          }
+        />
       )}
 
       {records.length === 0 ? (

@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { Form, useFetcher, useNavigation } from '@remix-run/react';
-import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
@@ -555,18 +554,9 @@ export function StaffOnboardingPage({
 
   return (
     <div className="space-y-4">
-      {showBackToProfile ? (
-        <Breadcrumb
-          items={[
-            { label: 'HR', to: '/hr/users' },
-            { label: subject.name, to: `/hr/users/${subject.id}` },
-            { label: 'Onboarding' },
-          ]}
-        />
-      ) : null}
-
       <PageHeader
-        title={mode === 'self' ? 'Your onboarding' : `Onboarding · ${subject.name}`}
+        title={mode === 'self' ? 'Your onboarding' : `Onboarding: ${subject.name}`}
+        backTo={showBackToProfile ? `/hr/users/${subject.id}` : undefined}
         mobileInlineActions
         description={
           mode === 'self'

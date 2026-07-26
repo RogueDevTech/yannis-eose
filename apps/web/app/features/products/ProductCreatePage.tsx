@@ -279,7 +279,7 @@ function CreateBundleComponentsEditor({
               <div className="w-20 shrink-0">
                 <NumberInput
                   value={row.quantity}
-                  onChange={(v) => updateRow(i, 'quantity', v ?? 1)}
+                  onValueChange={(v: number) => updateRow(i, 'quantity', v ?? 1)}
                   min={1}
                   max={999}
                   placeholder="Qty"

@@ -526,6 +526,8 @@ export function LogisticsProviderDetailPage({
                       qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
                       amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
                       amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
+                      qtyAwaitingRemittance: 0,
+                      amountAwaitingRemittance: '0',
                     };
                     setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
                   }}
@@ -585,6 +587,8 @@ export function LogisticsProviderDetailPage({
                     qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
                     amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
                     amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
+                    qtyAwaitingRemittance: 0,
+                    amountAwaitingRemittance: '0',
                   };
                   setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
                 }}

@@ -157,7 +157,7 @@ export function GeneralLedgerPage({
         render: (e) => {
           const debit = Number(e.amount);
           return e.balanceEffect > 0 || (e.balanceEffect === 0 && debit > 0) ? (
-            <span className="text-sm font-medium tabular-nums">
+            <span className="text-sm font-medium tabular-nums text-danger-600 dark:text-danger-400">
               <NairaPrice amount={debit} />
             </span>
           ) : null;
@@ -171,7 +171,7 @@ export function GeneralLedgerPage({
         render: (e) => {
           const credit = Number(e.amount);
           return e.balanceEffect < 0 || (e.balanceEffect === 0 && credit > 0) ? (
-            <span className="text-sm font-medium tabular-nums">
+            <span className="text-sm font-medium tabular-nums text-success-600 dark:text-success-400">
               <NairaPrice amount={credit} />
             </span>
           ) : null;

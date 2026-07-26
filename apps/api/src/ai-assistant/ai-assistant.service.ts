@@ -163,8 +163,6 @@ const PAGE_CONTEXT_MAP: Record<string, string> = {
 
   '/admin/finance/profit-by-shipment': `Profit by Shipment. P&L analysis scoped to a specific shipment. Revenue, costs, profit breakdown per shipment.`,
 
-  '/admin/finance/payout': `Payroll Batches. Monthly payroll batch management for finance approval. Status: Pending Finance, Paid.`,
-
   '/admin/finance/expenses': `Expense Submissions. Expense approval workflow with GL account assignment.`,
 
   '/admin/finance/aging': `Aging Report. Receivables/Payables aging by date buckets. Metrics: 0-30d, 31-60d, 61-90d, 90+d, Total. Kind toggle: Receivable/Payable.`,

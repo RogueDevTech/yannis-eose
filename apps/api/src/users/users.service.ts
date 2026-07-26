@@ -1079,10 +1079,13 @@ export class UsersService {
     const membershipsByUser = await this.getUserBranchMemberships([user.id]);
     const allMemberships = membershipsByUser.get(user.id) ?? [];
 
-    // Non-admin viewers only see branches within their own group (effectiveBranchIds).
-    // Admin-level users (SuperAdmin, Admin, Support) see all groups.
+    // Company boundary: when `effectiveBranchIds` is set (active company in session),
+    // only return memberships in that company — including for SuperAdmin/Admin.
+    // When null (cross-company / org-wide view), return every membership.
+    // Empty array = company selected but no branches resolved → return none
+    // (same isolation rule as `buildUsersListConditions`).
     const branchMemberships =
-      actor && !isAdminLevelRole(actor.role) && effectiveBranchIds?.length
+      effectiveBranchIds != null
         ? allMemberships.filter((m) => effectiveBranchIds.includes(m.branchId))
         : allMemberships;
 
@@ -1403,10 +1406,16 @@ export class UsersService {
     return {
       users: users.map((u) => {
         const { payoutBankName, payoutAccountName, payoutAccountNumber, payoutBankCode, ...rest } = u;
+        const allMemberships = membershipsByUser.get(u.id) ?? [];
+        // Mirror getById: when a company is active, only surface memberships in that company.
+        const branchMemberships =
+          effectiveBranchIds != null
+            ? allMemberships.filter((m) => effectiveBranchIds.includes(m.branchId))
+            : allMemberships;
         return {
           ...rest,
           phone: this.resolveStaffPhone(actor, { id: u.id, role: u.role, phone: u.phone }),
-          branchMemberships: membershipsByUser.get(u.id) ?? [],
+          branchMemberships,
           ...(includePayoutFields
             ? {
                 payoutBankName: payoutBankName ?? null,

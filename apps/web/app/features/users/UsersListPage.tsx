@@ -1145,7 +1145,7 @@ export function UsersListPage({
             <div className="space-y-4">
               {/* Header */}
               <div className="flex items-center gap-3">
-                <CompactUserAvatar name={u.name} size="lg" />
+                <CompactUserAvatar name={u.name} sizeClassName="w-10 h-10" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-app-fg truncate">{u.name}</p>
                   <p className="text-xs text-app-fg-muted truncate">{u.email}</p>

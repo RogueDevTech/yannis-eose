@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Link, useFetcher, useNavigate, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { clipName } from '~/lib/clip-name';
+import { isAdminLevel } from '~/lib/rbac';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -129,7 +130,7 @@ export function FollowUpPage({
   const adminRouteData = useRouteLoaderData('routes/admin') as
     | { user?: { role?: string } }
     | undefined;
-  const canEditPrices = adminRouteData?.user?.role === 'SUPER_ADMIN' || adminRouteData?.user?.role === 'ADMIN' || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING';
+  const canEditPrices = isAdminLevel(adminRouteData?.user?.role ? adminRouteData.user as { role: string } : null) || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING';
   const branchesCatalog = useBranchesCatalog();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const showSkeletonRows = deferredLoading || isLoaderRefetchBusy;

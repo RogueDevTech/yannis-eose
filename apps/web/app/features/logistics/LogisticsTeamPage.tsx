@@ -99,9 +99,9 @@ function generateProviderReport(p: LogisticsProviderRow, filters?: { productName
   lines.push('');
   lines.push(`REMITTANCE`);
   lines.push(`----------`);
-  lines.push(`Remitted:            ${formatNaira(p.remittedAmount)}`);
-  lines.push(`Pending:             ${formatNaira(p.pendingRemittanceAmount)}`);
-  if (Number(p.disputedRemittanceAmount) > 0) lines.push(`Disputed:            ${formatNaira(p.disputedRemittanceAmount)}`);
+  lines.push(`Remitted:            ${formatNaira(Number(p.remittedAmount))}`);
+  lines.push(`Pending:             ${formatNaira(Number(p.pendingRemittanceAmount))}`);
+  if (Number(p.disputedRemittanceAmount) > 0) lines.push(`Disputed:            ${formatNaira(Number(p.disputedRemittanceAmount))}`);
   lines.push('');
   lines.push(`--- End of Report ---`);
   return lines.join('\n');
@@ -419,7 +419,7 @@ export function LogisticsTeamPage({
     0,
   );
   const totalRemitted = providers.reduce((acc, p) => acc + (Number(p.remittedAmount) || 0), 0);
-  const totalRemittedOrders = providers.reduce((acc, p) => acc + (Number((p as Record<string, unknown>).remittedOrderCount) || 0), 0);
+  const totalRemittedOrders = providers.reduce((acc, p) => acc + (Number((p as unknown as Record<string, unknown>).remittedOrderCount) || 0), 0);
   const totalPending = providers.reduce((acc, p) => acc + (Number(p.pendingRemittanceAmount) || 0), 0);
   const totalOwing = providers.reduce((acc, p) => acc + (Number(p.owingAmount) || 0), 0);
   const totalAvailableStock = providers.reduce((acc, p) => acc + p.availableStock, 0);
@@ -1085,9 +1085,9 @@ export function LogisticsTeamPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Remittance</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(p.remittedAmount)}</td></tr>
-                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(p.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(p.pendingRemittanceAmount)}</span></td></tr>
-                    {Number(p.disputedRemittanceAmount) > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Disputed</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{formatNaira(p.disputedRemittanceAmount)}</td></tr>}
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(Number(p.remittedAmount))}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(p.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(Number(p.pendingRemittanceAmount))}</span></td></tr>
+                    {Number(p.disputedRemittanceAmount) > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Disputed</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{formatNaira(Number(p.disputedRemittanceAmount))}</td></tr>}
                   </tbody></table></div>
                 </div>
               </div>
@@ -1146,8 +1146,8 @@ export function LogisticsTeamPage({
           lines.push('');
           lines.push('REMITTANCE');
           lines.push('----------');
-          lines.push(`Remitted:            ${formatNaira(l.remittedAmount)}`);
-          lines.push(`Pending:             ${formatNaira(l.pendingRemittanceAmount)}`);
+          lines.push(`Remitted:            ${formatNaira(Number(l.remittedAmount))}`);
+          lines.push(`Pending:             ${formatNaira(Number(l.pendingRemittanceAmount))}`);
           lines.push('');
           lines.push('--- End of Report ---');
           return lines.join('\n');
@@ -1202,8 +1202,8 @@ export function LogisticsTeamPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Remittance</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(l.remittedAmount)}</td></tr>
-                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(l.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(l.pendingRemittanceAmount)}</span></td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(Number(l.remittedAmount))}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(l.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(Number(l.pendingRemittanceAmount))}</span></td></tr>
                   </tbody></table></div>
                 </div>
               </div>
@@ -1247,7 +1247,7 @@ export function LogisticsTeamPage({
               lines.push(`${l.locationName} (${l.providerName})`);
               lines.push(`  Received: ${l.stockReceived.toLocaleString()} | Sold: ${l.stockSold.toLocaleString()} | Transferred: ${l.stockTransferredOut.toLocaleString()}`);
               lines.push(`  Available: ${l.availableStock.toLocaleString()} | Expected: ${expected.toLocaleString()} | ${diff === 0 ? '✓ Balanced' : `✗ ${diff > 0 ? '+' : ''}${diff.toLocaleString()} off`}`);
-              lines.push(`  Assigned: ${l.totalAssigned} | Delivered: ${l.delivered} | Remitted: ${formatNaira(l.remittedAmount)}`);
+              lines.push(`  Assigned: ${l.totalAssigned} | Delivered: ${l.delivered} | Remitted: ${formatNaira(Number(l.remittedAmount))}`);
               lines.push('');
             }
           }

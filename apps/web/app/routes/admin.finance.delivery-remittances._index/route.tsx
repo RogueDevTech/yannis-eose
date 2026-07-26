@@ -155,6 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     remittanceId: string; remittanceStatus: string;
     sentAt: string; locationName: string | null; providerName: string | null;
     isDuplicate: string | null; duplicateOfId: string | null;
+    csName: string | null; branchName: string | null;
     category: 'marketing' | 'cart' | 'follow-up' | 'offline';
   };
   const ordersViewInput = encodeURIComponent(JSON.stringify(listInput));

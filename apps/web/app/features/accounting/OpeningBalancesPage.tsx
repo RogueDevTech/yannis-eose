@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useFetcher, useNavigate } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { PageSearchControl } from '~/components/ui/page-search-control';
@@ -80,7 +81,6 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
       <PageHeader
         title="Opening Balances"
         description="Enter each account's balance at go-live. Any residual posts to Opening Balance Equity so the entry balances."
-        backTo="/admin/finance/trial-balance"
         mobileInlineActions
         actions={
           <PageHeaderMobileTools
@@ -103,6 +103,7 @@ export function OpeningBalancesPage({ accounts }: OpeningBalancesPageProps) {
             }
             desktop={
               <div className="flex flex-wrap items-center gap-2">
+                <PageRefreshButton />
                 <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/admin/finance/trial-balance')}>
                   Cancel
                 </Button>

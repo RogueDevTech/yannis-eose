@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
 import { Await, Link, useFetcher, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { clipName } from '~/lib/clip-name';
+import { isAdminLevel } from '~/lib/rbac';
 import { Button } from '~/components/ui/button';
 import { StripToolbar } from '~/components/ui/strip-toolbar';
 import { Modal } from '~/components/ui/modal';
@@ -494,7 +495,7 @@ function ActiveOrderDetailModal({
               {order.totalAmount && (
                 <DetailRow
                   label="Amount"
-                  value={`\u20A6${Number(order.totalAmount).toLocaleString('en-NG')}`}
+                  value={<NairaPrice amount={Number(order.totalAmount)} />}
                   icon={
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -804,7 +805,7 @@ function CSDashboardPageLoaded({
       align: 'right',
       render: (order) => (
         <span className="text-sm">
-          {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
+          {order.totalAmount ? <NairaPrice amount={Number(order.totalAmount)} /> : '—'}
         </span>
       ),
     },
@@ -1621,7 +1622,7 @@ function CSDashboardPageLoaded({
                   cartPrefill={createOfflinePrefill?.cartPrefill ?? null}
                   products={products}
                   branchId={csMutationBranchPayload(unassignedOrders).branchId}
-                  canEditPrices={adminRouteData?.user?.role === 'SUPER_ADMIN' || adminRouteData?.user?.role === 'ADMIN' || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING'}
+                  canEditPrices={isAdminLevel(adminRouteData?.user?.role ? adminRouteData.user as { role: string } : null) || adminRouteData?.user?.role === 'HEAD_OF_CS' || adminRouteData?.user?.role === 'HEAD_OF_MARKETING'}
                 />
               </Suspense>
             )}
@@ -2109,7 +2110,7 @@ function CSDashboardPageLoaded({
                           </p>
                           {order.totalAmount && (
                             <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
-                              &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
+                              <NairaPrice amount={Number(order.totalAmount)} />
                             </span>
                           )}
                         </div>
@@ -2222,7 +2223,7 @@ function CSDashboardPageLoaded({
                   {qOrder.totalAmount && (
                     <DetailRow
                       label="Amount"
-                      value={`\u20A6${Number(qOrder.totalAmount).toLocaleString('en-NG')}`}
+                      value={<NairaPrice amount={Number(qOrder.totalAmount)} />}
                       icon={
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2292,11 +2293,11 @@ function CSDashboardPageLoaded({
                                 {item.productName ?? 'Unknown product'}
                               </p>
                               <p className="text-mini text-app-fg-muted">
-                                Qty: {item.quantity}{item.offerLabel ? ` · ${item.offerLabel}` : ''}
+                                Qty: {item.quantity}{(item as unknown as Record<string, string>).offerLabel ? ` · ${(item as unknown as Record<string, string>).offerLabel}` : ''}
                               </p>
                             </div>
                             <span className="text-sm font-semibold text-app-fg shrink-0">
-                              ₦{Number(item.unitPrice).toLocaleString('en-NG')}
+                              <NairaPrice amount={Number(item.unitPrice)} />
                             </span>
                           </li>
                         );
@@ -2701,8 +2702,10 @@ function CSDashboardPageLoaded({
               variant="danger"
               size="sm"
               disabled={bulkDismissDuplicatesFetcher.state !== 'idle'}
+              loading={bulkDismissDuplicatesFetcher.state !== 'idle'}
+              loadingText="Dismissing…"
             >
-              {bulkDismissDuplicatesFetcher.state !== 'idle' ? 'Dismissing…' : 'Dismiss all'}
+              Dismiss all
             </Button>
           </bulkDismissDuplicatesFetcher.Form>
         </Modal>

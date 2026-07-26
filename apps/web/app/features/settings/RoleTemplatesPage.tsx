@@ -331,6 +331,23 @@ export function RoleTemplatesPage({
               rowKey={(r) => r.id}
               rowClassName={(r) => (isOptimisticId(r.id) ? 'opacity-60' : '')}
               withCard={false}
+              renderMobileCard={(r) => (
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-app-fg leading-snug">
+                    {r.name}
+                    {isOptimisticId(r.id) ? (
+                      <span className="ml-2 text-xs text-app-fg-muted italic font-normal">Saving…</span>
+                    ) : null}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="font-mono text-xs text-app-fg-muted">{r.kind}</span>
+                    {r.mappedRole && r.mappedRole !== '—' ? (
+                      <span className="text-xs text-app-fg-muted">{r.mappedRole}</span>
+                    ) : null}
+                  </div>
+                  <p className="font-mono text-2xs text-app-fg-muted truncate">{r.key}</p>
+                </div>
+              )}
             />
           </CardBody>
         </Card>
@@ -339,7 +356,7 @@ export function RoleTemplatesPage({
       {mainTab === 'catalog' && (
         <div className="space-y-3">
           <p className="text-sm text-app-fg-muted">
-            {permCodesSorted.length} codes — use these strings in templates. The API rejects unknown
+            {permCodesSorted.length} codes. Use these strings in templates. The API rejects unknown
             codes.
           </p>
           <Card>
@@ -385,7 +402,7 @@ export function RoleTemplatesPage({
             <div>
               <p className="text-sm font-medium text-app-fg">Initial permissions (optional)</p>
               <p className="mt-0.5 text-xs text-app-fg-muted">
-                Select from the catalog. Unchecked permissions are not included — same as the API{' '}
+                Select from the catalog. Unchecked permissions are not included, same as the API{' '}
                 <span className="font-mono">permissionCodes</span> list.
               </p>
             </div>
@@ -471,7 +488,7 @@ export function RoleTemplatesPage({
             <div>
               <p className="text-sm font-medium text-app-fg">Permissions</p>
               <p className="mt-0.5 text-xs text-app-fg-muted">
-                Select from the catalog — same as creating a template. Save replaces this template’s
+                Select from the catalog, same as creating a template. Save replaces this template’s
                 permission set.
               </p>
             </div>

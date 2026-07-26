@@ -1216,14 +1216,14 @@ export function TransfersPage({
                         <div className="flex items-center gap-2 pt-0.5" onClick={(e) => e.stopPropagation()}>
                           <CompactTableActionButton
                             tone="success"
-                            onClick={(e) => { e.stopPropagation(); submitApprove(t); }}
+                            onClick={(e) => { e?.stopPropagation(); submitApprove(t); }}
                           >
                             Approve
                           </CompactTableActionButton>
                           <CompactTableActionButton
                             tone="danger"
                             onClick={(e) => {
-                              e.stopPropagation();
+                              e?.stopPropagation();
                               setRejectTarget(t);
                               setRejectReason('');
                               setRejectInlineError(null);

@@ -80,8 +80,6 @@ export function CashRemittanceCreateModal({
 
   useEffect(() => {
     if (!open) {
-      setReceiptUrls([]);
-      setUploadState('idle');
       setNotes('');
       setMarkReceivedNow(false);
       setDeliveryFees({});

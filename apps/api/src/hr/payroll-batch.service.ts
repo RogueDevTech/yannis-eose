@@ -521,12 +521,10 @@ export class PayrollBatchService {
               eq(schema.payrollContractors.branchId, branchId),
               isNull(schema.payrollContractors.branchId),
             ),
+            // Exact company only — never include null-scoped shared contractors.
             branchRow?.groupId
-              ? or(
-                  eq(schema.payrollContractors.groupId, branchRow.groupId),
-                  isNull(schema.payrollContractors.groupId),
-                )
-              : undefined,
+              ? eq(schema.payrollContractors.groupId, branchRow.groupId)
+              : sql`false`,
           ),
         );
 

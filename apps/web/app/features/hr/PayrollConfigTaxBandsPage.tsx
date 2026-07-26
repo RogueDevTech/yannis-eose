@@ -231,6 +231,22 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
           rowKey={(r) => r.id}
           emptyTitle="No configs"
           emptyDescription=""
+          renderMobileCard={(row) => (
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-app-fg leading-snug">{row.label}</p>
+              <p className="text-xs text-app-fg-muted truncate">
+                {formatBandsSummary(row.bands, row.taxFreeThreshold)}
+              </p>
+              <p className="text-xs text-app-fg-muted">
+                From{' '}
+                {new Date(row.effectiveFrom).toLocaleDateString('en-NG', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </p>
+            </div>
+          )}
         />
       )}
 

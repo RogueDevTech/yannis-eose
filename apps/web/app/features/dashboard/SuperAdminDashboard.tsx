@@ -387,13 +387,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     label: 'CR',
                     value: pct(confirmationRate),
                     valueClassName: confirmationRateColorClass(confirmationRate),
-                    title: 'Confirmation Rate — confirmed-or-beyond / total',
+                    title: 'Confirmation Rate: confirmed-or-beyond / total',
                   },
                   {
                     label: 'DR',
                     value: pct(deliveryRate),
                     valueClassName: deliveryRateColorClass(deliveryRate),
-                    title: 'Delivery Rate — delivered / total',
+                    title: 'Delivery Rate: delivered / total',
                   },
                   {
                     label: 'Deleted',
@@ -532,13 +532,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                         label: 'CR',
                         value: pct(offCR),
                         valueClassName: confirmationRateColorClass(offCR),
-                        title: 'Confirmation Rate — confirmed-or-beyond / total',
+                        title: 'Confirmation Rate: confirmed-or-beyond / total',
                       },
                       {
                         label: 'DR',
                         value: pct(offDR),
                         valueClassName: deliveryRateColorClass(offDR),
-                        title: 'Delivery Rate — delivered / total',
+                        title: 'Delivery Rate: delivered / total',
                       },
                       {
                         label: 'Deleted',

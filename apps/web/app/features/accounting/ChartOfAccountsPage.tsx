@@ -257,7 +257,7 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
           type="checkbox"
           checked={postableOnly}
           onChange={(e) => setPostableOnly(e.target.checked)}
-          className="rounded border-app-border"
+          className="rounded border-app-border text-brand-600 focus:ring-brand-500"
         />
         Postable only
       </label>
@@ -354,7 +354,7 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
             type="checkbox"
             checked={postableOnly}
             onChange={(e) => setPostableOnly(e.target.checked)}
-            className="rounded border-app-border"
+            className="rounded border-app-border text-brand-600 focus:ring-brand-500"
           />
           Postable only
         </label>
@@ -471,7 +471,7 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
                 clearable
               />
               <label className="flex items-center gap-2 text-sm text-app-fg">
-                <input type="checkbox" name="isGroup" value="true" /> This is a group (header) account
+                <input type="checkbox" name="isGroup" value="true" className="rounded border-app-border text-brand-600 focus:ring-brand-500" /> This is a group (header) account
               </label>
               {createFetcher.data?.error && (
                 <p className="text-sm text-danger-600">{createFetcher.data.error}</p>

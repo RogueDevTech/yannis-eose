@@ -14,6 +14,7 @@ export type PayslipApiRow = {
     grossPay: string | number;
     payeTax: string | number;
     netPay: string | number;
+    totalPayout?: string | number | null;
     payRoleName?: string | null;
     bonusBreakdown?: unknown;
     createdAt?: string | null;

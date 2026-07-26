@@ -1,11 +1,11 @@
-import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { DateInput } from '~/components/ui/date-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { ConsolidatedToggle } from './ConsolidatedToggle';
@@ -30,28 +30,8 @@ export interface BalanceSheetPageProps {
   asOfDate: string | null;
 }
 
-export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?: boolean; filters?: { asOfDate: string } }) {
+export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?: boolean; filters?: { startDate: string; endDate: string } }) {
   const { assets, liabilities, equity, retainedEarnings, totalAssets, totalLiabilities, totalEquity, balanced, consolidated, filters } = props;
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const onAsOfChange = (value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set('asOfDate', value);
-    else next.delete('asOfDate');
-    setSearchParams(next);
-  };
-
-  const asOfControl = (
-    <div className="flex items-center gap-2">
-      <label htmlFor="bs-asof" className="text-sm text-app-fg-muted">As of</label>
-      <DateInput
-        id="bs-asof"
-        value={filters?.asOfDate ?? ''}
-        onChange={(e) => onAsOfChange(e.target.value)}
-        wrapperClassName="w-44"
-      />
-    </div>
-  );
 
   const balancedBadge = (
     <span
@@ -102,17 +82,23 @@ export function BalanceSheetPage(props: BalanceSheetPageProps & { consolidated?:
             <PageHeaderMobileTools
               sheetTitle="Filters"
               triggerAriaLabel="Balance sheet toolbar"
-              filters={asOfControl}
+              sheet={<ConsolidatedToggle active={consolidated} />}
               desktop={
                 <>
                   <PageRefreshButton />
-                  {asOfControl}
+                  <DateFilterBar
+                    startDate={filters?.startDate}
+                    endDate={filters?.endDate}
+                    chrome="pill"
+                  />
                 </>
               }
             />
           </div>
         }
       />
+
+      <MobileDateFilterRow startDate={filters?.startDate} endDate={filters?.endDate} />
 
       <OverviewStatStrip
         items={[

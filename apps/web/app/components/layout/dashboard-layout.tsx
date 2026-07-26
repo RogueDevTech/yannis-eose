@@ -345,12 +345,6 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.read',
       },
       {
-        label: 'Payout',
-        href: '/admin/finance/payout',
-        icon: SidebarIcons.finance,
-        permission: 'finance.read',
-      },
-      {
         label: 'Disbursements',
         href: '/admin/finance/disbursements',
         icon: SidebarIcons.disbursements,
@@ -1040,7 +1034,7 @@ function DashboardLayoutInner({
     const msgHandler = (event: MessageEvent) => {
       if (event.data?.type === 'SW_UPDATED') {
         // Mark that a reload is needed — the next Remix navigation will trigger it.
-        window.__yannisSwUpdated = true;
+        (window as unknown as Record<string, boolean>).__yannisSwUpdated = true;
       }
     };
     navigator.serviceWorker?.addEventListener('message', msgHandler);
