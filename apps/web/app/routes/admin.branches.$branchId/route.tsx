@@ -2690,13 +2690,13 @@ function BranchSupervisorTeamsPanel({
                           size="sm"
                           onClick={() => setCreateTeamOpen(true)}
                         >
-                          + Create team
+                          Create team
                         </Button>
                       }
                       sheet={({ closeSheet }) => (
                         <Button
                           type="button"
-                          variant="primary"
+                          variant="secondary"
                           size="sm"
                           className="h-12 w-full justify-center"
                           onClick={() => {
@@ -2704,7 +2704,7 @@ function BranchSupervisorTeamsPanel({
                             setCreateTeamOpen(true);
                           }}
                         >
-                          + Create team
+                          Create team
                         </Button>
                       )}
                     />

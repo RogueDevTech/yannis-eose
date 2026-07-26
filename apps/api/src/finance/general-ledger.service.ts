@@ -36,6 +36,7 @@ import {
   type ListWhtInput,
   type VatReturnSummary,
   type VatTransaction,
+  type GetAccountLedgerInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -3142,6 +3143,139 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       totals,
       period: { startDate: startDate ?? null, endDate: endDate ?? null },
       companyCount: groupIds.length,
+    };
+  }
+
+  // ─── Account Ledger (sub-ledger detail) ────────────────────────────────────
+
+  async getAccountLedger(input: GetAccountLedgerInput) {
+    // 1. Fetch the account row
+    const [account] = await this.db
+      .select({
+        id: schema.accounts.id,
+        code: schema.accounts.code,
+        name: schema.accounts.name,
+        rootType: schema.accounts.rootType,
+        accountType: schema.accounts.accountType,
+        isGroup: schema.accounts.isGroup,
+        isActive: schema.accounts.isActive,
+        balance: schema.accounts.balance,
+        parentAccountId: schema.accounts.parentAccountId,
+      })
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, input.accountId))
+      .limit(1);
+
+    if (!account) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
+    }
+
+    // 2. Build date conditions for GL entries
+    const dateConds: SQL[] = [eq(schema.glEntries.accountId, input.accountId)];
+    if (input.startDate) dateConds.push(gte(schema.glEntries.postingDate, input.startDate));
+    if (input.endDate) dateConds.push(lte(schema.glEntries.postingDate, input.endDate));
+
+    // 3. Summary aggregates for the filtered period
+    const [summary] = await this.db
+      .select({
+        totalDebit: sql<string>`coalesce(sum(${schema.glEntries.debit}), 0)`,
+        totalCredit: sql<string>`coalesce(sum(${schema.glEntries.credit}), 0)`,
+        entryCount: sql<number>`count(*)::int`,
+      })
+      .from(schema.glEntries)
+      .where(and(...dateConds));
+
+    const totalDebit = Number(summary?.totalDebit ?? 0);
+    const totalCredit = Number(summary?.totalCredit ?? 0);
+    const netBalance = totalDebit - totalCredit;
+
+    // 4. Total count for pagination
+    const entryCount = summary?.entryCount ?? 0;
+    const totalPages = Math.max(1, Math.ceil(entryCount / input.limit));
+    const page = Math.min(input.page, totalPages);
+    const offset = (page - 1) * input.limit;
+
+    // 5. Fetch paginated GL entry lines joined with journal entry headers
+    const entries = await this.db
+      .select({
+        id: schema.glEntries.id,
+        postingDate: schema.glEntries.postingDate,
+        debit: schema.glEntries.debit,
+        credit: schema.glEntries.credit,
+        voucherType: schema.glEntries.voucherType,
+        voucherId: schema.glEntries.voucherId,
+        remarks: schema.glEntries.remarks,
+        createdAt: schema.glEntries.createdAt,
+        journalEntryNumber: schema.journalEntries.entryNumber,
+        journalDescription: schema.journalEntries.description,
+      })
+      .from(schema.glEntries)
+      .leftJoin(
+        schema.journalEntries,
+        eq(schema.glEntries.voucherId, schema.journalEntries.id),
+      )
+      .where(and(...dateConds))
+      .orderBy(desc(schema.glEntries.postingDate), desc(schema.glEntries.createdAt))
+      .limit(input.limit)
+      .offset(offset);
+
+    // 6. Compute running balance (DESC display).
+    // For the i-th displayed entry (newest first), running balance =
+    // total net minus the net of all entries newer than it. On page 1
+    // (offset=0), entry[0]'s running balance = netBalance. On later
+    // pages we subtract the net of the `offset` newer entries.
+
+    let newerEntriesNet = 0;
+    if (offset > 0) {
+      // Sum of the `offset` newest entries (the ones on earlier pages in DESC order)
+      const [ns] = await this.db
+        .select({
+          net: sql<string>`coalesce(sum(sub.debit::numeric - sub.credit::numeric), 0)`,
+        })
+        .from(
+          sql`(
+            SELECT ${schema.glEntries.debit} AS debit, ${schema.glEntries.credit} AS credit
+            FROM ${schema.glEntries}
+            WHERE ${and(...dateConds)}
+            ORDER BY ${schema.glEntries.postingDate} DESC, ${schema.glEntries.createdAt} DESC
+            LIMIT ${offset}
+          ) sub`,
+        );
+      newerEntriesNet = Number(ns?.net ?? 0);
+    }
+
+    // Running balance for each entry on this page (displayed in DESC order)
+    let runningBal = netBalance - newerEntriesNet;
+    const entriesWithBalance = entries.map((e) => {
+      const bal = runningBal;
+      runningBal -= Number(e.debit) - Number(e.credit);
+      return {
+        id: e.id,
+        postingDate: e.postingDate,
+        journalEntryNumber: e.journalEntryNumber,
+        description: e.journalDescription ?? e.remarks ?? '',
+        debit: e.debit,
+        credit: e.credit,
+        runningBalance: bal.toFixed(2),
+        voucherType: e.voucherType,
+      };
+    });
+
+    return {
+      account,
+      entries: entriesWithBalance,
+      pagination: {
+        total: entryCount,
+        page,
+        pageSize: input.limit,
+        totalPages,
+      },
+      summary: {
+        totalDebit: totalDebit.toFixed(2),
+        totalCredit: totalCredit.toFixed(2),
+        netBalance: netBalance.toFixed(2),
+        entryCount,
+      },
     };
   }
 

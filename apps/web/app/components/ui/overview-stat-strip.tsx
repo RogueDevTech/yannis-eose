@@ -159,7 +159,7 @@ export function OverviewStatStripSkeleton({
                 return (
                   <div
                     key={i}
-                    className={`flex items-center justify-between gap-3 px-3 py-2.5 min-w-0 ${tileClassName}`}
+                    className={`flex items-center justify-between gap-3 px-4 sm:px-3 py-2.5 min-w-0 ${tileClassName}`}
                   >
                     {hasLabels ? (
                       <span className="text-xs text-app-fg-muted shrink-0 pr-3">{labels[i] ?? ''}</span>
@@ -392,7 +392,7 @@ export function OverviewStatStrip({
                   </>
                 );
                 const cellClass = [
-                  'flex items-center justify-between gap-3 px-3 py-2.5 min-w-0',
+                  'flex items-center justify-between gap-3 px-4 sm:px-3 py-2.5 min-w-0',
                   item.active ? `${activeMatrixTileClass} ${cornerRadius}` : '',
                   item.itemClassName ?? '',
                   tileClassName,

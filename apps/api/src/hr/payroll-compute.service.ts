@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
@@ -48,18 +48,34 @@ export class PayrollComputeService {
       payRoleId?: string | null;
       salaryBasis?: string | null;
       taxStatus?: string | null;
-      crmLinked?: boolean | null;
-      reportsToUserId?: string | null;
       flatMonthlyAmount?: number | null;
     },
     periodStart: Date,
     periodEnd: Date,
     groupId?: string | null,
+    branchId?: string | null,
   ): Promise<ComputedPayslipLine | null> {
-    const reporteeRows = await tx
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.reportsToUserId, member.id), eq(schema.users.status, 'ACTIVE')));
+    // Derive team membership from branch + subordinate role instead of explicit reportsTo links.
+    const subordinateRoles: Record<string, string[]> = {
+      HEAD_OF_CS: ['CS_CLOSER'],
+      HEAD_OF_MARKETING: ['MEDIA_BUYER'],
+      HEAD_OF_LOGISTICS: ['TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'],
+    };
+    const subRoles = subordinateRoles[member.role];
+    let reporteeIds: string[] = [];
+    if (subRoles?.length && branchId) {
+      const reporteeRows = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            inArray(schema.users.role, subRoles as typeof schema.users.role.enumValues),
+            eq(schema.users.status, 'ACTIVE'),
+            eq(schema.users.primaryBranchId, branchId),
+          ),
+        );
+      reporteeIds = reporteeRows.map((r) => r.id);
+    }
 
     const metrics = await this.metricsService.getStaffMetrics(
       {
@@ -67,8 +83,8 @@ export class PayrollComputeService {
         staffRole: member.role,
         periodStart,
         periodEnd,
-        crmLinked: member.crmLinked ?? true,
-        reporteeIds: reporteeRows.map((r) => r.id),
+        crmLinked: true,
+        reporteeIds: reporteeIds.length > 0 ? reporteeIds : undefined,
       },
       tx,
     );

@@ -2,9 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { PageHeader } from '~/components/ui/page-header';
-import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
-import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -23,6 +20,8 @@ import type { PayePreviewResult, TaxBandConfig, PayeBandRow } from './payroll-pr
 interface PayrollConfigTaxBandsPageProps {
   configs: TaxBandConfig[];
   canWrite: boolean;
+  createOpen?: boolean;
+  onCreateClose?: () => void;
 }
 
 type BandDraft = { fromAmount: string; toAmount: string; rate: string };
@@ -37,15 +36,27 @@ function formatBandsSummary(bands: PayeBandRow[], threshold: string): string {
   return `Free: ₦${th.toLocaleString('en-NG')} · ${parts.join(' · ')}${suffix}`;
 }
 
-export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTaxBandsPageProps) {
+export function PayrollConfigTaxBandsPage({ configs, canWrite, createOpen, onCreateClose }: PayrollConfigTaxBandsPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string; preview?: PayePreviewResult }>();
   const previewFetcher = useFetcher<{ preview?: PayePreviewResult; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const [editConfig, setEditConfig] = useState<TaxBandConfig | null>(null);
+  const [modalReadOnly, setModalReadOnly] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const isCreateOpen = showCreate || !!createOpen;
+
   const [previewGross, setPreviewGross] = useState('250000');
   const [previewTaxStatus, setPreviewTaxStatus] = useState('STANDARD_PAYE');
   const [previewSubsidy, setPreviewSubsidy] = useState('');
+
+  const openView = useCallback((row: TaxBandConfig) => {
+    setModalReadOnly(true);
+    setEditConfig(row);
+  }, []);
+  const openEdit = useCallback((row: TaxBandConfig) => {
+    setModalReadOnly(false);
+    setEditConfig(row);
+  }, []);
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Tax band config saved',
@@ -55,6 +66,7 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
   const handleSaveSuccess = useCallback(() => {
     setShowCreate(false);
     setEditConfig(null);
+    setModalReadOnly(false);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleSaveSuccess, { intent: 'saveTaxBandConfig' });
 
@@ -66,12 +78,19 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
         key: 'label',
         header: 'Label',
         hideable: false,
-        render: (row) => <span className="font-medium text-app-fg">{row.label}</span>,
+        minWidth: 'min-w-[140px]',
+        cellClassName: 'max-w-[220px]',
+        render: (row) => (
+          <span className="font-medium text-app-fg truncate block" title={row.label}>
+            {row.label}
+          </span>
+        ),
       },
       {
         key: 'bands',
         header: 'Bands',
-        minWidth: 'min-w-[220px]',
+        minWidth: 'min-w-[160px]',
+        cellClassName: 'max-w-[280px]',
         cellTitle: (row) => formatBandsSummary(row.bands, row.taxFreeThreshold),
         render: (row) => (
           <span className="text-xs text-app-fg-muted truncate block">
@@ -96,108 +115,91 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
       {
         key: 'actions',
         header: '',
+        mobileLabel: 'Actions',
         align: 'right',
         tight: true,
         hideable: false,
         render: (row) => (
-          <CompactTableActionButton tone="brand" onClick={() => setEditConfig(row)}>
-            {canWrite ? 'Edit' : 'View'}
-          </CompactTableActionButton>
+          <div className="flex items-center justify-end gap-1.5">
+            <CompactTableActionButton onClick={() => openView(row)}>View</CompactTableActionButton>
+            {canWrite ? (
+              <CompactTableActionButton tone="brand" onClick={() => openEdit(row)}>
+                Edit
+              </CompactTableActionButton>
+            ) : null}
+          </div>
         ),
       },
     ],
-    [canWrite],
+    [canWrite, openView, openEdit],
   );
+
+  const showSubsidyField = previewTaxStatus === 'EMPLOYER_SUBSIDIZED_PAYE';
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="PAYE tax bands"
-        backTo="/hr/payroll"
-        mobileInlineActions
-        description="Versioned Nigerian PAYE band tables and reliefs for payroll deductions."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Actions"
-            triggerAriaLabel="Tax bands toolbar"
-            desktop={
-              <>
-                <PageRefreshButton />
-                {canWrite ? (
-                  <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                    + New config
-                  </Button>
-                ) : null}
-              </>
-            }
-            sheet={({ closeSheet }) =>
-              canWrite ? (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowCreate(true);
-                  }}
-                >
-                  + New config
-                </Button>
-              ) : null
-            }
-          />
-        }
-      />
-
       <div className="card p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-app-fg">PAYE preview calculator</h3>
-        <p className="text-xs text-app-fg-muted">
-          Uses the default band engine on the server. Confirm thresholds against official FIRS publications before go-live.
-        </p>
-        <previewFetcher.Form method="post" className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+        <div>
+          <h3 className="text-sm font-semibold text-app-fg">PAYE preview calculator</h3>
+          <p className="text-xs text-app-fg-muted mt-0.5">
+            Uses the default band engine on the server. Confirm thresholds against official FIRS
+            publications before go-live.
+          </p>
+        </div>
+        <previewFetcher.Form
+          method="post"
+          className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3"
+        >
           <input type="hidden" name="intent" value="previewPaye" />
-          <div>
+          <div className="w-full sm:w-44 min-w-0">
             <label className="block text-sm font-medium text-app-fg-muted mb-1">Monthly gross (₦)</label>
             <AmountInput
               name="monthlyGross"
-              className="input"
+              className="input w-full"
               value={previewGross}
               onChange={setPreviewGross}
             />
           </div>
-          <FormSelect
-            label="Tax status"
-            name="taxStatus"
-            value={previewTaxStatus}
-            onChange={(e) => setPreviewTaxStatus(e.target.value)}
-            options={[
-              { value: 'STANDARD_PAYE', label: 'Standard PAYE' },
-              { value: 'EMPLOYER_SUBSIDIZED_PAYE', label: 'Employer subsidized' },
-              { value: 'GROSS_NO_DEDUCTION', label: 'Gross, no deduction' },
-            ]}
-          />
-          {previewTaxStatus === 'EMPLOYER_SUBSIDIZED_PAYE' ? (
-            <TextInput
-              label="Employer subsidy %"
-              name="employerSubsidyPercent"
-              type="number"
-              min={0}
-              max={100}
-              value={previewSubsidy}
-              onChange={(e) => setPreviewSubsidy(e.target.value)}
+          <div className="w-full sm:w-52 min-w-0">
+            <FormSelect
+              label="Tax status"
+              name="taxStatus"
+              value={previewTaxStatus}
+              onChange={(e) => setPreviewTaxStatus(e.target.value)}
+              options={[
+                { value: 'STANDARD_PAYE', label: 'Standard PAYE' },
+                { value: 'EMPLOYER_SUBSIDIZED_PAYE', label: 'Employer subsidized' },
+                { value: 'GROSS_NO_DEDUCTION', label: 'Gross, no deduction' },
+              ]}
             />
+          </div>
+          {showSubsidyField ? (
+            <div className="w-full sm:w-40 min-w-0">
+              <TextInput
+                label="Employer subsidy %"
+                name="employerSubsidyPercent"
+                type="number"
+                min={0}
+                max={100}
+                value={previewSubsidy}
+                onChange={(e) => setPreviewSubsidy(e.target.value)}
+              />
+            </div>
           ) : (
             <input type="hidden" name="employerSubsidyPercent" value="" />
           )}
-          <Button
-            type="submit"
-            variant="secondary"
-            size="sm"
-            loading={previewFetcher.state === 'submitting'}
-            loadingText="Calculating…"
-          >
-            Preview PAYE
-          </Button>
+          <div className="w-full sm:w-auto shrink-0">
+            <Button
+              type="submit"
+              variant="secondary"
+              size="sm"
+              className="w-full sm:w-auto"
+              loading={previewFetcher.state === 'submitting'}
+              loadingText="Calculating…"
+            >
+              Preview PAYE
+            </Button>
+          </div>
         </previewFetcher.Form>
 
         {previewFetcher.data?.error ? (
@@ -205,7 +207,7 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
         ) : null}
 
         {previewResult ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-app-border">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 pt-3 border-t border-app-border">
             <PreviewStat label="Monthly gross" value={<NairaPrice amount={previewResult.monthlyGross} />} />
             <PreviewStat label="Annual tax" value={<NairaPrice amount={previewResult.annualTax} />} />
             <PreviewStat label="Monthly PAYE" value={<NairaPrice amount={previewResult.monthlyPaye} />} />
@@ -234,8 +236,9 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
           renderMobileCard={(row) => (
             <div className="space-y-1">
               <p className="text-sm font-semibold text-app-fg leading-snug">{row.label}</p>
-              <p className="text-xs text-app-fg-muted truncate">
-                {formatBandsSummary(row.bands, row.taxFreeThreshold)}
+              <p className="text-xs text-app-fg-muted">
+                {row.bands.length} {row.bands.length === 1 ? 'band' : 'bands'} · Free ₦
+                {Number(row.taxFreeThreshold).toLocaleString('en-NG')}
               </p>
               <p className="text-xs text-app-fg-muted">
                 From{' '}
@@ -250,10 +253,10 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
         />
       )}
 
-      {(showCreate || editConfig) && (
+      {(isCreateOpen || editConfig) && (
         <TaxBandConfigModal
           config={editConfig}
-          readOnly={!canWrite}
+          readOnly={showCreate ? false : modalReadOnly || !canWrite}
           submitting={fetcher.state === 'submitting'}
           error={surface.errorMatchingIntent('saveTaxBandConfig') ?? undefined}
           fetcher={fetcher}
@@ -261,6 +264,8 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite }: PayrollConfigTa
             if (fetcher.state !== 'idle') return;
             setShowCreate(false);
             setEditConfig(null);
+            setModalReadOnly(false);
+            onCreateClose?.();
           }}
         />
       )}

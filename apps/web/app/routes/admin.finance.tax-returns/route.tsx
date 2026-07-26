@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { TaxReturnsLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   TaxReturnsPage,
   type VatTransaction,
@@ -71,17 +72,12 @@ export default function TaxReturnsRoute() {
     <CachedAwait
       resolve={pageData}
       fallback={
-        <TaxReturnsPage
-          outputVat={0}
-          inputVat={0}
-          netVatPayable={0}
-          periodStart=""
-          periodEnd=""
-          transactionCount={0}
-          transactions={[]}
-          filters={shell.filters}
+        <TaxReturnsLoadingShell
+          filters={{ ...shell.filters, periodAllTime: false }}
         />
       }
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <TaxReturnsPage

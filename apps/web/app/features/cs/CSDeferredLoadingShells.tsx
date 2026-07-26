@@ -1148,7 +1148,7 @@ export function CSMessageTemplatesLoadingShell() {
                   Preview all
                 </Button>
                 <Button type="button" variant="primary" size="sm" disabled>
-                  + New Template
+                  New Template
                 </Button>
                 <PageRefreshButton />
               </>
@@ -1158,8 +1158,8 @@ export function CSMessageTemplatesLoadingShell() {
                 <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Preview all
                 </Button>
-                <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
-                  + New Template
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                  New Template
                 </Button>
               </>
             }

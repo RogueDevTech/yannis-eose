@@ -164,7 +164,7 @@ export function TaxReturnsPage({
             }
             sheet={
               exportButton ? (
-                <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
+                <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
                   Export CSV (FIRS)
                 </Button>
               ) : null

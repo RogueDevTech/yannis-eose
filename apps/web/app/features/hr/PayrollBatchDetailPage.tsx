@@ -458,30 +458,59 @@ function BatchTimeline({ batch }: { batch: PayrollBatch }) {
   const currentIdx = order.indexOf(batch.status);
 
   return (
-    <ol className="flex items-center gap-1 text-xs">
-      {stages.map((s, i) => {
-        const reached = i <= currentIdx;
-        const atLabel = s.at ? formatTimelineDate(s.at) : null;
-        return (
-          <li key={s.key} className="flex items-center gap-1 flex-1 min-w-0">
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${reached ? 'bg-brand-500' : 'bg-app-border'}`}
-            />
-            <div className="min-w-0">
-              <p className={`truncate ${reached ? 'text-app-fg font-medium' : 'text-app-fg-muted'}`}>
-                {s.label}
-              </p>
-              {atLabel && (
-                <p className="text-micro text-app-fg-muted truncate">{atLabel}</p>
+    <>
+      {/* Mobile: vertical timeline */}
+      <ol className="md:hidden space-y-3 text-xs">
+        {stages.map((s, i) => {
+          const reached = i <= currentIdx;
+          const atLabel = s.at ? formatTimelineDate(s.at) : null;
+          return (
+            <li key={s.key} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${reached ? 'bg-brand-500' : 'bg-app-border'}`} />
+                {i < stages.length - 1 && (
+                  <span className={`w-px flex-1 mt-1 ${reached && i < currentIdx ? 'bg-brand-500' : 'bg-app-border'}`} />
+                )}
+              </div>
+              <div className="pb-1 min-w-0">
+                <p className={reached ? 'text-app-fg font-medium' : 'text-app-fg-muted'}>
+                  {s.label}
+                </p>
+                {atLabel && (
+                  <p className="text-micro text-app-fg-muted">{atLabel}</p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* Desktop: horizontal timeline */}
+      <ol className="hidden md:flex items-center gap-1 text-xs">
+        {stages.map((s, i) => {
+          const reached = i <= currentIdx;
+          const atLabel = s.at ? formatTimelineDate(s.at) : null;
+          return (
+            <li key={s.key} className="flex items-center gap-1 flex-1 min-w-0">
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${reached ? 'bg-brand-500' : 'bg-app-border'}`}
+              />
+              <div className="min-w-0">
+                <p className={`truncate ${reached ? 'text-app-fg font-medium' : 'text-app-fg-muted'}`}>
+                  {s.label}
+                </p>
+                {atLabel && (
+                  <p className="text-micro text-app-fg-muted truncate">{atLabel}</p>
+                )}
+              </div>
+              {i < stages.length - 1 && (
+                <span className={`flex-1 h-px ${reached && i < currentIdx ? 'bg-brand-500' : 'bg-app-border'}`} />
               )}
-            </div>
-            {i < stages.length - 1 && (
-              <span className={`flex-1 h-px ${reached && i < currentIdx ? 'bg-brand-500' : 'bg-app-border'}`} />
-            )}
-          </li>
-        );
-      })}
-    </ol>
+            </li>
+          );
+        })}
+      </ol>
+    </>
   );
 }
 
@@ -666,7 +695,7 @@ export function PayrollBatchDetailPage({
                     {allowedTransitions.includes('SUBMIT') && (
                       <Button
                         type="button"
-                        variant="primary"
+                        variant="secondary"
                         size="sm"
                         className="w-full justify-center h-12"
                         loading={fetcher.state === 'submitting' && showSubmit}
@@ -778,7 +807,7 @@ export function PayrollBatchDetailPage({
               <button
                 type="button"
                 onClick={() => setViewingPayout(p)}
-                className="w-full text-left rounded-lg border border-app-border bg-app-elevated p-4 space-y-2 hover:bg-app-hover transition-colors"
+                className="w-full text-left p-4 space-y-2 hover:bg-app-hover transition-colors"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>

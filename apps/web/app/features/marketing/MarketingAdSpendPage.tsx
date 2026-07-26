@@ -1121,7 +1121,7 @@ export function MarketingAdSpendPage({
                   actionLabel="adding ad spend"
                   className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
                 >
-                  + Add Expense
+                  Add Expense
                 </BranchScopedLink>
               </>
             }
@@ -1133,7 +1133,7 @@ export function MarketingAdSpendPage({
                   onClick={() => closeSheet()}
                   className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
                 >
-                  + Add Expense
+                  Add Expense
                 </BranchScopedLink>
                 {canApproveAdSpend && pendingIdsOnPage.length > 0 && (
                   <Button

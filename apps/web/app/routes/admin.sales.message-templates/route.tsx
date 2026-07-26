@@ -477,7 +477,7 @@ function MessageTemplatesPage({
                     setCreateOpen(true);
                   }}
                 >
-                  + New Template
+                  New Template
                 </Button>
                 <PageRefreshButton />
               </>
@@ -499,7 +499,7 @@ function MessageTemplatesPage({
                   Preview all
                 </Button>
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   size="sm"
                   className="w-full justify-center"
                   onClick={() => {
@@ -508,7 +508,7 @@ function MessageTemplatesPage({
                     setCreateOpen(true);
                   }}
                 >
-                  + New Template
+                  New Template
                 </Button>
               </>
             )}

@@ -1002,7 +1002,7 @@ export function UserDetailPage({
                       to={`/hr/users/${user.id}/edit`}
                       actionLabel="editing this user"
                       prefetch="intent"
-                      className="btn-primary btn-sm h-12 flex items-center justify-center w-full"
+                      className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
                       onClick={() => closeSheet()}
                     >
                       Edit user

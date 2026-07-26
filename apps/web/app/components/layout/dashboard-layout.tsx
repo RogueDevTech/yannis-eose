@@ -364,12 +364,6 @@ const navStructure: NavGroupDef[] = [
         roles: ['AUDITOR'],
       },
       {
-        label: 'Opening Balances',
-        href: '/admin/finance/opening-balances',
-        icon: SidebarIcons.scale,
-        permission: 'finance.ledger.write',
-      },
-      {
         label: 'Journal Entries',
         href: '/admin/finance/journal-entries',
         icon: SidebarIcons.journal,

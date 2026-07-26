@@ -335,12 +335,12 @@ export function MarketingFundingLoadingShell({
               <>
                 {canRequestFunding && (
                   <Button type="button" variant={canSendFunding ? 'secondary' : 'primary'} size="sm" disabled className="opacity-70">
-                    + Request Funds
+                    Request Funds
                   </Button>
                 )}
                 {canSendFunding && (
                   <Button type="button" variant="primary" size="sm" disabled className="opacity-70">
-                    + Send Funding
+                    Send Funding
                   </Button>
                 )}
                 <PageRefreshButton />
@@ -354,12 +354,12 @@ export function MarketingFundingLoadingShell({
               <>
                 {canRequestFunding && (
                   <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
-                    + Request Funds
+                    Request Funds
                   </Button>
                 )}
                 {canSendFunding && (
-                  <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
-                    + Send Funding
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                    Send Funding
                   </Button>
                 )}
               </>
@@ -657,7 +657,7 @@ export function MarketingAdSpendLoadingShell({
                   actionLabel="adding ad spend"
                   className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
                 >
-                  + Add Expense
+                  Add Expense
                 </BranchScopedLink>
               </>
             }
@@ -668,7 +668,7 @@ export function MarketingAdSpendLoadingShell({
                 onClick={() => closeSheet()}
                 className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
               >
-                + Add Expense
+                Add Expense
               </BranchScopedLink>
             )}
           />
@@ -1389,13 +1389,13 @@ export function MarketingFormsLoadingShell({
               <>
                 <PageRefreshButton />
                 <Button type="button" variant="primary" size="sm" disabled className="opacity-70">
-                  + New Form
+                  New Form
                 </Button>
               </>
             }
             sheet={
-              <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
-                + New Form
+              <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                New Form
               </Button>
             }
           />

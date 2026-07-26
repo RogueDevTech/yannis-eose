@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { WhtCertificatesLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   WhtCertificatesPage,
   type WhtDeductionRow,
@@ -94,13 +95,9 @@ export default function WhtCertificatesRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={
-        <WhtCertificatesPage
-          records={[]}
-          pagination={EMPTY.pagination}
-          filters={shell.filters}
-        />
-      }
+      fallback={<WhtCertificatesLoadingShell />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <WhtCertificatesPage

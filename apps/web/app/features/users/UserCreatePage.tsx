@@ -554,8 +554,6 @@ export function UserCreatePage({
     reportsToUserId: editingUser?.reportsToUserId ?? null,
     crmLinked: editingUser?.crmLinked ?? true,
   });
-  const payrollProfileFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(payrollProfileFetcher.data, { successMessage: 'Payroll profile saved' });
 
   // Reset permissions to role defaults — standalone server action via fetcher.
   const resetPermsFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
@@ -1157,12 +1155,21 @@ export function UserCreatePage({
 
             {/* Capacity (CS roles) */}
             {showCapacity && (
-              <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <TextInput
                   id="capacity"
                   name="capacity"
                   type="number"
-                  label="Order Capacity"
+                  label={
+                    <span className="inline-flex items-center gap-1.5">
+                      Order Capacity
+                      <span title="Max concurrent orders this agent can handle">
+                        <svg className="w-3.5 h-3.5 text-app-fg-muted cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </span>
+                    </span>
+                  }
                   min={1}
                   max={100}
                   defaultValue={
@@ -1170,8 +1177,6 @@ export function UserCreatePage({
                       ? String(editingUser.capacity)
                       : '10'
                   }
-                  wrapperClassName="w-full sm:w-32"
-                  hint="Maximum concurrent orders this agent can handle."
                 />
               </div>
             )}
@@ -1206,12 +1211,14 @@ export function UserCreatePage({
             {/* Product Assignment */}
             {showProductAssignment && (
               <div>
-                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                <label className="flex items-center gap-1.5 text-sm font-medium text-app-fg-muted mb-1.5">
                   Assign Products
+                  <span title="Leave blank to assign all products. Select specific products to restrict access.">
+                    <svg className="w-3.5 h-3.5 text-app-fg-muted cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </span>
                 </label>
-                <p className="text-xs text-app-fg-muted mb-2">
-                  Leave blank to assign all products. Select specific products to restrict.
-                </p>
                 {products.length > 0 ? (
                   <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
                     <label className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border hover:bg-app-hover cursor-pointer shrink-0">
@@ -1244,9 +1251,7 @@ export function UserCreatePage({
                       ))}
                     </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-app-fg-muted">No products found.</p>
-                )}
+                ) : null}
 
                 {selectedProductIds.length > 0 && (
                   <div className="mt-3">
@@ -1363,9 +1368,7 @@ export function UserCreatePage({
         )}
 
         {isEditMode && (payRoles ?? []).length > 0 ? (
-          <payrollProfileFetcher.Form method="post" className="space-y-3">
-            <input type="hidden" name="intent" value="updatePayrollProfile" />
-            <input type="hidden" name="userId" value={editingUser!.id} />
+          <>
             <input type="hidden" name="payRoleId" value={payrollProfile.payRoleId ?? ''} />
             <input type="hidden" name="employmentType" value={payrollProfile.employmentType} />
             <input type="hidden" name="salaryBasis" value={payrollProfile.salaryBasis} />
@@ -1375,19 +1378,10 @@ export function UserCreatePage({
             <PayrollUserProfileSection
               values={payrollProfile}
               payRoles={(payRoles ?? []) as import('~/features/hr/payroll-prd-types').PayRole[]}
-              managerOptions={activeHeads.map((h) => ({ value: h.id, label: h.name }))}
+              userRole={selectedRole}
               onChange={(patch) => setPayrollProfile((prev) => ({ ...prev, ...patch }))}
             />
-            <Button
-              type="submit"
-              variant="secondary"
-              size="sm"
-              loading={payrollProfileFetcher.state === 'submitting'}
-              loadingText="Saving…"
-            >
-              Save payroll profile
-            </Button>
-          </payrollProfileFetcher.Form>
+          </>
         ) : null}
 
         {/* Section 4: Contact */}

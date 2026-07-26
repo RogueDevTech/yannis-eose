@@ -1,6 +1,7 @@
 import { Link } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
 import {
@@ -151,10 +152,11 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
         mobileInlineActions
         description="Quick snapshot of today's performance."
         actions={
-          <>
-            <span className="hidden md:inline-flex"><PageRefreshButton /></span>
-            <span className="md:hidden"><PageRefreshButton iconOnly /></span>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Dashboard toolbar"
+            desktop={<PageRefreshButton />}
+          />
         }
       />
 

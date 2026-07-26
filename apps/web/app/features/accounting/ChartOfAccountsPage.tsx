@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, Link } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -15,6 +15,8 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { DateInput } from '~/components/ui/date-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
 
@@ -33,6 +35,7 @@ export interface AccountRow {
 export interface ChartOfAccountsPageProps {
   accounts: AccountRow[];
   canWrite: boolean;
+  hasOpeningBalances?: boolean;
 }
 
 const ROOT_TYPES = [
@@ -103,7 +106,7 @@ function toTree(accounts: AccountRow[]): Array<AccountRow & { depth: number }> {
   return out;
 }
 
-export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageProps) {
+export function ChartOfAccountsPage({ accounts, canWrite, hasOpeningBalances = false }: ChartOfAccountsPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<AccountRow | null>(null);
@@ -128,6 +131,50 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
       return next;
     });
   };
+
+  // Opening balances modal state
+  const [openingOpen, setOpeningOpen] = useState(false);
+  const [openingDate, setOpeningDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [openingSearch, setOpeningSearch] = useState('');
+  const [openingAmounts, setOpeningAmounts] = useState<Record<string, { debit: number | null; credit: number | null }>>({});
+  const [showOpeningConfirm, setShowOpeningConfirm] = useState(false);
+  const openingFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
+
+  const postableAccounts = useMemo(() => accounts.filter((a) => !a.isGroup), [accounts]);
+  const openingFiltered = useMemo(() => {
+    const q = openingSearch.trim().toLowerCase();
+    if (!q) return postableAccounts;
+    return postableAccounts.filter((a) => `${a.code} ${a.name}`.toLowerCase().includes(q));
+  }, [postableAccounts, openingSearch]);
+
+  const toMinor = (v: number | null) => Math.round((v ?? 0) * 100);
+  const openingDebitMinor = Object.values(openingAmounts).reduce((s, a) => s + toMinor(a.debit), 0);
+  const openingCreditMinor = Object.values(openingAmounts).reduce((s, a) => s + toMinor(a.credit), 0);
+  const openingResidual = openingDebitMinor - openingCreditMinor;
+  const openingHasAny = openingDebitMinor > 0 || openingCreditMinor > 0;
+  const openingLineCount = Object.values(openingAmounts).filter((a) => (a.debit ?? 0) > 0 || (a.credit ?? 0) > 0).length;
+
+  const setOpeningAmt = (id: string, side: 'debit' | 'credit', value: number | null) => {
+    setOpeningAmounts((prev) => ({
+      ...prev,
+      [id]: side === 'debit' ? { debit: value, credit: null } : { debit: null, credit: value },
+    }));
+  };
+
+  const submitOpeningBalances = () => {
+    const lines = Object.entries(openingAmounts)
+      .map(([accountId, a]) => ({ accountId, debit: a.debit ?? 0, credit: a.credit ?? 0 }))
+      .filter((l) => l.debit > 0 || l.credit > 0);
+    if (lines.length === 0) return;
+    openingFetcher.submit(
+      { intent: 'postOpening', payload: JSON.stringify({ postingDate: openingDate, lines }) },
+      { method: 'post' },
+    );
+    setShowOpeningConfirm(false);
+  };
+
+  useFetcherToast(openingFetcher.data, { successMessage: 'Opening balances posted' });
+  useCloseOnFetcherSuccess(openingFetcher, () => setOpeningOpen(false), { intent: 'postOpening' });
 
   const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -292,6 +339,11 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <PageRefreshButton />
+                {canWrite && (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => setOpeningOpen(true)}>
+                    {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
+                  </Button>
+                )}
                 {canWrite ? (
                   <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
                     New Account
@@ -301,9 +353,14 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
             }
             sheet={
               canWrite ? (
-                <Button type="button" className="w-full" onClick={() => setCreateOpen(true)}>
-                  New Account
-                </Button>
+                <>
+                  <Button type="button" className="w-full" variant="secondary" onClick={() => setOpeningOpen(true)}>
+                    {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
+                  </Button>
+                  <Button type="button" className="w-full" onClick={() => setCreateOpen(true)}>
+                    New Account
+                  </Button>
+                </>
               ) : undefined
             }
           />
@@ -319,6 +376,20 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
           ...(inactiveCount > 0 ? [{ label: 'Inactive', value: String(inactiveCount), valueClassName: 'text-app-fg-muted' }] : []),
         ]}
       />
+
+      {canWrite && !hasOpeningBalances && (
+        <div className="rounded-lg border border-warning-200 dark:border-warning-800 bg-warning-50/60 dark:bg-warning-900/20 px-4 py-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-warning-800 dark:text-warning-200">Opening balances not posted</p>
+            <p className="text-xs text-warning-700 dark:text-warning-300 mt-0.5">
+              Post your go-live account balances so the ledger starts with the correct snapshot.
+            </p>
+          </div>
+          <Button type="button" size="sm" onClick={() => setOpeningOpen(true)}>
+            Post now
+          </Button>
+        </div>
+      )}
 
       <div className="hidden md:flex flex-wrap items-center gap-2">
         <PageSearchControl
@@ -407,10 +478,20 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
                   <span className="text-xs font-mono text-app-fg-muted w-14 shrink-0 tabular-nums">{r.code}</span>
 
                   {/* Name */}
-                  <span className={`flex-1 min-w-0 text-sm truncate ${r.isGroup ? 'font-semibold text-app-fg' : 'text-app-fg'} ${!r.isActive ? 'line-through' : ''}`}>
-                    {displayName(r.name)}
-                    <RealMoneyTag accountType={r.accountType} />
-                  </span>
+                  {r.isGroup ? (
+                    <span className={`flex-1 min-w-0 text-sm truncate font-semibold text-app-fg ${!r.isActive ? 'line-through' : ''}`}>
+                      {displayName(r.name)}
+                      <RealMoneyTag accountType={r.accountType} />
+                    </span>
+                  ) : (
+                    <Link
+                      to={`/admin/finance/accounts/${r.id}`}
+                      className={`flex-1 min-w-0 text-sm truncate text-app-fg hover:text-brand-600 transition-colors ${!r.isActive ? 'line-through' : ''}`}
+                    >
+                      {displayName(r.name)}
+                      <RealMoneyTag accountType={r.accountType} />
+                    </Link>
+                  )}
 
                   {/* Badges */}
                   {r.isGroup && (
@@ -435,7 +516,7 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
                   {/* Actions */}
                   {canWrite && (
                     <span className="flex items-center gap-1 shrink-0">
-                      <TableActionButton onClick={() => setEditAccount(r)}>Edit</TableActionButton>
+                      <TableActionButton onClick={() => setEditAccount(r)}>View</TableActionButton>
           {r.isActive && (
             <TableActionButton onClick={() => setDeactivateTarget(r)} variant="danger">Deactivate</TableActionButton>
           )}
@@ -507,17 +588,23 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
       {editAccount && (
         <Modal open onClose={() => setEditAccount(null)} maxWidth="max-w-md">
           <div className="p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-app-fg">Edit Account</h2>
+            <h2 className="text-lg font-semibold text-app-fg">Account Details</h2>
             <p className="text-sm text-app-fg-muted">
-              {editAccount.code}: only the account name can be changed after creation.
+              Only the account name can be changed. Code, type, and structure are locked after creation.
             </p>
             <editFetcher.Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="updateAccount" />
               <input type="hidden" name="accountId" value={editAccount.id} />
               <TextInput label="Code" value={editAccount.code} disabled />
               <TextInput label="Name" name="name" defaultValue={editAccount.name} required />
-              <TextInput label="Root type" value={editAccount.rootType} disabled />
-              <TextInput label="Normal balance" value={normalBalance(editAccount.rootType)} disabled />
+              <div className="grid grid-cols-2 gap-3">
+                <TextInput label="Root type" value={editAccount.rootType} disabled />
+                <TextInput label="Normal balance" value={normalBalance(editAccount.rootType)} disabled />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <TextInput label="Account type" value={editAccount.accountType ? typeLabel(editAccount.accountType) : 'None'} disabled />
+                <TextInput label="Group" value={editAccount.isGroup ? 'Yes (header)' : 'No (postable)'} disabled />
+              </div>
               {editFetcher.data?.error && (
                 <p className="text-sm text-danger-600">{editFetcher.data.error}</p>
               )}
@@ -525,14 +612,125 @@ export function ChartOfAccountsPage({ accounts, canWrite }: ChartOfAccountsPageP
                 <Button type="button" variant="secondary" onClick={() => setEditAccount(null)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={editFetcher.state !== 'idle'}>
-                  {editFetcher.state !== 'idle' ? 'Saving...' : 'Save'}
+                <Button type="submit" loading={editFetcher.state !== 'idle'} loadingText="Saving...">
+                  Save
                 </Button>
               </div>
             </editFetcher.Form>
           </div>
         </Modal>
       )}
+
+      {/* ── Opening Balances Modal ─────────────────────── */}
+      {openingOpen && (
+        <Modal open onClose={() => setOpeningOpen(false)} maxWidth="max-w-3xl">
+          <div className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">
+                {hasOpeningBalances ? 'Opening Balances' : 'Post Opening Balances'}
+              </h2>
+              <button type="button" onClick={() => setOpeningOpen(false)} className="text-app-fg-muted hover:text-app-fg text-xl" aria-label="Close">×</button>
+            </div>
+
+            {hasOpeningBalances ? (
+              <div className="rounded-lg border border-success-200 dark:border-success-800 bg-success-50/60 dark:bg-success-900/20 px-4 py-3">
+                <p className="text-sm font-medium text-success-800 dark:text-success-200">Opening balances have been posted.</p>
+                <p className="text-xs text-success-700 dark:text-success-300 mt-0.5">
+                  View the entry in Journal Entries. To correct, reverse and re-post.
+                </p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-app-fg-muted">
+                  Enter each account's balance at go-live. Any residual posts to Opening Balance Equity.
+                </p>
+
+                <div className="flex flex-wrap items-end gap-3">
+                  <DateInput label="Cutover date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} wrapperClassName="w-44" />
+                  <TextInput label="Filter accounts" value={openingSearch} onChange={(e) => setOpeningSearch(e.target.value)} placeholder="Search by code or name" />
+                </div>
+
+                <div className="overflow-y-auto max-h-[50vh] rounded-lg border border-app-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-app-hover text-xs uppercase text-app-fg-muted sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Account</th>
+                        <th className="px-3 py-2 text-right w-36">Debit</th>
+                        <th className="px-3 py-2 text-right w-36">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openingFiltered.map((a) => (
+                        <tr key={a.id} className="border-t border-app-border">
+                          <td className="px-3 py-1 text-app-fg text-xs">{a.code} {a.name.replace(/\s*[—–]\s*/g, ' · ')}</td>
+                          <td className="px-3 py-1">
+                            <NumberInput
+                              value={openingAmounts[a.id]?.debit ?? null}
+                              onValueChange={(v) => setOpeningAmt(a.id, 'debit', v)}
+                              onValueCleared={() => setOpeningAmt(a.id, 'debit', null)}
+                              coerce="decimal" commitOnChange allowEmpty useGrouping min={0}
+                              controlSize="sm" className="text-right tabular-nums" wrapperClassName="ml-auto w-28"
+                            />
+                          </td>
+                          <td className="px-3 py-1">
+                            <NumberInput
+                              value={openingAmounts[a.id]?.credit ?? null}
+                              onValueChange={(v) => setOpeningAmt(a.id, 'credit', v)}
+                              onValueCleared={() => setOpeningAmt(a.id, 'credit', null)}
+                              coerce="decimal" commitOnChange allowEmpty useGrouping min={0}
+                              controlSize="sm" className="text-right tabular-nums" wrapperClassName="ml-auto w-28"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-app-border bg-app-hover px-4 py-2.5 text-sm">
+                  <div className="flex gap-4">
+                    <span>Debit <NairaPrice amount={openingDebitMinor / 100} className="ml-1 font-semibold text-danger-600 dark:text-danger-400" /></span>
+                    <span>Credit <NairaPrice amount={openingCreditMinor / 100} className="ml-1 font-semibold text-success-600 dark:text-success-400" /></span>
+                  </div>
+                  <span className="text-xs text-app-fg-muted">
+                    {openingResidual === 0 ? 'Balanced' : `Residual ${(Math.abs(openingResidual) / 100).toLocaleString('en-US')} → Equity`}
+                  </span>
+                </div>
+
+                {openingFetcher.data?.error && <p className="text-sm text-danger-600">{openingFetcher.data.error}</p>}
+
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setOpeningOpen(false)}>Cancel</Button>
+                  <Button type="button" size="sm" onClick={() => setShowOpeningConfirm(true)} disabled={!openingHasAny || openingFetcher.state !== 'idle'}>
+                    {openingFetcher.state !== 'idle' ? 'Posting…' : 'Post Opening Balances'}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      <ConfirmActionModal
+        open={showOpeningConfirm}
+        onClose={() => setShowOpeningConfirm(false)}
+        title="Post opening balances"
+        description={`Post ${openingLineCount} account line${openingLineCount === 1 ? '' : 's'} as of ${openingDate}? This creates a journal entry in the general ledger.`}
+        details={
+          <ul className="list-disc pl-4 space-y-1 text-sm">
+            <li>Debit <NairaPrice amount={openingDebitMinor / 100} /> · Credit <NairaPrice amount={openingCreditMinor / 100} /></li>
+            {openingResidual !== 0 ? (
+              <li>Residual of {(Math.abs(openingResidual) / 100).toLocaleString('en-US')} posts to Opening Balance Equity</li>
+            ) : (
+              <li>Entry is balanced</li>
+            )}
+          </ul>
+        }
+        confirmLabel="Post opening balances"
+        variant="warning"
+        loading={openingFetcher.state !== 'idle'}
+        onConfirm={submitOpeningBalances}
+      />
     </div>
   );
 }

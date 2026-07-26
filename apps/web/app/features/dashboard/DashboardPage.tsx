@@ -69,25 +69,20 @@ export function DashboardPage({
     <div className="space-y-6">
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
-        mobileInlineActions
         description={getRoleDescription(role)}
         actions={
-          // Match the Inventory-page mobile pattern (CEO directive 2026-05-10):
-          // refresh + date filter would otherwise stack and squash the greeting
-          // + role description on narrow viewports. Below `md` we collapse
-          // them into the kebab sheet; icon-only refresh stays beside it for
-          // one-tap reload.
           <PageHeaderMobileTools
-            sheetTitle="Actions"
-            triggerAriaLabel="Dashboard toolbar"
-            saveFilterKey
+            sheetTitle="Dashboard options"
+            triggerAriaLabel="Dashboard actions"
             desktop={
               <>
                 <PageRefreshButton />
                 <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime ?? false} chrome="pill" />
+                  startDate={dateFilters.startDate}
+                  endDate={dateFilters.endDate}
+                  periodAllTime={dateFilters.periodAllTime ?? false}
+                  chrome="pill"
+                />
                 {hasTeamFilter && (
                   <FormSelect
                     value={searchParams.get('teamId') || ''}
@@ -108,24 +103,26 @@ export function DashboardPage({
                 )}
               </>
             }
-            sheet={hasTeamFilter ? (
-              <FormSelect
-                value={searchParams.get('teamId') || ''}
-                onChange={(e) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    if (e.target.value) next.set('teamId', e.target.value);
-                    else next.delete('teamId');
-                    return next;
-                  });
-                }}
-                options={[
-                  { value: '', label: 'All teams' },
-                  ...teamsForFilter.map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
-                ]}
-                wrapperClassName="w-full"
-              />
-            ) : undefined}
+            sheet={
+              hasTeamFilter ? (
+                <FormSelect
+                  label="Team"
+                  value={searchParams.get('teamId') || ''}
+                  onChange={(e) => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      if (e.target.value) next.set('teamId', e.target.value);
+                      else next.delete('teamId');
+                      return next;
+                    });
+                  }}
+                  options={[
+                    { value: '', label: 'All teams' },
+                    ...teamsForFilter.map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
+                  ]}
+                />
+              ) : <span className="text-sm text-app-fg-muted">No additional options.</span>
+            }
           />
         }
       />
@@ -134,6 +131,27 @@ export function DashboardPage({
         startDate={dateFilters.startDate}
         endDate={dateFilters.endDate}
         periodAllTime={dateFilters.periodAllTime ?? false}
+        actionsSheetTitle="Dashboard options"
+        actionsSheet={
+          hasTeamFilter ? (
+            <FormSelect
+              label="Team"
+              value={searchParams.get('teamId') || ''}
+              onChange={(e) => {
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  if (e.target.value) next.set('teamId', e.target.value);
+                  else next.delete('teamId');
+                  return next;
+                });
+              }}
+              options={[
+                { value: '', label: 'All teams' },
+                ...teamsForFilter.map((t) => ({ value: t.id, label: t.name || 'Unnamed team' })),
+              ]}
+            />
+          ) : <span className="text-sm text-app-fg-muted">No additional filters available.</span>
+        }
       />
 
       {/* Missing role: minimal welcome (safer than defaulting to SuperAdmin) */}

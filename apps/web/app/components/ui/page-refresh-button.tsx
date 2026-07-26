@@ -21,7 +21,7 @@ export function PageRefreshButton({
 
   const mergedClassName = [
     iconOnly
-      ? 'btn-primary !px-0 !h-9 !min-h-0 w-9 shrink-0 md:bg-app-hover md:text-app-fg md:hover:opacity-90 md:focus:ring-surface-400'
+      ? 'btn-secondary !px-0 !h-9 !min-h-0 w-9 shrink-0'
       : 'btn-secondary btn-sm',
     className,
   ]

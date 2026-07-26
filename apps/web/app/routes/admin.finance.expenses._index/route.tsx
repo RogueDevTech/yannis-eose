@@ -5,6 +5,7 @@ import { apiRequest, getSessionCookie, requirePermissionOrRoles, parsePerPage } 
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { ExpenseSubmissionsLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { ExpenseSubmissionsPage, type ExpenseRow } from '~/features/finance/ExpenseSubmissionsPage';
 
 export const meta: MetaFunction = () => [{ title: 'Expense Submissions — Accounting — Yannis EOSE' }];
@@ -139,14 +140,9 @@ export default function ExpenseSubmissionsRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={
-        <ExpenseSubmissionsPage
-          expenses={[]}
-          pagination={EMPTY.pagination}
-          accounts={[]}
-          canWrite={shell.canWrite}
-        />
-      }
+      fallback={<ExpenseSubmissionsLoadingShell />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <ExpenseSubmissionsPage

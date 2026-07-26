@@ -569,14 +569,14 @@ function ProductsRouteInner(
                       setShowCreateOffer(true);
                     }}
                   >
-                    + Create offer
+                    Create offer
                   </Button>
                 ) : null}
                 {data.canCreateProduct ? (
                   <ActionDropdown
                     id="add-product"
                     trigger="button"
-                    triggerLabel="+ Add product"
+                    triggerLabel="Add product"
                     triggerVariant="primary"
                     openMenuId={openHeaderMenuId}
                     setOpenMenuId={setOpenHeaderMenuId}
@@ -602,14 +602,14 @@ function ProductsRouteInner(
                       setShowCreateOffer(true);
                     }}
                   >
-                    + Create offer
+                    Create offer
                   </Button>
                 ) : null}
                 {data.canCreateProduct ? (
                   <ActionDropdown
                     id="add-product-mobile"
                     trigger="button"
-                    triggerLabel="+ Add product"
+                    triggerLabel="Add product"
                     triggerVariant="secondary"
                     triggerClassName="w-full justify-center"
                     openMenuId={openHeaderMenuId}

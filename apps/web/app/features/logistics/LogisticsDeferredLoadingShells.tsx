@@ -823,7 +823,7 @@ function TransfersWorkspaceLoadingShell({
     variant === 'logistics'
       ? 'Request stock moves between logistics locations.'
       : 'Move stock between locations and track receipt.';
-  const initiateCta = variant === 'logistics' ? '+ Request transfer' : '+ Record transfer';
+  const initiateCta = variant === 'logistics' ? 'Request transfer' : 'Record transfer';
 
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
@@ -848,7 +848,7 @@ function TransfersWorkspaceLoadingShell({
               </>
             }
             sheet={
-              <Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
+              <Button variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                 {initiateCta}
               </Button>
             }

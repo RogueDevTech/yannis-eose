@@ -301,7 +301,7 @@ export function AssetRegisterPage({
                       Run Depreciation
                     </Button>
                     <Button type="button" onClick={() => setShowAddModal(true)}>
-                      + Add Asset
+                      Add Asset
                     </Button>
                   </>
                 ) : null}

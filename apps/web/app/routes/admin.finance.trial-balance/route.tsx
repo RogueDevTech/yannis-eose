@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { TrialBalanceLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   TrialBalancePage,
   type TrialBalanceRow,
@@ -71,7 +72,9 @@ export default function TrialBalanceRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={<TrialBalancePage accounts={[]} totals={EMPTY.totals} filters={shell.filters} />}
+      fallback={<TrialBalanceLoadingShell filters={shell.filters} />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <TrialBalancePage

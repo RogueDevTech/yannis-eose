@@ -143,7 +143,7 @@ export function BudgetVsActualPage({ rows, filters }: BudgetVsActualPageProps) {
             }
             sheet={
               exportButton ? (
-                <Button variant="primary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
+                <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={handleExport}>
                   Export CSV
                 </Button>
               ) : null

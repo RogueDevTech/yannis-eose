@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, inArray, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -53,7 +53,24 @@ export class PayrollConfigService {
         ),
       )
       .orderBy(schema.payrollPayRoles.name);
-    return rows;
+
+    // Count staff assigned to each pay role
+    const staffCounts = await this.db
+      .select({
+        payRoleId: schema.users.payRoleId,
+        count: count(),
+      })
+      .from(schema.users)
+      .where(
+        and(
+          isNotNull(schema.users.payRoleId),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .groupBy(schema.users.payRoleId);
+
+    const countMap = new Map(staffCounts.map((r) => [r.payRoleId, Number(r.count)]));
+    return rows.map((r) => ({ ...r, staffCount: countMap.get(r.id) ?? 0 }));
   }
 
   async createPayRole(input: CreatePayRoleInput, actor: SessionUser, groupId?: string | null) {
@@ -471,8 +488,7 @@ export class PayrollConfigService {
           ...(input.employmentType != null ? { employmentType: input.employmentType as typeof schema.users.$inferInsert.employmentType } : {}),
           ...(input.salaryBasis != null ? { salaryBasis: input.salaryBasis as typeof schema.users.$inferInsert.salaryBasis } : {}),
           ...(input.taxStatus != null ? { taxStatus: input.taxStatus as typeof schema.users.$inferInsert.taxStatus } : {}),
-          ...(input.reportsToUserId !== undefined ? { reportsToUserId: input.reportsToUserId } : {}),
-          ...(input.crmLinked != null ? { crmLinked: input.crmLinked } : {}),
+          ...(input.flatMonthlyAmount != null ? { flatMonthlyAmount: sql`${input.flatMonthlyAmount}::numeric` } : {}),
           updatedAt: new Date(),
         })
         .where(eq(schema.users.id, input.userId))

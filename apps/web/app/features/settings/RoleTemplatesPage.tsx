@@ -279,7 +279,7 @@ export function RoleTemplatesPage({
             sheet={({ closeSheet }) => (
               <Button
                 type="button"
-                variant="primary"
+                variant="secondary"
                 size="sm"
                 className="h-12 w-full justify-center"
                 onClick={() => {

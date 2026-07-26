@@ -301,14 +301,14 @@ export function ExpenseSubmissionsPage({
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
                 <Button type="button" onClick={() => setShowSubmitModal(true)}>
-                  + Submit Expense
+                  Submit Expense
                 </Button>
               </div>
             }
             sheet={
               <div className="flex flex-col gap-2">
                 <Button type="button" onClick={() => setShowSubmitModal(true)}>
-                  + Submit Expense
+                  Submit Expense
                 </Button>
               </div>
             }

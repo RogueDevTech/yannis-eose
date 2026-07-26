@@ -659,8 +659,6 @@ export class PayrollBatchService {
       payRoleId?: string | null;
       salaryBasis?: string | null;
       taxStatus?: string | null;
-      crmLinked?: boolean | null;
-      reportsToUserId?: string | null;
       onboardingPayrollStatus?: string | null;
     },
     periodStart: Date,
@@ -668,7 +666,7 @@ export class PayrollBatchService {
   ): Promise<Omit<PayoutRow, 'staffId'> | null> {
     const branchRow = (
       await tx
-        .select({ groupId: schema.branches.groupId })
+        .select({ groupId: schema.branches.groupId, branchId: schema.branches.id })
         .from(schema.users)
         .innerJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
         .where(eq(schema.users.id, member.id))
@@ -681,6 +679,7 @@ export class PayrollBatchService {
       periodStart,
       periodEnd,
       branchRow?.groupId ?? null,
+      branchRow?.branchId ?? null,
     );
     if (!computed) {
       return this.computePayoutForMemberLegacy(tx, member, periodStart, periodEnd);

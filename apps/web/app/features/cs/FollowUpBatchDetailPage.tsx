@@ -360,7 +360,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
                   <button
                     type="button"
                     onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
-                    className="btn-primary w-full inline-flex items-center justify-center"
+                    className="btn-secondary w-full inline-flex items-center justify-center"
                   >
                     Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
                   </button>

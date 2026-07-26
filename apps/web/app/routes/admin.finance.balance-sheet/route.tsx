@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { BalanceSheetLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { BalanceSheetPage, type BalanceSheetPageProps } from '~/features/accounting/BalanceSheetPage';
 
 export const meta: MetaFunction = () => [{ title: 'Balance Sheet — Accounting — Yannis EOSE' }];
@@ -33,6 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;
   const consolidated = url.searchParams.get('consolidated') === 'true';
+  const shell = { filters: { startDate, endDate, periodAllTime: false } };
 
   // Balance sheet is point-in-time: use endDate as the "as of" date so the
   // DateFilterBar preset (e.g. "This month") maps to end-of-period.
@@ -64,13 +66,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return { ...data, consolidated: false, filters: { startDate, endDate } };
   })();
 
-  return defer({ pageData });
+  return defer({ shell, pageData });
 }
 
 export default function BalanceSheetRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  const { shell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<BalanceSheetPage {...EMPTY} />}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<BalanceSheetLoadingShell filters={shell.filters} />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
+    >
       {(data) => <BalanceSheetPage {...data} consolidated={data.consolidated} filters={data.filters} />}
     </CachedAwait>
   );

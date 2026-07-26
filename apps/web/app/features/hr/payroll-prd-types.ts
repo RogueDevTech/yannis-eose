@@ -23,6 +23,7 @@ export type PayRole = {
   perProductBonus: boolean;
   commissionPlanId: string | null;
   active: boolean;
+  staffCount?: number;
 };
 
 export type PayeBandRow = {

@@ -10,6 +10,7 @@ import { isAdminLevel } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { ChartOfAccountsLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   ChartOfAccountsPage,
   type AccountRow,
@@ -31,15 +32,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shell = { canWrite };
 
   const pageData = (async () => {
-    const input = encodeURIComponent(JSON.stringify({ includeInactive: true }));
-    const res = await apiRequest<unknown>(
-      `/trpc/generalLedger.listAccounts?input=${input}`,
-      { method: 'GET', cookie },
-    );
-    const accounts: AccountRow[] = res.ok
-      ? ((res.data as { result?: { data?: AccountRow[] } })?.result?.data ?? [])
+    const [accountsRes, jeRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listAccounts?input=${encodeURIComponent(JSON.stringify({ includeInactive: true }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)' }))}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
+    const accounts: AccountRow[] = accountsRes.ok
+      ? ((accountsRes.data as { result?: { data?: AccountRow[] } })?.result?.data ?? [])
       : [];
-    return { accounts };
+    const jePayload = jeRes.ok
+      ? (jeRes.data as { result?: { data?: { entries?: unknown[] } } })?.result?.data
+      : null;
+    const hasOpeningBalances = (jePayload?.entries?.length ?? 0) > 0;
+    return { accounts, hasOpeningBalances };
   })();
 
   return defer({ shell, pageData });
@@ -105,6 +115,25 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'postOpening') {
+    const payloadRaw = formData.get('payload')?.toString() ?? '{}';
+    let payload: { postingDate?: string; lines?: Array<{ accountId: string; debit: number; credit: number }> };
+    try {
+      payload = JSON.parse(payloadRaw);
+    } catch {
+      return json({ error: 'Invalid payload' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/generalLedger.postOpeningBalances', {
+      method: 'POST',
+      cookie,
+      body: payload,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to post opening balances') }, { status: 400 });
+    }
+    return json({ success: true, intent: 'postOpening' });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -113,9 +142,11 @@ export default function ChartOfAccountsRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={<ChartOfAccountsPage accounts={[]} canWrite={shell.canWrite} />}
+      fallback={<ChartOfAccountsLoadingShell />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
-      {(data) => <ChartOfAccountsPage accounts={data.accounts} canWrite={shell.canWrite} />}
+      {(data) => <ChartOfAccountsPage accounts={data.accounts} canWrite={shell.canWrite} hasOpeningBalances={data.hasOpeningBalances} />}
     </CachedAwait>
   );
 }

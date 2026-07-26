@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { BudgetVsActualLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   BudgetVsActualPage,
   type BudgetVsActualRow,
@@ -12,12 +13,6 @@ import {
 export const meta: MetaFunction = () => [{ title: 'Budget Report — Accounting — Yannis EOSE' }];
 
 export { cachedClientLoader as clientLoader };
-
-interface BudgetVsActualResponse {
-  rows: BudgetVsActualRow[];
-}
-
-const EMPTY: BudgetVsActualResponse = { rows: [] };
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
@@ -53,7 +48,16 @@ export default function BudgetReportRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={<BudgetVsActualPage rows={[]} filters={shell.filters} />}
+      fallback={
+        <BudgetVsActualLoadingShell
+          filters={{
+            ...shell.filters,
+            periodAllTime: !shell.filters.startDate && !shell.filters.endDate,
+          }}
+        />
+      }
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <BudgetVsActualPage

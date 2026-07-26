@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -110,11 +111,12 @@ export function PayrollAssignRolePage({
       : 'Staff assigned successfully',
   });
 
-  useEffect(() => {
-    if (fetcher.data?.success) {
-      setSelected(new Set());
-    }
-  }, [fetcher.data?.success]);
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setShowAssignConfirm(false);
+    setSelected(new Set());
+    // Navigate back to pay roles list after successful assignment
+    window.location.href = '/hr/payroll/config/roles';
+  });
 
   const payRoleById = useMemo(() => new Map(allRoles.map((r) => [r.id, r.name])), [allRoles]);
 
@@ -414,7 +416,6 @@ export function PayrollAssignRolePage({
             },
             { method: 'post' },
           );
-          setShowAssignConfirm(false);
         }}
       />
     </div>

@@ -8,6 +8,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { useFetcherToast } from '~/components/ui/toast';
 import {
@@ -21,7 +22,11 @@ import type { ProductTierConfig, ProductTierRow } from './payroll-prd-types';
 
 interface PayrollConfigProductsPageProps {
   configs: ProductTierConfig[];
+  products?: Array<{ id: string; name: string }>;
   canWrite: boolean;
+  /** Controlled create modal state from parent. */
+  createOpen?: boolean;
+  onCreateClose?: () => void;
 }
 
 type TierDraft = { fromPct: string; toPct: string; ratePerOrder: string };
@@ -43,11 +48,12 @@ function formatEffective(from: string, to: string | null): string {
   return `${fromLabel}: ${toLabel}`;
 }
 
-export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigProductsPageProps) {
+export function PayrollConfigProductsPage({ configs, products = [], canWrite, createOpen, onCreateClose }: PayrollConfigProductsPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const [editConfig, setEditConfig] = useState<ProductTierConfig | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const isCreateOpen = showCreate || !!createOpen;
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Product tier config saved',
@@ -115,55 +121,6 @@ export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigPr
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Product tier configs"
-        backTo="/hr/payroll"
-        mobileInlineActions
-        description="Configure per-product DR tier bonuses used by CS payroll formulas."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Actions"
-            triggerAriaLabel="Product tier toolbar"
-            desktop={
-              <>
-                <PageRefreshButton />
-                {canWrite ? (
-                  <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                    + New config
-                  </Button>
-                ) : null}
-              </>
-            }
-            sheet={({ closeSheet }) =>
-              canWrite ? (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowCreate(true);
-                  }}
-                >
-                  + New config
-                </Button>
-              ) : null
-            }
-          />
-        }
-      />
-
-      <p className="text-xs text-app-fg-muted">
-        Related:{' '}
-        <Link to="/hr/payroll/config/roles" className="text-brand-600 dark:text-brand-400 hover:underline">
-          Pay roles
-        </Link>
-        ,{' '}
-        <Link to="/hr/payroll/config/tax-bands" className="text-brand-600 dark:text-brand-400 hover:underline">
-          Tax bands
-        </Link>
-      </p>
-
       {configs.length === 0 ? (
         <EmptyState
           title="No product tier configs for this company"
@@ -200,9 +157,10 @@ export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigPr
         />
       )}
 
-      {(showCreate || editConfig) && (
+      {(isCreateOpen || editConfig) && (
         <ProductTierConfigModal
           config={editConfig}
+          products={products}
           readOnly={!canWrite}
           submitting={fetcher.state === 'submitting'}
           error={surface.errorMatchingIntent('saveProductTierConfig') ?? undefined}
@@ -211,6 +169,7 @@ export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigPr
             if (fetcher.state !== 'idle') return;
             setShowCreate(false);
             setEditConfig(null);
+            onCreateClose?.();
           }}
         />
       )}
@@ -220,6 +179,7 @@ export function PayrollConfigProductsPage({ configs, canWrite }: PayrollConfigPr
 
 function ProductTierConfigModal({
   config,
+  products,
   readOnly,
   submitting,
   error,
@@ -227,12 +187,16 @@ function ProductTierConfigModal({
   onClose,
 }: {
   config: ProductTierConfig | null;
+  products: Array<{ id: string; name: string }>;
   readOnly: boolean;
   submitting: boolean;
   error?: string;
   fetcher: ReturnType<typeof useFetcher>;
   onClose: () => void;
 }) {
+  const [selectedProductId, setSelectedProductId] = useState(config?.productId ?? '');
+  const selectedProductName = products.find((p) => p.id === selectedProductId)?.name ?? config?.productName ?? '';
+
   const [tierRows, setTierRows] = useState<TierDraft[]>(() =>
     (config?.tierRows ?? [{ fromPct: 0, toPct: 100, ratePerOrder: 0 }]).map((r) => ({
       fromPct: String(r.fromPct),
@@ -277,13 +241,17 @@ function ProductTierConfigModal({
         <input type="hidden" name="tierRowsJson" value={tierRowsJson} />
         {config ? <input type="hidden" name="configId" value={config.id} /> : null}
 
-        <TextInput
-          label="Product name"
-          name="productName"
-          required
-          readOnly={readOnly}
-          defaultValue={config?.productName ?? ''}
-          placeholder="e.g. Slim Tea 30-day"
+        <input type="hidden" name="productId" value={selectedProductId} />
+        <input type="hidden" name="productName" value={selectedProductName} />
+        <SearchableSelect
+          id="productTierProduct"
+          label="Product"
+          value={selectedProductId}
+          onChange={setSelectedProductId}
+          disabled={readOnly}
+          placeholder="Select a product"
+          searchPlaceholder="Search products..."
+          options={products.map((p) => ({ value: p.id, label: p.name }))}
         />
 
         <div className="space-y-2">

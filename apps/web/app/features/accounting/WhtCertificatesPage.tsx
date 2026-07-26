@@ -137,7 +137,7 @@ export function WhtCertificatesPage({ records, pagination, filters }: WhtCertifi
             }
             sheet={({ closeSheet }) => (
               <Button
-                variant="primary"
+                variant="secondary"
                 size="sm"
                 className="h-12 w-full justify-center"
                 onClick={() => {

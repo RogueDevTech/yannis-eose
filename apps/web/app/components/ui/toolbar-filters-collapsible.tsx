@@ -87,7 +87,7 @@ export function ToolbarFiltersCollapsible({
 
   return (
     <>
-      <div className={['relative border-b border-app-border py-2 md:px-4', className].filter(Boolean).join(' ')}>
+      <div className={['relative border-b border-app-border py-2 md:px-4 hidden md:block', className].filter(Boolean).join(' ')}>
         {/* Floating clear-all badge at top-right edge of the toolbar */}
         {badgeCount > 0 && onClearAll && (
           <button
@@ -124,7 +124,7 @@ export function ToolbarFiltersCollapsible({
           )}
 
           {searchRow != null && searchRow !== false ? (
-            <div className="min-w-0 w-full md:w-auto md:contents">{searchRow}</div>
+            <div className="hidden min-w-0 md:w-auto md:contents" data-has-toolbar-search>{searchRow}</div>
           ) : null}
 
           <div className={showInlineFilters(bp)}>{desktopInlineFilters}</div>

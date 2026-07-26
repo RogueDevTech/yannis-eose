@@ -143,8 +143,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       employmentType: user.employmentType ?? 'STAFF',
       salaryBasis: user.salaryBasis ?? 'FORMULA_BASED',
       taxStatus: user.taxStatus ?? 'STANDARD_PAYE',
-      reportsToUserId: user.reportsToUserId ?? null,
-      crmLinked: user.crmLinked ?? true,
+      flatMonthlyAmount: user.flatMonthlyAmount ? String(Number(user.flatMonthlyAmount)) : '',
     };
     return { kind: 'ok', editingUser };
   })();
@@ -274,8 +273,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         employmentType: formData.get('employmentType')?.toString() ?? 'STAFF',
         salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
         taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
-        reportsToUserId: reportsRaw || null,
-        crmLinked: formData.get('crmLinked')?.toString() === 'true',
+        flatMonthlyAmount: formData.get('flatMonthlyAmount')?.toString() ? Number(formData.get('flatMonthlyAmount')) : undefined,
       },
     });
     if (!res.ok) {
@@ -514,6 +512,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({
       success: true,
       message: updatePayload.message ?? 'Edit submitted for SuperAdmin approval.',
+    });
+  }
+
+  // If payroll profile fields were submitted alongside the main form,
+  // fire a follow-up updatePayrollProfile call so users don't need a separate save.
+  if (formData.has('payRoleId')) {
+    const payRoleRaw = formData.get('payRoleId')?.toString() ?? '';
+    const reportsRaw = formData.get('reportsToUserId')?.toString() ?? '';
+    await apiRequest<unknown>('/trpc/hr.updatePayrollProfile', {
+      method: 'POST',
+      cookie,
+      body: {
+        userId,
+        payRoleId: payRoleRaw || null,
+        employmentType: formData.get('employmentType')?.toString() ?? 'STAFF',
+        salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
+        taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
+        flatMonthlyAmount: formData.get('flatMonthlyAmount')?.toString() ? Number(formData.get('flatMonthlyAmount')) : undefined,
+      },
     });
   }
 

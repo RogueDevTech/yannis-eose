@@ -42,6 +42,12 @@ export function PageSearchControl({
   const titleId = useId();
   const applied = value.trim();
 
+  // Expose opener on window so MobileDateFilterRow can trigger it
+  useEffect(() => {
+    (window as any).__openMobileSearchSheet = () => setOpen(true);
+    return () => { delete (window as any).__openMobileSearchSheet; };
+  }, []);
+
   useEffect(() => {
     if (open) {
       setDraft(value);
@@ -68,13 +74,14 @@ export function PageSearchControl({
           aria-haspopup="dialog"
           aria-expanded={open}
           className={[
-            'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
+            'btn-secondary btn-sm inline-flex items-center gap-1.5',
             applied
               ? 'border-brand-500/40 bg-brand-500/10 text-brand-600 dark:text-brand-400'
-              : 'border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
+              : '',
           ].join(' ')}
         >
           <SearchIcon />
+          Search
         </button>
         {applied ? (
           <div className="flex min-w-0 max-w-[14rem] items-center rounded-full border border-app-border bg-app-hover text-xs text-app-fg">

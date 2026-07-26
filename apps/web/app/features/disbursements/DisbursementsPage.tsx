@@ -851,7 +851,7 @@ export function DisbursementsPage({
                 </Button>
                 {canCreate && (
                   <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-                    + New disbursement
+                    New disbursement
                   </Button>
                 )}
               </div>
@@ -970,7 +970,7 @@ export function DisbursementsPage({
                       setShowForm(true);
                     }}
                   >
-                    + New disbursement
+                    New disbursement
                   </Button>
                 ) : null}
               </>

@@ -168,7 +168,7 @@ function GroupDetailLoadingShell() {
               <>
                 <PageRefreshButton />
                 <Button variant="secondary" size="sm" disabled className="opacity-60">Edit</Button>
-                <Button variant="primary" size="sm" disabled className="opacity-60">+ New Branch</Button>
+                <Button variant="primary" size="sm" disabled className="opacity-60">New Branch</Button>
               </>
             }
           />
@@ -325,7 +325,7 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
                   Edit
                 </Button>
                 <Button variant="primary" size="sm" onClick={() => setCreateBranchOpen(true)}>
-                  + New Branch
+                  New Branch
                 </Button>
               </>
             }
@@ -348,12 +348,12 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
                   Edit group
                 </Button>
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   size="sm"
                   className="w-full justify-center"
                   onClick={() => { closeSheet(); setCreateBranchOpen(true); }}
                 >
-                  + New Branch
+                  New Branch
                 </Button>
               </div>
             )}

@@ -19,11 +19,11 @@ export function BranchesListLoadingShell() {
               <>
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" disabled className="opacity-60">
-                  + New Branch
+                  New Branch
                 </Button>
               </>
             }
-            sheet={<Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>+ New Branch</Button>}
+            sheet={<Button variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>New Branch</Button>}
           />
         }
       />

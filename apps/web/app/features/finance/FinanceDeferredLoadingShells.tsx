@@ -376,7 +376,7 @@ export function FinanceDisbursementsLoadingShell({
                   Generate report
                 </Button>
                 <Button type="button" variant="primary" size="sm" disabled>
-                  + New disbursement
+                  New disbursement
                 </Button>
               </>
             }
@@ -385,8 +385,8 @@ export function FinanceDisbursementsLoadingShell({
                 <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                   Generate report
                 </Button>
-                <Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
-                  + New disbursement
+                <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                  New disbursement
                 </Button>
               </>
             )}

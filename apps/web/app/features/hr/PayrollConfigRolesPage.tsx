@@ -21,6 +21,12 @@ import type { PayRole } from './payroll-prd-types';
 interface PayrollConfigRolesPageProps {
   roles: PayRole[];
   canWrite: boolean;
+  /** Tab bar + sub-tab content rendered between header and filters. */
+  tabsSlot?: React.ReactNode;
+  /** When true, hides the roles-specific content (filters + table). Used when another tab is active. */
+  hideRolesContent?: boolean;
+  /** Extra action button rendered in the header for the active tab. */
+  headerAction?: React.ReactNode;
 }
 
 const FORMULA_FILTER_OPTIONS = [
@@ -33,7 +39,7 @@ function formatCategory(category: string): string {
   return formatRoleLabel(category);
 }
 
-export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPageProps) {
+export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesContent, headerAction }: PayrollConfigRolesPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [archiveRole, setArchiveRole] = useState<PayRole | null>(null);
   const [search, setSearch] = useState('');
@@ -43,10 +49,18 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
   useFetcherToast(fetcher.data, { successMessage: 'Pay role archived' });
   useCloseOnFetcherSuccess(fetcher, () => setArchiveRole(null), { intent: 'archivePayRole' });
 
-  const categoryOptions = useMemo(() => {
-    const cats = [...new Set(roles.map((r) => r.category))].sort();
-    return [{ value: '', label: 'All categories' }, ...cats.map((c) => ({ value: c, label: formatCategory(c) }))];
-  }, [roles]);
+  const categoryOptions = [
+    { value: '', label: 'All categories' },
+    { value: 'CS', label: 'CS' },
+    { value: 'MEDIA_BUYING', label: 'Media Buying' },
+    { value: 'LOGISTICS', label: 'Logistics' },
+    { value: 'LEADERSHIP', label: 'Leadership' },
+    { value: 'OPERATIONS', label: 'Operations' },
+    { value: 'FINANCE', label: 'Finance' },
+    { value: 'HR_ADMIN', label: 'HR / Admin' },
+    { value: 'SUPPORT', label: 'Support' },
+    { value: 'CONTRACTOR', label: 'Contractor' },
+  ];
 
   const filteredRoles = useMemo(() => {
     let list = roles;
@@ -88,12 +102,22 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
         render: (row) => (
           <span className="text-xs text-app-fg-muted">
             {[
-              row.reportsToRequired ? 'Reports-to required' : null,
+              null,
               row.perProductBonus ? 'Per-product bonus' : null,
               row.commissionPlanId ? 'Formula linked' : 'No formula',
             ]
               .filter(Boolean)
               .join(' \u00b7 ')}
+          </span>
+        ),
+      },
+      {
+        key: 'staffCount',
+        header: 'Staff',
+        align: 'right',
+        render: (row) => (
+          <span className={`text-sm tabular-nums ${(row.staffCount ?? 0) > 0 ? 'font-medium text-app-fg' : 'text-app-fg-muted'}`}>
+            {row.staffCount ?? 0}
           </span>
         ),
       },
@@ -129,9 +153,9 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Pay roles"
+        title="Payroll config"
         mobileInlineActions
-        description="Library of payroll pay roles and their linked formula plans."
+        description="Pay roles, product bonus tiers, and tax band settings."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
@@ -148,7 +172,8 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                {canWrite && (
+                {headerAction}
+                {!hideRolesContent && canWrite && (
                   <Link
                     to="/hr/payroll/config/rules/new"
                     className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg"
@@ -181,9 +206,9 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
                 <Link
                   to="/hr/payroll/config/rules/new"
                   onClick={closeSheet}
-                  className="btn-primary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
+                  className="btn-secondary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
                 >
-                  + Pay Role
+                  Pay Role
                 </Link>
               ) : null
             }
@@ -191,6 +216,9 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
         }
       />
 
+      {tabsSlot}
+
+      {!hideRolesContent && <>
       <div className="list-panel">
       <ToolbarFiltersCollapsible
         className="!border-0"
@@ -226,17 +254,6 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
         }
       />
       </div>
-
-      <p className="text-xs text-app-fg-muted">
-        Related:{' '}
-        <Link to="/hr/payroll/config/products" className="text-brand-600 dark:text-brand-400 hover:underline">
-          Product tiers
-        </Link>
-        ,{' '}
-        <Link to="/hr/payroll/config/tax-bands" className="text-brand-600 dark:text-brand-400 hover:underline">
-          Tax bands
-        </Link>
-      </p>
 
       {filteredRoles.length === 0 ? (
         <EmptyState
@@ -278,6 +295,7 @@ export function PayrollConfigRolesPage({ roles, canWrite }: PayrollConfigRolesPa
           }}
         />
       )}
+      </>}
     </div>
   );
 }

@@ -62,6 +62,8 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   // Role metadata state
   const [reportsToRequired, setReportsToRequired] = useState(payRole?.reportsToRequired ?? false);
   const [perProductBonus, setPerProductBonus] = useState(payRole?.perProductBonus ?? false);
+  const [category, setCategory] = useState(payRole?.category ?? '');
+  const showPerProductBonus = category === 'CS';
 
   useFetcherToast(fetcher.data, {
     successMessage: isCreate ? 'Pay role created' : 'Formula saved',
@@ -148,26 +150,13 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
                 label="Category"
                 name="category"
                 required
-                defaultValue={payRole?.category ?? ''}
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
                 placeholder="Select category..."
                 options={CATEGORY_OPTIONS}
               />
             </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={reportsToRequired}
-                  onChange={(e) => setReportsToRequired(e.target.checked)}
-                  className="mt-0.5 rounded border-app-border text-brand-600 focus:ring-brand-500"
-                />
-                <div>
-                  <span className="text-sm text-app-fg">Reports-to required</span>
-                  <p className="text-xs text-app-fg-muted mt-0.5">
-                    Staff must have a manager set for team DR formulas.
-                  </p>
-                </div>
-              </label>
+            {showPerProductBonus && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -182,19 +171,18 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
                   </p>
                 </div>
               </label>
-            </div>
+            )}
           </div>
         ) : (
           <div className="card p-4 space-y-2">
             <h3 className="text-sm font-semibold text-app-fg">{payRole?.name}</h3>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-app-fg-muted">
-              <span className={reportsToRequired ? 'text-success-600 dark:text-success-400' : ''}>
-                {reportsToRequired ? '\u2713' : '\u2717'} Reports-to required
-              </span>
-              <span className={perProductBonus ? 'text-success-600 dark:text-success-400' : ''}>
-                {perProductBonus ? '\u2713' : '\u2717'} Per-product bonus
-              </span>
-            </div>
+            {showPerProductBonus && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-app-fg-muted">
+                <span className={perProductBonus ? 'text-success-600 dark:text-success-400' : ''}>
+                  {perProductBonus ? '\u2713' : '\u2717'} Per-product bonus
+                </span>
+              </div>
+            )}
           </div>
         )}
 

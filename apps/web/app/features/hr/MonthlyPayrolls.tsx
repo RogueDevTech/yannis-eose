@@ -226,7 +226,7 @@ function MonthGroup({
             renderMobileCard={(row) => (
               <Link
                 to={`/hr/payroll-batch/${row.id}`}
-                className="block rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 hover:bg-app-hover transition-colors"
+                className="block p-4 space-y-3 hover:bg-app-hover transition-colors"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>

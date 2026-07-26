@@ -142,11 +142,15 @@ export function MonthlyPayrollsLoadingShell() {
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" disabled className="opacity-60">
-                  + Add-on
+                  Add-on
                 </Button>
               </div>
             }
-            sheet={<Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>+ Add-on</Button>}
+            sheet={
+              <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                Add-on
+              </Button>
+            }
           />
         }
       />
@@ -590,11 +594,11 @@ export function CommissionPlansLoadingShell() {
               <>
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" disabled className="opacity-60">
-                  + New Commission Plan
+                  New Commission Plan
                 </Button>
               </>
             }
-            sheet={<Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>+ New Commission Plan</Button>}
+            sheet={<Button variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>New Commission Plan</Button>}
           />
         }
       />
@@ -630,13 +634,13 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
               <>
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" disabled className="opacity-60">
-                  {staffAccounts ? 'Export' : '+ Add User'}
+                  {staffAccounts ? 'Export' : 'Add User'}
                 </Button>
               </>
             }
             sheet={
-              <Button variant="primary" size="sm" className="h-12 w-full justify-center" disabled>
-                {staffAccounts ? 'Export' : '+ Add User'}
+              <Button variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                {staffAccounts ? 'Export' : 'Add User'}
               </Button>
             }
           />

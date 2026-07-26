@@ -26,9 +26,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {
-    const res = await apiRequest<unknown>('/trpc/hr.listProductTierConfigs', { method: 'GET', cookie });
+    const [res, productsRes] = await Promise.all([
+      apiRequest<unknown>('/trpc/hr.listProductTierConfigs', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/products.options', { method: 'GET', cookie }),
+    ]);
     const configs = res.ok
       ? (((res.data as { result?: { data?: ProductTierConfig[] } })?.result?.data) ?? [])
+      : [];
+    const products: Array<{ id: string; name: string }> = productsRes.ok
+      ? (((productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data) ?? [])
       : [];
     const perms = user.permissions ?? [];
     const canWrite =
@@ -36,7 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'SUPER_ADMIN' ||
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
-    return { configs, canWrite };
+    return { configs, products, canWrite };
   })();
 
   return defer({ pageData });
@@ -67,6 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const configId = formData.get('configId')?.toString();
     const body: Record<string, unknown> = {
+      productId: formData.get('productId')?.toString() || undefined,
       productName: formData.get('productName')?.toString() ?? '',
       active: true,
       tierRows,
@@ -95,7 +102,7 @@ export default function PayrollConfigProductsRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<PayrollConfigLoadingShell />} loaderShell={{}} deferredKey="pageData">
-      {(data) => <PayrollConfigProductsPage configs={data.configs} canWrite={data.canWrite} />}
+      {(data) => <PayrollConfigProductsPage configs={data.configs} products={data.products} canWrite={data.canWrite} />}
     </CachedAwait>
   );
 }

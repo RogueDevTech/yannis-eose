@@ -290,7 +290,7 @@ export function UserPayrollHistoryPage({
                   type="button"
                   disabled={p.status !== 'PAID'}
                   onClick={() => p.status === 'PAID' && openPayslip(p.id)}
-                  className="w-full text-left rounded-lg border border-app-border bg-app-elevated p-4 space-y-2 hover:bg-app-hover transition-colors disabled:hover:bg-app-elevated disabled:opacity-80"
+                  className="w-full text-left p-4 space-y-2 hover:bg-app-hover transition-colors disabled:hover:bg-transparent disabled:opacity-80"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium text-app-fg">{formatPeriod(p.periodStart, p.periodEnd)}</p>
@@ -330,7 +330,7 @@ export function UserPayrollHistoryPage({
               renderMobileCard={(adj) => {
                 const isDeduction = adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK';
                 return (
-                  <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
+                  <div className="p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <StatusBadge status={adj.type} label={adj.type.replace(/_/g, ' ')} size="sm" />
                       <StatusBadge status={adj.status} size="sm" />

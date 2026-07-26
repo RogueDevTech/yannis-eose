@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { BankReconciliationLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   BankReconciliationPage,
   type BankReconciliationPageProps,
@@ -12,13 +13,6 @@ import {
 export const meta: MetaFunction = () => [{ title: 'Bank Reconciliation — Accounting — Yannis EOSE' }];
 
 export { cachedClientLoader as clientLoader };
-
-const EMPTY: BankReconciliationPageProps = {
-  reconciliations: [],
-  pagination: { page: 1, limit: 25, total: 0 },
-  bankAccounts: [],
-  detail: null,
-};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
@@ -160,7 +154,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function BankReconciliationRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<BankReconciliationPage {...EMPTY} />}>
+    <CachedAwait resolve={pageData} fallback={<BankReconciliationLoadingShell />} deferredKey="pageData">
       {(data) => <BankReconciliationPage {...data} />}
     </CachedAwait>
   );

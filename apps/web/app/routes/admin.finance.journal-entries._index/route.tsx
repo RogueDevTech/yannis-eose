@@ -12,6 +12,7 @@ import { isAdminLevel } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { JournalEntriesLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import {
   JournalEntriesPage,
   type JournalEntryRow,
@@ -154,14 +155,16 @@ export default function JournalEntriesRoute() {
     <CachedAwait
       resolve={pageData}
       fallback={
-        <JournalEntriesPage
-          records={[]}
-          pagination={EMPTY.pagination}
-          canWrite={shell.canWrite}
-          canApprove={shell.canApprove}
-          filters={shell.filters}
+        <JournalEntriesLoadingShell
+          filters={{
+            startDate: shell.filters.startDate,
+            endDate: shell.filters.endDate,
+            periodAllTime: !shell.filters.startDate && !shell.filters.endDate,
+          }}
         />
       }
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <JournalEntriesPage

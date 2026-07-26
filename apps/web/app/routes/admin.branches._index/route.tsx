@@ -155,13 +155,13 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
               <>
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-                  + New Branch
+                  New Branch
                 </Button>
               </>
             }
             sheet={({ closeSheet }) => (
               <Button
-                variant="primary"
+                variant="secondary"
                 size="sm"
                 className="w-full justify-center"
                 onClick={() => {
@@ -169,7 +169,7 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
                   setCreateOpen(true);
                 }}
               >
-                + New Branch
+                New Branch
               </Button>
             )}
           />

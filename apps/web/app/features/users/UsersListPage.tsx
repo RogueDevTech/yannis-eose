@@ -582,7 +582,7 @@ export function UsersListPage({
                   <ActionDropdown
                     id="add-user"
                     trigger="button"
-                    triggerLabel="+ Add User"
+                    triggerLabel="Add User"
                     triggerVariant="primary"
                     openMenuId={openHeaderMenuId}
                     setOpenMenuId={setOpenHeaderMenuId}
@@ -615,7 +615,7 @@ export function UsersListPage({
                     <BranchScopedLink
                       to={`${usersBasePath}/new`}
                       actionLabel="creating a user"
-                      className="btn-primary btn-sm h-12 flex items-center justify-center w-full"
+                      className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
                       onClick={() => closeSheet()}
                     >
                       Add User

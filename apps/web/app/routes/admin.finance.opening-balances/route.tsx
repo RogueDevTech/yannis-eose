@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { OpeningBalancesLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { OpeningBalancesPage } from '~/features/accounting/OpeningBalancesPage';
 
 export const meta: MetaFunction = () => [{ title: 'Opening Balances — Accounting — Yannis EOSE' }];
@@ -69,7 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function OpeningBalancesRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<OpeningBalancesPage accounts={[]} />}>
+    <CachedAwait resolve={pageData} fallback={<OpeningBalancesLoadingShell />} deferredKey="pageData">
       {(data) => <OpeningBalancesPage accounts={data.accounts} />}
     </CachedAwait>
   );

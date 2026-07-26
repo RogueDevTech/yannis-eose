@@ -160,20 +160,21 @@ export function HRPage({
                     size="sm"
                     onClick={() => setShowAddAdjustment(true)}
                   >
-                    + Add-on
+                    Add-on
                   </Button>
                 ) : null}
                 {showGenerateButton ? (
                   <Button variant="primary" size="sm" onClick={() => navigate('/hr/payroll/generate')}>
-                    + Generate Monthly Batch
+                    Generate Monthly Batch
                   </Button>
                 ) : null}
               </div>
             }
             sheet={({ closeSheet }) => (
-              <div className="space-y-2">
+              <>
                 {canExportBankPay ? (
                   <Button
+                    type="button"
                     variant="secondary"
                     size="sm"
                     className="h-12 w-full justify-center"
@@ -187,7 +188,8 @@ export function HRPage({
                 ) : null}
                 {isHrOrFinance ? (
                   <Button
-                    variant="primary"
+                    type="button"
+                    variant="secondary"
                     size="sm"
                     className="h-12 w-full justify-center"
                     onClick={() => {
@@ -195,12 +197,13 @@ export function HRPage({
                       setShowAddAdjustment(true);
                     }}
                   >
-                    + Add-on
+                    Add-on
                   </Button>
                 ) : null}
                 {showGenerateButton ? (
                   <Button
-                    variant="primary"
+                    type="button"
+                    variant="secondary"
                     size="sm"
                     className="h-12 w-full justify-center"
                     onClick={() => {
@@ -208,10 +211,10 @@ export function HRPage({
                       navigate('/hr/payroll/generate');
                     }}
                   >
-                    + Generate Monthly Batch
+                    Generate Monthly Batch
                   </Button>
                 ) : null}
-              </div>
+              </>
             )}
           />
         }
@@ -463,7 +466,7 @@ export function HRPage({
                       emptyTitle="No earnings adjustments yet"
                       emptyDescription="Add an adjustment to get started."
                       renderMobileCard={(adj) => (
-                        <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+                        <div className="p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="font-medium text-app-fg text-sm">{getStaffName(adj.staffId)}</span>
                             <StatusBadge status={adj.category} />

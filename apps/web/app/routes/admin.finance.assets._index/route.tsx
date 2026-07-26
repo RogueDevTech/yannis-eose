@@ -5,6 +5,7 @@ import { apiRequest, getSessionCookie, requirePermissionOrRoles, parsePerPage } 
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { AssetRegisterLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { AssetRegisterPage, type AssetRow } from '~/features/finance/AssetRegisterPage';
 
 export const meta: MetaFunction = () => [{ title: 'Asset Register — Accounting — Yannis EOSE' }];
@@ -157,14 +158,9 @@ export default function AssetRegisterRoute() {
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={
-        <AssetRegisterPage
-          records={[]}
-          pagination={EMPTY.pagination}
-          summary={EMPTY.summary}
-          canWrite={shell.canWrite}
-        />
-      }
+      fallback={<AssetRegisterLoadingShell />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
     >
       {(data) => (
         <AssetRegisterPage

@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { CashFlowLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { CashFlowPage, type CashFlowPageProps } from '~/features/accounting/CashFlowPage';
 
 export const meta: MetaFunction = () => [{ title: 'Cash Flow — Accounting — Yannis EOSE' }];
@@ -27,6 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;
   const consolidated = url.searchParams.get('consolidated') === 'true';
+  const shell = { filters: { startDate, endDate, periodAllTime: false } };
 
   const pageData = (async () => {
     if (consolidated) {
@@ -52,13 +54,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return { ...data, consolidated: false, filters: { startDate, endDate } };
   })();
 
-  return defer({ pageData });
+  return defer({ shell, pageData });
 }
 
 export default function CashFlowRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  const { shell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<CashFlowPage {...EMPTY} />}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<CashFlowLoadingShell filters={shell.filters} />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
+    >
       {(data) => <CashFlowPage {...data} consolidated={data.consolidated} filters={data.filters} />}
     </CachedAwait>
   );

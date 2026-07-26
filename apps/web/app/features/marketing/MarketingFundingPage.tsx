@@ -802,12 +802,12 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     activeSection === 'received'
       ? isMediaBuyer
         ? 'Head of Marketing has not sent funding to you yet.'
-        : 'Finance has not sent funding to you in this period — tap "+ Request Funds" to ask.'
-      : 'You have not disbursed funding to any Media Buyer in this period — tap "+ Send Funding" to start.';
+        : 'Finance has not sent funding to you in this period. Tap Request Funds to ask.'
+      : 'You have not disbursed funding to any Media Buyer in this period. Tap Send Funding to start.';
   const requestsEmptyMessage =
     activeSection === 'received'
       ? canRequestFunding
-        ? 'No outbound funding requests yet — tap "+ Request Funds" to start one.'
+        ? 'No outbound funding requests yet. Tap Request Funds to start one.'
         : 'No outbound funding requests.'
       : 'No pending requests from your Media Buyers.';
 
@@ -846,7 +846,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               setShowRequestForm(true);
             }}
           >
-            + Request Funds
+            Request Funds
           </Button>
         )}
         {canSendFunding && (
@@ -859,7 +859,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               setShowSendForm(true);
             }}
           >
-            + Send Funding
+            Send Funding
           </Button>
         )}
         {isMediaBuyer && (
@@ -1163,7 +1163,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               emptyAction={
                 canRequestFunding ? (
                   <Button type="button" variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
-                    + Request Funds
+                    Request Funds
                   </Button>
                 ) : undefined
               }

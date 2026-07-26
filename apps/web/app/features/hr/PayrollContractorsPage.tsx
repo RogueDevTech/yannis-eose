@@ -129,7 +129,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
                 <PageRefreshButton />
                 {canWrite ? (
                   <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                    + Add contractor
+                    Add contractor
                   </Button>
                 ) : null}
               </>
@@ -137,7 +137,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
             sheet={({ closeSheet }) =>
               canWrite ? (
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   size="sm"
                   className="h-12 w-full justify-center"
                   onClick={() => {
@@ -145,7 +145,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
                     setShowCreate(true);
                   }}
                 >
-                  + Add contractor
+                  Add contractor
                 </Button>
               ) : null
             }
@@ -193,7 +193,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
           renderMobileCard={(row) => (
             <Link
               to={`/hr/payroll/contractors/${row.id}`}
-              className="block rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 hover:bg-app-hover transition-colors"
+              className="block p-4 space-y-3 hover:bg-app-hover transition-colors"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>

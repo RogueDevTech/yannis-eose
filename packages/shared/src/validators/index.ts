@@ -406,6 +406,7 @@ export {
   postOpeningBalancesSchema,
   repostPayrollBatchSchema,
   financialKPIsSchema,
+  getAccountLedgerSchema,
 } from './general-ledger';
 
 export type {
@@ -434,6 +435,7 @@ export type {
   PostOpeningBalancesInput,
   FinancialKPIsInput,
   FinancialKPIs,
+  GetAccountLedgerInput,
 } from './general-ledger';
 
 // Asset register validators (Phase 4A)

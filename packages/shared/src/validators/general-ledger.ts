@@ -265,3 +265,14 @@ export const repostPayrollBatchSchema = z.object({
   batchId: z.string().uuid(),
 });
 export type RepostPayrollBatchInput = z.infer<typeof repostPayrollBatchSchema>;
+
+// ─── Account Ledger (sub-ledger detail) ──────────────────────────────────────
+
+export const getAccountLedgerSchema = z.object({
+  accountId: z.string().uuid(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(200).default(50),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+export type GetAccountLedgerInput = z.infer<typeof getAccountLedgerSchema>;

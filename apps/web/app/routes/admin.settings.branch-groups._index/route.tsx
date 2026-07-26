@@ -93,18 +93,18 @@ export default function CompanyGroupsPage() {
               <>
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-                  + New Company Group
+                  New Company Group
                 </Button>
               </>
             }
             sheet={({ closeSheet }) => (
               <Button
-                variant="primary"
+                variant="secondary"
                 size="sm"
                 className="w-full justify-center"
                 onClick={() => { closeSheet(); setCreateOpen(true); }}
               >
-                + New Company Group
+                New Company Group
               </Button>
             )}
           />

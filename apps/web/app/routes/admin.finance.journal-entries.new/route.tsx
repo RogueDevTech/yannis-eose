@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { JournalEntryCreateLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { JournalEntryCreatePage } from '~/features/accounting/JournalEntryCreatePage';
 
 export const meta: MetaFunction = () => [{ title: 'New Journal Entry — Accounting — Yannis EOSE' }];
@@ -68,7 +69,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function JournalEntryCreateRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<JournalEntryCreatePage accounts={[]} />}>
+    <CachedAwait resolve={pageData} fallback={<JournalEntryCreateLoadingShell />} deferredKey="pageData">
       {(data) => <JournalEntryCreatePage accounts={data.accounts} />}
     </CachedAwait>
   );

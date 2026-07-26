@@ -1088,7 +1088,7 @@ export function CategoriesLoadingShell() {
                 </Button>
               </>
             }
-            sheet={<Button type="button" variant="primary" size="sm" className="h-12 w-full justify-center" disabled>New Category</Button>}
+            sheet={<Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>New Category</Button>}
           />
         }
       />

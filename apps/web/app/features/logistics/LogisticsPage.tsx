@@ -735,10 +735,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               <div className="flex flex-wrap gap-2">
                 <PageRefreshButton />
                 <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
-                  + Company
+                  Company
                 </Button>
                 <Button variant="secondary" size="sm" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
-                  + Location
+                  Location
                 </Button>
                 <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-primary btn-sm">
                   Import from Excel
@@ -751,10 +751,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             sheet={
               <>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => setShowAddProvider(true)}>
-                  + Company
+                  Company
                 </Button>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
-                  + Location
+                  Location
                 </Button>
                 <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-secondary h-12 w-full justify-center text-center">
                   Import from Excel

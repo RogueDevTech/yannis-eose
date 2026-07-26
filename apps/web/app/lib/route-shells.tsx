@@ -19,6 +19,23 @@ import {
 } from '~/features/dashboard/DashboardSkeleton';
 import { isAdminLevel } from '~/lib/rbac';
 import {
+  AgingLoadingShell,
+  AssetRegisterLoadingShell,
+  BalanceSheetLoadingShell,
+  BankReconciliationLoadingShell,
+  BudgetVsActualLoadingShell,
+  CashFlowLoadingShell,
+  ChartOfAccountsLoadingShell,
+  ExpenseSubmissionsLoadingShell,
+  JournalEntriesLoadingShell,
+  JournalEntryCreateLoadingShell,
+  OpeningBalancesLoadingShell,
+  ProfitAndLossLoadingShell,
+  TaxReturnsLoadingShell,
+  TrialBalanceLoadingShell,
+  WhtCertificatesLoadingShell,
+} from '~/features/accounting/AccountingDeferredLoadingShells';
+import {
   DeliveryRemittanceDetailLoadingShell,
   DeliveryRemittancesLoadingShell,
   FinanceDisbursementsLoadingShell,
@@ -360,6 +377,68 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/finance\/overview$/,
     render: (_m, sp) => <FinanceOverviewLoadingShell filters={parseDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/accounts$/,
+    render: () => <ChartOfAccountsLoadingShell />,
+  },
+  {
+    match: /^\/admin\/finance\/journal-entries\/new$/,
+    render: () => <JournalEntryCreateLoadingShell />,
+  },
+  {
+    match: /^\/admin\/finance\/journal-entries$/,
+    render: (_m, sp) => <JournalEntriesLoadingShell filters={parseDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/trial-balance$/,
+    render: (_m, sp) => <TrialBalanceLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/profit-loss$/,
+    render: (_m, sp) => <ProfitAndLossLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/balance-sheet$/,
+    render: (_m, sp) => <BalanceSheetLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/cash-flow$/,
+    render: (_m, sp) => <CashFlowLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/budget-report$/,
+    render: (_m, sp) => <BudgetVsActualLoadingShell filters={parseDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/bank-reconciliation$/,
+    render: () => <BankReconciliationLoadingShell />,
+  },
+  {
+    match: /^\/admin\/finance\/tax-returns$/,
+    render: (_m, sp) => <TaxReturnsLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
+  },
+  {
+    match: /^\/admin\/finance\/wht-certificates$/,
+    render: () => <WhtCertificatesLoadingShell />,
+  },
+  {
+    match: /^\/admin\/finance\/opening-balances$/,
+    render: () => <OpeningBalancesLoadingShell />,
+  },
+  {
+    match: /^\/admin\/finance\/aging$/,
+    render: (_m, sp) => (
+      <AgingLoadingShell kind={sp.get('kind') === 'PAYABLE' ? 'PAYABLE' : 'RECEIVABLE'} />
+    ),
+  },
+  {
+    match: /^\/admin\/finance\/assets$/,
+    render: () => <AssetRegisterLoadingShell />,
+  },
+  {
+    match: /^\/admin\/finance\/expenses$/,
+    render: () => <ExpenseSubmissionsLoadingShell />,
   },
 
   // ── Admin / Inventory ───────────────────────────────────────────────────────

@@ -1951,7 +1951,7 @@ function OrdersListPageImpl({
                 {canCreateOffline && (
                   <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
                     <span className="hidden sm:inline">{createModalVariant === 'delivered_follow_up' ? 'Create delivered follow-up' : 'Create offline order'}</span>
-                    <span className="sm:hidden">+ Order</span>
+                    <span className="sm:hidden">Order</span>
                   </Button>
                 )}
                 {isTestOrdersView && (

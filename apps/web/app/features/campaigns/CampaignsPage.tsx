@@ -308,7 +308,7 @@ export function FormsPage({
                   prefetch="intent"
                 >
                   <Button variant="primary" size="sm">
-                    + New Form
+                    New Form
                   </Button>
                 </BranchScopedLink>
               </>
@@ -338,8 +338,8 @@ export function FormsPage({
                 prefetch="intent"
                 className="block"
               >
-                <Button variant="primary" size="sm" className="h-12 w-full justify-center">
-                  + New Form
+                <Button variant="secondary" size="sm" className="h-12 w-full justify-center">
+                  New Form
                 </Button>
               </BranchScopedLink>
             }
@@ -441,7 +441,7 @@ export function FormsPage({
                 actionLabel="creating a form"
                 className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"
               >
-                + New Form
+                New Form
               </BranchScopedLink>{' '}
               to create one.
             </p>
@@ -457,7 +457,7 @@ export function FormsPage({
                 actionLabel="creating a form"
                 className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"
               >
-                + New Form
+                New Form
               </BranchScopedLink>{' '}
               to create one.
             </p>
@@ -539,7 +539,7 @@ export function FormsPage({
           <div className="col-span-full">
             <EmptyState
               title="No forms yet"
-              description="Use + New Form in the header to create your first form."
+              description="Use New Form in the header to create your first form."
             />
           </div>
         )}

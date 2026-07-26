@@ -523,7 +523,7 @@ export function TransfersPage({
       : 'Move stock between locations and track receipt.';
 
   const initiateTransferCta =
-    transfersPageVariant === 'logistics' ? '+ Request transfer' : '+ Record transfer';
+    transfersPageVariant === 'logistics' ? 'Request transfer' : 'Record transfer';
   const modalTransferTitle =
     transfersPageVariant === 'logistics' ? 'Request stock transfer' : 'Record stock transfer';
   const saveTransferSubmitLabel =

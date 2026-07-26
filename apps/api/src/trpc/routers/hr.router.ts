@@ -421,7 +421,7 @@ export const hrRouter = router({
         staffRole: userRows.role,
         periodStart: new Date(input.periodStart),
         periodEnd: new Date(input.periodEnd),
-        crmLinked: userRows.crmLinked,
+        crmLinked: true,
       });
     }),
 
@@ -434,7 +434,7 @@ export const hrRouter = router({
           return {
             id: user.id,
             role: user.role,
-            crmLinked: user.crmLinked,
+            crmLinked: true,
             reportsToUserId: user.reportsToUserId,
           };
         }),

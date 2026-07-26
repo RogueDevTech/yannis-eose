@@ -6,6 +6,7 @@ import {
   approveJournalEntrySchema,
   rejectJournalEntrySchema,
   listAccountsSchema,
+  getAccountLedgerSchema,
   createAccountSchema,
   updateAccountSchema,
   deactivateAccountSchema,
@@ -205,6 +206,12 @@ export const generalLedgerRouter = router({
       });
     }),
 
+  getAccountLedger: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+    .input(getAccountLedgerSchema)
+    .query(async ({ input }) => {
+      return getGeneralLedgerService().getAccountLedger(input);
+    }),
+
   createAccount: permissionProcedure('finance.ledger.write')
     .input(createAccountSchema)
     .mutation(async ({ input, ctx }) => {
@@ -398,10 +405,12 @@ export const generalLedgerRouter = router({
   submitExpense: authedProcedure
     .input(submitExpenseSchema)
     .mutation(async ({ input, ctx }) => {
+      // Pass undefined (not null): SuperAdmin resolveGroupId treats explicit null
+      // as "no company", which would orphan expense rows outside CoA scope.
       return getExpenseSubmissionService().submitExpense(
         input,
         { id: ctx.user.id },
-        resolveGroupId(null, ctx.activeGroupId, ctx.user.role),
+        resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role),
       );
     }),
 

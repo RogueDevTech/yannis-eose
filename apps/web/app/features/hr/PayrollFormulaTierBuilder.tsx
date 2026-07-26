@@ -83,7 +83,7 @@ export function PayrollFormulaTierBuilder({
 
   const formula = useMemo((): PayrollFormula => {
     const out: PayrollFormula = { schemaVersion: 'payroll_v1' };
-    if (flatBaseSalary) out.flatBaseSalary = Number(flatBaseSalary);
+    out.flatBaseSalary = flatBaseSalary ? Number(flatBaseSalary) : 0;
     if (baseTiers.length) out.baseSalaryTiers = baseTiers;
     if (bonusTiers.length) out.bonusTiers = bonusTiers;
     if (penaltyPerReturn) out.penaltyPerReturn = Number(penaltyPerReturn);
@@ -113,8 +113,8 @@ export function PayrollFormulaTierBuilder({
         <div>
           <LabelWithInfo
             htmlFor="flatBaseSalary"
-            label="Flat base salary (optional fallback)"
-            info="A fixed salary paid when no tier conditions match. Acts as a safety net so staff always receive at least this amount."
+            label="Base salary"
+            info="Guaranteed monthly base salary for this role. Every staff member on this pay role receives at least this amount."
           />
           <AmountInput
             id="flatBaseSalary"
@@ -124,6 +124,7 @@ export function PayrollFormulaTierBuilder({
             value={flatBaseSalary}
             onChange={(v) => setFlatBaseSalary(v)}
             disabled={!canWrite}
+            required
           />
         </div>
         <div>
@@ -308,6 +309,15 @@ export function PayrollFormulaTierBuilder({
               </p>
               <p>
                 Est. PAYE: <NairaPrice amount={previewResult.payePreview.employeePaye} /> · Net:{' '}
+                <NairaPrice
+                  amount={
+                    previewResult.formulaResult.grossBeforeAdjustments -
+                    previewResult.payePreview.employeePaye
+                  }
+                />
+              </p>
+              <p className="font-semibold text-app-fg pt-1 border-t border-app-border">
+                Total payout:{' '}
                 <NairaPrice
                   amount={
                     previewResult.formulaResult.grossBeforeAdjustments -

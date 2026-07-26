@@ -4,6 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { AgingLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
 import { AgingPage, type AgingPageProps } from '~/features/accounting/AgingPage';
 
 export const meta: MetaFunction = () => [{ title: 'Aging — Accounting — Yannis EOSE' }];
@@ -47,7 +48,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function AgingRoute() {
   const { shell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<AgingPage {...emptyFor(shell.kind as 'RECEIVABLE' | 'PAYABLE', shell.asOfDate)} />}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<AgingLoadingShell kind={shell.kind as 'RECEIVABLE' | 'PAYABLE'} />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
+    >
       {(data) => <AgingPage {...data} />}
     </CachedAwait>
   );

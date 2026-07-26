@@ -412,12 +412,12 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                   </Button>
                 ) : null}
                 {allow('VERIFY') ? (
-                  <Button variant="primary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setVerifyOpen(true)}>
+                  <Button variant="secondary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setVerifyOpen(true)}>
                     Verify and receive
                   </Button>
                 ) : null}
                 {allow('CLOSE') ? (
-                  <Button variant="primary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setConfirmClose(true)}>
+                  <Button variant="secondary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setConfirmClose(true)}>
                     Close shipment
                   </Button>
                 ) : null}

@@ -97,7 +97,6 @@ export class PayrollMetricsService {
     );
 
     const missingData =
-      input.crmLinked !== false &&
       input.staffRole !== 'HR_MANAGER' &&
       totalOrders === 0 &&
       deliveredCount === 0 &&
@@ -141,7 +140,7 @@ export class PayrollMetricsService {
             staffRole: s.role,
             periodStart,
             periodEnd,
-            crmLinked: s.crmLinked,
+            crmLinked: true,
             reporteeIds: reporteeMap.get(s.id),
           },
           tx,
