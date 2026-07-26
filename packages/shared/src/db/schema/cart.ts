@@ -22,9 +22,8 @@ export const cartAbandonments = pgTable('cart_abandonments', {
    * `cart.revealPhoneForAbandoned` endpoint. Pillar 2 still applies.
    */
   customerPhone: text('customer_phone'),
-  productId: uuid('product_id')
-    .notNull()
-    .references(() => products.id),
+  /** Nullable: phone-only progressive capture may land before product selection. */
+  productId: uuid('product_id').references(() => products.id),
   offerLabel: text('offer_label'),
   status: cartStatusEnum('status').default('PENDING').notNull(),
   convertedOrderId: uuid('converted_order_id').references(() => orders.id),

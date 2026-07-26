@@ -40,8 +40,11 @@ export interface Env {
 // Redis queue config — single source of truth for keys + retry policy.
 const REDIS_PENDING_KEY = 'edge:orders:pending';
 const REDIS_DEAD_LETTER_KEY = 'edge:orders:dead-letter';
+const REDIS_CART_PENDING_KEY = 'edge:carts:pending';
+const REDIS_CART_DEAD_LETTER_KEY = 'edge:carts:dead-letter';
 const REDIS_MAX_ATTEMPTS = 6;          // ~6 minutes of retries at 1-per-minute cron
 const REDIS_DRAIN_BATCH_SIZE = 20;     // max orders processed per cron tick (CPU budget)
+const REDIS_CART_DRAIN_BATCH_SIZE = 30; // carts are smaller; allow a slightly larger batch
 
 function getRedis(env: Env): Redis | null {
   if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) return null;
@@ -147,7 +150,8 @@ interface CartFormData extends ProgressiveCartFields {
   mediaBuyerId?: string;
   customerName: string;
   customerPhone: string;
-  productId: string;
+  /** Optional — phone-only capture before the customer picks a product. */
+  productId?: string;
   offerLabel?: string;
 }
 
@@ -162,7 +166,8 @@ interface CartSavePayload extends ProgressiveCartFields {
    * the API stores it for the same audited reveal flow as orders.
    */
   customerPhone: string;
-  productId: string;
+  /** Optional — phone-only capture before the customer picks a product. */
+  productId?: string;
   offerLabel?: string;
 }
 
@@ -550,7 +555,7 @@ async function getCampaignConfig(campaignId: string, env: Env): Promise<Campaign
 async function forwardCartToApi(
   payload: CartSavePayload,
   env: Env,
-): Promise<{ ok: boolean; data: unknown }> {
+): Promise<{ ok: boolean; status: number; data: unknown }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
 
@@ -564,10 +569,18 @@ async function forwardCartToApi(
 
     clearTimeout(timeoutId);
     const data = await response.json().catch(() => ({}));
-    return { ok: response.ok, data };
-  } catch {
+    if (!response.ok) {
+      console.error('[edge] cart.save failed', response.status, JSON.stringify(data));
+    }
+    return { ok: response.ok, status: response.status, data };
+  } catch (err) {
     clearTimeout(timeoutId);
-    return { ok: false, data: { error: 'API unreachable' } };
+    const isTimeout = err instanceof Error && err.name === 'AbortError';
+    console.error(
+      isTimeout ? '[edge] cart.save timed out' : '[edge] cart.save unreachable:',
+      err,
+    );
+    return { ok: false, status: 503, data: { error: 'API unreachable', timedOut: isTimeout } };
   }
 }
 
@@ -673,6 +686,32 @@ async function bufferToQStash(
   }
 }
 
+async function bufferCartToQStash(
+  payload: CartSavePayload,
+  env: Env,
+): Promise<boolean> {
+  if (!env.QSTASH_URL || !env.QSTASH_TOKEN) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${env.QSTASH_URL}/v2/publish/${env.API_URL}/trpc/cart.save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.QSTASH_TOKEN}`,
+        'Upstash-Retries': '3',
+        'Upstash-Delay': '10s',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Redis Failover (last-resort defense-in-depth) ───────────────
 // Fires only when BOTH the direct API call AND QStash fail. Orders sit on a
 // Redis list until the per-minute healer cron drains them back to the API.
@@ -746,6 +785,73 @@ async function drainRedisQueue(env: Env): Promise<{ drained: number; requeued: n
 
     // Push back to the tail with incremented attempts so fresh orders aren't blocked.
     await redis.rpush(REDIS_PENDING_KEY, JSON.stringify(queued));
+    requeued += 1;
+  }
+
+  return { drained, requeued, deadLettered };
+}
+
+async function bufferCartToRedis(payload: CartSavePayload, env: Env): Promise<boolean> {
+  const redis = getRedis(env);
+  if (!redis) return false;
+
+  const queued: QueuedOrder = {
+    payload,
+    attempts: 0,
+    firstQueuedAt: new Date().toISOString(),
+    lastAttemptAt: null,
+  };
+
+  try {
+    await redis.rpush(REDIS_CART_PENDING_KEY, JSON.stringify(queued));
+    return true;
+  } catch (err) {
+    console.error('[redis-failover] cart rpush failed:', err);
+    return false;
+  }
+}
+
+async function drainRedisCartQueue(env: Env): Promise<{ drained: number; requeued: number; deadLettered: number }> {
+  const redis = getRedis(env);
+  if (!redis) return { drained: 0, requeued: 0, deadLettered: 0 };
+
+  let drained = 0;
+  let requeued = 0;
+  let deadLettered = 0;
+
+  for (let i = 0; i < REDIS_CART_DRAIN_BATCH_SIZE; i += 1) {
+    const raw = (await redis.lpop(REDIS_CART_PENDING_KEY)) as string | null;
+    if (!raw) break;
+
+    let queued: QueuedOrder;
+    try {
+      queued = typeof raw === 'string' ? JSON.parse(raw) : (raw as QueuedOrder);
+    } catch {
+      await redis.rpush(REDIS_CART_DEAD_LETTER_KEY, raw);
+      deadLettered += 1;
+      continue;
+    }
+
+    queued.attempts += 1;
+    queued.lastAttemptAt = new Date().toISOString();
+
+    const apiResult = await forwardCartToApi(queued.payload as CartSavePayload, env);
+
+    if (apiResult.ok) {
+      drained += 1;
+      continue;
+    }
+
+    if (queued.attempts >= REDIS_MAX_ATTEMPTS) {
+      await redis.rpush(REDIS_CART_DEAD_LETTER_KEY, JSON.stringify(queued));
+      deadLettered += 1;
+      console.error(
+        `[redis-drain] cart dead-lettered after ${queued.attempts} attempts (first queued ${queued.firstQueuedAt})`,
+      );
+      continue;
+    }
+
+    await redis.rpush(REDIS_CART_PENDING_KEY, JSON.stringify(queued));
     requeued += 1;
   }
 
@@ -1093,12 +1199,11 @@ function getFormScript(
       }
       function maybeSaveCart() {
         if (cartSaveDisabled) return;
-        if (!selectedProduct || !selectedOffer) return;
         var nameEl = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
         var phoneEl = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
         if (!phoneEl) return;
         var name = nameEl ? (nameEl.value || '').trim() : '';
-        // Gate on a real Nigerian phone — phone alone is enough to capture a cart.
+        // Gate on a real Nigerian phone only — product/offer/name are progressive.
         // Name is optional; defaults to "Unknown" on the API side.
         if (!isValidNgPhone(phoneEl.value)) return;
         if (!isOnline) return;
@@ -1140,10 +1245,11 @@ function getFormScript(
           var payload = {
             campaignId: '${campaignId}',
             mediaBuyerId: ${mediaBuyerIdJson},
-            customerPhone: phoneEl.value,
-            productId: selectedProduct,
-            offerLabel: selectedOffer.label
+            customerPhone: phoneEl.value
           };
+          // Progressive — include product/offer only once the customer selected them.
+          if (selectedProduct) payload.productId = selectedProduct;
+          if (selectedOffer && selectedOffer.label) payload.offerLabel = selectedOffer.label;
           // Name is optional — phone alone captures the cart.
           if (name.length >= 1) payload.customerName = name;
           // Progressive capture — only include fields that have a value right now.
@@ -1181,7 +1287,13 @@ function getFormScript(
             headers: { 'Content-Type': 'application/json' },
             body: payloadJson
           }).then(function(r) { return r.json(); }).then(function(d) {
-            if (d.id) savedCartId = d.id;
+            if (d.id) {
+              savedCartId = d.id;
+            } else if (d.buffered && !savedCartId) {
+              // Failover accepted the cart without an id yet — still unlock
+              // progressive field listeners so later typing is not dropped.
+              savedCartId = 'buffered';
+            }
             lastCartPayloadJson = payloadJson;
             cartSaveInflight = null;
             // Fields may have changed while in-flight — schedule one more save.
@@ -1433,8 +1545,6 @@ function getFormScript(
         // block submit on it) but with a 0ms debounce override it fires on the
         // next microtask, well ahead of the network round-trip for the order.
         flushCartSave();
-        // Kill further cart saves — no more /cart calls after submit is clicked.
-        cartSaveDisabled = true;
         btn.disabled = true;
         btn.textContent = 'Submitting...';
         msg.className = 'msg hidden';
@@ -1580,6 +1690,10 @@ function getFormScript(
           return;
         }
 
+        // Kill further cart saves only after client validation passes —
+        // otherwise a failed click would permanently stop abandonment capture.
+        cartSaveDisabled = true;
+
         var orderData = {
           campaignId: '${campaignId}',
           mediaBuyerId: ${mediaBuyerIdJson},
@@ -1707,9 +1821,12 @@ function getFormScript(
               }
             }
             msg.textContent = friendlyError;
+            // Submit failed — keep capturing carts while the customer retries.
+            cartSaveDisabled = false;
           }
         }).catch(function() {
           // Network failed — save offline
+          cartSaveDisabled = false;
           saveOffline({ data: orderData, timestamp: new Date().toISOString() }).then(function() {
             msg.className = 'msg msg-info';
             msg.textContent = 'Connection lost. Your order has been saved and will be submitted automatically when you reconnect.';
@@ -2427,27 +2544,40 @@ export default {
    * Responsibilities:
    *   1. Heartbeat — check API health, log status.
    *   2. Drain — when the API is healthy AND Upstash Redis is configured,
-   *      pull buffered orders off `edge:orders:pending` and replay them.
+   *      pull buffered orders off `edge:orders:pending` and buffered carts
+   *      off `edge:carts:pending` and replay them.
    *      Failed replays go back to the tail with an incremented attempts
-   *      counter; after REDIS_MAX_ATTEMPTS they move to
-   *      `edge:orders:dead-letter` for manual replay.
+   *      counter; after REDIS_MAX_ATTEMPTS they move to the matching
+   *      dead-letter list for manual replay.
    *
    * QStash handles its own retries internally — the cron does not touch it.
    */
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const healthy = await isApiHealthy(env);
     if (!healthy) {
-      console.log('[healer] API is unhealthy — buffers will continue holding orders');
+      console.log('[healer] API is unhealthy — buffers will continue holding orders/carts');
       return;
     }
 
     const result = await drainRedisQueue(env);
     if (result.drained || result.requeued || result.deadLettered) {
       console.log(
-        `[healer] drained=${result.drained} requeued=${result.requeued} deadLettered=${result.deadLettered}`,
+        `[healer] orders drained=${result.drained} requeued=${result.requeued} deadLettered=${result.deadLettered}`,
       );
-    } else {
-      console.log('[healer] API healthy, no pending orders to drain');
+    }
+
+    const cartResult = await drainRedisCartQueue(env);
+    if (cartResult.drained || cartResult.requeued || cartResult.deadLettered) {
+      console.log(
+        `[healer] carts drained=${cartResult.drained} requeued=${cartResult.requeued} deadLettered=${cartResult.deadLettered}`,
+      );
+    }
+
+    if (
+      !result.drained && !result.requeued && !result.deadLettered &&
+      !cartResult.drained && !cartResult.requeued && !cartResult.deadLettered
+    ) {
+      console.log('[healer] API healthy, no pending orders/carts to drain');
     }
   },
 };
@@ -2485,9 +2615,11 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
     b['customerPhone'] = phoneStr;
   }
 
-  if (!b['productId'] || typeof b['productId'] !== 'string') {
-    return { valid: false, error: 'Product ID is required' };
-  }
+  // Product is optional for phone-only capture. When present it must be a UUID string.
+  const productId =
+    typeof b['productId'] === 'string' && b['productId'].trim().length > 0
+      ? (b['productId'] as string).trim()
+      : undefined;
 
   const strField = (key: string): string | undefined => {
     const v = b[key];
@@ -2516,7 +2648,7 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
       mediaBuyerId: typeof b['mediaBuyerId'] === 'string' ? b['mediaBuyerId'] : undefined,
       customerName: b['customerName'] as string,
       customerPhone: b['customerPhone'] as string,
-      productId: b['productId'] as string,
+      productId,
       offerLabel: typeof b['offerLabel'] === 'string' ? b['offerLabel'] : undefined,
       customerEmail: strField('customerEmail'),
       customerAddress: strField('customerAddress'),
@@ -2573,6 +2705,20 @@ async function handleCart(request: Request, env: Env): Promise<Response> {
   if (result.ok) {
     const id = (result.data as { result?: { data?: { id: string } } })?.result?.data?.id;
     return corsResponse({ success: true, id });
+  }
+
+  // API 5xx/unreachable — same failover ladder as orders: QStash → Redis healer.
+  // Return success when buffered so the form keeps progressive capture alive;
+  // the cart id may be missing until the buffer drains.
+  if (result.status >= 500 || result.status === 503) {
+    const buffered = await bufferCartToQStash(payload, env);
+    if (buffered) {
+      return corsResponse({ success: true, buffered: true });
+    }
+    const redisBuffered = await bufferCartToRedis(payload, env);
+    if (redisBuffered) {
+      return corsResponse({ success: true, buffered: true, bufferedVia: 'redis' });
+    }
   }
 
   return corsResponse(

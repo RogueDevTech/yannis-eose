@@ -69,7 +69,8 @@ export class CartService {
       customerPhoneHash: string;
       /** Raw phone — captured for CS reveal-to-call when the cart drops off. */
       customerPhone?: string;
-      productId: string;
+      /** Optional at first save — phone-only capture before product selection. */
+      productId?: string;
       offerLabel?: string;
       // Progressive form-field capture (migration 0142). Optional — Edge sends
       // whatever the customer has typed at debounce time; we merge field-by-field
@@ -154,8 +155,9 @@ export class CartService {
             status: 'PENDING',
             // Only overwrite name when caller sent a real name (not the "Unknown" default).
             customerName: input.customerName && input.customerName !== 'Unknown' ? input.customerName : existingRow.customerName,
-            productId: input.productId,
-            offerLabel: input.offerLabel ?? null,
+            // Progressive: never wipe a previously captured product with a phone-only save.
+            productId: input.productId ?? existingRow.productId,
+            offerLabel: input.offerLabel ?? existingRow.offerLabel,
             mediaBuyerId: input.mediaBuyerId ?? existingRow.mediaBuyerId,
             // Keep an existing phone if the new payload missed it (older Edge Worker
             // builds, partial form retries) — only overwrite when caller actually
@@ -188,7 +190,7 @@ export class CartService {
           customerName: input.customerName,
           customerPhoneHash: input.customerPhoneHash,
           customerPhone: trimmedPhone,
-          productId: input.productId,
+          productId: input.productId ?? null,
           offerLabel: input.offerLabel ?? null,
           status: 'PENDING',
           customerEmail: progressive.customerEmail ?? null,
@@ -294,13 +296,13 @@ export class CartService {
   }
 
   /**
-   * Cron: mark PENDING carts as ABANDONED every 2 minutes.
-   * Carts not updated in 2+ minutes are considered abandoned.
+   * Cron: mark PENDING carts as ABANDONED (runs every 2 minutes).
+   * Carts not updated in 5+ minutes are considered abandoned.
    * If the user later completes the order, we still convert the cart (CONVERTED) via convert() / convertByPhoneAndProduct().
    */
   @Cron('0 */2 * * * *') // Every 2 minutes at :00 seconds
   async handleAbandonedCarts(): Promise<void> {
-    const thresholdMinutes = 2;
+    const thresholdMinutes = 5;
 
     // Each step is isolated — a failure in marking or merging must never
     // block the auto-pull, which is the critical path for cart recovery.
@@ -406,7 +408,7 @@ export class CartService {
       id: string;
       customerName: string;
       customerPhoneDisplay: string;
-      productId: string;
+      productId: string | null;
       productName: string | null;
       campaignId: string;
       campaignName: string | null;
@@ -426,7 +428,7 @@ export class CartService {
       customerName: string;
       customerPhoneHash: string;
       customerPhone: string | null;
-      productId: string;
+      productId: string | null;
       productName: string | null;
       campaignId: string;
       campaignName: string | null;
@@ -499,7 +501,7 @@ export class CartService {
       customerName: string;
       customerPhoneDisplay: string;
       customerPhone: string | null;
-      productId: string;
+      productId: string | null;
       productName: string | null;
       campaignId: string;
       campaignName: string | null;
@@ -661,7 +663,7 @@ export class CartService {
     customerName: string;
     customerPhoneDisplay: string;
     customerPhone: string | null;
-    productId: string;
+    productId: string | null;
     productName: string | null;
     campaignId: string;
     campaignName: string | null;

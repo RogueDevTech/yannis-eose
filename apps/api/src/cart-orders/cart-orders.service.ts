@@ -1324,6 +1324,7 @@ export class CartOrdersService {
       LEFT JOIN products p ON p.id = ca.product_id
       WHERE ca.id IN (${safeIdList})
         AND ca.status IN ('PENDING', 'ABANDONED')
+        AND ca.product_id IS NOT NULL
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
         -- Dedup: skip if order already exists for same customer + product within 14 days
@@ -1693,10 +1694,12 @@ export class CartOrdersService {
       .where(and(...conditions));
   }
 
-  // ── Auto-Pull (called from cart.service.ts 10-min cron) ─────────────
-  // No standalone cron here — the 10-min abandoned-cart cron in
-  // CartService marks PENDING→ABANDONED then calls runAutoSync so
+  // ── Auto-Pull (called from cart.service.ts abandon cron) ─────────────
+  // No standalone cron here — the abandoned-cart cron in CartService
+  // marks PENDING→ABANDONED (5-min idle) then calls runAutoSync so
   // there is a single pull path with routing rules.
+  // Phone-only carts (product_id NULL) stay on Cart Abandonment until a
+  // product is captured on a later progressive save.
 
   async runAutoSync(triggeredBy: 'cron' | 'manual', actorId?: string) {
     const startedAt = new Date();
@@ -1708,6 +1711,7 @@ export class CartOrdersService {
       SELECT ca.id
       FROM cart_abandonments ca
       WHERE ca.status = 'ABANDONED'
+        AND ca.product_id IS NOT NULL
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
         AND ca.skip_reason IS NULL
       LIMIT 5000
