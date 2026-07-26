@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 /**
- * Save cart — called by Edge Worker when user fills name + phone.
- * Phone comes pre-hashed from the Edge Worker.
+ * Save cart — called by Edge Worker when the customer enters a valid phone.
+ * Phone comes pre-hashed from the Edge Worker. Product/offer and other fields
+ * are progressive and may arrive on later saves.
  */
 export const saveCartSchema = z.object({
   campaignId: z.string().uuid(),
@@ -16,7 +17,8 @@ export const saveCartSchema = z.object({
    * because older Edge Worker builds may still post hash-only payloads.
    */
   customerPhone: z.string().trim().min(4).max(40).optional(),
-  productId: z.string().uuid(),
+  /** Optional at first save — phone-only capture; merged when the customer picks a product. */
+  productId: z.string().uuid().optional(),
   offerLabel: z.string().max(100).optional(),
   // Progressive form-field capture (migration 0142). Edge Worker sends each
   // value as the customer types it; service merges into the existing PENDING row.

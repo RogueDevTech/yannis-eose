@@ -2037,7 +2037,7 @@ export class OrdersService {
         productIds,
         // Skip cart_orders as a dedup winner for edge-form submissions.
         // A real form submit must always win over a cart order created by the
-        // 2-min abandonment cron — otherwise the cron "steals" the submission
+        // 5-min abandonment cron — otherwise the cron "steals" the submission
         // and the customer ends up in the cart pipeline instead of orders.
         // After the order is created we supersede any matching cart order below.
         { skipCartOrders: true },
@@ -4264,7 +4264,7 @@ export class OrdersService {
       // Exclude graduated follow-up orders (is_follow_up=true) and delivered
       // follow-up copies (order_source='delivered_follow_up', is_follow_up=false).
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`);
       if (listOpts.excludeCartGraduated) {
         // Also exclude cart-graduated orders (order_source='online').
         // CS funnel passes this — cart orders have their own strip.
@@ -6525,7 +6525,7 @@ export class OrdersService {
     // so strip counts align with the table rows.
     if (opts.excludeFollowUps) {
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`);
     }
     // Cart-graduated exclusion: when cart-graduated orders are counted separately
     // (in the breakdown modal), exclude them from the funnel count.
@@ -6623,7 +6623,7 @@ export class OrdersService {
       // Exclude graduated follow-up orders (is_follow_up=true) and delivered
       // follow-up copies (order_source='delivered_follow_up', is_follow_up=false).
       conditions.push(eq(schema.orders.isFollowUp, false));
-      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up')`);
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`);
       if (excludeCartGraduated) {
         // Exclude cart-graduated orders — CS funnel; cart orders have their own strip.
         // Primary: order_source='online' (stamped since cart graduation was added).
@@ -6738,7 +6738,7 @@ export class OrdersService {
           offlineCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'offline')`.as('offline_count'),
           duplicateCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isDuplicate} IS NOT NULL AND ${schema.orders.isDuplicate} != '')`.as('duplicate_count'),
           offlineDeliveredCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'offline' AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED'))`.as('offline_delivered_count'),
-          deliveredFollowUpCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'delivered_follow_up')`.as('delivered_follow_up_count'),
+          deliveredFollowUpCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up'))`.as('delivered_follow_up_count'),
         })
         .from(schema.orders)
         .where(whereClause),
@@ -6787,7 +6787,7 @@ export class OrdersService {
         offline: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} = 'offline')::int`,
         followUp: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.isFollowUp} = true)::int`,
         cart: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'online')::int`,
-        deliveredFollowUp: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} = 'delivered_follow_up')::int`,
+        deliveredFollowUp: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up'))::int`,
       })
       .from(schema.orders)
       .where(and(...conditions));
@@ -6943,7 +6943,7 @@ export class OrdersService {
         if (cat === 'offline') clauses.push(sql`(${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} = 'offline')`);
         if (cat === 'follow_up') clauses.push(sql`(${schema.orders.isFollowUp} = true)`);
         if (cat === 'cart') clauses.push(sql`(${schema.orders.orderSource} = 'online')`);
-        if (cat === 'delivered_follow_up') clauses.push(sql`(${schema.orders.orderSource} = 'delivered_follow_up')`);
+        if (cat === 'delivered_follow_up') clauses.push(sql`(${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up'))`);
       }
       if (clauses.length === 1) catConditions.push(clauses[0]!);
       else if (clauses.length > 1) catConditions.push(sql`(${sql.join(clauses, sql` OR `)})`);
@@ -7188,14 +7188,12 @@ export class OrdersService {
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
 
-    // Classify graduated follow-up orders (is_follow_up=true, order_source != 'delivered_follow_up')
-    // as 'follow-up' instead of their inherited source (e.g. 'edge-form').
-    // Cart-graduated orders already have order_source='online'.
-    // Delivered follow-up copies keep order_source='delivered_follow_up'.
+    // Classify order sources for delivered breakdown.
+    // graduated_follow_up and delivered_follow_up both map to 'delivered_follow_up' bucket.
     const rows = await this.db
       .select({
         source: sql<string>`CASE
-          WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+          WHEN ${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up') THEN 'delivered_follow_up'
           WHEN ${schema.orders.isFollowUp} = true THEN 'follow-up'
           ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
         END`,
@@ -7206,7 +7204,7 @@ export class OrdersService {
       .where(and(...conditions))
       .groupBy(
         sql`CASE
-          WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+          WHEN ${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up') THEN 'delivered_follow_up'
           WHEN ${schema.orders.isFollowUp} = true THEN 'follow-up'
           ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
         END`,
@@ -7699,7 +7697,7 @@ export class OrdersService {
         if (cat === 'offline') clauses.push(sql`(${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} = 'offline')`);
         if (cat === 'follow_up') clauses.push(sql`(${schema.orders.isFollowUp} = true)`);
         if (cat === 'cart') clauses.push(sql`(${schema.orders.orderSource} = 'online')`);
-        if (cat === 'delivered_follow_up') clauses.push(sql`(${schema.orders.orderSource} = 'delivered_follow_up')`);
+        if (cat === 'delivered_follow_up') clauses.push(sql`(${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up'))`);
       }
       if (clauses.length === 1) {
         categoryConditions.push(clauses[0]!);

@@ -124,7 +124,7 @@ export function AbandonedCartDetailModal({
       `Customer: ${cart.customerName}`,
       `Phone: ${phone ?? cart.customerPhoneDisplay}`,
       cart.customerEmail ? `Email: ${cart.customerEmail}` : null,
-      `Product: ${cart.productName ?? '—'}`,
+      `Product: ${cart.productName ?? 'No product yet'}`,
       cart.quantity ? `Quantity: ${cart.quantity}` : null,
       cart.offerLabel ? `Offer: ${cart.offerLabel}` : null,
       cart.campaignName ? `Campaign: ${cart.campaignName}` : null,
@@ -212,7 +212,7 @@ export function AbandonedCartDetailModal({
             <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
               <DetailRow
                 label="Product"
-                value={cart.productName ?? '—'}
+                value={cart.productName ?? 'No product yet'}
                 icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />

@@ -767,11 +767,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
 
     // Resolve product prices for order total
-    const productIds = [...new Set(carts.map((c) => c.productId))];
-    const products = await this.db
+    const productIds = [...new Set(carts.map((c) => c.productId).filter((id): id is string => !!id))];
+    const products = productIds.length > 0 ? await this.db
       .select({ id: schema.products.id, name: schema.products.name, baseSalePrice: schema.products.baseSalePrice, offers: schema.products.offers })
       .from(schema.products)
-      .where(inArray(schema.products.id, productIds));
+      .where(inArray(schema.products.id, productIds)) : [];
     const productMap = new Map(products.map((p) => [p.id, p]));
 
     // Validate mediaBuyerIds — drop invalid refs to avoid FK constraint failures
@@ -787,7 +787,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     for (let i = 0; i < carts.length; i++) {
       const cart = carts[i]!;
       try {
-        const product = productMap.get(cart.productId);
+        const product = cart.productId ? productMap.get(cart.productId) : undefined;
         const qty = cart.quantity ?? 1;
 
         let unitPrice = product?.baseSalePrice ?? '0';
@@ -844,7 +844,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           if (fuOrder) {
             await tx.insert(schema.followUpOrderItems).values({
               followUpOrderId: fuOrder.id,
-              productId: cart.productId,
+              productId: cart.productId!,
               quantity: qty,
               unitPrice,
               offerLabel: cart.offerLabel,
@@ -1903,8 +1903,6 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .from(schema.followUpOrderItems)
       .where(eq(schema.followUpOrderItems.followUpOrderId, followUpOrderId));
 
-    const isCartOrigin = !fuOrder.sourceOrderId && !!fuOrder.cartId;
-
     // Dedup guard: skip graduation if the same phone+product already has a
     // DELIVERED or REMITTED order within 14 days (same guard as cart graduation).
     if (fuOrder.customerPhoneHash && fuItems.length > 0) {
@@ -1934,25 +1932,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
     }
 
-    // Resolve orderSource + original createdAt from the source order.
-    // DELIVERED-targeting rules set orderSource='delivered_follow_up' on
-    // the follow-up order at pull time — preserve that through graduation.
-    const isDeliveredFollowUp = fuOrder.orderSource === 'delivered_follow_up';
-    let resolvedOrderSource: string = isDeliveredFollowUp ? 'delivered_follow_up' : 'follow-up';
+    // Graduated follow-up copies use 'graduated_follow_up' to distinguish them
+    // from manually-created delivered follow-ups ('delivered_follow_up').
+    const resolvedOrderSource = 'graduated_follow_up';
     // Always use the follow-up order's own createdAt so the graduated copy
     // appears in the same date range as the follow-up, keeping date-filtered
     // counts consistent between follow_up_orders and orders tables.
     const resolvedCreatedAt: Date = fuOrder.createdAt;
-    if (isCartOrigin && !isDeliveredFollowUp) {
-      resolvedOrderSource = 'online';
-    } else if (fuOrder.sourceOrderId && !isDeliveredFollowUp) {
-      const [src] = await this.db
-        .select({ orderSource: schema.orders.orderSource })
-        .from(schema.orders)
-        .where(eq(schema.orders.id, fuOrder.sourceOrderId))
-        .limit(1);
-      resolvedOrderSource = src?.orderSource ?? 'follow-up';
-    }
 
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       // Insert into orders table as a delivered follow-up order
@@ -1998,7 +1984,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           deliveryGpsLng: fuOrder.deliveryGpsLng,
           createdAt: resolvedCreatedAt,
           isFollowUp: true,
-          isDeliveredFollowUp,
+          isDeliveredFollowUp: true,
           followUpSourceOrderId: fuOrder.sourceOrderId,
           sourceFollowUpOrderId: followUpOrderId,
           confirmedAt: fuOrder.confirmedAt,

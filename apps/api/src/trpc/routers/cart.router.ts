@@ -20,7 +20,8 @@ export function getCartService(): CartService {
 
 export const cartRouter = router({
   /**
-   * Save cart — called by Edge Worker when user fills name + phone.
+   * Save cart — called by Edge Worker when the customer enters a valid phone
+   * (product/offer and other fields merge in progressively).
    * Public procedure (no auth). When caller is authenticated, audit trail records that user.
    */
   save: publicProcedure
