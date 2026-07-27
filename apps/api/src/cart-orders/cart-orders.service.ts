@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
@@ -10,7 +10,8 @@ import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { uuidv7 } from 'uuidv7';
+// uuidv7() is now called as a PostgreSQL 18 built-in function in raw SQL
+// instead of JS-side generation. The import was removed to avoid TS6133.
 
 /** Valid values for the order_timeline_events.event_type enum.
  *  Cart order timeline uses plain text — filter before copying to orders. */
@@ -87,28 +88,12 @@ export class CartOrdersService {
       ) sub
       WHERE co.id = sub.cart_order_id
     `);
-    // Pass 3: absolute fallback — any campaign with a valid MB user
-    const r3 = await this.db.execute(sql`
-      UPDATE cart_orders co
-      SET campaign_id = sub.campaign_id,
-          media_buyer_id = sub.media_buyer_id
-      FROM (
-        SELECT DISTINCT ON (co2.id) co2.id AS cart_order_id, c.id AS campaign_id, c.media_buyer_id
-        FROM cart_orders co2
-        CROSS JOIN LATERAL (
-          SELECT c2.id, c2.media_buyer_id
-          FROM campaigns c2
-          JOIN users u ON u.id = c2.media_buyer_id
-          WHERE c2.media_buyer_id IS NOT NULL
-          ORDER BY random() LIMIT 1
-        ) c
-        WHERE co2.media_buyer_id IS NULL
-      ) sub
-      WHERE co.id = sub.cart_order_id
-    `);
+    // Pass 3 removed: random MB attribution corrupts marketing KPIs.
+    // Cart orders that can't be attributed to a specific campaign/MB via Pass 1
+    // or Pass 2 are left with media_buyer_id=NULL. This is correct — unattributed
+    // is better than misattributed.
     const total = ((r1 as unknown as { rowCount?: number })?.rowCount ?? 0)
-      + ((r2 as unknown as { rowCount?: number })?.rowCount ?? 0)
-      + ((r3 as unknown as { rowCount?: number })?.rowCount ?? 0);
+      + ((r2 as unknown as { rowCount?: number })?.rowCount ?? 0);
     if (total > 0) {
       this.logger.log(`Backfilled media_buyer_id/campaign_id on ${total} cart orders`);
     }
@@ -141,7 +126,7 @@ export class CartOrdersService {
     const result = await this.pg.unsafe(`
       INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
       SELECT
-        gen_random_uuid(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
+        uuidv7(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
         COALESCE(
           (SELECT (o->>'price')::numeric
            FROM jsonb_array_elements(p.offers) AS o
@@ -847,6 +832,59 @@ export class CartOrdersService {
             .where(eq(schema.cartOrders.id, cartOrderId));
           return;
         }
+
+        // Also check follow_up_orders for same phone+product in DELIVERED/REMITTED
+        const [existingFu] = await this.db
+          .select({ id: schema.followUpOrders.id })
+          .from(schema.followUpOrders)
+          .innerJoin(schema.followUpOrderItems, eq(schema.followUpOrderItems.followUpOrderId, schema.followUpOrders.id))
+          .where(
+            and(
+              eq(schema.followUpOrders.customerPhoneHash, co.customerPhoneHash),
+              inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.followUpOrders.deletedAt),
+              gte(schema.followUpOrders.createdAt, fourteenDaysAgo),
+              inArray(schema.followUpOrderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existingFu) {
+          this.logger.warn(
+            `Cart order ${cartOrderId} skipped graduation: duplicate follow-up order found (${existingFu.id}) for same phone+product`,
+          );
+          await this.db
+            .update(schema.cartOrders)
+            .set({ status: 'CONVERTED' })
+            .where(eq(schema.cartOrders.id, cartOrderId));
+          return;
+        }
+
+        // Also check other cart_orders (exclude self) for same phone+product in DELIVERED/REMITTED
+        const [existingCo] = await this.db
+          .select({ id: schema.cartOrders.id })
+          .from(schema.cartOrders)
+          .innerJoin(schema.cartOrderItems, eq(schema.cartOrderItems.cartOrderId, schema.cartOrders.id))
+          .where(
+            and(
+              ne(schema.cartOrders.id, cartOrderId),
+              eq(schema.cartOrders.customerPhoneHash, co.customerPhoneHash),
+              inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.cartOrders.deletedAt),
+              gte(schema.cartOrders.createdAt, fourteenDaysAgo),
+              inArray(schema.cartOrderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existingCo) {
+          this.logger.warn(
+            `Cart order ${cartOrderId} skipped graduation: duplicate cart order found (${existingCo.id}) for same phone+product`,
+          );
+          await this.db
+            .update(schema.cartOrders)
+            .set({ status: 'CONVERTED' })
+            .where(eq(schema.cartOrders.id, cartOrderId));
+          return;
+        }
       }
     }
 
@@ -1259,6 +1297,17 @@ export class CartOrdersService {
   ) {
     if (cartIds.length === 0) return { pulled: 0 };
 
+    // Defence-in-depth: validate all IDs are strict UUIDs before interpolation
+    // into raw SQL. Zod validates at the router, but we enforce here at the
+    // SQL boundary to eliminate injection risk entirely.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    for (const id of cartIds) {
+      if (!UUID_RE.test(id)) throw new TRPCError({ code: 'BAD_REQUEST', message: `Invalid cart ID format: ${id}` });
+    }
+    if (targetBranchId && !UUID_RE.test(targetBranchId)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid branch ID format' });
+    }
+
     // ── 1. Resolve routing BEFORE the transaction (read-only, can use Drizzle) ──
     let resolvedBranchId = targetBranchId;
     let resolvedRuleId: string | null = null;
@@ -1287,6 +1336,14 @@ export class CartOrdersService {
         resolvedTeamId = routing.teamId;
       }
     }
+    // Validate DB-sourced IDs before interpolation (defence-in-depth).
+    const assertUuid = (v: string | null, label: string) => {
+      if (v && !UUID_RE.test(v)) throw new Error(`${label} is not a valid UUID: ${v}`);
+    };
+    assertUuid(resolvedBranchId, 'resolvedBranchId');
+    assertUuid(resolvedRuleId, 'resolvedRuleId');
+    assertUuid(resolvedTeamId, 'resolvedTeamId');
+
     const branchLiteral = resolvedBranchId ? `'${resolvedBranchId}'` : 'NULL';
     const ruleLiteral = resolvedRuleId ? `'${resolvedRuleId}'` : 'NULL';
     const teamLiteral = resolvedTeamId ? `'${resolvedTeamId}'` : 'NULL';
@@ -1299,9 +1356,14 @@ export class CartOrdersService {
     // The NOT IN / NOT EXISTS guards on each step prevent duplicates if a
     // partial failure leaves orphaned rows — the next cron run completes them.
 
+    // Inject audit actor for all pg.unsafe() calls. Simple-protocol multi-statement
+    // runs on the same connection, so set_config persists for the INSERT that follows.
+    const actorSetSql = `SELECT set_config('yannis.current_user_id', '${SYSTEM_ACTOR_ID}', false);`;
+
     // Step A: Insert cart_orders from eligible abandoned carts
     this.logger.log(`[pull] Step A: starting INSERT for ${cartIds.length} cart(s), branch=${branchLiteral}, rule=${ruleLiteral}`);
     const inserted = await this.pg.unsafe<Array<{ id: string; source_cart_id: string }>>(`
+      ${actorSetSql}
       INSERT INTO cart_orders (
         id, source_cart_id, campaign_id, media_buyer_id, status,
         customer_name, customer_phone_hash, customer_phone,
@@ -1312,7 +1374,7 @@ export class CartOrdersService {
         custom_fields
       )
       SELECT
-        gen_random_uuid(), ca.id, ca.campaign_id, ca.media_buyer_id,
+        uuidv7(), ca.id, ca.campaign_id, ca.media_buyer_id,
         'UNPROCESSED', ca.customer_name, ca.customer_phone_hash, ca.customer_phone,
         ca.customer_address, ca.delivery_address, 0,
         ca.delivery_notes, ca.delivery_state, ca.customer_gender,
@@ -1460,11 +1522,12 @@ export class CartOrdersService {
 
     // Step B: Create cart_order_items from product catalog
     const items = await this.pg.unsafe<Array<{ id: string }>>(`
+      ${actorSetSql}
       INSERT INTO cart_order_items (
         id, cart_order_id, product_id, quantity, unit_price, offer_label
       )
       SELECT
-        gen_random_uuid(),
+        uuidv7(),
         co.id,
         ca.product_id,
         COALESCE(ca.quantity, 1),
@@ -1489,6 +1552,7 @@ export class CartOrdersService {
 
     // Step C: Update total_amount from line items
     await this.pg.unsafe(`
+      ${actorSetSql}
       UPDATE cart_orders co
       SET total_amount = sub.line_total, updated_at = now()
       FROM (
@@ -1506,11 +1570,12 @@ export class CartOrdersService {
 
     // Step D: Create timeline events
     await this.pg.unsafe(`
+      ${actorSetSql}
       INSERT INTO cart_order_timeline_events (
         id, cart_order_id, event_type, actor_name, description, metadata, branch_id
       )
       SELECT
-        gen_random_uuid(),
+        uuidv7(),
         co.id,
         'ORDER_RECEIVED',
         'System',
@@ -1749,21 +1814,16 @@ export class CartOrdersService {
       }
     }
 
-    // Write sync log for observability
+    // Write sync log for observability (parameterized via Drizzle)
     try {
-      await this.pg.unsafe(`
-        INSERT INTO cart_order_sync_logs (
-          id, triggered_by, triggered_by_user_id, started_at, finished_at,
-          total_pulled, error_message
-        ) VALUES (
-          '${uuidv7()}', '${triggeredBy}',
-          ${actorId ? `'${actorId}'` : 'NULL'},
-          '${startedAt.toISOString()}'::timestamptz,
-          now(),
-          ${totalPulled},
-          ${errorMessage ? `'${errorMessage.replace(/'/g, "''")}'` : 'NULL'}
-        )
-      `);
+      await this.db.insert(schema.cartOrderSyncLogs).values({
+        triggeredBy,
+        triggeredByUserId: actorId ?? null,
+        startedAt,
+        finishedAt: new Date(),
+        totalPulled,
+        errorMessage,
+      });
     } catch (logErr) {
       this.logger.warn(`[runAutoSync] Failed to write sync log: ${logErr instanceof Error ? logErr.message : logErr}`);
     }

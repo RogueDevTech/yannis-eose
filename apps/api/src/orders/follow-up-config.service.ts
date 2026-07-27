@@ -11,6 +11,9 @@ import type {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { isTransitionAllowed, getAllowedNextStatuses } from './order-state-machine';
+import { isAdminLevel } from '../common/authz';
+import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { CacheService } from '../common/cache/cache.service';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
@@ -1598,6 +1601,39 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Follow-up order not found' });
 
+    // Enforce the same state machine used by regular orders.
+    const currentStatus = order.status as import('@yannis/shared').OrderStatus;
+    const targetStatus = newStatus as import('@yannis/shared').OrderStatus;
+    if (!isTransitionAllowed(currentStatus, targetStatus)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot transition follow-up order from ${currentStatus} to ${targetStatus}. Allowed: ${getAllowedNextStatuses(currentStatus).join(', ') || 'none'}`,
+      });
+    }
+
+    // Retrack guard: backward transitions require HoCS / HoLogistics / Admin / SuperAdmin / Finance.
+    const LIFECYCLE_ORDER: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const isBackward =
+      (LIFECYCLE_ORDER[currentStatus] ?? -1) > (LIFECYCLE_ORDER[targetStatus] ?? -1) &&
+      targetStatus !== 'UNPROCESSED';
+    if (isBackward) {
+      const canRetrack =
+        isAdminLevel(actor) ||
+        actor.role === 'SUPPORT' ||
+        actor.role === 'HEAD_OF_CS' ||
+        actor.role === 'HEAD_OF_LOGISTICS' ||
+        hasFinanceAccess(actor);
+      if (!canRetrack) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only Head of CS, Head of Logistics, Finance, or an Admin can retrack a follow-up order.',
+        });
+      }
+    }
+
     const timestampUpdates: Record<string, unknown> = { updatedAt: new Date() };
     if (newStatus === 'CONFIRMED') timestampUpdates.confirmedAt = new Date();
     if (newStatus === 'AGENT_ASSIGNED') timestampUpdates.allocatedAt = new Date();
@@ -1674,10 +1710,24 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (metadata?.deliveryProofUrl) logisticsUpdates.deliveryProofUrl = metadata.deliveryProofUrl;
 
     await withActor(this.db, actor, async (tx) => {
-      await tx
+      // Optimistic lock: only update if status hasn't changed since we read it.
+      const updatedRows = await tx
         .update(schema.followUpOrders)
         .set({ status: newStatus, ...timestampUpdates, ...logisticsUpdates })
-        .where(eq(schema.followUpOrders.id, orderId));
+        .where(
+          and(
+            eq(schema.followUpOrders.id, orderId),
+            eq(schema.followUpOrders.status, currentStatus),
+          ),
+        )
+        .returning({ id: schema.followUpOrders.id });
+
+      if (!updatedRows.length) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Follow-up order status changed concurrently. Please refresh and try again.',
+        });
+      }
 
       // Map status to timeline event type
       const eventTypeMap: Record<string, string> = {
@@ -1774,7 +1824,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // Surfacing the error would confuse the user (order IS delivered, just not graduated yet).
     if (newStatus === 'DELIVERED') {
       try {
-        await this.graduateToOrders(orderId);
+        await this.graduateToOrders(orderId, actor.id);
       } catch (err) {
         this.logger.error(
           `Graduation failed for follow-up order ${orderId} (will retry on next boot): ${err instanceof Error ? err.stack ?? err.message : err}`,
@@ -1857,6 +1907,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       FROM follow_up_orders fo
       WHERE fo.status = 'DELIVERED'
         AND fo.deleted_at IS NULL
+        AND fo.graduated_order_id IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM orders o
           WHERE o.is_follow_up = true
@@ -1884,7 +1935,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     this.logger.log(`Follow-up graduation retry: ${succeeded}/${orphaned.length} succeeded`);
   }
 
-  private async graduateToOrders(followUpOrderId: string) {
+  private async graduateToOrders(followUpOrderId: string, actorId?: string) {
     const [fuOrder] = await this.db
       .select()
       .from(schema.followUpOrders)
@@ -1909,7 +1960,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
       const productIds = fuItems.map((i) => i.productId).filter(Boolean) as string[];
       if (productIds.length > 0) {
-        const existing = await this.db
+        // Check all 3 tables for existing delivered orders with same phone+product.
+        // Previously only checked `orders` — a cart order and follow-up order for
+        // the same customer could both graduate without triggering the guard.
+        const [existingOrder] = await this.db
           .select({ id: schema.orders.id })
           .from(schema.orders)
           .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
@@ -1923,10 +1977,67 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
             ),
           )
           .limit(1);
-        if (existing[0]) {
+        if (existingOrder) {
           this.logger.warn(
-            `Follow-up order ${followUpOrderId} skipped graduation: duplicate delivery found (order ${existing[0].id}) for same phone+product`,
+            `Follow-up order ${followUpOrderId} skipped graduation: duplicate delivery found (order ${existingOrder.id}) for same phone+product`,
           );
+          // Mark as graduation-blocked so retryFailedGraduations() doesn't retry forever
+          await this.db.update(schema.followUpOrders)
+            .set({ graduatedOrderId: existingOrder.id, updatedAt: new Date() })
+            .where(eq(schema.followUpOrders.id, followUpOrderId));
+          return;
+        }
+
+        // Also check cart_orders for same phone+product in DELIVERED/REMITTED
+        const [existingCartOrder] = await this.db
+          .select({ id: schema.cartOrders.id })
+          .from(schema.cartOrders)
+          .innerJoin(schema.cartOrderItems, eq(schema.cartOrderItems.cartOrderId, schema.cartOrders.id))
+          .where(
+            and(
+              eq(schema.cartOrders.customerPhoneHash, fuOrder.customerPhoneHash),
+              inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.cartOrders.deletedAt),
+              gte(schema.cartOrders.createdAt, fourteenDaysAgo),
+              inArray(schema.cartOrderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existingCartOrder) {
+          this.logger.warn(
+            `Follow-up order ${followUpOrderId} skipped graduation: duplicate cart order found (${existingCartOrder.id}) for same phone+product`,
+          );
+          // Mark graduatedOrderId to prevent retryFailedGraduations() from retrying forever.
+          // Uses the cart order's ID (no FK constraint on this column).
+          await this.db.update(schema.followUpOrders)
+            .set({ graduatedOrderId: existingCartOrder.id, updatedAt: new Date() })
+            .where(eq(schema.followUpOrders.id, followUpOrderId));
+          return;
+        }
+
+        // Also check other follow_up_orders (exclude self) in DELIVERED/REMITTED
+        const [existingFuOrder] = await this.db
+          .select({ id: schema.followUpOrders.id })
+          .from(schema.followUpOrders)
+          .innerJoin(schema.followUpOrderItems, eq(schema.followUpOrderItems.followUpOrderId, schema.followUpOrders.id))
+          .where(
+            and(
+              ne(schema.followUpOrders.id, followUpOrderId),
+              eq(schema.followUpOrders.customerPhoneHash, fuOrder.customerPhoneHash),
+              inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+              isNull(schema.followUpOrders.deletedAt),
+              gte(schema.followUpOrders.createdAt, fourteenDaysAgo),
+              inArray(schema.followUpOrderItems.productId, productIds),
+            ),
+          )
+          .limit(1);
+        if (existingFuOrder) {
+          this.logger.warn(
+            `Follow-up order ${followUpOrderId} skipped graduation: duplicate follow-up order found (${existingFuOrder.id}) for same phone+product`,
+          );
+          await this.db.update(schema.followUpOrders)
+            .set({ graduatedOrderId: existingFuOrder.id, updatedAt: new Date() })
+            .where(eq(schema.followUpOrders.id, followUpOrderId));
           return;
         }
       }
@@ -1940,7 +2051,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // counts consistent between follow_up_orders and orders tables.
     const resolvedCreatedAt: Date = fuOrder.createdAt;
 
-    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+    // Use the real actor who triggered the DELIVERED transition when available,
+    // falling back to SYSTEM_ACTOR_ID for boot-time retries.
+    await withActor(this.db, { id: actorId ?? SYSTEM_ACTOR_ID }, async (tx) => {
       // Insert into orders table as a delivered follow-up order
       const [graduated] = await tx
         .insert(schema.orders)

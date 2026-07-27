@@ -122,10 +122,10 @@ export const logisticsRouter = router({
       );
     }),
 
-  getProvider: authedProcedure
+  getProvider: permissionProcedure('logistics.read')
     .input(z.object({ providerId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getLogisticsService().getProviderById(input.providerId);
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getProviderById(input.providerId, ctx.activeGroupId);
     }),
 
   createProvider: permissionProcedure('logistics.write')
@@ -302,10 +302,10 @@ export const logisticsRouter = router({
     }),
 
   /** Duplicate order comparison: original + all duplicates with invoices and remittance info. */
-  getDuplicateGroup: authedProcedure
+  getDuplicateGroup: permissionProcedure('logistics.read')
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getLogisticsService().getDuplicateGroup(input.orderId);
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getDuplicateGroup(input.orderId, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -317,8 +317,18 @@ export const logisticsRouter = router({
       z.object({
         page: z.number().int().min(1).default(1),
         limit: z.number().int().min(1).max(1000).default(100),
-        status: z.string().optional(),
-        statuses: z.array(z.string()).min(1).optional(),
+        status: z.enum([
+          'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'CANCELLED',
+          'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED',
+          'PARTIALLY_DELIVERED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF',
+          'REMITTED', 'DELETED',
+        ]).optional(),
+        statuses: z.array(z.enum([
+          'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'CANCELLED',
+          'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED',
+          'PARTIALLY_DELIVERED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF',
+          'REMITTED', 'DELETED',
+        ])).min(1).optional(),
         search: z.string().trim().max(200).optional(),
         logisticsLocationId: z.string().uuid().optional(),
         servicingBranchId: z.string().uuid().optional(),

@@ -53,6 +53,19 @@ export function hasFinanceAccess(user: { role: string; permissions?: string[] })
 }
 
 /**
+ * Stricter variant of `hasFinanceAccess` for write operations (creating,
+ * updating, settling, or disputing remittances). SUPPORT and AUDITOR are
+ * read-only roles and should never perform finance write actions.
+ */
+export function hasFinanceWriteAccess(user: { role: string; permissions?: string[] }): boolean {
+  if (user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'ADMIN') return true;
+  if (user.role === 'FINANCE_OFFICER') return true;
+  if (user.permissions?.includes('finance.costView')) return true;
+  return false;
+}
+
+/**
  * Recursively strip sensitive financial fields from a value.
  * - Objects: nullifies matching keys, recurses into non-matching values
  * - Arrays: recurses into each element

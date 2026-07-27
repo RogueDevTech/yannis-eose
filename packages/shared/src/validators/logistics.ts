@@ -8,7 +8,7 @@ export const createProviderSchema = z.object({
   name: z.string().trim().min(2).max(200),
   contactInfo: z.string().trim().min(1).max(500),
   coverageArea: z.string().trim().min(1).max(500),
-  rateCard: z.record(z.unknown()).optional(),
+  rateCard: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type CreateProviderInput = z.infer<typeof createProviderSchema>;
 
@@ -17,7 +17,7 @@ export const updateProviderSchema = z.object({
   name: z.string().trim().min(2).max(200).optional(),
   contactInfo: z.string().trim().min(1).max(500).optional(),
   coverageArea: z.string().trim().min(1).max(500).optional(),
-  rateCard: z.record(z.unknown()).optional(),
+  rateCard: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
 });
 export type UpdateProviderInput = z.infer<typeof updateProviderSchema>;
@@ -161,6 +161,9 @@ export type RejectDeliveryConfirmationInput = z.infer<typeof rejectDeliveryConfi
 // Delivery remittances (3PL batches delivered orders + receipts; Finance marks received)
 // ============================================
 
+/** Non-negative numeric string (e.g. "100", "12.50"). Blocks negatives and non-numeric values. */
+const nonNegativeNumericStr = z.string().regex(/^\d+(\.\d{1,2})?$/, 'Must be a non-negative number with up to 2 decimal places');
+
 export const createDeliveryRemittanceSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1).max(500),
   receiptUrls: z.array(z.string().url()).max(20).default([]),
@@ -174,13 +177,13 @@ export const createDeliveryRemittanceSchema = z.object({
    */
   markReceivedNow: z.boolean().optional().default(false),
   /** Per-order delivery fee overrides. Keys are order UUIDs, values are fee amounts as strings (numeric). */
-  deliveryFees: z.record(z.string()).optional(),
+  deliveryFees: z.record(z.string().uuid(), nonNegativeNumericStr).optional(),
   /** Remittance-level deductions (not per-order). */
-  commitmentFee: z.string().optional(),
-  posFee: z.string().optional(),
-  failedDeliveryCost: z.string().optional(),
-  discount: z.string().optional(),
-  waybillCost: z.string().optional(),
+  commitmentFee: nonNegativeNumericStr.optional(),
+  posFee: nonNegativeNumericStr.optional(),
+  failedDeliveryCost: nonNegativeNumericStr.optional(),
+  discount: nonNegativeNumericStr.optional(),
+  waybillCost: nonNegativeNumericStr.optional(),
   /** When true, skip the same-customer-product duplicate warning and proceed. */
   skipDuplicateWarning: z.boolean().optional().default(false),
 });
@@ -190,13 +193,13 @@ export const updateDeliveryRemittanceSchema = z.object({
   id: z.string().uuid(),
   receiptUrls: z.array(z.string().url()).max(20).optional(),
   notes: z.string().trim().max(1000).optional().nullable(),
-  commitmentFee: z.string().optional(),
-  posFee: z.string().optional(),
-  failedDeliveryCost: z.string().optional(),
-  discount: z.string().optional(),
-  waybillCost: z.string().optional(),
+  commitmentFee: nonNegativeNumericStr.optional(),
+  posFee: nonNegativeNumericStr.optional(),
+  failedDeliveryCost: nonNegativeNumericStr.optional(),
+  discount: nonNegativeNumericStr.optional(),
+  waybillCost: nonNegativeNumericStr.optional(),
   /** Per-order delivery fees. Keys are order IDs, values are numeric fee amounts. */
-  deliveryFees: z.record(z.string().uuid(), z.string()).optional(),
+  deliveryFees: z.record(z.string().uuid(), nonNegativeNumericStr).optional(),
 });
 export type UpdateDeliveryRemittanceInput = z.infer<typeof updateDeliveryRemittanceSchema>;
 

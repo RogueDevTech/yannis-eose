@@ -1535,10 +1535,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (logisticsProviderId) metadata['logisticsProviderId'] = logisticsProviderId;
     if (riderId) metadata['riderId'] = riderId;
     if (newStatus === 'CONFIRMED') {
-      if (!preferredDeliveryDate || !/^\d{4}-\d{2}-\d{2}$/.test(preferredDeliveryDate)) {
-        return json({ error: 'Scheduled delivery date is required.' }, { status: 400 });
-      }
-      metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+      // For retracks back to CONFIRMED, auto-use the existing preferred delivery date
+      // so finance users don't need to re-enter it. Fall back to today if missing.
+      const resolvedDate = preferredDeliveryDate && /^\d{4}-\d{2}-\d{2}$/.test(preferredDeliveryDate)
+        ? preferredDeliveryDate
+        : new Date().toISOString().slice(0, 10);
+      metadata['preferredDeliveryDate'] = resolvedDate;
     } else if (preferredDeliveryDate) {
       metadata['preferredDeliveryDate'] = preferredDeliveryDate;
     }

@@ -100,7 +100,7 @@ export type RejectTransferInput = z.infer<typeof rejectTransferSchema>;
 export const stockAdjustmentSchema = z.object({
   productId: z.string().uuid(),
   locationId: z.string().uuid(),
-  adjustmentQuantity: z.number().int(), // positive = add, negative = remove
+  adjustmentQuantity: z.number().int().min(-10000).max(10000), // positive = add, negative = remove; capped to prevent accidental mass inflation
   reason: z.string().min(10, 'Reason must be at least 10 characters'),
 });
 

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Accounting on Yannis: Quick Guide for Finance &amp; Team</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: #1a1a1a;
+      font-size: 10.5pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1 {
+      font-size: 18pt;
+      margin: 0 0 6px;
+      color: #111;
+    }
+    .subtitle {
+      color: #555;
+      margin: 0 0 18px;
+      font-size: 10.5pt;
+    }
+    h2 {
+      font-size: 12.5pt;
+      margin: 22px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1.5px solid #222;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11pt;
+      margin: 14px 0 6px;
+      page-break-after: avoid;
+    }
+    p { margin: 0 0 8px; }
+    ul, ol { margin: 0 0 10px; padding-left: 20px; }
+    li { margin-bottom: 3px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0 0 12px;
+      font-size: 10pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f3f3f3;
+      font-weight: 600;
+    }
+    .tip {
+      background: #f7f7f7;
+      border-left: 3px solid #444;
+      padding: 8px 10px;
+      margin: 8px 0 12px;
+    }
+    .note {
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      padding: 8px 10px;
+      margin: 0 0 14px;
+    }
+    .flow {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      padding: 12px 14px;
+      margin: 8px 0 12px;
+      white-space: pre;
+      font-size: 9.5pt;
+      line-height: 1.35;
+      page-break-inside: avoid;
+    }
+    .checklist li { list-style: none; margin-left: -8px; }
+    .checklist li::before { content: "☐  "; }
+    strong { font-weight: 600; }
+    .footer-note {
+      margin-top: 24px;
+      font-size: 9pt;
+      color: #777;
+      border-top: 1px solid #ddd;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Accounting on Yannis: Quick Guide for Finance &amp; Team</h1>
+  <p class="subtitle">
+    Welcome. This guide shows where accounting lives and how to use it day to day.
+    Most of what you need is under <strong>Accounting</strong> in the left sidebar.
+  </p>
+  <p class="note">
+    <strong>Note:</strong> <strong>Finance</strong> (cash remittance, disbursements) is a separate menu.
+    This guide is for the <strong>Accounting</strong> group only.
+  </p>
+
+  <h2>1. Where to find things</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>What you need</th>
+        <th>Where in the left menu</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>List of all accounts (the chart)</td>
+        <td><strong>Accounting → Chart of Accounts</strong></td>
+      </tr>
+      <tr>
+        <td>Opening balances at go-live</td>
+        <td><strong>Chart of Accounts</strong> → <strong>Post Opening Balances</strong> / <strong>View Opening Balances</strong></td>
+      </tr>
+      <tr>
+        <td>Which account auto-posting uses</td>
+        <td><strong>Accounting → Account Mappings</strong></td>
+      </tr>
+      <tr>
+        <td>Manual journal entries</td>
+        <td><strong>Accounting → Journal Entries</strong></td>
+      </tr>
+      <tr>
+        <td>Vendor / staff expense claims</td>
+        <td><strong>Accounting → Expenses</strong></td>
+      </tr>
+      <tr>
+        <td>Match bank statement to ledger</td>
+        <td><strong>Accounting → Bank Reconciliation</strong></td>
+      </tr>
+      <tr>
+        <td>Full ledger lines by account</td>
+        <td><strong>Accounting → General Ledger</strong></td>
+      </tr>
+      <tr>
+        <td>Check debits = credits</td>
+        <td><strong>Accounting → Trial Balance</strong></td>
+      </tr>
+      <tr>
+        <td>Income vs expenses for a period</td>
+        <td><strong>Accounting → Profit &amp; Loss</strong></td>
+      </tr>
+      <tr>
+        <td>Assets vs liabilities &amp; equity</td>
+        <td><strong>Accounting → Balance Sheet</strong></td>
+      </tr>
+      <tr>
+        <td>Cash / bank movement</td>
+        <td><strong>Accounting → Cash Flow</strong></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="tip">
+    <strong>Tip:</strong> if you do not see a menu item, ask an admin for accounting / ledger access.
+  </p>
+
+  <h2>2. Who does what</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Main job in accounting</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Finance / Accountant</strong></td>
+        <td>Set up accounts and mappings, post journals, approve expenses, reconcile the bank, run reports</td>
+      </tr>
+      <tr>
+        <td><strong>Heads / Managers</strong></td>
+        <td>Submit expenses when needed; they may see Expenses but not the full ledger</td>
+      </tr>
+      <tr>
+        <td><strong>Auditor</strong></td>
+        <td>View ledger and reports (read access)</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Everything in Accounting is <strong>double-entry</strong>: every posting must balance (debits = credits).
+  </p>
+
+  <h2>3. One-time setup (do this before day-to-day use)</h2>
+  <p>Do these in order.</p>
+
+  <h3>Step 1: Check the Chart of Accounts</h3>
+  <p>Go to <strong>Accounting → Chart of Accounts</strong>.</p>
+  <p>
+    The system already seeds a standard Nigerian-style chart
+    (Assets, Liabilities, Equity, Revenue, Cost of Sales, Expenses, Tax, and so on).
+  </p>
+  <ul>
+    <li>Review the list</li>
+    <li>Add any extra accounts your company needs</li>
+    <li>Edit names if needed</li>
+    <li>Leave group accounts as groups; post only to leaf (postable) accounts</li>
+  </ul>
+  <p>Until the chart looks right, do not rely on reports.</p>
+
+  <h3>Step 2: Set Account Mappings</h3>
+  <p>Go to <strong>Accounting → Account Mappings</strong>.</p>
+  <p>
+    This tells the system which GL account to use when it auto-posts
+    (sales, stock, tax, expenses, and so on).
+  </p>
+  <ul>
+    <li>Review each mapping</li>
+    <li>Change a mapping only if your chart uses a different account than the default</li>
+    <li>You can reset a mapping back to default if you make a mistake</li>
+  </ul>
+  <p>Wrong mappings send money to the wrong account. Fix this before go-live.</p>
+
+  <h3>Step 3: Post Opening Balances (go-live only)</h3>
+  <p>From <strong>Chart of Accounts</strong>, open <strong>Post Opening Balances</strong>.</p>
+  <ul>
+    <li>Enter each account’s balance as at your go-live date</li>
+    <li>Debits and credits must balance (any leftover goes to Opening Balance Equity)</li>
+    <li>Post once when you are ready to start on the system</li>
+  </ul>
+  <p>
+    After this is posted, use normal journals and expenses for new activity.
+    Do not treat opening balances as a monthly task.
+  </p>
+
+  <h2>4. Day-to-day flow</h2>
+  <div class="flow">1. Post activity (journals / expenses / auto-postings)
+     ↓
+2. Check General Ledger / Trial Balance
+     ↓
+3. Reconcile the bank
+     ↓
+4. Read Profit &amp; Loss, Balance Sheet, Cash Flow</div>
+
+  <h3>A. Journal Entries (manual postings)</h3>
+  <ol>
+    <li>Open <strong>Accounting → Journal Entries</strong></li>
+    <li>Create a new entry</li>
+    <li>Add lines: each line is a debit or a credit to an account</li>
+    <li>Total debits must equal total credits</li>
+    <li>Save</li>
+  </ol>
+  <p>Statuses you will see:</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Draft</strong></td>
+        <td>Saved, not yet in the ledger reports as posted</td>
+      </tr>
+      <tr>
+        <td><strong>Posted</strong></td>
+        <td>Approved / live on the ledger</td>
+      </tr>
+      <tr>
+        <td><strong>Cancelled</strong></td>
+        <td>Rejected or reversed; not active</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    If your role can approve: open a <strong>Draft</strong> entry → <strong>Approve and post</strong>.<br />
+    If a posted entry was wrong: use reverse / cancel (do not silently edit history).
+  </p>
+
+  <h3>B. Expenses</h3>
+  <ol>
+    <li>Open <strong>Accounting → Expenses</strong></li>
+    <li>Submit a vendor / expense claim (amount, details, proof if required)</li>
+    <li>
+      Finance reviews:
+      <strong>Approve</strong> if correct, or <strong>Reject</strong> with a reason if not
+    </li>
+  </ol>
+  <p>Statuses: <strong>Pending → Approved</strong> or <strong>Rejected</strong>.</p>
+
+  <h3>C. Bank Reconciliation</h3>
+  <ol>
+    <li>Open <strong>Accounting → Bank Reconciliation</strong></li>
+    <li>Click <strong>New Reconciliation</strong></li>
+    <li>Choose the bank account and statement date / closing balance</li>
+    <li>Match each bank statement line to the matching ledger entry</li>
+    <li>When everything that should match is matched, <strong>Complete reconciliation</strong></li>
+  </ol>
+  <p>
+    Do this regularly (for example monthly) so the bank account in the books matches the real bank statement.
+  </p>
+
+  <h3>D. Reports (read and check)</h3>
+  <p>Use these after postings are in:</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Page</th>
+        <th>Use it for</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>General Ledger</strong></td>
+        <td>Drill into one account’s movements</td>
+      </tr>
+      <tr>
+        <td><strong>Trial Balance</strong></td>
+        <td>Confirm the books balance (debits = credits)</td>
+      </tr>
+      <tr>
+        <td><strong>Profit &amp; Loss</strong></td>
+        <td>Profit for a period</td>
+      </tr>
+      <tr>
+        <td><strong>Balance Sheet</strong></td>
+        <td>Position as at a date</td>
+      </tr>
+      <tr>
+        <td><strong>Cash Flow</strong></td>
+        <td>How cash / bank moved over the period</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Pick the date range (or as-at date) at the top of each report before you share numbers.</p>
+
+  <h2>5. Simple monthly checklist</h2>
+  <ul class="checklist">
+    <li>Chart and Account Mappings still look correct</li>
+    <li>All needed journal entries for the month are posted</li>
+    <li>Pending expenses reviewed (approve or reject)</li>
+    <li>Bank reconciliation completed for the month</li>
+    <li>Trial Balance balances</li>
+    <li>Review Profit &amp; Loss, Balance Sheet, and Cash Flow</li>
+  </ul>
+
+  <h2>6. Quick reminders</h2>
+  <ul>
+    <li><strong>Setup order:</strong> Chart of Accounts → Account Mappings → Opening Balances (once) → then daily work</li>
+    <li><strong>Never post unbalanced journals</strong> (debits must equal credits)</li>
+    <li><strong>Bank recon</strong> is matching the statement to the ledger, not creating sales</li>
+    <li><strong>Opening balances</strong> are for go-live only</li>
+    <li>Menu labels only: use <strong>Accounting → …</strong> in the sidebar (no need to type URLs)</li>
+  </ul>
+
+  <p class="footer-note">Yannis EOSE · Accounting guide for Finance &amp; team</p>
+</body>
+</html>

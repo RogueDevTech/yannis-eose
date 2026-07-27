@@ -8,7 +8,6 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -16,12 +15,10 @@ import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
-import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
 import {
   applyOptimisticPatches,
   useOptimisticListPatches,
 } from '~/hooks/useOptimisticListPatches';
-import { optimisticId } from '~/lib/optimistic';
 import { useFetcherToast } from '~/components/ui/toast';
 
 export interface AccountRow {
@@ -49,13 +46,6 @@ const ROOT_TYPES = [
   { value: 'INCOME', label: 'Income' },
   { value: 'EXPENSE', label: 'Expense' },
 ];
-
-const ACCOUNT_TYPES = [
-  'BANK', 'CASH', 'RECEIVABLE', 'PAYABLE', 'STOCK', 'COST_OF_GOODS_SOLD',
-  'TAX', 'FIXED_ASSET', 'INDIRECT_EXPENSE', 'INDIRECT_INCOME', 'DIRECT_INCOME',
-  'EQUITY', 'ROUND_OFF', 'TEMPORARY', 'DEPRECIATION', 'EXPENSE_ACCOUNT',
-  'CHARGEABLE', 'STOCK_RECEIVED_BUT_NOT_BILLED',
-].map((v) => ({ value: v, label: v.replace(/_/g, ' ') }));
 
 const CATEGORY_OPTIONS = [
   { value: '', label: 'All categories' },
@@ -116,10 +106,8 @@ export function ChartOfAccountsPage({
   hasOpeningBalances = false,
 }: ChartOfAccountsPageProps) {
   const serverAccounts = Array.isArray(accountsProp) ? accountsProp : [];
-  const [createOpen, setCreateOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<AccountRow | null>(null);
-  const [parentId, setParentId] = useState('');
   const [search, setSearch] = useState('');
   const [rootTypeFilter, setRootTypeFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -141,43 +129,13 @@ export function ChartOfAccountsPage({
     });
   };
 
-  const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const deactivateFetcher = useFetcher<{ success?: boolean; error?: string }>();
 
-  useFetcherToast(createFetcher.data);
   useFetcherToast(editFetcher.data);
   useFetcherToast(deactivateFetcher.data);
 
-  useCloseOnFetcherSuccess(createFetcher, () => {
-    setCreateOpen(false);
-    setParentId('');
-  });
   useCloseOnFetcherSuccess(editFetcher, () => setEditAccount(null));
-
-  const buildCreateRows = useCallback((fd: FormData, intent: string) => {
-    if (intent !== 'createAccount') return null;
-    const code = fd.get('code')?.toString()?.trim();
-    const name = fd.get('name')?.toString()?.trim();
-    const rootType = fd.get('rootType')?.toString()?.trim();
-    if (!code || !name || !rootType) return null;
-    const accountType = fd.get('accountType')?.toString()?.trim() || null;
-    const parentAccountId = fd.get('parentAccountId')?.toString()?.trim() || null;
-    const isGroup = fd.get('isGroup') === 'true';
-    return [
-      {
-        id: optimisticId('account'),
-        code,
-        name,
-        rootType,
-        accountType,
-        isGroup,
-        parentAccountId,
-        balance: '0',
-        isActive: true,
-      } satisfies AccountRow,
-    ];
-  }, []);
 
   const buildEditPatches = useCallback((fd: FormData, intent: string) => {
     if (intent !== 'updateAccount') return null;
@@ -193,17 +151,15 @@ export function ChartOfAccountsPage({
     return [{ id, patch: { isActive: false } }];
   }, []);
 
-  const optimisticCreated = useOptimisticListMerge<AccountRow>(createFetcher, buildCreateRows);
   const editPatches = useOptimisticListPatches<AccountRow>(editFetcher, buildEditPatches);
   const deactivatePatches = useOptimisticListPatches<AccountRow>(
     deactivateFetcher,
     buildDeactivatePatches,
   );
   const accounts = useMemo(() => {
-    const merged = [...optimisticCreated, ...serverAccounts];
-    const afterEdit = applyOptimisticPatches(merged, editPatches);
+    const afterEdit = applyOptimisticPatches(serverAccounts, editPatches);
     return applyOptimisticPatches(afterEdit, deactivatePatches);
-  }, [optimisticCreated, serverAccounts, editPatches, deactivatePatches]);
+  }, [serverAccounts, editPatches, deactivatePatches]);
 
   // Apply status filter first (active/inactive/all)
   const statusFiltered = useMemo(() => {
@@ -256,11 +212,6 @@ export function ChartOfAccountsPage({
 
     return filtered;
   }, [tree, search, rootTypeFilter, categoryFilter, postableOnly, expandedGroups]);
-
-  const parentOptions = useMemo(
-    () => accounts.filter((a) => a.isGroup).map((a) => ({ value: a.id, label: `${a.code} ${a.name.replace(/\s*[—–]\s*/g, ' · ')}` })),
-    [accounts],
-  );
 
   const groupCount = statusFiltered.filter((a) => a.isGroup).length;
   const activeCount = accounts.filter((a) => a.isActive).length;
@@ -331,7 +282,7 @@ export function ChartOfAccountsPage({
     <div className="space-y-4">
       <PageHeader
         title="Chart of Accounts"
-        description="IFRS-compliant account tree for double-entry ledger postings."
+        description="Browse and review the ledger tree. Create or remap accounts from Account Mappings."
         mobileInlineActions
         actions={
           <PageHeaderMobileTools
@@ -360,9 +311,9 @@ export function ChartOfAccountsPage({
                   </Link>
                 )}
                 {canWrite ? (
-                  <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
-                    New Account
-                  </Button>
+                  <Link to="/admin/finance/account-mappings" className="btn-primary btn-sm inline-flex items-center">
+                    Manage Accounts
+                  </Link>
                 ) : null}
               </div>
             }
@@ -372,9 +323,9 @@ export function ChartOfAccountsPage({
                   <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
                     {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
                   </Link>
-                  <Button type="button" className="w-full" onClick={() => setCreateOpen(true)}>
-                    New Account
-                  </Button>
+                  <Link to="/admin/finance/account-mappings" className="btn-primary w-full flex items-center justify-center">
+                    Manage Accounts
+                  </Link>
                 </>
               ) : undefined
             }
@@ -392,9 +343,9 @@ export function ChartOfAccountsPage({
                   Post Opening Balances
                 </Link>
               )}
-              <Button type="button" className="w-full" onClick={() => setCreateOpen(true)}>
-                New Account
-              </Button>
+              <Link to="/admin/finance/account-mappings" className="btn-primary w-full flex items-center justify-center">
+                Manage Accounts
+              </Link>
             </>
           ) : undefined
         }
@@ -473,7 +424,7 @@ export function ChartOfAccountsPage({
       {accounts.length === 0 ? (
         <EmptyState
           title="No accounts yet"
-          description="The chart of accounts seeds automatically on server boot. Create one manually if needed."
+          description="The chart of accounts seeds automatically on server boot. Create accounts from Account Mappings."
         />
       ) : rows.length === 0 ? (
         <EmptyState title="No matches" description="No accounts match the current filters." />
@@ -596,47 +547,6 @@ export function ChartOfAccountsPage({
             })}
           </div>
         </div>
-      )}
-
-      {createOpen && (
-        <Modal open onClose={() => setCreateOpen(false)} maxWidth="max-w-md">
-          <div className="p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-app-fg">New Account</h2>
-            <createFetcher.Form method="post" className="space-y-3">
-              <input type="hidden" name="intent" value="createAccount" />
-              <TextInput label="Code" name="code" required placeholder="e.g. 1125" />
-              <TextInput label="Name" name="name" required />
-              <FormSelect name="rootType" label="Root type" options={ROOT_TYPES} required />
-              <FormSelect
-                name="accountType"
-                label="Account type (optional)"
-                options={[{ value: '', label: 'None' }, ...ACCOUNT_TYPES]}
-              />
-              <input type="hidden" name="parentAccountId" value={parentId} />
-              <SearchableSelect
-                label="Parent account (optional)"
-                value={parentId}
-                onChange={setParentId}
-                options={parentOptions}
-                clearable
-              />
-              <label className="flex items-center gap-2 text-sm text-app-fg">
-                <input type="checkbox" name="isGroup" value="true" className="rounded border-app-border text-brand-600 focus:ring-brand-500" /> This is a group (header) account
-              </label>
-              {createFetcher.data?.error && (
-                <p className="text-sm text-danger-600">{createFetcher.data.error}</p>
-              )}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createFetcher.state !== 'idle'}>
-                  {createFetcher.state !== 'idle' ? 'Saving...' : 'Create'}
-                </Button>
-              </div>
-            </createFetcher.Form>
-          </div>
-        </Modal>
       )}
 
       <ConfirmActionModal

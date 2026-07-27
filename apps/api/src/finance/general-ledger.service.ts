@@ -406,6 +406,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           this.groupEqOn(schema.accounts.groupId, groupId),
           eq(schema.accounts.code, code),
           eq(schema.accounts.isGroup, false),
+          eq(schema.accounts.isActive, true),
         ),
       )
       .limit(1);
@@ -668,10 +669,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (totalDebtors <= 0) return { posted: false, reason: 'zero-settlement' };
 
       // Resolve accounts. Remittances carry no bank field, so cash lands in the
-      // company's primary bank — prefer "First Bank", else the first BANK account.
-      // (Deterministic default; revisit if per-remittance bank selection is added.)
+      // company's mapped primary bank (Account Mappings → BANK_PRIMARY).
       const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', ACCT.AR_CUSTOMERS);
-      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
       if (!debtors || !bank) return { posted: false, reason: 'missing-debtors-or-bank-account' };
       const deliveryFeeAcct =
         totalDeliveryFee > 0
@@ -972,7 +972,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       }
 
       const marketing = await this.resolveAccountForPosting(tx, groupId, 'AD_SPEND_DIGITAL');
-      const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
+      const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
       if (!marketing || !bank) {
         return { posted: false, reason: 'missing-marketing-or-bank-account' };
       }
@@ -1015,7 +1015,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         return { posted: false, reason: 'already-posted' };
       }
       const ap = await this.resolveAccountForPosting(tx, groupId, 'AP_SUPPLIERS');
-      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
       if (!ap || !bank) return { posted: false, reason: 'missing-accounts' };
 
       const whtRate = opts?.whtRate ?? 0;
@@ -1135,7 +1135,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         return { posted: false, reason: 'already-posted' };
       }
       const apAgent = await this.resolveAccountForPosting(tx, groupId, 'AP_AGENT_COMMISSIONS');
-      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
       if (!apAgent || !bank) return { posted: false, reason: 'missing-accounts' };
 
       const whtRate = opts?.whtRate ?? 0;
@@ -1217,7 +1217,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         return { posted: false, reason: 'already-posted' };
       }
       const creditAcct = paidByBank
-        ? await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY)
+        ? await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY')
         : await this.resolveAccountForPosting(tx, groupId, 'AP_SUPPLIERS');
       if (!creditAcct) return { posted: false, reason: 'missing-credit-account' };
 
@@ -1254,7 +1254,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (await this.alreadyPosted(tx, 'PAYMENT', depositId)) {
         return { posted: false, reason: 'already-posted' };
       }
-      const bank = await this.resolveAccountByType(tx, groupId, 'BANK', ACCT.BANK_PRIMARY);
+      const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
       const deposits = await this.resolveAccountForPosting(tx, groupId, 'CUSTOMER_DEPOSITS');
       if (!bank || !deposits) return { posted: false, reason: 'missing-accounts' };
 
@@ -2336,6 +2336,9 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
   async cashFlow(input: CashFlowInput) {
     const groupId = input.groupId ?? null;
 
+    // Match Chart of Accounts: only active leaf cash/bank accounts.
+    // Legacy ERPNext rows (FCMB, First Bank, Cash, …) were deactivated by
+    // migration 0251 but used to leak onto this page because is_active was ignored.
     const cashAccounts = await this.db
       .select({ id: schema.accounts.id, code: schema.accounts.code, name: schema.accounts.name, accountType: schema.accounts.accountType })
       .from(schema.accounts)
@@ -2344,6 +2347,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           this.groupEqOn(schema.accounts.groupId, groupId),
           inArray(schema.accounts.accountType, ['BANK', 'CASH'] as never),
           eq(schema.accounts.isGroup, false),
+          eq(schema.accounts.isActive, true),
         ),
       )
       .orderBy(schema.accounts.code);
@@ -2843,7 +2847,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       // Attempt GL posting (non-fatal — missing accounts should not block recording).
       try {
         const expense = await this.resolveAccountForPosting(tx, groupId, 'AD_SPEND_DIGITAL');
-        const bank = await this.resolveAccountByType(tx, groupId, 'BANK');
+        const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
         // WHT Payable — look for an account with code matching ACCT.WHT_PAYABLE; fall back to any PAYABLE.
         const whtPayable = await this.resolveAccountForPosting(tx, groupId, 'WHT_PAYABLE');
 

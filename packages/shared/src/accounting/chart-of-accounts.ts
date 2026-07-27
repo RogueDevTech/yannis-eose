@@ -145,6 +145,8 @@ export const ACCT = {
   // Assets
   CASH_ON_HAND:           '1111',
   BANK_PRIMARY:           '1112',
+  /** Optional second operating bank — create via CoA / Account Mappings when needed. */
+  BANK_SECONDARY:         '1113',
   AR_CUSTOMERS:           '1121',
   STOCK_FINISHED_GOODS:   '1131',
   STOCK_IN_TRANSIT:       '1132',
@@ -208,7 +210,9 @@ export const ACCT = {
 // engine. Companies can override these defaults via `gl_account_mappings`.
 
 export const GL_MAPPING_KEYS = {
+  CASH_PETTY: { key: 'CASH_PETTY', label: 'Petty Cash / Cash on Hand', defaultCode: '1111', category: 'Assets' },
   BANK_PRIMARY: { key: 'BANK_PRIMARY', label: 'Primary Bank Account', defaultCode: '1112', category: 'Assets' },
+  BANK_SECONDARY: { key: 'BANK_SECONDARY', label: 'Secondary Bank Account', defaultCode: '1113', category: 'Assets' },
   AR_CUSTOMERS: { key: 'AR_CUSTOMERS', label: 'Accounts Receivable', defaultCode: '1121', category: 'Assets' },
   STOCK_FINISHED_GOODS: { key: 'STOCK_FINISHED_GOODS', label: 'Finished Goods Stock', defaultCode: '1131', category: 'Assets' },
   VAT_INPUT_CREDIT: { key: 'VAT_INPUT_CREDIT', label: 'VAT Input Credit', defaultCode: '1151', category: 'Assets' },
