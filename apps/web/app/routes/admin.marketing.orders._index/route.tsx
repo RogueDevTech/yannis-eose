@@ -6,7 +6,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultTodayRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { MarketingOrdersPage, type MarketingOrdersSecondaryPayload } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -525,6 +525,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function MarketingOrdersRoute() {
   const { ordersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
+  usePollingFallback(30_000);
 
   const shellProps = {
     page: ordersShell.page,

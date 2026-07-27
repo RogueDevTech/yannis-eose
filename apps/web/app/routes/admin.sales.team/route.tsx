@@ -8,6 +8,14 @@ import { CSTeamPage } from '~/features/cs/CSTeamPage';
 import { CSTeamLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import type { CSTeamMemberOverview } from '~/features/cs/types';
 import type { AgentWorkload, CSLeaderboardEntry, InactiveAgent } from '~/features/cs/types';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
+
+const CS_TEAM_LIVE_EVENTS = [
+  'order:new',
+  'order:status_changed',
+  'order:assigned',
+  'order:reassigned',
+] as const;
 
 export const meta: MetaFunction = () => [
   { title: 'Team Analysis — Yannis EOSE' },
@@ -289,6 +297,9 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export default function CSTeamRoute() {
+  usePageRefreshOnEvent([...CS_TEAM_LIVE_EVENTS]);
+  usePollingFallback(30_000);
+
   const { teamShell, pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<CSTeamLoadingShell {...teamShell} />}

@@ -14,6 +14,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { SearchableSelect, type SearchableSelectOption } from '~/components/ui/searchable-select';
+import { FormSelect } from '~/components/ui/form-select';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {

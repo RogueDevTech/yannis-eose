@@ -13,7 +13,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
@@ -687,6 +687,7 @@ export default function CSQueueRoute() {
     },
   });
   usePageRefreshOnEvent([...CS_QUEUE_LIVE_EVENTS]);
+  usePollingFallback(30_000);
   return (
     <Suspense fallback={<CSOverviewSkeleton />}>
       <CSDashboardPage

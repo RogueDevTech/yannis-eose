@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultTodayRange, defaultThisMonthRange } from '~/lib/api.server';
 import { isAdminLevel, isSuperAdminOnly } from '~/lib/rbac';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -220,6 +220,7 @@ export default function AdminDashboard() {
   const isCsTeamSupervisor =
     parentData?.user?.isCsTeamSupervisorOnActiveBranch === true;
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
+  usePollingFallback(30_000);
 
   const adminRole = role ?? 'ADMIN';
 

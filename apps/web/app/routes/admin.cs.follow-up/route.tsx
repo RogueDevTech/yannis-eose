@@ -26,6 +26,14 @@ import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
 import { FollowUpBatchesLoadingShell, FollowUpOrdersLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
+
+const FOLLOW_UP_LIVE_EVENTS = [
+  'order:new',
+  'order:status_changed',
+  'order:assigned',
+  'cart:updated',
+] as const;
 
 export const meta: MetaFunction = () => [
   { title: 'Follow Up — Yannis EOSE' },
@@ -750,6 +758,9 @@ export function ErrorBoundary() {
 }
 
 export default function FollowUpRoute() {
+  usePageRefreshOnEvent([...FOLLOW_UP_LIVE_EVENTS]);
+  usePollingFallback(30_000);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const loaderData = useLoaderData<typeof loader>() as any;
   const shell = loaderData.shell;
