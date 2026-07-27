@@ -35,12 +35,21 @@ export interface FormulaPreviewResult {
   payePreview: { monthlyPaye: number; employeePaye: number };
 }
 
+export interface FormulaPreviewSamples {
+  individualDr: number;
+  teamDr: number;
+  cpa: number;
+  deliveredCount: number;
+  returnedCount: number;
+  targetMet: boolean;
+}
+
 interface PayrollFormulaTierBuilderProps {
   initialFormula: PayrollFormula;
   canWrite: boolean;
   previewResult: FormulaPreviewResult | null;
   previewLoading: boolean;
-  onPreview: (formula: PayrollFormula, sampleDr: number, sampleTeamDr: number) => void;
+  onPreview: (formula: PayrollFormula, samples: FormulaPreviewSamples) => void;
 }
 
 function emptyBaseTier(): BaseTier {
@@ -52,12 +61,17 @@ function emptyBonusTier(): BonusTier {
 }
 
 function parseFormula(raw: Record<string, unknown>): PayrollFormula {
+  const asNumber = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+    return undefined;
+  };
   return {
     schemaVersion: 'payroll_v1',
-    flatBaseSalary: typeof raw.flatBaseSalary === 'number' ? raw.flatBaseSalary : undefined,
+    flatBaseSalary: asNumber(raw.flatBaseSalary),
     baseSalaryTiers: Array.isArray(raw.baseSalaryTiers) ? (raw.baseSalaryTiers as BaseTier[]) : [],
     bonusTiers: Array.isArray(raw.bonusTiers) ? (raw.bonusTiers as BonusTier[]) : [],
-    penaltyPerReturn: typeof raw.penaltyPerReturn === 'number' ? raw.penaltyPerReturn : undefined,
+    penaltyPerReturn: asNumber(raw.penaltyPerReturn),
     perProductBonus: raw.perProductBonus === true,
   };
 }
@@ -80,6 +94,10 @@ export function PayrollFormulaTierBuilder({
   const [penaltyPerReturn, setPenaltyPerReturn] = useState(String(parsed.penaltyPerReturn ?? ''));
   const [sampleDr, setSampleDr] = useState('55');
   const [sampleTeamDr, setSampleTeamDr] = useState('52');
+  const [sampleCpa, setSampleCpa] = useState('10000');
+  const [sampleDelivered, setSampleDelivered] = useState('10');
+  const [sampleReturned, setSampleReturned] = useState('1');
+  const [sampleTargetMet, setSampleTargetMet] = useState(true);
 
   const formula = useMemo((): PayrollFormula => {
     const out: PayrollFormula = { schemaVersion: 'payroll_v1' };
@@ -89,6 +107,28 @@ export function PayrollFormulaTierBuilder({
     if (penaltyPerReturn) out.penaltyPerReturn = Number(penaltyPerReturn);
     return out;
   }, [flatBaseSalary, baseTiers, bonusTiers, penaltyPerReturn]);
+
+  /** Which sample inputs to show: driven only by metrics/kinds currently on the form. */
+  const sampleFields = useMemo(() => {
+    const usedMetrics = new Set([
+      ...baseTiers.map((t) => t.metric),
+      ...bonusTiers.map((t) => t.metric),
+    ]);
+    return {
+      individualDr: usedMetrics.has('INDIVIDUAL_DR'),
+      teamDr: usedMetrics.has('TEAM_DR'),
+      cpa: usedMetrics.has('CPA'),
+      targetMet: usedMetrics.has('TARGET_MET'),
+      delivered: bonusTiers.some((t) => t.kind === 'PER_ORDER'),
+      returned: Number(penaltyPerReturn) > 0,
+    };
+  }, [baseTiers, bonusTiers, penaltyPerReturn]);
+
+  const showSamplePreview =
+    baseTiers.length > 0 ||
+    bonusTiers.length > 0 ||
+    Number(flatBaseSalary) > 0 ||
+    Number(penaltyPerReturn) > 0;
 
   const gapWarning = useMemo(() => {
     const drTiers = baseTiers.filter((t) => t.metric === 'INDIVIDUAL_DR').sort((a, b) => a.threshold - b.threshold);
@@ -102,8 +142,6 @@ export function PayrollFormulaTierBuilder({
     }
     return null;
   }, [baseTiers]);
-
-  const hasTierChildren = baseTiers.length > 0 || bonusTiers.length > 0;
 
   return (
     <div className="space-y-3">
@@ -147,7 +185,7 @@ export function PayrollFormulaTierBuilder({
 
       <TierSection
         title="Base salary tiers"
-        info="Conditional salary rules based on performance metrics. The first matching tier sets the base salary. If none match, the flat base salary above is used."
+        info={"Conditional salary rules based on performance metrics. The first matching tier sets the base salary. If none match, the flat base salary above is used.\n\nMetric options:\n\u2022 Individual DR %: The closer's personal delivery rate (their delivered orders / their total orders).\n\u2022 Team DR %: The entire branch team's delivery rate for the period.\n\u2022 CPA: Cost Per Acquisition in NGN. Lower is better, calculated as total ad spend / confirmed orders.\n\u2022 Target met: Whether the closer hit their assigned delivery target for the period (yes/no).\n\u2022 None (flat): Fixed amount, no metric condition required."}
         canWrite={canWrite}
         emptyLabel="No base tiers: flat base salary or plan defaults apply."
         onAdd={() => setBaseTiers((rows) => [...rows, emptyBaseTier()])}
@@ -203,7 +241,7 @@ export function PayrollFormulaTierBuilder({
 
       <TierSection
         title="Performance bonus tiers"
-        info="Extra pay earned when staff hit delivery or sales targets. Each matching tier adds its amount on top of the base salary."
+        info={"Extra pay earned when staff hit delivery or sales targets. Each matching tier adds its amount on top of the base salary.\n\nMetric options:\n\u2022 Individual DR %: The closer's personal delivery rate (their delivered orders / their total orders).\n\u2022 Team DR %: The entire branch team's delivery rate for the period.\n\u2022 CPA: Cost Per Acquisition in NGN. Lower is better, calculated as total ad spend / confirmed orders.\n\u2022 Target met: Whether the closer hit their assigned delivery target for the period (yes/no).\n\u2022 None (flat): Fixed bonus amount, no metric condition required."}
         canWrite={canWrite}
         emptyLabel="No bonus tiers configured."
         onAdd={() => setBonusTiers((rows) => [...rows, emptyBonusTier()])}
@@ -255,18 +293,14 @@ export function PayrollFormulaTierBuilder({
         )}
       </TierSection>
 
-      {!hasTierChildren ? null : (() => {
-        const usedMetrics = new Set([
-          ...baseTiers.map((t) => t.metric),
-          ...bonusTiers.map((t) => t.metric),
-        ]);
-        const needsIndividualDr = usedMetrics.has('INDIVIDUAL_DR') || usedMetrics.size === 0;
-        const needsTeamDr = usedMetrics.has('TEAM_DR');
-        return (
+      {!showSamplePreview ? null : (
         <div className="card !p-3 space-y-2">
           <h3 className="text-sm font-semibold text-app-fg">Sample preview</h3>
-          <div className="grid grid-cols-2 gap-3 max-w-md">
-            {needsIndividualDr && (
+          <p className="text-xs text-app-fg-muted">
+            Inputs appear for metrics used in your tiers (and for per-order / return penalties).
+          </p>
+          <div className="grid grid-cols-2 gap-3 max-w-lg">
+            {sampleFields.individualDr && (
               <TextInput
                 label="Sample individual DR %"
                 type="number"
@@ -276,7 +310,7 @@ export function PayrollFormulaTierBuilder({
                 onChange={(e) => setSampleDr(e.target.value)}
               />
             )}
-            {needsTeamDr && (
+            {sampleFields.teamDr && (
               <TextInput
                 label="Sample team DR %"
                 type="number"
@@ -286,9 +320,54 @@ export function PayrollFormulaTierBuilder({
                 onChange={(e) => setSampleTeamDr(e.target.value)}
               />
             )}
-            {!needsIndividualDr && !needsTeamDr && (
-              <p className="text-sm text-app-fg-muted col-span-2">No DR-based tiers. Preview uses flat values only.</p>
+            {sampleFields.cpa && (
+              <TextInput
+                label="Sample CPA (NGN)"
+                type="number"
+                min={0}
+                value={sampleCpa}
+                onChange={(e) => setSampleCpa(e.target.value)}
+              />
             )}
+            {sampleFields.delivered && (
+              <TextInput
+                label="Sample delivered orders"
+                type="number"
+                min={0}
+                value={sampleDelivered}
+                onChange={(e) => setSampleDelivered(e.target.value)}
+              />
+            )}
+            {sampleFields.returned && (
+              <TextInput
+                label="Sample returned orders"
+                type="number"
+                min={0}
+                value={sampleReturned}
+                onChange={(e) => setSampleReturned(e.target.value)}
+              />
+            )}
+            {sampleFields.targetMet && (
+              <label className="flex items-center gap-2 text-sm text-app-fg col-span-2 pt-1">
+                <input
+                  type="checkbox"
+                  checked={sampleTargetMet}
+                  onChange={(e) => setSampleTargetMet(e.target.checked)}
+                  className="rounded border-app-border text-brand-600 focus:ring-brand-500"
+                />
+                Sample: target met
+              </label>
+            )}
+            {!sampleFields.individualDr &&
+              !sampleFields.teamDr &&
+              !sampleFields.cpa &&
+              !sampleFields.delivered &&
+              !sampleFields.returned &&
+              !sampleFields.targetMet && (
+                <p className="text-sm text-app-fg-muted col-span-2">
+                  No metric-based tiers yet. Preview uses flat base / allowances only.
+                </p>
+              )}
           </div>
           <Button
             type="button"
@@ -296,7 +375,16 @@ export function PayrollFormulaTierBuilder({
             size="sm"
             loading={previewLoading}
             loadingText="Previewing…"
-            onClick={() => onPreview(formula, Number(sampleDr), Number(sampleTeamDr))}
+            onClick={() =>
+              onPreview(formula, {
+                individualDr: Number(sampleDr) || 0,
+                teamDr: Number(sampleTeamDr) || 0,
+                cpa: Number(sampleCpa) || 0,
+                deliveredCount: Number(sampleDelivered) || 0,
+                returnedCount: Number(sampleReturned) || 0,
+                targetMet: sampleTargetMet,
+              })
+            }
           >
             Preview against sample metrics
           </Button>
@@ -328,8 +416,7 @@ export function PayrollFormulaTierBuilder({
             </div>
           ) : null}
         </div>
-        );
-      })()}
+      )}
     </div>
   );
 }

@@ -37,6 +37,7 @@ import {
   saveFormulaConfigSchema,
   previewPayrollFormulaSchema,
   archivePayRoleSchema,
+  getPayRoleWithFormulaSchema,
   getPayslipSchema,
   bulkPayslipPdfSchema,
   exportPayRunDraftSchema,
@@ -447,7 +448,12 @@ export const hrRouter = router({
       return Object.fromEntries(metricsMap.entries());
     }),
 
-  listPayRoles: permissionProcedure('payroll.config.read')
+  listPayRoles: permissionProcedure(
+      'payroll.config.read',
+      'users.staff.view',
+      'users.staff.update',
+      'users.staff.create',
+    )
     .query(async ({ ctx }) => {
       return getPayrollConfigService().listPayRoles(ctx.activeGroupId);
     }),
@@ -468,6 +474,12 @@ export const hrRouter = router({
     .input(archivePayRoleSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollConfigService().archivePayRole(input.id, ctx.user, ctx.activeGroupId);
+    }),
+
+  getPayRoleWithFormula: permissionProcedure('payroll.config.read')
+    .input(getPayRoleWithFormulaSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollConfigService().getPayRoleWithFormula(input.payRoleId, ctx.activeGroupId);
     }),
 
   saveFormulaConfig: permissionProcedure('payroll.config.write')

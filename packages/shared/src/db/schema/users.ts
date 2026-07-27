@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, integer, serial, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, integer, serial, boolean, jsonb, timestamp, numeric } from 'drizzle-orm/pg-core';
 import {
   userRoleEnum,
   recordStatusEnum,
@@ -91,6 +91,8 @@ export const users = pgTable('users', {
   employmentType: payrollEmploymentTypeEnum('employment_type').default('STAFF'),
   salaryBasis: payrollSalaryBasisEnum('salary_basis').default('FORMULA_BASED'),
   taxStatus: payrollTaxStatusEnum('tax_status').default('STANDARD_PAYE'),
+  /** Flat monthly salary when `salaryBasis` is FLAT_RATE (₦). */
+  flatMonthlyAmount: numeric('flat_monthly_amount', { precision: 14, scale: 2 }),
   reportsToUserId: uuid('reports_to_user_id'),
   crmLinked: boolean('crm_linked').default(true).notNull(),
   onboardingPayrollStatus: payrollOnboardingStatusEnum('onboarding_payroll_status').default('NOT_APPLICABLE'),

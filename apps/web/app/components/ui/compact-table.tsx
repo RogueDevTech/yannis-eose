@@ -33,7 +33,6 @@
 import { Fragment, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from '@remix-run/react';
 import type { LinkProps } from '@remix-run/react';
-import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -395,28 +394,37 @@ export function CompactTableActionButton({
   title,
 }: CompactTableActionButtonProps) {
   const toneClass = TONE_CLASSES[tone];
-  const sharedClass = `${toneClass} font-medium min-h-10 px-4 py-2 text-sm md:h-auto md:min-h-0 md:px-0 md:py-0 md:text-xs ${className}`;
+  // Dense text link on desktop; large tap target on mobile only.
+  // Do not use `.btn` / `.btn-ghost` — those enforce min-h-9/10 and blow up row height.
+  const sharedClass = [
+    toneClass,
+    'inline-flex items-center font-medium',
+    'min-h-10 px-4 py-2 text-sm',
+    'md:min-h-0 md:h-auto md:px-0 md:py-0 md:text-xs',
+    disabled ? 'opacity-50 pointer-events-none' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   if (to && !disabled) {
     return (
-      <Link to={to} state={state} className={`btn-ghost btn-sm ${sharedClass}`} title={title}>
+      <Link to={to} state={state} className={sharedClass} title={title}>
         {children}
       </Link>
     );
   }
 
   return (
-    <Button
+    <button
       type={type}
-      variant="ghost"
-      size="sm"
       onClick={onClick}
       disabled={disabled}
       className={sharedClass}
       title={title}
     >
       {children}
-    </Button>
+    </button>
   );
 }
 

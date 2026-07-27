@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNull, isNotNull, ne, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
@@ -651,6 +651,12 @@ export class OnboardingService {
       } else {
         conditions.push(eq(schema.staffOnboarding.status, input.onboardingStatus));
       }
+    }
+
+    if (input.payrollSetup === 'SET_UP') {
+      conditions.push(isNotNull(schema.users.payRoleId));
+    } else if (input.payrollSetup === 'NOT_SET_UP') {
+      conditions.push(isNull(schema.users.payRoleId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

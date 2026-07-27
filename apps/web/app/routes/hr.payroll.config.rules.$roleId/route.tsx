@@ -44,29 +44,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const cookie = getSessionCookie(request);
 
-  const [rolesRes, plansRes] = await Promise.all([
-    apiRequest<unknown>('/trpc/hr.listPayRoles', { method: 'GET', cookie }),
-    apiRequest<unknown>(
-      `/trpc/hr.listPlans?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 200, activeOnly: false }))}`,
+  const pageData = (async () => {
+    const detailRes = await apiRequest<unknown>(
+      `/trpc/hr.getPayRoleWithFormula?input=${encodeURIComponent(JSON.stringify({ payRoleId: roleId }))}`,
       { method: 'GET', cookie },
-    ),
-  ]);
+    );
+    if (!detailRes.ok) {
+      // Role missing / wrong company — send back to the list.
+      throw redirect('/hr/payroll/config/roles');
+    }
+    const detail = (detailRes.data as {
+      result?: { data?: { payRole: PayRole; plan: CommissionPlan | null } };
+    })?.result?.data;
+    if (!detail?.payRole) throw redirect('/hr/payroll/config/roles');
 
-  const roles = rolesRes.ok
-    ? (((rolesRes.data as { result?: { data?: PayRole[] } })?.result?.data) ?? [])
-    : [];
-  const payRole = roles.find((r) => r.id === roleId);
-  if (!payRole) throw redirect('/hr/payroll/config/roles');
-
-  const plansPayload = plansRes.ok
-    ? (plansRes.data as { result?: { data?: { plans: CommissionPlan[] } } })?.result?.data
-    : null;
-  const plans = plansPayload?.plans ?? [];
-  const plan = payRole.commissionPlanId
-    ? plans.find((p) => p.id === payRole.commissionPlanId) ?? null
-    : null;
-
-  const pageData = { payRole, plan, canWrite };
+    return { payRole: detail.payRole, plan: detail.plan ?? null, canWrite };
+  })();
 
   return defer({ pageData });
 }
@@ -213,15 +206,23 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const sampleDr = Number(formData.get('sampleDr') ?? 0);
     const sampleTeamDr = Number(formData.get('sampleTeamDr') ?? 0);
+    const sampleCpa = Number(formData.get('sampleCpa') ?? 0);
+    const sampleDeliveredCount = Number(formData.get('sampleDeliveredCount') ?? 10);
+    const sampleReturnedCount = Number(formData.get('sampleReturnedCount') ?? 0);
+    const sampleTargetMet = formData.get('sampleTargetMet')?.toString() === 'true';
+    const delivered = Number.isFinite(sampleDeliveredCount) ? Math.max(0, Math.floor(sampleDeliveredCount)) : 10;
+    const returned = Number.isFinite(sampleReturnedCount) ? Math.max(0, Math.floor(sampleReturnedCount)) : 0;
     const input = encodeURIComponent(
       JSON.stringify({
         formula,
         metrics: {
           individualDr: sampleDr,
           teamDr: sampleTeamDr,
-          deliveredCount: 10,
-          totalOrders: 20,
-          returnedCount: 1,
+          cpa: sampleCpa,
+          deliveredCount: delivered,
+          totalOrders: Math.max(delivered + returned, delivered || 1),
+          returnedCount: returned,
+          targetMet: sampleTargetMet,
         },
       }),
     );

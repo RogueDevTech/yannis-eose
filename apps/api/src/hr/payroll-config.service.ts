@@ -123,6 +123,41 @@ export class PayrollConfigService {
     return this.updatePayRole({ id, active: false }, actor, groupId);
   }
 
+  /**
+   * Load a pay role and its currently linked commission-plan formula in one
+   * shot. Prefer this over listPlans + find — listPlans is paginated/scoped and
+   * can miss the linked plan, which made Edit formula look empty ("Formula
+   * linked" on the list but blank tiers on the editor).
+   */
+  async getPayRoleWithFormula(payRoleId: string, groupId?: string | null) {
+    const companyId = requireCompanyId(groupId);
+    const [payRole] = await this.db
+      .select()
+      .from(schema.payrollPayRoles)
+      .where(
+        and(
+          eq(schema.payrollPayRoles.id, payRoleId),
+          eq(schema.payrollPayRoles.groupId, companyId),
+        ),
+      )
+      .limit(1);
+    if (!payRole) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found in this company' });
+    }
+
+    let plan: typeof schema.commissionPlans.$inferSelect | null = null;
+    if (payRole.commissionPlanId) {
+      const [linked] = await this.db
+        .select()
+        .from(schema.commissionPlans)
+        .where(eq(schema.commissionPlans.id, payRole.commissionPlanId))
+        .limit(1);
+      plan = linked ?? null;
+    }
+
+    return { payRole, plan };
+  }
+
   async saveFormulaConfig(
     input: {
       payRoleId: string;

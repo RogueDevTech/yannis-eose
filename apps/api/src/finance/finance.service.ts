@@ -163,13 +163,18 @@ export class FinanceService {
     order: {
       id: string;
       confirmedAt: string | Date | null;
+      status?: string;
       customerName: string;
       customerAddress: string | null;
       orderItems: Array<{ quantity: number; unitPrice: string; productName: string | null; productId: string }>;
     };
     actorId: string;
   }) {
-    if (!params.order.confirmedAt) {
+    // Orders that are CONFIRMED or beyond can always get an invoice, even if
+    // confirmedAt is null (e.g. cart-graduated orders that skipped the timestamp).
+    const POST_CONFIRM_STATUSES = ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED'];
+    const isPastConfirm = params.order.status && POST_CONFIRM_STATUSES.includes(params.order.status);
+    if (!params.order.confirmedAt && !isPastConfirm) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Invoice can only be generated after the order is confirmed',

@@ -5,7 +5,6 @@ import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
 import { FormField } from '~/components/ui/form-field';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -15,10 +14,11 @@ import { Textarea } from '~/components/ui/textarea';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
+import { BankSelect } from '~/components/ui/bank-select';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
-import { NIGERIAN_BANKS, NIGERIAN_STATES, findBankByName } from '@yannis/shared';
+import { NIGERIAN_STATES, resolveNigerianBank } from '@yannis/shared';
 
 /** Public FIRS TaxProMax portal where staff can request a Tax Identification Number. */
 const TAX_ID_REGISTER_URL = 'https://taxpromax.firs.gov.ng/';
@@ -26,11 +26,6 @@ const TAX_ID_REGISTER_URL = 'https://taxpromax.firs.gov.ng/';
 const STATE_OPTIONS = [
   { value: '', label: 'Select…' },
   ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
-];
-
-const BANK_SELECT_OPTIONS = [
-  { value: '', label: 'Select your bank…' },
-  ...NIGERIAN_BANKS.map((b) => ({ value: b.name, label: b.name })),
 ];
 
 type OnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
@@ -482,23 +477,21 @@ export function StaffOnboardingPage({
   const [g2Form, setG2Form] = useState(record.guarantor2FormUrl ?? '');
   const [g2IdDoc, setG2IdDoc] = useState(record.guarantor2IdUrl ?? '');
   const [supportingDocs, setSupportingDocs] = useState(record.supportingDocuments);
-  // Bank picker — track the name so we can auto-fill the matching code when
-  // the user picks from the dropdown. Free-text legacy values (not in the
-  // list) stay editable via the same input.
-  const [bankName, setBankName] = useState(record.payoutBankName ?? '');
-  const [bankCode, setBankCode] = useState(record.payoutBankCode ?? '');
+  // Bank picker — selecting a bank sets both name and NIP code together.
+  const initialBank = resolveNigerianBank({
+    name: record.payoutBankName,
+    code: record.payoutBankCode,
+  });
+  const [bankName, setBankName] = useState(initialBank?.name ?? record.payoutBankName ?? '');
+  const [bankCode, setBankCode] = useState(initialBank?.code ?? record.payoutBankCode ?? '');
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesReason, setRequestChangesReason] = useState('');
 
-  const handleBankChange = (nextName: string) => {
-    setBankName(nextName);
-    const match = findBankByName(nextName);
-    // Auto-fill the code from the canonical list. If staff picked a bank
-    // that's not in NIGERIAN_BANKS (legacy free text), leave whatever code
-    // they already had so we don't blow it away.
-    if (match) setBankCode(match.code);
+  const handleBankChange = (next: { bankName: string; bankCode: string }) => {
+    setBankName(next.bankName);
+    setBankCode(next.bankCode);
   };
 
   // Close confirm modals only AFTER the action returns success — keeps the
@@ -900,38 +893,19 @@ export function StaffOnboardingPage({
               description="Where Finance sends your payroll. Bank, bank code, account name, and account number are required before review."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Bank" hint="Pick from the list. Bank code fills in automatically.">
-                <SearchableSelect
-                  id="onboarding-bank-name"
-                  value={bankName}
-                  onChange={handleBankChange}
-                  options={BANK_SELECT_OPTIONS}
-                  placeholder="Select your bank…"
-                  searchPlaceholder="Search banks…"
-                  wrapperClassName="w-full"
-                />
-                {/* Hidden inputs so the controlled bank name + code reach the
-                    server even though the visible control is SearchableSelect. */}
-                <input type="hidden" name="payoutBankName" value={bankName} />
-                <input type="hidden" name="payoutBankCode" value={bankCode} />
-              </FormField>
-              <FormField
-                label="Bank code"
-                hint={
-                  bankCode
-                    ? `Auto-filled from ${bankName || 'selected bank'}. Edit if Finance needs a different code.`
-                    : 'Required. Pick a bank above or type the CBN/NIBSS code.'
-                }
-              >
-                <TextInput
-                  name="payoutBankCodeVisible"
-                  value={bankCode}
-                  onChange={(e) => setBankCode(e.target.value.trim())}
-                  placeholder="e.g. 058"
-                  maxLength={20}
-                  inputMode="numeric"
-                />
-              </FormField>
+              <BankSelect
+                id="onboarding-bank"
+                bankName={bankName}
+                bankCode={bankCode}
+                onChange={handleBankChange}
+                nameBankName="payoutBankName"
+                nameBankCode="payoutBankCode"
+                label="Bank"
+                hint="Search and pick your bank. The NIBSS bank code fills in automatically."
+                placeholder="Select your bank…"
+                className="sm:col-span-2"
+                required
+              />
               <FormField label="Account name" hint="As it appears on your bank statement">
                 <TextInput
                   name="payoutAccountName"

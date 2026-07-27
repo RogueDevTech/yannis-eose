@@ -14,6 +14,7 @@ import type { PayRole } from './payroll-prd-types';
 import {
   PayrollFormulaTierBuilder,
   type FormulaPreviewResult,
+  type FormulaPreviewSamples,
 } from './PayrollFormulaTierBuilder';
 import type { PayrollFormula } from '@yannis/shared';
 
@@ -83,13 +84,17 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   }, [plan]);
 
   const handlePreview = useCallback(
-    (formula: PayrollFormula, sampleDr: number, sampleTeamDr: number) => {
+    (formula: PayrollFormula, samples: FormulaPreviewSamples) => {
       previewFetcher.submit(
         {
           intent: 'previewFormula',
           formulaJson: JSON.stringify(formula),
-          sampleDr: String(sampleDr),
-          sampleTeamDr: String(sampleTeamDr),
+          sampleDr: String(samples.individualDr),
+          sampleTeamDr: String(samples.teamDr),
+          sampleCpa: String(samples.cpa),
+          sampleDeliveredCount: String(samples.deliveredCount),
+          sampleReturnedCount: String(samples.returnedCount),
+          sampleTargetMet: samples.targetMet ? 'true' : 'false',
         },
         { method: 'post' },
       );

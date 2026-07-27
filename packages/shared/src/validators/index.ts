@@ -574,6 +574,7 @@ export {
   saveFormulaConfigSchema,
   previewPayrollFormulaSchema,
   archivePayRoleSchema,
+  getPayRoleWithFormulaSchema,
   getPayslipSchema,
   bulkPayslipPdfSchema,
   exportPayRunDraftSchema,

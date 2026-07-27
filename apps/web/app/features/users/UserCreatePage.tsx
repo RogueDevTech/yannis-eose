@@ -160,6 +160,7 @@ export interface EditingUser {
   employmentType?: string;
   salaryBasis?: string;
   taxStatus?: string;
+  flatMonthlyAmount?: string;
   reportsToUserId?: string | null;
   crmLinked?: boolean;
 }
@@ -551,9 +552,35 @@ export function UserCreatePage({
     employmentType: editingUser?.employmentType ?? 'STAFF',
     salaryBasis: editingUser?.salaryBasis ?? 'FORMULA_BASED',
     taxStatus: editingUser?.taxStatus ?? 'STANDARD_PAYE',
+    flatMonthlyAmount: editingUser?.flatMonthlyAmount ?? '',
     reportsToUserId: editingUser?.reportsToUserId ?? null,
     crmLinked: editingUser?.crmLinked ?? true,
   });
+
+  // Keep payroll fields in sync when loader data lands / refreshes (e.g. after
+  // assign-role elsewhere, or when clientLoader cache is bypassed).
+  useEffect(() => {
+    if (!editingUser) return;
+    setPayrollProfile((prev) => ({
+      ...prev,
+      payRoleId: editingUser.payRoleId ?? null,
+      employmentType: editingUser.employmentType ?? prev.employmentType,
+      salaryBasis: editingUser.salaryBasis ?? prev.salaryBasis,
+      taxStatus: editingUser.taxStatus ?? prev.taxStatus,
+      flatMonthlyAmount: editingUser.flatMonthlyAmount ?? prev.flatMonthlyAmount,
+      reportsToUserId: editingUser.reportsToUserId ?? prev.reportsToUserId ?? null,
+      crmLinked: editingUser.crmLinked ?? prev.crmLinked,
+    }));
+  }, [
+    editingUser?.id,
+    editingUser?.payRoleId,
+    editingUser?.employmentType,
+    editingUser?.salaryBasis,
+    editingUser?.taxStatus,
+    editingUser?.flatMonthlyAmount,
+    editingUser?.reportsToUserId,
+    editingUser?.crmLinked,
+  ]);
 
   // Reset permissions to role defaults — standalone server action via fetcher.
   const resetPermsFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
@@ -1367,7 +1394,8 @@ export function UserCreatePage({
           </div>
         )}
 
-        {isEditMode && (payRoles ?? []).length > 0 ? (
+        {isEditMode ? (
+          Array.isArray(payRoles) && payRoles.length > 0 ? (
           <>
             <input type="hidden" name="payRoleId" value={payrollProfile.payRoleId ?? ''} />
             <input type="hidden" name="employmentType" value={payrollProfile.employmentType} />
@@ -1377,11 +1405,21 @@ export function UserCreatePage({
             <input type="hidden" name="crmLinked" value={payrollProfile.crmLinked ? 'true' : 'false'} />
             <PayrollUserProfileSection
               values={payrollProfile}
-              payRoles={(payRoles ?? []) as import('~/features/hr/payroll-prd-types').PayRole[]}
+              payRoles={payRoles as import('~/features/hr/payroll-prd-types').PayRole[]}
               userRole={selectedRole}
               onChange={(patch) => setPayrollProfile((prev) => ({ ...prev, ...patch }))}
             />
           </>
+          ) : (
+            <div className="card space-y-2">
+              <h2 className="text-lg font-semibold text-app-fg">Payroll profile</h2>
+              <p className="text-sm text-app-fg-muted">
+                {picklistsLoading
+                  ? 'Loading pay roles…'
+                  : 'No pay roles found for the selected company. Create one under HR → Payroll → Pay roles, or switch company in the header.'}
+              </p>
+            </div>
+          )
         ) : null}
 
         {/* Section 4: Contact */}
