@@ -344,7 +344,6 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       WHERE loser.customer_phone_hash IS NOT NULL
         AND loser.customer_phone_hash = winner.customer_phone_hash
         AND loser.id != winner.id
-        AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) < 604800
         AND loser.status NOT IN ('CANCELLED', 'DELETED')
         AND loser.deleted_at IS NULL
         AND winner.status NOT IN ('CANCELLED', 'DELETED')
