@@ -2067,12 +2067,10 @@ export class OrdersService {
       }
     }
 
-    // Universal 7-day dedup (CEO directive 2026-05-26):
-    // Same phone + any overlapping product within 7 days = duplicate.
-    // Any MB, any campaign, any offer. One order per customer×product per week.
+    // Universal dedup (no time limit):
+    // Same phone + any overlapping product = duplicate, regardless of age.
     // Duplicates are recorded in cross_funnel_attempts for MB visibility.
-    // Customer always sees success (pixel fires, redirect works).
-    // Order is still created (MB traction) but immediately soft-deleted (CS never sees it).
+    // No order is created. Customer still sees success (pixel fires, redirect works).
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const productIds = orderInput.items.map((i) => i.productId);
       const winner = await this.findExistingOrderForDedup(
@@ -8827,6 +8825,24 @@ export class OrdersService {
       if (previousOrder.status === 'DELIVERED') {
         // Reverse the FIFO delivery deduction before the switch re-reserves stock.
         await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+
+        // When retracking DELIVERED → DISPATCHED/IN_TRANSIT, the order is still in
+        // the logistics pipeline so reservedCount must be re-applied. DELIVERED →
+        // CONFIRMED and DELIVERED → AGENT_ASSIGNED are handled by their switch cases.
+        const POST_ALLOCATION_STATUSES = ['DISPATCHED', 'IN_TRANSIT'];
+        if (POST_ALLOCATION_STATUSES.includes(newStatus) && updatedOrder.logisticsLocationId) {
+          try {
+            await this.inventoryService.reserveForAllocateWithMovements(
+              updatedOrder.id,
+              updatedOrder.logisticsLocationId,
+              actor,
+            );
+          } catch (err) {
+            this.logger.warn(
+              `Re-reserve on retrack DELIVERED → ${newStatus} for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`,
+            );
+          }
+        }
       } else if (
         ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(previousOrder.status) &&
         nextPos <= 3 && // retracking to CONFIRMED or earlier
@@ -8982,6 +8998,15 @@ export class OrdersService {
       }
 
       case 'DELIVERED': {
+        // Skip inventory deduction on REMITTED → DELIVERED retrack — stock was
+        // already deducted when the order was first delivered. Re-running
+        // completeDeliveryInventory would double-deduct stockCount, double-consume
+        // FIFO batches, and drive reservedCount negative.
+        const isRetrackFromRemitted = isRetrackSideEffect && previousOrder.status === 'REMITTED';
+        if (isRetrackFromRemitted) {
+          break;
+        }
+
         const fulfillmentLocationId = updatedOrder.logisticsLocationId;
         if (!fulfillmentLocationId) {
           throw new TRPCError({
@@ -9766,7 +9791,10 @@ export class OrdersService {
   ): Promise<{ id: string; mediaBuyerId: string | null; status: string; createdAt: Date } | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // No time limit — any existing order for the same phone + product is a
+    // duplicate. MBs accused the system of "swallowing orders" when the old
+    // 7-day window let repeats through; unlimited window ensures every repeat
+    // goes to cross_funnel_attempts for MB visibility.
 
     // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
     type Candidate = { id: string; mediaBuyerId: string | null; status: string; createdAt: Date; source: 'orders' | 'cart_orders' | 'follow_up_orders' };
@@ -9783,7 +9811,6 @@ export class OrdersService {
         .where(
           and(
             eq(schema.orders.customerPhoneHash, phoneHash),
-            gte(schema.orders.createdAt, sevenDaysAgo),
             notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
             isNull(schema.orders.deletedAt),
           ),
@@ -9803,7 +9830,6 @@ export class OrdersService {
             .where(
               and(
                 eq(schema.cartOrders.customerPhoneHash, phoneHash),
-                gte(schema.cartOrders.createdAt, sevenDaysAgo),
                 notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
                 isNull(schema.cartOrders.deletedAt),
               ),
@@ -9821,7 +9847,6 @@ export class OrdersService {
         .where(
           and(
             eq(schema.followUpOrders.customerPhoneHash, phoneHash),
-            gte(schema.followUpOrders.createdAt, sevenDaysAgo),
             notInArray(schema.followUpOrders.status, ['CANCELLED', 'DELETED']),
             isNull(schema.followUpOrders.deletedAt),
           ),
