@@ -20,7 +20,6 @@ import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -193,7 +192,6 @@ export function UserDetailPage({
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [showReactivateConfirm, setShowReactivateConfirm] = useState(false);
-  const [showMirrorConfirm, setShowMirrorConfirm] = useState(false);
   const [mobileProfileSheetOpen, setMobileProfileSheetOpen] = useState(false);
   const [showEmailChangeModal, setShowEmailChangeModal] = useState<{
     requestId: string;
@@ -946,7 +944,10 @@ export function UserDetailPage({
                       className="border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
                       loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
                       loadingText="Entering..."
-                      onClick={() => setShowMirrorConfirm(true)}
+                      onClick={() => {
+                        const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
+                        form?.requestSubmit();
+                      }}
                     >
                       Mirror user
                     </Button>
@@ -1035,7 +1036,8 @@ export function UserDetailPage({
                       loadingText="Entering..."
                       onClick={() => {
                         closeSheet();
-                        setShowMirrorConfirm(true);
+                        const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
+                        form?.requestSubmit();
                       }}
                     >
                       Mirror user
@@ -1685,7 +1687,8 @@ export function UserDetailPage({
                 loadingText="Entering..."
                 onClick={() => {
                   setMobileProfileSheetOpen(false);
-                  setShowMirrorConfirm(true);
+                  const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
+                  form?.requestSubmit();
                 }}
               >
                 Mirror user
@@ -1851,32 +1854,6 @@ export function UserDetailPage({
       >
         <input type="hidden" name="intent" value="mirror" />
       </Form>
-
-      <ConfirmActionModal
-        open={showMirrorConfirm}
-        onClose={() => setShowMirrorConfirm(false)}
-        title="Mirror this user"
-        description={
-          <>
-            Enter mirror mode as <strong>{user.name}</strong>? You will see the app with their
-            permissions and branch scope until you exit mirror mode.
-          </>
-        }
-        details={
-          <ul className="list-disc pl-4 space-y-1 text-sm">
-            <li>Use this only for support and troubleshooting</li>
-            <li>Your own Super Admin session is paused until you exit</li>
-          </ul>
-        }
-        confirmLabel="Start mirroring"
-        variant="warning"
-        loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-        onConfirm={() => {
-          const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
-          form?.requestSubmit();
-          setShowMirrorConfirm(false);
-        }}
-      />
 
       {/* ─── Deactivate Confirmation Modal ───────────────── */}
       {showDeactivateConfirm && (

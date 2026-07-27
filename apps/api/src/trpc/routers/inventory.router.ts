@@ -72,14 +72,14 @@ export const inventoryRouter = router({
   /**
    * List inventory levels — filtered by product/location.
    */
-  levels: authedProcedure
+  levels: permissionProcedure('inventory.read')
     .input(listInventorySchema)
     .query(async ({ input, ctx }) => {
       return getInventoryService().listLevels(input, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /** Aggregated stock per (product, location) — no batch rows, no pagination. */
-  levelsSummary: authedProcedure.query(async ({ ctx }) => {
+  levelsSummary: permissionProcedure('inventory.read').query(async ({ ctx }) => {
     return getInventoryService().listLevelsSummary(ctx.activeGroupId);
   }),
 
@@ -96,7 +96,7 @@ export const inventoryRouter = router({
    * Detail view for a single inventory row — FIFO batches intaken at this location
    * plus the full movement history affecting stock at this (product, location).
    */
-  levelDetail: authedProcedure
+  levelDetail: permissionProcedure('inventory.read')
     .input(z.object({
       productId: z.string().uuid(),
       locationId: z.string().uuid(),
@@ -118,13 +118,13 @@ export const inventoryRouter = router({
    * Stock movements across all locations belonging to a logistics provider.
    * Powers the provider detail "Stock Activity" tab.
    */
-  providerShipments: authedProcedure
+  providerShipments: permissionProcedure('inventory.read')
     .input(z.object({ providerId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       return getInventoryService().getProviderShipments(input.providerId, ctx.activeGroupId);
     }),
 
-  providerLocationBreakdown: authedProcedure
+  providerLocationBreakdown: permissionProcedure('inventory.read')
     .input(z.object({
       providerId: z.string().uuid(),
       shipmentId: z.string().uuid().optional(),
@@ -133,7 +133,7 @@ export const inventoryRouter = router({
       return getInventoryService().getProviderLocationBreakdown(input, ctx.activeGroupId);
     }),
 
-  providerProductBreakdown: authedProcedure
+  providerProductBreakdown: permissionProcedure('inventory.read')
     .input(z.object({
       providerId: z.string().uuid(),
       shipmentId: z.string().uuid().optional(),
@@ -142,7 +142,7 @@ export const inventoryRouter = router({
       return getInventoryService().getProviderProductBreakdown(input, ctx.activeGroupId);
     }),
 
-  providerMovements: authedProcedure
+  providerMovements: permissionProcedure('inventory.read')
     .input(z.object({
       providerId: z.string().uuid(),
       productId: z.string().uuid().optional(),
@@ -160,7 +160,7 @@ export const inventoryRouter = router({
    * Single-inventory-row detail page loader — returns level + product/location names
    * + batches + movements in one round-trip.
    */
-  getLevelById: authedProcedure
+  getLevelById: permissionProcedure('inventory.read')
     .input(z.object({
       id: z.string().uuid(),
       page: z.number().int().min(1).default(1),
@@ -267,7 +267,7 @@ export const inventoryRouter = router({
   /**
    * Stock movement history log.
    */
-  movements: authedProcedure
+  movements: permissionProcedure('inventory.read')
     .input(listMovementsSchema)
     .query(async ({ input, ctx }) => {
       return getInventoryService().listMovements(input, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds);
@@ -276,7 +276,7 @@ export const inventoryRouter = router({
   /**
    * List stock transfers.
    */
-  transfers: authedProcedure
+  transfers: permissionProcedure('inventory.read')
     .input(z.object({ status: z.string().optional(), page: z.number().int().min(1).optional(), limit: z.number().int().min(1).max(1000).optional() }))
     .query(async ({ input, ctx }) => {
       return getInventoryService().listTransfers(input.status, ctx.user, input.page, input.limit, ctx.activeGroupId);
@@ -653,8 +653,8 @@ export const inventoryRouter = router({
 
     get: permissionProcedure('inventory.read')
       .input(z.object({ warehouseId: z.string().uuid() }))
-      .query(async ({ input }) => {
-        return getLogisticsServiceForInventory().getWarehouseById(input.warehouseId);
+      .query(async ({ input, ctx }) => {
+        return getLogisticsServiceForInventory().getWarehouseById(input.warehouseId, ctx.activeGroupId);
       }),
 
     create: permissionProcedure('inventory.warehouses.write')

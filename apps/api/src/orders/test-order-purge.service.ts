@@ -410,23 +410,51 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       .join('; ');
 
     const now = new Date();
+    // Early-stage statuses where no stock has moved — safe to soft-delete.
+    const SAFE_TO_DELETE_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
+    const softDeleteIds = loserEntries
+      .filter((e) => SAFE_TO_DELETE_STATUSES.includes(e.status))
+      .map((e) => e.loserId);
+    const flagOnlyIds = loserEntries
+      .filter((e) => !SAFE_TO_DELETE_STATUSES.includes(e.status))
+      .map((e) => e.loserId);
+
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      // 1. Flag loser orders as duplicates — NEVER delete them.
-      //    Orders must stay in the system with their original status so
-      //    they remain visible in counts, CS queues, and audit trails.
-      //    Stock-moved orders (CONFIRMED+) would orphan inventory if deleted.
-      await tx
-        .update(schema.orders)
-        .set({
-          isDuplicate: 'FLAGGED',
-          updatedAt: now,
-        })
-        .where(
-          and(
-            inArray(schema.orders.id, loserIds),
-            isNull(schema.orders.deletedAt),
-          ),
-        );
+      // 1a. Soft-delete early-stage duplicates — removes them from CS queues
+      //     and counts so they don't drag down confirmation rates.
+      if (softDeleteIds.length > 0) {
+        await tx
+          .update(schema.orders)
+          .set({
+            isDuplicate: 'FLAGGED',
+            status: 'DELETED',
+            deletedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              inArray(schema.orders.id, softDeleteIds),
+              isNull(schema.orders.deletedAt),
+            ),
+          );
+      }
+
+      // 1b. Flag-only for CONFIRMED+ orders — stock may be allocated, can't
+      //     safely delete without inventory reversal. CS/HoCS handles manually.
+      if (flagOnlyIds.length > 0) {
+        await tx
+          .update(schema.orders)
+          .set({
+            isDuplicate: 'FLAGGED',
+            updatedAt: now,
+          })
+          .where(
+            and(
+              inArray(schema.orders.id, flagOnlyIds),
+              isNull(schema.orders.deletedAt),
+            ),
+          );
+      }
 
       // 2. Timeline events for audit trail
       await tx.insert(schema.orderTimelineEvents).values(
@@ -434,12 +462,15 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           const winnerLabel = e.winnerOrderNumber
             ? `YNS-${e.winnerOrderNumber}`
             : e.winnerId.slice(0, 8);
+          const wasSoftDeleted = SAFE_TO_DELETE_STATUSES.includes(e.status);
           return {
             orderId: e.loserId,
             eventType: 'ORDER_DUPLICATE_FLAGGED' as const,
             actorId: null,
             actorName: 'System' as const,
-            description: `Flagged as duplicate: same phone + product within 7 days (winner: ${winnerLabel})`,
+            description: wasSoftDeleted
+              ? `Auto-deleted duplicate: same phone + product within 7 days (winner: ${winnerLabel})`
+              : `Flagged as duplicate: same phone + product within 7 days (winner: ${winnerLabel})`,
             metadata: { winnerId: e.winnerId },
             branchId: e.branchId ?? null,
           };
@@ -473,10 +504,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
-      `Flagged ${loserIds.length} universal duplicate(s) (isDuplicate=FLAGGED, status unchanged) + cross_funnel_attempts recorded. Targets: ${preview}` +
+      `Duplicate cleanup: ${softDeleteIds.length} soft-deleted (early-stage), ${flagOnlyIds.length} flagged-only (CONFIRMED+). Targets: ${preview}` +
         (loserIds.length > 20 ? ` … +${loserIds.length - 20} more` : ''),
     );
-    return { deleted: loserIds.length, skipped: 0 };
+    return { deleted: softDeleteIds.length, skipped: flagOnlyIds.length };
   }
 }
 

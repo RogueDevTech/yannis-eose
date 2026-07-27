@@ -211,7 +211,8 @@ export class InventoryService {
       .from(schema.stockBatches)
       .where(and(eq(schema.stockBatches.productId, productId), gt(schema.stockBatches.remainingQuantity, 0)))
       .orderBy(asc(schema.stockBatches.receivedAt), asc(schema.stockBatches.id))
-      .limit(InventoryService.FIFO_BATCH_PAGE_SIZE);
+      .limit(InventoryService.FIFO_BATCH_PAGE_SIZE)
+      .for('update');
   }
 
   /**
@@ -460,9 +461,9 @@ export class InventoryService {
    * | WAREHOUSE            | STOCK_MANAGER, BRANCH_ADMIN, SUPER_ADMIN, ADMIN                             |
    * | THIRD_PARTY          | TPL_MANAGER, HEAD_OF_LOGISTICS, SUPER_ADMIN, ADMIN                          |
    *
-   * HEAD_OF_LOGISTICS does NOT skip approval for WAREHOUSE sources — that's the
-   * whole point of the gate. Stock managers must consciously sign off on stock
-   * leaving the warehouse.
+   * Per CEO directive 2026-05-25, HEAD_OF_LOGISTICS skips approval for ALL
+   * source types (including WAREHOUSE). Stock Manager + HoL + Admin go
+   * straight to RECEIVED.
    */
   private canApproveSourceTransfer(
     actor: SessionUser,
@@ -604,6 +605,7 @@ export class InventoryService {
           eq(schema.inventoryLevels.locationId, fromLocationId),
         ),
       )
+      .for('update')
       .limit(1);
 
     const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
@@ -828,6 +830,7 @@ export class InventoryService {
             eq(schema.inventoryLevels.locationId, transfer.fromLocationId),
           ),
         )
+        .for('update')
         .limit(1);
       const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
       if (available < transfer.quantitySent) {
@@ -1058,6 +1061,13 @@ export class InventoryService {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: `Transfer is ${transfer.transferStatus}, cannot verify`,
+      });
+    }
+
+    if (input.quantityReceived > transfer.quantitySent) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot receive more than was sent. Sent: ${transfer.quantitySent}, Claimed: ${input.quantityReceived}`,
       });
     }
 
@@ -1306,9 +1316,11 @@ export class InventoryService {
         });
       }
 
-      // 2. Add back to source (reverse the debit). We restore the originally
-      // sent quantity, not the received quantity — the source lost `sentQty`
-      // when the transfer was initiated, so that's what comes back.
+      // 2. Add back to source. If the transfer had shrinkage (received < sent),
+      // only restore receivedQty — the shrinkage units are a real loss and must
+      // not be re-created. For unverified transfers (receivedQty=0), restore
+      // the full sentQty since nothing was credited to destination.
+      const restoreToSource = receivedQty > 0 ? receivedQty : sentQty;
       const sourceRows = await tx
         .select()
         .from(schema.inventoryLevels)
@@ -1323,7 +1335,7 @@ export class InventoryService {
         await tx
           .update(schema.inventoryLevels)
           .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${sentQty}`,
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${restoreToSource}`,
             updatedAt: now,
           })
           .where(eq(schema.inventoryLevels.id, sourceRows[0].id));
@@ -1331,7 +1343,7 @@ export class InventoryService {
         await tx.insert(schema.inventoryLevels).values({
           productId: transfer.productId,
           locationId: transfer.fromLocationId,
-          stockCount: sentQty,
+          stockCount: restoreToSource,
           reservedCount: 0,
           status: 'AVAILABLE',
         });
@@ -1339,7 +1351,7 @@ export class InventoryService {
       await tx.insert(schema.stockMovements).values({
         productId: transfer.productId,
         movementType: 'TRANSFER_IN',
-        quantity: sentQty,
+        quantity: restoreToSource,
         fromLocationId: transfer.toLocationId,
         toLocationId: transfer.fromLocationId,
         referenceId: transfer.id,
@@ -3676,7 +3688,8 @@ export class InventoryService {
             desc(
               sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount})`,
             ),
-          );
+          )
+          .for('update');
 
         if (rows.length === 0) {
           throw new TRPCError({
@@ -3836,7 +3849,8 @@ export class InventoryService {
               eq(schema.inventoryLevels.locationId, logisticsLocationId),
             ),
           )
-          .orderBy(desc(schema.inventoryLevels.stockCount));
+          .orderBy(desc(schema.inventoryLevels.stockCount))
+          .for('update');
 
         if (levelRows.length === 0) {
           throw new TRPCError({
@@ -3943,14 +3957,14 @@ export class InventoryService {
         });
 
         // Restore inventory level at the original location.
-        // Both stockCount and reservedCount were decremented on delivery
-        // (completeDeliveryInventory), so restore both on reversal.
+        // Only restore stockCount — reservedCount was released on delivery
+        // and will be re-reserved by the retrack flow if needed (e.g. when
+        // reverting DELIVERED → CONFIRMED triggers reserveForAllocateWithMovements).
         if (locationId) {
           await tx
             .update(schema.inventoryLevels)
             .set({
               stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
-              reservedCount: sql`${schema.inventoryLevels.reservedCount} + ${reverseQty}`,
               updatedAt: new Date(),
             })
             .where(

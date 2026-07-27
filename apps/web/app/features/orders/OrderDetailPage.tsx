@@ -4328,9 +4328,6 @@ export function OrderDetailPage({
               { value: 'CS_ASSIGNED', label: 'Assigned', pos: 1 },
               { value: 'CS_ENGAGED', label: 'Unconfirmed', pos: 2 },
               { value: 'CONFIRMED', label: 'Confirmed', pos: 3 },
-              { value: 'AGENT_ASSIGNED', label: 'Agent Assigned', pos: 4 },
-              { value: 'DISPATCHED', label: 'Dispatched', pos: 5 },
-              { value: 'IN_TRANSIT', label: 'In Transit', pos: 6 },
               { value: 'DELIVERED', label: 'Delivered', pos: 7 },
               { value: 'REMITTED', label: 'Cash Remitted', pos: 8 },
             ];
@@ -4376,6 +4373,11 @@ export function OrderDetailPage({
                   reason: editStatusReason.trim(),
                   ...(isFollowUpOrder ? { isFollowUpOrder: 'true' } : {}),
                   ...(isCartOrder ? { isCartOrder: 'true' } : {}),
+                  // When retracking to CONFIRMED, re-use the existing delivery date
+                  // so finance users don't have to pick one manually.
+                  ...(editStatusTarget === 'CONFIRMED' && order.preferredDeliveryDate
+                    ? { preferredDeliveryDate: order.preferredDeliveryDate.slice(0, 10) }
+                    : {}),
                 },
                 { method: 'post' },
               );

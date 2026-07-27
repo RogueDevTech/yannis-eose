@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes } from 'react';
-import { useRevalidator } from '@remix-run/react';
+import { useLocation, useRevalidator } from '@remix-run/react';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 
 interface PageRefreshButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'onClick'> {
@@ -16,6 +17,7 @@ export function PageRefreshButton({
   title,
   ...rest
 }: PageRefreshButtonProps) {
+  const location = useLocation();
   const { revalidate, state } = useRevalidator();
   const isLoading = state === 'loading';
 
@@ -33,7 +35,13 @@ export function PageRefreshButton({
   return (
     <button
       type="button"
-      onClick={() => revalidate()}
+      onClick={() => {
+        // Bust client loader cache first — otherwise revalidate can re-serve a
+        // stale empty snapshot (e.g. CoA after a transient API blip) for one
+        // more round before fresh data lands.
+        invalidateCachedLoader(location.pathname);
+        revalidate();
+      }}
       disabled={isLoading || disabled}
       title={accessibleName}
       aria-label={iconOnly ? accessibleName : undefined}

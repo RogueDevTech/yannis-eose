@@ -76,15 +76,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const accounts: AccountOption[] = accountsRes.ok
       ? (
           (accountsRes.data as { result?: { data?: Array<{ id: string; code: string; name: string; isGroup: boolean; rootType: string; accountType?: string | null }> } })?.result?.data ?? []
-        )
-          .filter((a) => !a.isGroup)
-          .map((a) => ({
-            id: a.id,
-            code: a.code,
-            name: a.name,
-            rootType: a.rootType,
-            accountType: a.accountType ?? undefined,
-          }))
+        ).map((a) => ({
+          id: a.id,
+          code: a.code,
+          name: a.name,
+          rootType: a.rootType,
+          accountType: a.accountType ?? undefined,
+          isGroup: a.isGroup,
+        }))
       : [];
 
     return { mappings, accounts };
@@ -99,6 +98,54 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
+
+  if (intent === 'createAccount') {
+    const accountTypeRaw = formData.get('accountType')?.toString() || '';
+    const parentRaw = formData.get('parentAccountId')?.toString() || '';
+    const assignToMappingKey = formData.get('assignToMappingKey')?.toString() || '';
+    const body = {
+      code: formData.get('code')?.toString() ?? '',
+      name: formData.get('name')?.toString() ?? '',
+      rootType: formData.get('rootType')?.toString() ?? '',
+      accountType: accountTypeRaw || null,
+      isGroup: formData.get('isGroup')?.toString() === 'true',
+      parentAccountId: parentRaw || null,
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.createAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    const created = (res.data as { result?: { data?: { id: string; code: string; name: string } } })?.result?.data;
+    if (assignToMappingKey && created?.id) {
+      const mapRes = await apiRequest<unknown>('/trpc/generalLedger.updateAccountMapping', {
+        method: 'POST',
+        cookie,
+        body: { mappingKey: assignToMappingKey, accountId: created.id },
+      });
+      if (!mapRes.ok) {
+        return json(
+          {
+            success: true,
+            intent: 'createAccount',
+            account: created,
+            assignToMappingKey,
+            error: extractApiErrorMessage(mapRes.data) || 'Account created but mapping assign failed.',
+          },
+          { status: 200 },
+        );
+      }
+    }
+    return json({
+      success: true,
+      intent: 'createAccount',
+      account: created ?? null,
+      assignToMappingKey: assignToMappingKey || undefined,
+    });
+  }
 
   if (intent === 'updateMapping') {
     const mappingKey = formData.get('mappingKey')?.toString() ?? '';

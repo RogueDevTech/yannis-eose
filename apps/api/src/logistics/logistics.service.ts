@@ -53,7 +53,7 @@ import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
-import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
+import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
@@ -68,6 +68,7 @@ async function syncRemittedToSourceTables(
     orderSource: string | null;
     isFollowUp: boolean;
     customerPhoneHash: string | null;
+    servicingBranchId: string | null;
   }>,
 ) {
   const remittedIds = remittedRows.map((r) => r.id);
@@ -168,16 +169,20 @@ async function syncRemittedToSourceTables(
       (r) => r.isFollowUp && r.customerPhoneHash && !followUpOrderIds.length,
     );
     for (const row of fuFallback) {
+      // Scope by servicingBranchId to prevent cross-company collisions when
+      // matching by phone hash alone (pre-0263 orders lack a direct FK).
+      const conditions = [
+        eq(schema.followUpOrders.customerPhoneHash, row.customerPhoneHash!),
+        eq(schema.followUpOrders.status, 'DELIVERED'),
+        isNull(schema.followUpOrders.deletedAt),
+      ];
+      if (row.servicingBranchId) {
+        conditions.push(eq(schema.followUpOrders.servicingBranchId, row.servicingBranchId));
+      }
       await tx
         .update(schema.followUpOrders)
         .set({ status: 'REMITTED', updatedAt: new Date() })
-        .where(
-          and(
-            eq(schema.followUpOrders.customerPhoneHash, row.customerPhoneHash!),
-            eq(schema.followUpOrders.status, 'DELIVERED'),
-            isNull(schema.followUpOrders.deletedAt),
-          ),
-        );
+        .where(and(...conditions));
     }
   }
 }
@@ -266,11 +271,15 @@ export class LogisticsService {
     });
   }
 
-  async getProviderById(providerId: string) {
+  async getProviderById(providerId: string, groupId?: string | null) {
+    const conditions = [eq(schema.logisticsProviders.id, providerId)];
+    if (groupId) {
+      conditions.push(eq(schema.logisticsProviders.groupId, groupId));
+    }
     const rows = await this.db
       .select()
       .from(schema.logisticsProviders)
-      .where(eq(schema.logisticsProviders.id, providerId))
+      .where(and(...conditions))
       .limit(1);
 
     if (!rows[0]) {
@@ -958,7 +967,14 @@ export class LogisticsService {
     };
   }
 
-  async getWarehouseById(warehouseId: string) {
+  async getWarehouseById(warehouseId: string, groupId?: string | null) {
+    const conditions = [
+      eq(schema.logisticsLocations.id, warehouseId),
+      eq(schema.logisticsProviders.kind, 'WAREHOUSE'),
+    ];
+    if (groupId) {
+      conditions.push(eq(schema.logisticsProviders.groupId, groupId));
+    }
     const [row] = await this.db
       .select({
         id: schema.logisticsLocations.id,
@@ -976,12 +992,7 @@ export class LogisticsService {
         schema.logisticsProviders,
         eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
       )
-      .where(
-        and(
-          eq(schema.logisticsLocations.id, warehouseId),
-          eq(schema.logisticsProviders.kind, 'WAREHOUSE'),
-        ),
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (!row) {
@@ -1259,20 +1270,19 @@ export class LogisticsService {
   }, effectiveBranchIds?: string[] | null) {
     const offset = (input.page - 1) * input.limit;
 
-    // Build WHERE conditions as raw SQL fragments for the UNION
-    const sharedConditions: string[] = ['deleted_at IS NULL'];
+    // Build WHERE conditions as parameterised SQL fragments for the UNION
+    const sharedConditions: SQL[] = [sql`deleted_at IS NULL`];
 
-    // Status scope
+    // Status scope — always parameterised to prevent injection
     const logisticsStatuses = input.statuses ?? [
       'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
       'DELIVERED', 'PARTIALLY_DELIVERED', 'RETURNED', 'RESTOCKED',
       'WRITTEN_OFF', 'REMITTED',
     ];
     if (input.status) {
-      sharedConditions.push(`status = '${input.status}'`);
+      sharedConditions.push(sql`status = ${input.status}`);
     } else {
-      const statusList = logisticsStatuses.map((s) => `'${s}'`).join(', ');
-      sharedConditions.push(`status IN (${statusList})`);
+      sharedConditions.push(sql`status IN (${sql.join(logisticsStatuses.map((s) => sql`${s}`), sql`, `)})`);
     }
 
     // Parameterised conditions (safe via sql template)
@@ -1297,12 +1307,10 @@ export class LogisticsService {
       paramConditions.push(sql`(customer_name ILIKE ${term} OR CAST(order_number AS text) ILIKE ${term})`);
     }
 
-    const staticWhere = sharedConditions.join(' AND ');
-    const paramWhere = paramConditions.length > 0
-      ? sql` AND ${sql.join(paramConditions, sql` AND `)}`
-      : sql``;
+    const allConditions = [...sharedConditions, ...paramConditions];
+    const baseWhere = sql.join(allConditions, sql` AND `);
 
-    // Sort mapping
+    // Sort mapping — hardcoded column names only (safe)
     const sortCol = input.sortBy === 'preferredDeliveryDate' ? 'preferred_delivery_date'
       : input.sortBy === 'deliveredAt' ? 'delivered_at'
       : input.sortBy === 'totalAmount' ? 'total_amount'
@@ -1329,7 +1337,7 @@ export class LogisticsService {
                logistics_location_id, preferred_delivery_date, delivered_at,
                servicing_branch_id, created_at, 'funnel' AS order_category
         FROM orders
-        WHERE ${sql.raw(staticWhere)}${paramWhere}${ordersExtraWhere}${overdueCondition}
+        WHERE ${baseWhere}${ordersExtraWhere}${overdueCondition}
 
         UNION ALL
 
@@ -1337,7 +1345,7 @@ export class LogisticsService {
                logistics_location_id, NULL AS preferred_delivery_date, delivered_at,
                servicing_branch_id, created_at, 'cart' AS order_category
         FROM cart_orders
-        WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``}
+        WHERE ${baseWhere}${isOverdue ? sql` AND 1=0` : sql``}
 
         UNION ALL
 
@@ -1345,7 +1353,7 @@ export class LogisticsService {
                logistics_location_id, preferred_delivery_date, delivered_at,
                servicing_branch_id, created_at, 'follow-up' AS order_category
         FROM follow_up_orders
-        WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``}
+        WHERE ${baseWhere}${isOverdue ? sql` AND 1=0` : sql``}
       )
       SELECT * FROM unified
       ORDER BY ${sql.raw(sortCol)} ${sql.raw(sortDir)} ${sql.raw(nullsClause)}
@@ -1354,9 +1362,9 @@ export class LogisticsService {
 
     const countQuery = sql`
       SELECT
-        (SELECT COUNT(*) FROM orders WHERE ${sql.raw(staticWhere)}${paramWhere}${ordersExtraWhere}${overdueCondition}) +
-        (SELECT COUNT(*) FROM cart_orders WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``}) +
-        (SELECT COUNT(*) FROM follow_up_orders WHERE ${sql.raw(staticWhere)}${paramWhere}${isOverdue ? sql` AND 1=0` : sql``})
+        (SELECT COUNT(*) FROM orders WHERE ${baseWhere}${ordersExtraWhere}${overdueCondition}) +
+        (SELECT COUNT(*) FROM cart_orders WHERE ${baseWhere}${isOverdue ? sql` AND 1=0` : sql``}) +
+        (SELECT COUNT(*) FROM follow_up_orders WHERE ${baseWhere}${isOverdue ? sql` AND 1=0` : sql``})
         AS total
     `;
 
@@ -1443,21 +1451,20 @@ export class LogisticsService {
       'DELIVERED', 'PARTIALLY_DELIVERED', 'RETURNED', 'RESTOCKED',
       'WRITTEN_OFF', 'REMITTED',
     ];
-    const statusList = logisticsStatuses.map((s) => `'${s}'`).join(', ');
-    const statusFilter = `status IN (${statusList})`;
+    const statusFilterSql = sql`status IN (${sql.join(logisticsStatuses.map((s) => sql`${s}`), sql`, `)})`;
 
     const ordersExtraWhere = sql` AND (is_follow_up = false OR status IN ('DELIVERED', 'REMITTED'))`;
 
     const query = sql`
       WITH unified AS (
         SELECT status::text AS status, 'funnel' AS category FROM orders
-        WHERE deleted_at IS NULL AND ${sql.raw(statusFilter)}${paramWhere}${ordersExtraWhere}
+        WHERE deleted_at IS NULL AND ${statusFilterSql}${paramWhere}${ordersExtraWhere}
         UNION ALL
         SELECT status, 'cart' AS category FROM cart_orders
-        WHERE deleted_at IS NULL AND ${sql.raw(statusFilter)}${paramWhere}
+        WHERE deleted_at IS NULL AND ${statusFilterSql}${paramWhere}
         UNION ALL
         SELECT status, 'follow-up' AS category FROM follow_up_orders
-        WHERE deleted_at IS NULL AND ${sql.raw(statusFilter)}${paramWhere}
+        WHERE deleted_at IS NULL AND ${statusFilterSql}${paramWhere}
       )
       SELECT status, category, COUNT(*)::int AS cnt FROM unified GROUP BY status, category
     `;
@@ -1741,7 +1748,7 @@ export class LogisticsService {
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const isFinanceCaller =
       isAdminLevel(actor) ||
-      hasFinanceAccess(actor) ||
+      hasFinanceWriteAccess(actor) ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
@@ -1823,7 +1830,8 @@ export class LogisticsService {
       const alreadyRemitted = await tx
         .select({ orderId: schema.deliveryRemittanceOrders.orderId })
         .from(schema.deliveryRemittanceOrders)
-        .where(inArray(schema.deliveryRemittanceOrders.orderId, input.orderIds));
+        .where(inArray(schema.deliveryRemittanceOrders.orderId, input.orderIds))
+        .for('update');
       if (alreadyRemitted.length > 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1891,6 +1899,16 @@ export class LogisticsService {
       }
 
       const markReceivedNow = !!input.markReceivedNow;
+
+      // markReceivedNow settles the remittance and cascades DELIVERED→REMITTED in one
+      // step. This requires the same permission as the standalone markReceived endpoint.
+      if (markReceivedNow && !hasFinanceWriteAccess(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only Finance can create and settle a remittance in one step. Create without markReceivedNow, then ask Finance to mark it received.',
+        });
+      }
+
       const now = new Date();
 
       // Parse remittance-level cost deductions
@@ -1970,6 +1988,7 @@ export class LogisticsService {
           .returning({
             id: schema.orders.id,
             branchId: schema.orders.branchId,
+            servicingBranchId: schema.orders.servicingBranchId,
             orderSource: schema.orders.orderSource,
             isFollowUp: schema.orders.isFollowUp,
             customerPhoneHash: schema.orders.customerPhoneHash,
@@ -2051,7 +2070,7 @@ export class LogisticsService {
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
     const isFinanceCaller =
       isAdminLevel(actor) ||
-      hasFinanceAccess(actor) ||
+      hasFinanceWriteAccess(actor) ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
@@ -2068,6 +2087,15 @@ export class LogisticsService {
 
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
+      }
+
+      // Only SENT remittances can be edited — once RECEIVED or DISPUTED, the
+      // GL settlement has been posted and amounts must not change retroactively.
+      if (existing.status !== 'SENT') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Cannot edit a delivery remittance in ${existing.status} status. Only SENT remittances can be updated.`,
+        });
       }
 
       const now = new Date();
@@ -2898,7 +2926,7 @@ export class LogisticsService {
    * for a side-by-side comparison view. Returns the original first, then duplicates
    * sorted by delivered_at.
    */
-  async getDuplicateGroup(orderId: string) {
+  async getDuplicateGroup(orderId: string, _groupId?: string | null, effectiveBranchIds?: string[] | null) {
     // Find the order — either the original or one of its duplicates
     const [order] = await this.db
       .select({
@@ -2953,7 +2981,6 @@ export class LogisticsService {
         id: schema.orders.id,
         orderNumber: schema.orders.orderNumber,
         customerName: schema.orders.customerName,
-        customerPhone: schema.orders.customerPhone,
         totalAmount: schema.orders.totalAmount,
         deliveryFee: schema.orders.deliveryFee,
         status: schema.orders.status,
@@ -2979,6 +3006,10 @@ export class LogisticsService {
         and(
           not(inArray(schema.orders.status, ['CANCELLED', 'DELETED'])),
           isNull(schema.orders.deletedAt),
+          // Branch scoping — restrict to caller's effective branches
+          effectiveBranchIds && effectiveBranchIds.length > 0
+            ? inArray(schema.orders.servicingBranchId, effectiveBranchIds)
+            : undefined,
           or(
             // The original order
             eq(schema.orders.id, originalId),
@@ -3096,8 +3127,7 @@ export class LogisticsService {
     // Phase 20: also accept the explicit `finance.cashRemittance.markReceived`
     // permission so custom role templates can grant just this capability.
     if (
-      actor.role !== 'SUPER_ADMIN' &&
-      !hasFinanceAccess(actor) &&
+      !hasFinanceWriteAccess(actor) &&
       !this.actorHasAnyPermission(actor, 'finance.cashRemittance.markReceived')
     ) {
       throw new TRPCError({
@@ -3184,6 +3214,7 @@ export class LogisticsService {
           .returning({
             id: schema.orders.id,
             branchId: schema.orders.branchId,
+            servicingBranchId: schema.orders.servicingBranchId,
             orderSource: schema.orders.orderSource,
             isFollowUp: schema.orders.isFollowUp,
             customerPhoneHash: schema.orders.customerPhoneHash,
@@ -3241,7 +3272,7 @@ export class LogisticsService {
    * Finance disputes a delivery remittance (payment not received / receipt invalid). Notifies 3PL location.
    */
   async disputeDeliveryRemittance(input: DisputeDeliveryRemittanceInput, actor: SessionUser) {
-    if (actor.role !== 'FINANCE_OFFICER' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    if (!hasFinanceWriteAccess(actor) && !this.actorHasAnyPermission(actor, 'finance.cashRemittance.markReceived')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Finance or Super Admin can dispute delivery remittances',

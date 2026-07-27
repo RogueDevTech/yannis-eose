@@ -386,6 +386,9 @@ function CSDashboard({
   if (role === 'CS_CLOSER' && !isCsTeamSupervisor) {
     return (
       <>
+        {/* TOTAL ORDERS first — grand total across all pipelines */}
+        <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} />
+
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
           {(metrics) => (
             <div>
@@ -415,11 +418,43 @@ function CSDashboard({
           )}
         </DashboardMetricsSection>
 
+        {/* ── Offline Orders ── */}
+        {(() => {
+          const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + (n || 0), 0);
+          if (offTotal === 0 && offlineCount === 0) return null;
+          const offAssigned = offSc['CS_ASSIGNED'] ?? 0;
+          const offEngaged = offSc['CS_ENGAGED'] ?? 0;
+          const offConfirmed =
+            (offSc['CONFIRMED'] ?? 0) +
+            (offSc['AGENT_ASSIGNED'] ?? 0) +
+            (offSc['DISPATCHED'] ?? 0) +
+            (offSc['IN_TRANSIT'] ?? 0);
+          const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+          const offCR = offTotal > 0 ? (offConfirmed + offDelivered) / offTotal * 100 : 0;
+          const offDR = offTotal > 0 ? offDelivered / offTotal * 100 : 0;
+          return (
+            <div>
+              <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Offline Orders</h2>
+              <OverviewStatStrip
+                mobileGrid
+                tileClassName="min-w-[6rem]"
+                items={[
+                  { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: '/admin/sales/offline-orders' },
+                  { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/offline-orders?status=CS_ASSIGNED' },
+                  { label: 'Unconfirmed', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/offline-orders?status=CS_ENGAGED' },
+                  { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/offline-orders?status=CONFIRMED' },
+                  { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/offline-orders?status=DELIVERED' },
+                  { label: 'CR', value: `${offCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(offCR) },
+                  { label: 'DR', value: `${offDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(offDR) },
+                ]}
+              />
+            </div>
+          );
+        })()}
+
         <FollowUpDashboardStrip showUnassigned={false} filters={dateFilters} />
         <CartOrdersDashboardStrip showUnassigned={false} filters={dateFilters} />
         <DeliveredFollowUpDashboardStrip filters={dateFilters} />
-
-        <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={{}} offlineCount={0} />
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
           {(metrics) => (
