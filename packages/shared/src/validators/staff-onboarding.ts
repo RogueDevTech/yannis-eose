@@ -67,8 +67,8 @@ export const updateOnboardingProfileSchema = z.object({
    * Payout beneficiary bank details. Live on `users` (finance-only visibility);
    * onboarding writes them through to the user row in the same transaction so
    * `/admin/finance/staff-accounts` and payout exports stay aligned with what
-   * staff filled in here. `payoutBankCode` is auto-filled from `payoutBankName`
-   * by the UI bank picker (NIGERIAN_BANKS); staff may override. Submit requires
+   * staff filled in here. `payoutBankCode` is the NIBSS NIP institution code
+   * auto-filled by the BankSelect picker (NIGERIAN_BANKS). Submit requires
    * bank name + code + account name + number (see onboarding.service submit).
    */
   payoutBankName: z.string().max(120).nullish(),
@@ -129,6 +129,8 @@ export const staffOnboardingDocumentsFilterStatusSchema = z.enum([
 export const listStaffOnboardingDocumentsSchema = z.object({
   search: z.string().optional(),
   onboardingStatus: staffOnboardingDocumentsFilterStatusSchema.default('ALL'),
+  /** Filter by whether a pay role is assigned (matches the Payroll column). */
+  payrollSetup: z.enum(['ALL', 'SET_UP', 'NOT_SET_UP']).default('ALL'),
   userStatus: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
   branchId: z.string().uuid().optional(),
   page: z.number().int().min(1).default(1),

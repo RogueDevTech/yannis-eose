@@ -8,6 +8,7 @@ import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { BankSelect } from '~/components/ui/bank-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -491,8 +492,15 @@ function EditContractorModal({
             ...branches.map((b) => ({ value: b.id, label: b.name })),
           ]}
         />
-        <TextInput label="Bank name" name="bankName" defaultValue={contractor.bankName ?? ''} />
-        <TextInput label="Bank code" name="bankCode" defaultValue={contractor.bankCode ?? ''} />
+        <BankSelect
+          id={`contractor-detail-bank-${contractor.id}`}
+          defaultBankName={contractor.bankName}
+          defaultBankCode={contractor.bankCode}
+          nameBankName="bankName"
+          nameBankCode="bankCode"
+          label="Bank"
+          hint="Search and pick a bank. Bank code fills in automatically."
+        />
         <TextInput
           label="Account number"
           name="accountNumber"

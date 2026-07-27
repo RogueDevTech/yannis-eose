@@ -104,6 +104,7 @@ export const financeRouter = router({
       type InvoiceOrder = {
         id: string;
         confirmedAt: string | Date | null;
+        status?: string;
         customerName: string;
         customerAddress: string | null;
         orderItems: Array<{ quantity: number; unitPrice: string; productName: string | null; productId: string }>;

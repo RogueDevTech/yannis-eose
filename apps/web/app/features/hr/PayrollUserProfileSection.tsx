@@ -11,21 +11,28 @@ export interface PayrollProfileValues {
   salaryBasis: string;
   taxStatus: string;
   flatMonthlyAmount: string;
+  reportsToUserId?: string | null;
+  crmLinked?: boolean;
 }
 
-/** Map system roles to pay role categories they can be assigned to. */
+/** Map system roles to pay role categories they can be assigned to.
+ *  Includes both legacy department buckets and 1:1 role categories from
+ *  `payrollPayRoleCategorySchema` so newly created roles stay visible. */
 const ROLE_CATEGORY_MAP: Record<string, string[]> = {
-  CS_CLOSER: ['CS'],
-  HEAD_OF_CS: ['CS', 'LEADERSHIP'],
-  MEDIA_BUYER: ['MEDIA_BUYING'],
-  HEAD_OF_MARKETING: ['MEDIA_BUYING', 'LEADERSHIP'],
-  HEAD_OF_LOGISTICS: ['LOGISTICS', 'LEADERSHIP'],
-  TPL_MANAGER: ['LOGISTICS'],
-  TPL_RIDER: ['LOGISTICS'],
-  STOCK_MANAGER: ['LOGISTICS', 'OPERATIONS'],
-  HR_MANAGER: ['HR_ADMIN', 'OPERATIONS'],
-  FINANCE_OFFICER: ['FINANCE', 'OPERATIONS'],
-  BRANCH_ADMIN: ['HR_ADMIN', 'OPERATIONS'],
+  CS_CLOSER: ['CS', 'CS_CLOSER'],
+  HEAD_OF_CS: ['CS', 'LEADERSHIP', 'HEAD_OF_CS'],
+  MEDIA_BUYER: ['MEDIA_BUYING', 'MEDIA_BUYER'],
+  HEAD_OF_MARKETING: ['MEDIA_BUYING', 'LEADERSHIP', 'HEAD_OF_MARKETING'],
+  HEAD_OF_LOGISTICS: ['LOGISTICS', 'LEADERSHIP', 'HEAD_OF_LOGISTICS'],
+  TPL_MANAGER: ['LOGISTICS', 'TPL_MANAGER'],
+  TPL_RIDER: ['LOGISTICS', 'TPL_RIDER'],
+  STOCK_MANAGER: ['LOGISTICS', 'OPERATIONS', 'STOCK_MANAGER', 'STOCK_MANAGEMENT'],
+  HR_MANAGER: ['HR_ADMIN', 'OPERATIONS', 'HR_MANAGER'],
+  FINANCE_OFFICER: ['FINANCE', 'OPERATIONS', 'FINANCE_OFFICER'],
+  BRANCH_ADMIN: ['HR_ADMIN', 'OPERATIONS', 'BRANCH_ADMIN'],
+  SUPER_ADMIN: ['LEADERSHIP', 'OPERATIONS', 'SUPER_ADMIN', 'SUPPORT'],
+  ADMIN: ['LEADERSHIP', 'OPERATIONS', 'ADMIN', 'SUPPORT'],
+  AUDITOR: ['SUPPORT', 'AUDITOR'],
 };
 
 const PAY_ROLE_INFO = [
@@ -97,11 +104,25 @@ export function PayrollUserProfileSection({
   const [showSalaryBasisInfo, setShowSalaryBasisInfo] = useState(false);
   const [showTaxInfo, setShowTaxInfo] = useState(false);
   const filteredPayRoles = useMemo(() => {
-    if (!userRole) return payRoles;
-    const categories = ROLE_CATEGORY_MAP[userRole];
-    if (!categories) return payRoles;
-    return payRoles.filter((r) => categories.includes(r.category));
-  }, [payRoles, userRole]);
+    const all = Array.isArray(payRoles) ? payRoles : [];
+    let list = all;
+    if (userRole) {
+      const categories = ROLE_CATEGORY_MAP[userRole];
+      if (categories?.length) {
+        const matched = all.filter((r) => categories.includes(r.category));
+        // If the category filter matches nothing (legacy/mismatched categories),
+        // fall back to the full company list so the dropdown is never empty.
+        list = matched.length > 0 ? matched : all;
+      }
+    }
+    // Always keep the currently assigned role visible.
+    const assignedId = values.payRoleId;
+    if (assignedId && !list.some((r) => r.id === assignedId)) {
+      const assigned = all.find((r) => r.id === assignedId);
+      if (assigned) list = [assigned, ...list];
+    }
+    return list;
+  }, [payRoles, userRole, values.payRoleId]);
 
   return (
     <div className="card space-y-4">
@@ -150,7 +171,7 @@ export function PayrollUserProfileSection({
               className="input"
               disabled={disabled}
               value={values.flatMonthlyAmount}
-              onChange={(e) => onChange({ flatMonthlyAmount: e.target.value })}
+              onChange={(raw) => onChange({ flatMonthlyAmount: raw })}
             />
           </div>
         )}

@@ -1053,6 +1053,7 @@ export class UsersService {
         employmentType: schema.users.employmentType,
         salaryBasis: schema.users.salaryBasis,
         taxStatus: schema.users.taxStatus,
+        flatMonthlyAmount: schema.users.flatMonthlyAmount,
         reportsToUserId: schema.users.reportsToUserId,
         crmLinked: schema.users.crmLinked,
         onboardingPayrollStatus: schema.users.onboardingPayrollStatus,

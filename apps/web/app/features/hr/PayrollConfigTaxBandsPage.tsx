@@ -355,26 +355,28 @@ function TaxBandConfigModal({
               <div className="sm:col-span-4">
                 <TextInput
                   label="From (₦)"
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="numeric"
                   readOnly={readOnly}
-                  value={row.fromAmount}
-                  onChange={(e) =>
-                    setBandRows((rows) => rows.map((r, i) => (i === idx ? { ...r, fromAmount: e.target.value } : r)))
-                  }
+                  value={row.fromAmount ? Number(row.fromAmount).toLocaleString('en-NG') : ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    setBandRows((rows) => rows.map((r, i) => (i === idx ? { ...r, fromAmount: raw } : r)));
+                  }}
                 />
               </div>
               <div className="sm:col-span-4">
                 <TextInput
                   label="To (₦, optional)"
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="numeric"
                   readOnly={readOnly}
                   placeholder="∞"
-                  value={row.toAmount}
-                  onChange={(e) =>
-                    setBandRows((rows) => rows.map((r, i) => (i === idx ? { ...r, toAmount: e.target.value } : r)))
-                  }
+                  value={row.toAmount ? Number(row.toAmount).toLocaleString('en-NG') : ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    setBandRows((rows) => rows.map((r, i) => (i === idx ? { ...r, toAmount: raw } : r)));
+                  }}
                 />
               </div>
               <div className="sm:col-span-3">

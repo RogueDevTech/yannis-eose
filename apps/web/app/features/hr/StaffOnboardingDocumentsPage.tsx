@@ -35,6 +35,7 @@ interface StaffOnboardingDocumentsPageProps {
   totalCount: number;
   pageSize: number;
   onboardingParam: string;
+  payrollParam: string;
   sortByParam: string;
   sortOrderParam: string;
   searchParam: string;
@@ -53,6 +54,12 @@ const ONBOARDING_OPTIONS = [
   { value: 'IN_PROGRESS', label: 'In progress' },
   { value: 'SUBMITTED', label: 'Submitted' },
   { value: 'APPROVED', label: 'Approved' },
+] as const;
+
+const PAYROLL_OPTIONS = [
+  { value: 'ALL', label: 'All payroll setup' },
+  { value: 'SET_UP', label: 'Payroll set up' },
+  { value: 'NOT_SET_UP', label: 'Payroll not set up' },
 ] as const;
 
 const SORT_OPTIONS = [
@@ -74,6 +81,7 @@ export function StaffOnboardingDocumentsPage({
   totalCount,
   pageSize,
   onboardingParam,
+  payrollParam,
   sortByParam,
   sortOrderParam,
   searchParam,
@@ -81,6 +89,21 @@ export function StaffOnboardingDocumentsPage({
 }: StaffOnboardingDocumentsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy().busy;
+
+  const activeFilterCount = [
+    onboardingParam !== 'ALL' ? onboardingParam : '',
+    payrollParam !== 'ALL' ? payrollParam : '',
+    sortByParam !== 'name' ? sortByParam : '',
+    sortOrderParam !== 'asc' ? sortOrderParam : '',
+  ].filter(Boolean).length;
+
+  const clearFilters = () =>
+    patchParams({
+      onboarding: undefined,
+      payroll: undefined,
+      sortBy: undefined,
+      sortOrder: undefined,
+    });
 
   const patchParams = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams(searchParams);
@@ -113,7 +136,7 @@ export function StaffOnboardingDocumentsPage({
         <Link
           to={`/hr/users/${row.userId}`}
           prefetch="intent"
-          className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          className="text-sm font-medium leading-none text-brand-600 dark:text-brand-400 hover:underline"
         >
           {row.name}
         </Link>
@@ -123,7 +146,7 @@ export function StaffOnboardingDocumentsPage({
       key: 'onboardingStatus',
       header: 'Onboarding',
       render: (row) => (
-        <StatusBadge status={row.onboardingStatus} size="sm" />
+        <StatusBadge status={row.onboardingStatus} size="sm" className="!py-0 leading-none" />
       ),
     },
     {
@@ -134,6 +157,7 @@ export function StaffOnboardingDocumentsPage({
           status={row.payRoleId ? 'Set up' : 'Not set up'}
           variant={row.payRoleId ? 'success' : 'warning'}
           size="sm"
+          className="!py-0 leading-none"
         />
       ),
     },
@@ -142,7 +166,7 @@ export function StaffOnboardingDocumentsPage({
       header: 'Submitted',
       hideOnMobile: true,
       render: (row) => (
-        <span className="text-xs text-app-muted whitespace-nowrap">{formatTs(row.submittedAt)}</span>
+        <span className="text-xs leading-none text-app-muted whitespace-nowrap">{formatTs(row.submittedAt)}</span>
       ),
     },
     {
@@ -150,7 +174,7 @@ export function StaffOnboardingDocumentsPage({
       header: 'Approved',
       hideOnMobile: true,
       render: (row) => (
-        <span className="text-xs text-app-muted whitespace-nowrap">{formatTs(row.approvedAt)}</span>
+        <span className="text-xs leading-none text-app-muted whitespace-nowrap">{formatTs(row.approvedAt)}</span>
       ),
     },
     {
@@ -178,14 +202,8 @@ export function StaffOnboardingDocumentsPage({
             sheetTitle="Filters"
             triggerAriaLabel="Onboarding filters"
             saveFilterKey
-            filtersBadgeCount={
-              [onboardingParam !== 'ALL' ? onboardingParam : '', sortByParam !== 'name' ? sortByParam : '', sortOrderParam !== 'asc' ? sortOrderParam : ''].filter(Boolean).length
-            }
-            onClearFilters={
-              onboardingParam !== 'ALL' || sortByParam !== 'name' || sortOrderParam !== 'asc'
-                ? () => patchParams({ onboarding: undefined, sortBy: undefined, sortOrder: undefined })
-                : undefined
-            }
+            filtersBadgeCount={activeFilterCount}
+            onClearFilters={activeFilterCount > 0 ? clearFilters : undefined}
             desktop={<PageRefreshButton />}
             filters={
               <div className="space-y-3">
@@ -194,6 +212,12 @@ export function StaffOnboardingDocumentsPage({
                   value={onboardingParam}
                   onChange={(e) => patchParams({ onboarding: e.target.value === 'ALL' ? undefined : e.target.value })}
                   options={[...ONBOARDING_OPTIONS]}
+                />
+                <FormSelect
+                  label="Payroll"
+                  value={payrollParam}
+                  onChange={(e) => patchParams({ payroll: e.target.value === 'ALL' ? undefined : e.target.value })}
+                  options={[...PAYROLL_OPTIONS]}
                 />
                 <FormSelect
                   label="Sort"
@@ -271,9 +295,7 @@ export function StaffOnboardingDocumentsPage({
         <ToolbarFiltersCollapsible
           className="!border-0 !px-0 md:!px-4"
           hideMobileSheet
-          badgeCount={
-            [onboardingParam !== 'ALL' ? onboardingParam : '', sortByParam !== 'name' ? sortByParam : '', sortOrderParam !== 'asc' ? sortOrderParam : ''].filter(Boolean).length
-          }
+          badgeCount={activeFilterCount}
           searchRow={
             <PageSearchControl
               value={searchParam}
@@ -290,6 +312,14 @@ export function StaffOnboardingDocumentsPage({
                 defaultValue="ALL"
                 onChange={(v) => patchParams({ onboarding: v === 'ALL' ? undefined : v })}
                 options={[...ONBOARDING_OPTIONS]}
+                width="status"
+              />
+              <InlineFilter
+                type="select"
+                value={payrollParam}
+                defaultValue="ALL"
+                onChange={(v) => patchParams({ payroll: v === 'ALL' ? undefined : v })}
+                options={[...PAYROLL_OPTIONS]}
                 width="status"
               />
               <InlineFilter
@@ -324,7 +354,7 @@ export function StaffOnboardingDocumentsPage({
           loadingVariant="overlay"
           withCard={false}
           emptyTitle="No staff match these filters"
-          emptyDescription="Try clearing search or widening the onboarding status filter."
+          emptyDescription="Try clearing search or widening the onboarding / payroll filters."
           renderMobileCard={(row) => (
             <Link
               to={`/hr/users/${row.userId}/onboarding`}

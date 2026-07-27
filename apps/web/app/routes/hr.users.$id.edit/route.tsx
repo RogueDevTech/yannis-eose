@@ -2,7 +2,6 @@ import { Suspense } from 'react';
 import { Await, Link, useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { cachedClientLoader } from '~/lib/loader-cache';
 import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import {
   apiRequest,
@@ -229,9 +228,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       roleTemplates,
       permissionCatalog,
       templatePermissionsById,
-      payRoles: payRolesRes.ok
-        ? (((payRolesRes.data as { result?: { data?: UserCreateLoaderData['payRoles'] } })?.result?.data) ?? [])
-        : [],
+      payRoles: (() => {
+        if (!payRolesRes.ok) return [];
+        const raw = extractTrpc<unknown>(payRolesRes, null);
+        return Array.isArray(raw) ? (raw as UserCreateLoaderData['payRoles']) : [];
+      })(),
       // Editing — no auto-fill default needed.
       defaultMembershipBranchId: null,
       viewerRole: viewer.role,
@@ -246,7 +247,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // baseline, permission overrides preview), so the App Shell refactor is its
 // own project. The cache makes every revisit (within 5 min) instant — no
 // fetch, no skeleton, all current values are pre-populated.
-export const clientLoader = cachedClientLoader;
+// Do not use cachedClientLoader here: pay role / payroll fields must reflect
+// the latest assign-role and profile updates when reopening Edit Profile.
+export async function clientLoader({ serverLoader }: { serverLoader: () => Promise<unknown> }) {
+  return serverLoader();
+}
 clientLoader.hydrate = false;
 
 // ─── Action ─────────────────────────────────────────────

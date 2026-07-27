@@ -18,6 +18,7 @@ import {
 import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { RoleBadge } from '~/components/ui/role-badge';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 import type { PayRole } from './payroll-prd-types';
 import type { BranchOption } from './types';
 
@@ -112,9 +113,15 @@ export function PayrollAssignRolePage({
   });
 
   useCloseOnFetcherSuccess(fetcher, () => {
+    const assignedIds = [...selected];
     setShowAssignConfirm(false);
     setSelected(new Set());
-    // Navigate back to pay roles list after successful assignment
+    // Drop stale edit-profile caches so the next Edit Profile visit shows the
+    // newly assigned pay role.
+    for (const id of assignedIds) {
+      invalidateCachedLoader(`/hr/users/${id}/edit`);
+      invalidateCachedLoader(`/hr/users/${id}`);
+    }
     window.location.href = '/hr/payroll/config/roles';
   });
 

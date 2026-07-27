@@ -56,6 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit,
     search: url.searchParams.get('search')?.trim() || undefined,
     onboardingStatus: url.searchParams.get('onboarding') || undefined,
+    payrollSetup: url.searchParams.get('payroll') || undefined,
     sortBy: url.searchParams.get('sortBy') || undefined,
     sortOrder: url.searchParams.get('sortOrder') || undefined,
     allBranches: url.searchParams.get('allBranches') === '1',
@@ -81,6 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   const onboardingParam = input.onboardingStatus;
+  const payrollParam = input.payrollSetup;
   const sortByParam = input.sortBy;
   const sortOrderParam = input.sortOrder;
   const searchParam = input.search ?? '';
@@ -113,6 +115,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalCount,
     pageSize: STAFF_ONBOARDING_DOCUMENTS_PAGE_SIZE,
     onboardingParam,
+    payrollParam,
     sortByParam,
     sortOrderParam,
     searchParam,
@@ -141,6 +144,7 @@ export default function StaffOnboardingDocumentsRoute() {
             totalCount={data.totalCount}
             pageSize={data.pageSize}
             onboardingParam={data.onboardingParam}
+            payrollParam={data.payrollParam}
             sortByParam={data.sortByParam}
             sortOrderParam={data.sortOrderParam}
             searchParam={data.searchParam}

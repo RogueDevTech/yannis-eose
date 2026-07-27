@@ -138,8 +138,8 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
               {canWrite ? 'Edit' : 'View'}
             </CompactTableActionButton>
             {canWrite && (
-              <CompactTableActionButton to={`/hr/payroll/config/roles/${row.id}/assign`}>
-                View
+              <CompactTableActionButton to={`/hr/payroll/config/roles/${row.id}/assign?assignStatus=assigned_this`}>
+                Assign
               </CompactTableActionButton>
             )}
             {canWrite && (
@@ -363,7 +363,7 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
               </Link>
               {canWrite && (
                 <Link
-                  to={`/hr/payroll/config/roles/${peekRole.id}/assign`}
+                  to={`/hr/payroll/config/roles/${peekRole.id}/assign?assignStatus=assigned_this`}
                   className="btn-secondary h-10 flex items-center justify-center text-sm font-medium rounded-lg"
                   onClick={() => setPeekRole(null)}
                 >
