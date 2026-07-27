@@ -365,15 +365,16 @@ export class OnboardingService {
       if (!existing.dateOfBirth) missing.push('date of birth');
       if (!existing.residentialAddress) missing.push('residential address');
       if (!existing.currentStateOfResidence) missing.push('current state of residence');
-      if (!existing.proofOfAddressUrl) missing.push('proof of address');
-      if (!existing.signedContractUrl) missing.push('signed contract');
-      if (!existing.governmentIdUrl) missing.push('government ID (NIN slip or passport)');
-      if (!existing.guarantor1FormUrl || !existing.guarantor1IdUrl) {
-        missing.push('guarantor 1 (signed form + means of ID)');
-      }
-      if (!existing.guarantor2FormUrl || !existing.guarantor2IdUrl) {
-        missing.push('guarantor 2 (signed form + means of ID)');
-      }
+      // File uploads are optional until image upload is fully implemented.
+      // if (!existing.proofOfAddressUrl) missing.push('proof of address');
+      // if (!existing.signedContractUrl) missing.push('signed contract');
+      // if (!existing.governmentIdUrl) missing.push('government ID (NIN slip or passport)');
+      // if (!existing.guarantor1FormUrl || !existing.guarantor1IdUrl) {
+      //   missing.push('guarantor 1 (signed form + means of ID)');
+      // }
+      // if (!existing.guarantor2FormUrl || !existing.guarantor2IdUrl) {
+      //   missing.push('guarantor 2 (signed form + means of ID)');
+      // }
       if (
         !bankRow?.payoutBankName?.trim() ||
         !bankRow?.payoutAccountName?.trim() ||
