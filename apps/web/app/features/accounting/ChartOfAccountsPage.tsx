@@ -310,23 +310,13 @@ export function ChartOfAccountsPage({
                     {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
                   </Link>
                 )}
-                {canWrite ? (
-                  <Link to="/admin/finance/account-mappings" className="btn-primary btn-sm inline-flex items-center">
-                    Manage Accounts
-                  </Link>
-                ) : null}
               </div>
             }
             sheet={
               canWrite ? (
-                <>
-                  <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
-                    {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
-                  </Link>
-                  <Link to="/admin/finance/account-mappings" className="btn-primary w-full flex items-center justify-center">
-                    Manage Accounts
-                  </Link>
-                </>
+                <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
+                  {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
+                </Link>
               ) : undefined
             }
           />
@@ -336,17 +326,10 @@ export function ChartOfAccountsPage({
       <MobileDateFilterRow
         hideDate
         actionsSheet={
-          canWrite ? (
-            <>
-              {!hasOpeningBalances && (
-                <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
-                  Post Opening Balances
-                </Link>
-              )}
-              <Link to="/admin/finance/account-mappings" className="btn-primary w-full flex items-center justify-center">
-                Manage Accounts
-              </Link>
-            </>
+          canWrite && !hasOpeningBalances ? (
+            <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
+              Post Opening Balances
+            </Link>
           ) : undefined
         }
         actionsSheetTitle="Actions"

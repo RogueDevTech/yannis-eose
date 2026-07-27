@@ -8,6 +8,7 @@ import {
 } from '~/lib/api.server';
 import { isAdminLevel } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { extractTrpc } from '~/lib/trpc-extract.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { ChartOfAccountsLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
@@ -42,12 +43,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       ),
     ]);
-    const accounts: AccountRow[] = accountsRes.ok
-      ? ((accountsRes.data as { result?: { data?: AccountRow[] } })?.result?.data ?? [])
-      : [];
-    const jePayload = jeRes.ok
-      ? (jeRes.data as { result?: { data?: { records?: unknown[] } } })?.result?.data
-      : null;
+    // Fail loud: a silent [] here gets snapshotted by CachedAwait and looks like
+    // "no CoA seeded" after an API blip (common during local turbo restarts).
+    if (!accountsRes.ok) {
+      throw new Error(extractApiErrorMessage(accountsRes.data, 'Failed to load chart of accounts'));
+    }
+    const accountsRaw = extractTrpc<AccountRow[] | null>(accountsRes, null);
+    const accounts = Array.isArray(accountsRaw) ? accountsRaw : [];
+    const jePayload = extractTrpc<{ records?: unknown[] } | null>(jeRes, null);
     const hasOpeningBalances = (jePayload?.records?.length ?? 0) > 0;
     return { accounts, hasOpeningBalances };
   })();
