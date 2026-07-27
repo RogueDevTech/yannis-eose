@@ -303,7 +303,7 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
       <PageHeader
         title="Account Mappings"
         mobileInlineActions
-        description="Point auto-posting at the GL accounts your company uses. Create or remap accounts here."
+        description="Map system posting keys to leaf accounts so auto-posting hits the right GL. Create tree structure on Chart of Accounts."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
@@ -316,7 +316,7 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
                 </Link>
                 {canWrite && (
                   <Button type="button" size="sm" onClick={() => openCreate()}>
-                    New Account
+                    New Leaf
                   </Button>
                 )}
               </div>
@@ -339,7 +339,7 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
                       openCreate();
                     }}
                   >
-                    New Account
+                    New Leaf
                   </Button>
                 )}
               </div>
@@ -367,7 +367,7 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
             {missingCount} mapping{missingCount !== 1 ? 's' : ''} have no matching account
           </p>
           <p className="text-xs text-warning-700 dark:text-warning-300 mt-0.5">
-            Create the missing account (suggested code is filled in) or remap to an existing one, then save.
+            Create a leaf (suggested code is filled in) or remap to an existing one, then save. Use Chart of Accounts for groups.
           </p>
         </div>
       )}
@@ -482,14 +482,20 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
       {createOpen && (
         <Modal open onClose={() => setCreateOpen(false)} maxWidth="max-w-md">
           <div className="p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-app-fg">New Account</h2>
+            <h2 className="text-lg font-semibold text-app-fg">New Leaf Account</h2>
             {createDraft.mappingKey && (
               <p className="text-xs text-app-fg-muted">
                 Creating for mapping <span className="font-mono">{createDraft.mappingKey}</span>. After save it will be assigned automatically.
               </p>
             )}
+            {!createDraft.mappingKey && (
+              <p className="text-xs text-app-fg-muted">
+                Creates a postable leaf. For groups, use Chart of Accounts. Assign it to a mapping key below or after save.
+              </p>
+            )}
             <createFetcher.Form method="post" className="space-y-3">
               <input type="hidden" name="intent" value="createAccount" />
+              <input type="hidden" name="isGroup" value="false" />
               {createDraft.mappingKey && (
                 <input type="hidden" name="assignToMappingKey" value={createDraft.mappingKey} />
               )}
@@ -527,15 +533,6 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
                 options={parentOptions}
                 clearable
               />
-              <label className="flex items-center gap-2 text-sm text-app-fg">
-                <input
-                  type="checkbox"
-                  name="isGroup"
-                  value="true"
-                  className="rounded border-app-border text-brand-600 focus:ring-brand-500"
-                />
-                This is a group (header) account
-              </label>
               {createFetcher.data?.error && (
                 <p className="text-sm text-danger-600">{createFetcher.data.error}</p>
               )}
