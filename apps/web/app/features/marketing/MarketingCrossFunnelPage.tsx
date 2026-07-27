@@ -49,6 +49,8 @@ export interface CrossFunnelAttemptRow {
   originalOrderAmount: string | null;
   originalOrderNumber: number | null;
   originalOrderCreatedAt: string | null;
+  originalOrderPhone: string | null;
+  originalOrderCustomerName: string | null;
 }
 
 export interface CrossFunnelStats {
@@ -252,7 +254,8 @@ export function MarketingCrossFunnelPage({
     },
     {
       key: 'created',
-      header: 'Created',
+      header: 'Date & Time',
+      hideable: false,
       render: (row) => (
         <span className="text-xs text-app-fg-muted whitespace-nowrap">
           {formatTimestamp(row.attemptedAt)}
@@ -790,10 +793,12 @@ function DuplicateCompareOverlay({
               }
               right={row.originalOrderStatus ? <OrderStatusBadge status={row.originalOrderStatus} /> : '—'}
             />
-            <CompareRow label="Customer" left={row.customerName} right={row.customerName} />
-            {row.customerPhone && (
-              <CompareRow label="Phone" left={row.customerPhone} right={row.customerPhone} />
-            )}
+            <CompareRow label="Customer" left={row.customerName} right={row.originalOrderCustomerName ?? row.customerName} />
+            <CompareRow
+              label="Phone"
+              left={row.customerPhone ?? row.originalOrderPhone ?? 'Not available'}
+              right={row.originalOrderPhone ?? row.customerPhone ?? 'Not available'}
+            />
             <CompareRow label="Product" left={row.productName ?? '—'} right={row.productName ?? '—'} />
             <CompareRow
               label="Total"

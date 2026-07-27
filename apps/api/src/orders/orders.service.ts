@@ -2004,7 +2004,6 @@ export class OrdersService {
         }
       }
     }
-    let dupWinnerFound = false;
     try {
     // MARKETING branch — the campaign/form branch this order is attributed to.
     const branchId = await this.resolveBranchIdForNewOrder({
@@ -2133,11 +2132,11 @@ export class OrdersService {
             submittingMbId: orderInput.mediaBuyerId,
             phoneHash: orderInput.customerPhoneHash,
           },
-          'universal dedup: duplicate detected — order will be created + immediately soft-deleted',
+          'universal dedup: duplicate detected — CFA recorded, no order created',
         );
-        // Fall through so the order is always created (MB traction preserved).
-        // The order will be immediately soft-deleted after INSERT so CS never sees it.
-        dupWinnerFound = true;
+        // Return early — duplicate is recorded in cross_funnel_attempts for MB
+        // visibility. No order is created. Customer still sees success.
+        return { duplicateRecorded: true as const };
       }
     }
 
@@ -2428,28 +2427,6 @@ export class OrdersService {
         };
         await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, updatePayRef);
       }
-    }
-
-    // Immediately soft-delete duplicate orders so CS never sees them.
-    // The order row exists for audit + CFA traction, but is excluded from
-    // all list/count queries via deleted_at IS NULL / status != DELETED.
-    if (dupWinnerFound) {
-      await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, async (tx) => {
-        await tx
-          .update(schema.orders)
-          .set({
-            isDuplicate: 'FLAGGED',
-            status: 'DELETED',
-            deletedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.orders.id, order.id));
-      });
-      this.logger.log(
-        { orderId: order.id, orderNumber: order.orderNumber },
-        'duplicate order soft-deleted immediately after creation — invisible to CS',
-      );
-      return { id: order.id, duplicateRecorded: true as const };
     }
 
     return { id: order.id, authorizationUrl };
