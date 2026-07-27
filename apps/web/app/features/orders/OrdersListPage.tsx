@@ -1244,6 +1244,9 @@ function OrdersListPageImpl({
                 {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
+                {order.status === 'DELETED' && !(/\btest\b/i.test(order.customerName?.trim() ?? '')) && order.isDuplicate && (
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">Duplicate</span>
+                )}
               </span>
               {/* Tag dots + tooltip — outside truncated span so tooltip isn't clipped */}
               {tags.length > 0 && (
@@ -1455,6 +1458,9 @@ function OrdersListPageImpl({
               {clipName(order.customerName)}
               {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+              )}
+              {order.status === 'DELETED' && !(/\btest\b/i.test(order.customerName?.trim() ?? '')) && order.isDuplicate && (
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">Duplicate</span>
               )}
               {(order as { isFollowUp?: boolean }).isFollowUp && !isCSCloser && (
                 <span className="ml-1.5 inline-flex shrink-0 w-2 h-2 rounded-full bg-info-500" title="Follow Up" />
