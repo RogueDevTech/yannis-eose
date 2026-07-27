@@ -188,7 +188,7 @@ export const updatePayRoleSchema = createPayRoleSchema.partial().extend({
 export const createContractorSchema = z.object({
   name: z.string().min(2).max(200),
   jobTitle: z.string().max(200).optional(),
-  branchId: z.string().uuid().optional(),
+  branchId: z.string().uuid().nullish(),
   monthlyFee: z.coerce.number().min(0),
   bankName: z.string().optional(),
   bankCode: z.string().optional(),
@@ -327,6 +327,10 @@ export const previewPayrollFormulaSchema = z.object({
 
 export const archivePayRoleSchema = z.object({
   id: z.string().uuid(),
+});
+
+export const getPayRoleWithFormulaSchema = z.object({
+  payRoleId: z.string().uuid(),
 });
 
 export const getPayslipSchema = z.object({
