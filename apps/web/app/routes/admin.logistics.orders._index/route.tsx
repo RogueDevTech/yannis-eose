@@ -13,7 +13,7 @@ import {
   defaultThisMonthRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
 import type { Order } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
@@ -392,6 +392,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function LogisticsOrdersRoute() {
   const { logisticsOrdersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
+  usePollingFallback(30_000);
   return (
     <CachedAwait
       resolve={pageData}

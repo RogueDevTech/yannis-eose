@@ -12,7 +12,7 @@ import {
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
 import type { CEODashboardData } from '~/features/ceo/types';
 import { CEODashboardSkeleton } from '~/features/ceo/CEODashboardSkeleton';
@@ -137,6 +137,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function CEODashboardRoute() {
   const { ceoShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
+  usePollingFallback(30_000);
 
   return (
     <CachedAwait

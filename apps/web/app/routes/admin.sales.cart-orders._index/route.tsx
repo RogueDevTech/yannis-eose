@@ -16,6 +16,14 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import { FollowUpOrdersLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
+
+const CART_ORDERS_LIVE_EVENTS = [
+  'order:new',
+  'order:status_changed',
+  'order:assigned',
+  'cart:updated',
+] as const;
 
 export const meta: MetaFunction = () => [
   { title: 'Cart Orders — Yannis EOSE' },
@@ -283,6 +291,9 @@ type CartOrdersBundle = {
 };
 
 export default function CartOrdersRoute() {
+  usePageRefreshOnEvent([...CART_ORDERS_LIVE_EVENTS]);
+  usePollingFallback(30_000);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const loaderData = useLoaderData<typeof loader>() as any;
   const shell = loaderData.shell;
@@ -337,6 +348,7 @@ export default function CartOrdersRoute() {
           bulkSelectAllMatchingInput={shell?.bulkSelectAllMatchingInput}
           bulkSelectEndpoint="cartOrders.list"
           bulkMovePerItem
+          liveEvents={[...CART_ORDERS_LIVE_EVENTS] as string[]}
           {...baseShellProps}
         />
       )}

@@ -2154,7 +2154,7 @@ export class OrdersService {
           paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: deepStrip0(orderInput.items),
-          totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+          totalAmount: orderInput.totalAmount != null ? sql`${orderInput.totalAmount}::numeric` : null,
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : orderSource === 'offline' ? 'offline' : null,
           customFields: orderInput.customFields ? deepStrip0(orderInput.customFields) : null,
@@ -2175,7 +2175,7 @@ export class OrdersService {
             orderId: created.id,
             productId: item.productId,
             quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
+            unitPrice: sql`${item.unitPrice}::numeric`,
             offerLabel: strip0(item.offerLabel) ?? null,
           })),
         );
@@ -2188,9 +2188,9 @@ export class OrdersService {
     const MAX_ORDER_NUMBER_RETRIES = 3;
     for (let attempt = 0; attempt < MAX_ORDER_NUMBER_RETRIES; attempt++) {
       try {
-        order = actorId
-          ? await withActor(this.db, { id: actorId }, insertOrder)
-          : await insertOrder(this.db);
+        // Always use withActor — fallback to EDGE_FORM_ACTOR_ID for anonymous
+        // edge-form submissions so the temporal audit trigger always has an actor.
+        order = await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, insertOrder);
         break; // success
       } catch (err: unknown) {
         const isSeqCollision =
@@ -2381,11 +2381,7 @@ export class OrdersService {
             .set({ paymentReference: result.reference })
             .where(eq(schema.orders.id, order.id));
         };
-        if (actorId) {
-          await withActor(this.db, { id: actorId }, updatePayRef);
-        } else {
-          await updatePayRef(this.db);
-        }
+        await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, updatePayRef);
       }
     }
 
@@ -2472,10 +2468,16 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    // Offline orders are manually created by a closer — the closer's session
-    // branch is the servicing branch. CS routing rules should NOT override this;
-    // routing is for incoming funnel orders, not closer-created orders.
-    const servicingBranchId = sessionBranchId ?? branchId;
+    // Offline orders are manually created by a closer — use the closer's PRIMARY
+    // branch as servicing branch. The session branch can differ when the closer
+    // switches the header branch picker (e.g. to Lagos while belonging to Ile-Ife),
+    // causing orders to land in the wrong branch for dashboard scoping.
+    const closerRow = await this.db
+      .select({ primaryBranchId: schema.users.primaryBranchId })
+      .from(schema.users)
+      .where(eq(schema.users.id, actorId))
+      .limit(1);
+    const servicingBranchId = closerRow[0]?.primaryBranchId ?? sessionBranchId ?? branchId;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
@@ -2500,7 +2502,7 @@ export class OrdersService {
           paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: input.items,
-          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
           offlineOrderCategory: input.offlineOrderCategory ?? null,
@@ -2521,7 +2523,7 @@ export class OrdersService {
           orderId: created.id,
           productId: item.productId,
           quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
+          unitPrice: sql`${item.unitPrice}::numeric`,
           offerLabel: item.offerLabel ?? null,
         })),
       );
@@ -2645,7 +2647,7 @@ export class OrdersService {
           customerEmail: input.customerEmail ?? null,
           paymentMethod: 'PAY_ON_DELIVERY',
           items: input.items,
-          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
           status: input.targetStatus,
           orderSource: 'import',
           customFields: input.customFields ?? null,
@@ -2664,7 +2666,7 @@ export class OrdersService {
           orderId: created.id,
           productId: item.productId,
           quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
+          unitPrice: sql`${item.unitPrice}::numeric`,
           offerLabel: item.offerLabel ?? null,
         })),
       );
@@ -2795,7 +2797,7 @@ export class OrdersService {
           paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: input.items,
-          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
           status: 'CS_ASSIGNED',
           orderSource: 'delivered_follow_up',
           isDeliveredFollowUp: true,
@@ -2814,7 +2816,7 @@ export class OrdersService {
           orderId: created.id,
           productId: item.productId,
           quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
+          unitPrice: sql`${item.unitPrice}::numeric`,
           offerLabel: item.offerLabel ?? null,
         })),
       );
@@ -3095,7 +3097,7 @@ export class OrdersService {
             customerEmail: p.cart.customerEmail ?? null,
             paymentMethod: (p.cart.paymentMethod as 'PAY_ON_DELIVERY' | 'PAY_ONLINE') ?? 'PAY_ON_DELIVERY',
             items: p.items,
-            totalAmount: p.items[0] ? String(p.items[0].unitPrice) : null,
+            totalAmount: p.items[0] ? sql`${p.items[0].unitPrice}::numeric` : null,
             status: 'UNPROCESSED' as const,
             orderSource: 'offline' as const,
             isFollowUp: true,
@@ -3108,7 +3110,7 @@ export class OrdersService {
       for (const row of orderRows) ids.push(row.id);
 
       // Bulk insert order_items
-      const allItems: Array<{ orderId: string; productId: string; quantity: number; unitPrice: string; offerLabel: string | null }> = [];
+      const allItems: Array<{ orderId: string; productId: string; quantity: number; unitPrice: ReturnType<typeof sql>; offerLabel: string | null }> = [];
       for (let i = 0; i < prepared.length; i++) {
         const orderId = ids[i];
         if (!orderId) continue;
@@ -3117,7 +3119,7 @@ export class OrdersService {
             orderId,
             productId: item.productId,
             quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
+            unitPrice: sql`${item.unitPrice}::numeric`,
             offerLabel: item.offerLabel ?? null,
           });
         }
@@ -5289,26 +5291,65 @@ export class OrdersService {
     }
 
     // Perform the update — wrapped in withActor so the temporal-audit trigger sees the actor.
+    // Optimistic lock: only update if the status is still what we read earlier.
+    // This prevents TOCTOU races (e.g. two concurrent CONFIRMs both passing the
+    // state-machine check before either writes).
     const updatedRows = await withActor(this.db, actor, async (tx) =>
       tx
         .update(schema.orders)
         .set(updateFields)
-        .where(eq(schema.orders.id, input.orderId))
+        .where(
+          and(
+            eq(schema.orders.id, input.orderId),
+            eq(schema.orders.status, currentStatus),
+          ),
+        )
         .returning(),
     );
 
     const updated = updatedRows[0];
     if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update order' });
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'Order status changed concurrently. Please refresh and try again.',
+      });
     }
 
     // Execute side effects (stock reservation, deduction, etc.)
-    await this.executeTransitionSideEffects(newStatus, order, updated, actor, input.metadata);
+    // If critical side effects fail, revert the status to prevent inconsistency
+    // (e.g. order marked DELIVERED but stock never deducted).
+    try {
+      await this.executeTransitionSideEffects(newStatus, order, updated, actor, input.metadata);
+    } catch (sideEffectErr) {
+      this.logger.error(
+        `Side effects failed for order ${updated.id} transition ${currentStatus} → ${newStatus}. Reverting status.`,
+        sideEffectErr instanceof Error ? sideEffectErr.stack : sideEffectErr,
+      );
+      await withActor(this.db, actor, async (tx) =>
+        tx
+          .update(schema.orders)
+          .set({ status: currentStatus, updatedAt: new Date() })
+          .where(eq(schema.orders.id, updated.id)),
+      );
+      throw sideEffectErr;
+    }
 
     // Sync status back to the source cart_orders / follow_up_orders row so both
-    // tables always reflect the same status after graduation. Non-fatal.
+    // tables always reflect the same status after graduation. Non-fatal but retried
+    // once to reduce permanent divergence risk.
     if (updated.sourceCartOrderId || updated.sourceFollowUpOrderId) {
-      await this.syncGraduatedStatusToSource(updated, newStatus);
+      try {
+        await this.syncGraduatedStatusToSource(updated, newStatus);
+      } catch {
+        // Retry once after a short delay to handle transient DB issues.
+        try {
+          await this.syncGraduatedStatusToSource(updated, newStatus);
+        } catch (retryErr) {
+          this.logger.error(
+            `syncGraduatedStatusToSource retry failed for order ${updated.id} → ${newStatus}: ${retryErr instanceof Error ? retryErr.message : retryErr}`,
+          );
+        }
+      }
     }
 
     // Auto-generate a draft invoice the first time an order is CONFIRMED. Idempotent
@@ -5590,7 +5631,7 @@ export class OrdersService {
     }
     if (workingInput.paymentMethod !== undefined) updateFields['paymentMethod'] = workingInput.paymentMethod;
     if (workingInput.customerEmail !== undefined) updateFields['customerEmail'] = workingInput.customerEmail;
-    if (workingInput.totalAmount !== undefined) updateFields['totalAmount'] = String(workingInput.totalAmount);
+    if (workingInput.totalAmount !== undefined) updateFields['totalAmount'] = sql`${workingInput.totalAmount}::numeric`;
     if (workingInput.items !== undefined) updateFields['items'] = workingInput.items;
 
     const updated = await withActor(this.db, actor, async (tx) => {
@@ -5617,7 +5658,7 @@ export class OrdersService {
             orderId: input.orderId,
             productId: item.productId,
             quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
+            unitPrice: sql`${item.unitPrice}::numeric`,
             ...(item.offerLabel != null && item.offerLabel !== ''
               ? { offerLabel: item.offerLabel }
               : {}),
@@ -5783,7 +5824,7 @@ export class OrdersService {
             paymentReference: reference,
             paymentProvider: 'PAYSTACK',
             items: orderInput.items,
-            totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+            totalAmount: orderInput.totalAmount != null ? sql`${orderInput.totalAmount}::numeric` : null,
             status: 'UNPROCESSED',
           })
           .returning();
@@ -5797,7 +5838,7 @@ export class OrdersService {
               orderId: created.id,
               productId: item.productId,
               quantity: item.quantity,
-              unitPrice: String(item.unitPrice),
+              unitPrice: sql`${item.unitPrice}::numeric`,
               offerLabel: item.offerLabel ?? null,
             })),
           );
@@ -5994,6 +6035,9 @@ export class OrdersService {
         assignedCsId: csCloserId,
         updatedAt: new Date(),
       };
+      // Pre-engagement reassignment intentionally resets to CS_ASSIGNED.
+      // This is NOT a retrack — the closer hasn't confirmed or progressed
+      // the order beyond the CS engagement phase, so resetting is safe.
       if (!isLateStageTransfer) {
         patch.status = 'CS_ASSIGNED';
       }
@@ -8070,10 +8114,8 @@ export class OrdersService {
     const now = new Date();
     const lockExpiry = new Date(now.getTime() + 15 * 60 * 1000);
 
-    let claimedOrder: Array<{ id: string }> = [];
-    await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
-      claimedOrder = await tx.execute<{ id: string }>(
+    const claimedOrder = await withActor(this.db, actor, async (tx) => {
+      return tx.execute<{ id: string }>(
         sql`
           UPDATE orders
           SET
@@ -8841,19 +8883,57 @@ export class OrdersService {
 
       case 'CANCELLED':
       case 'DELETED': {
+        const RESERVED_STATUSES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
         if (previousOrder.status === 'CONFIRMED') {
-          await withActor(this.db, actor, async (tx) => {
-            for (const item of orderItems) {
-              await tx.insert(schema.stockMovements).values({
-                productId: item.productId,
-                movementType: 'ADJUSTMENT',
-                quantity: item.quantity,
-                referenceId: updatedOrder.id,
-                reason: `Released: order ${updatedOrder.id} deleted`,
-                actorId: actor.id,
-              });
-            }
-          });
+          try {
+            await withActor(this.db, actor, async (tx) => {
+              for (const item of orderItems) {
+                await tx.insert(schema.stockMovements).values({
+                  productId: item.productId,
+                  movementType: 'ADJUSTMENT',
+                  quantity: item.quantity,
+                  referenceId: updatedOrder.id,
+                  reason: `Released: order ${updatedOrder.id} deleted`,
+                  actorId: actor.id,
+                });
+              }
+            });
+          } catch (stockErr) {
+            // Compensate: revert status to CONFIRMED so the reservation stays consistent.
+            this.logger.error(`Stock release failed for deleted order ${updatedOrder.id}, reverting to CONFIRMED: ${stockErr instanceof Error ? stockErr.message : stockErr}`);
+            await withActor(this.db, actor, async (tx) => {
+              await tx.update(schema.orders)
+                .set({ status: 'CONFIRMED', deletedAt: null, updatedAt: new Date() })
+                .where(eq(schema.orders.id, updatedOrder.id));
+            });
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'Failed to release stock reservation. Order has been reverted to Confirmed status.',
+            });
+          }
+        } else if (RESERVED_STATUSES.includes(previousOrder.status) && updatedOrder.logisticsLocationId) {
+          // Release the reservedCount that was set by reserveForAllocateWithMovements
+          // when the order was assigned to an agent.
+          try {
+            await this.inventoryService.releaseAllocationReserveAtLocation(
+              updatedOrder.id,
+              updatedOrder.logisticsLocationId,
+              actor,
+            );
+          } catch (stockErr) {
+            this.logger.error(
+              `Reserve release failed for deleted order ${updatedOrder.id} from ${previousOrder.status}, reverting: ${stockErr instanceof Error ? stockErr.message : stockErr}`,
+            );
+            await withActor(this.db, actor, async (tx) => {
+              await tx.update(schema.orders)
+                .set({ status: previousOrder.status as any, deletedAt: null, updatedAt: new Date() })
+                .where(eq(schema.orders.id, updatedOrder.id));
+            });
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: `Failed to release stock reservation. Order has been reverted to ${previousOrder.status} status.`,
+            });
+          }
         }
         break;
       }
@@ -8870,6 +8950,22 @@ export class OrdersService {
               reason: `Returned: order ${updatedOrder.id}`,
               actorId: actor.id,
             });
+
+            // Restore stock at the logistics location
+            if (updatedOrder.logisticsLocationId) {
+              await tx
+                .update(schema.inventoryLevels)
+                .set({
+                  stockCount: sql`${schema.inventoryLevels.stockCount} + ${item.quantity}`,
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(schema.inventoryLevels.productId, item.productId),
+                    eq(schema.inventoryLevels.locationId, updatedOrder.logisticsLocationId),
+                  ),
+                );
+            }
           }
         });
         break;
@@ -8887,6 +8983,22 @@ export class OrdersService {
               reason: `Restocked at logistics company: order ${updatedOrder.id}`,
               actorId: actor.id,
             });
+
+            // Restore stock at the logistics location
+            if (updatedOrder.logisticsLocationId) {
+              await tx
+                .update(schema.inventoryLevels)
+                .set({
+                  stockCount: sql`${schema.inventoryLevels.stockCount} + ${item.quantity}`,
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(schema.inventoryLevels.productId, item.productId),
+                    eq(schema.inventoryLevels.locationId, updatedOrder.logisticsLocationId),
+                  ),
+                );
+            }
           }
         });
         break;
@@ -9780,7 +9892,10 @@ export class OrdersService {
       await this.db.insert(schema.crossFunnelAttempts).values(
         args.productIds.map((productId) => ({
           customerPhoneHash: args.customerPhoneHash,
-          customerPhone: args.customerPhone,
+          // Pillar 2 — Lead Fortress: do not persist raw phone in secondary tables.
+          // The cross-funnel UI derives the display phone from the original order
+          // (behind role-based access control).
+          customerPhone: null,
           customerName: args.customerName,
           productId,
           mediaBuyerId: args.mediaBuyerId,
@@ -10336,6 +10451,9 @@ export class OrdersService {
         if (isPreConfirm) {
           updateFields.status = 'UNPROCESSED';
           updateFields.assignedCsId = null;
+          // Clear claim lock so the order doesn't stay locked to the previous branch's agent.
+          updateFields.lockedBy = null;
+          updateFields.lockedUntil = null;
         }
         if (opts?.clearMediaBuyer) {
           updateFields.mediaBuyerId = null;

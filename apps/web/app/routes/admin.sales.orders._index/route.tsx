@@ -15,7 +15,7 @@ import {
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { OrdersListPage, type OrdersListPageProps } from '~/features/orders/OrdersListPage';
 import { CSOrdersLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
@@ -861,6 +861,7 @@ export default function CSOrdersRoute() {
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
+  usePollingFallback(30_000);
   return (
     <CachedAwait
       resolve={pageData}
