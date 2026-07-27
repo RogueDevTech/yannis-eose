@@ -2813,24 +2813,12 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
   if (apiResult.ok) {
     const resultData = apiResult.data as {
       result?: {
-        data?: { id?: string; authorizationUrl?: string; reference?: string; duplicateRecorded?: true; alreadySubmitted?: true };
+        data?: { id?: string; authorizationUrl?: string; reference?: string; duplicateRecorded?: true };
       };
     };
     const orderId = resultData?.result?.data?.id;
     const authorizationUrl = resultData?.result?.data?.authorizationUrl;
     const duplicateRecorded = resultData?.result?.data?.duplicateRecorded === true;
-    const alreadySubmitted = resultData?.result?.data?.alreadySubmitted === true;
-
-    // Same-form rapid resubmit (within 2min): lock the form and tell the
-    // customer their order was already received. No duplicate created.
-    if (alreadySubmitted) {
-      return corsResponse({
-        success: true,
-        orderId,
-        alreadySubmitted: true,
-        message: 'Your order has already been submitted. No need to submit again.',
-      });
-    }
 
     // Universal dedup (CEO 2026-05-26): duplicate submissions see the normal
     // success flow — pixel fires, successCallbackUrl redirect works. The

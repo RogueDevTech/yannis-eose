@@ -1903,7 +1903,7 @@ export class OrdersService {
     actorId: string | null,
     orderSource?: 'edge-form' | 'offline' | null,
     opts?: { isFollowUp?: boolean },
-  ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true; alreadySubmitted?: true }> {
+  ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -2004,6 +2004,7 @@ export class OrdersService {
         }
       }
     }
+    let dupWinnerFound = false;
     try {
     // MARKETING branch — the campaign/form branch this order is attributed to.
     const branchId = await this.resolveBranchIdForNewOrder({
@@ -2025,53 +2026,12 @@ export class OrdersService {
       }
     }
 
-    // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).
-    // Same phone + same campaign + same products = idempotent return.
-    // This is distinct from the 7-day cross-funnel dedup below: that one records
-    // CFA rows but still creates the order. This one returns early.
-    if (orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId) {
-      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
-      const productIds = orderInput.items.map((i) => i.productId);
-      const [recentSameForm] = await this.db
-        .select({ id: schema.orders.id })
-        .from(schema.orders)
-        .where(
-          and(
-            eq(schema.orders.customerPhoneHash, orderInput.customerPhoneHash),
-            eq(schema.orders.campaignId, orderInput.campaignId),
-            gte(schema.orders.createdAt, twoMinAgo),
-            isNull(schema.orders.deletedAt),
-            notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
-            productIds.length === 1
-              ? exists(
-                  this.db.select({ x: sql`1` }).from(schema.orderItems)
-                    .where(and(
-                      eq(schema.orderItems.orderId, schema.orders.id),
-                      eq(schema.orderItems.productId, productIds[0]!),
-                    )),
-                )
-              : undefined,
-          ),
-        )
-        .orderBy(desc(schema.orders.createdAt))
-        .limit(1);
-      if (recentSameForm) {
-        this.logger.log(
-          { existingId: recentSameForm.id, phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', campaignId: orderInput.campaignId },
-          'same-form idempotency: returning existing order (rapid resubmit within 2min)',
-        );
-        if (cartId) {
-          await this.cartService.convert(cartId, recentSameForm.id, actorId ?? undefined).catch(() => {});
-        }
-        return { id: recentSameForm.id, alreadySubmitted: true };
-      }
-    }
-
     // Universal 7-day dedup (CEO directive 2026-05-26):
     // Same phone + any overlapping product within 7 days = duplicate.
     // Any MB, any campaign, any offer. One order per customer×product per week.
     // Duplicates are recorded in cross_funnel_attempts for MB visibility.
     // Customer always sees success (pixel fires, redirect works).
+    // Order is still created (MB traction) but immediately soft-deleted (CS never sees it).
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const productIds = orderInput.items.map((i) => i.productId);
       const winner = await this.findExistingOrderForDedup(
@@ -2131,10 +2091,11 @@ export class OrdersService {
             submittingMbId: orderInput.mediaBuyerId,
             phoneHash: orderInput.customerPhoneHash,
           },
-          'universal dedup: duplicate detected — recorded in cross_funnel_attempts, order still created',
+          'universal dedup: duplicate detected — order will be created + immediately soft-deleted',
         );
-        // Do NOT block — fall through so the order is always created.
-        // CS will see it and can merge/delete if needed.
+        // Fall through so the order is always created (MB traction preserved).
+        // The order will be immediately soft-deleted after INSERT so CS never sees it.
+        dupWinnerFound = true;
       }
     }
 
@@ -2427,6 +2388,28 @@ export class OrdersService {
       }
     }
 
+    // Immediately soft-delete duplicate orders so CS never sees them.
+    // The order row exists for audit + CFA traction, but is excluded from
+    // all list/count queries via deleted_at IS NULL / status != DELETED.
+    if (dupWinnerFound) {
+      await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, async (tx) => {
+        await tx
+          .update(schema.orders)
+          .set({
+            isDuplicate: 'FLAGGED',
+            status: 'DELETED',
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.orders.id, order.id));
+      });
+      this.logger.log(
+        { orderId: order.id, orderNumber: order.orderNumber },
+        'duplicate order soft-deleted immediately after creation — invisible to CS',
+      );
+      return { id: order.id, duplicateRecorded: true as const };
+    }
+
     return { id: order.id, authorizationUrl };
   }
 
@@ -2441,6 +2424,11 @@ export class OrdersService {
   ): Promise<{ id: string }> {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
+
+    // Advisory lock: serialize concurrent offline creations for the same phone
+    // to close the TOCTOU race between dedup SELECT and INSERT.
+    const lock = await this.acquirePhoneAdvisoryLock(customerPhoneHash);
+    try {
 
     if (paymentMethod === 'PAY_ONLINE' && (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail))) {
       throw new TRPCError({
@@ -2630,6 +2618,10 @@ export class OrdersService {
     });
 
     return { id: order.id };
+
+    } finally {
+      if (lock.acquired) await this.releasePhoneAdvisoryLock(lock.key1, lock.key2);
+    }
   }
 
   /**
@@ -2748,6 +2740,10 @@ export class OrdersService {
   ): Promise<{ id: string }> {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
+
+    // Advisory lock: serialize concurrent delivered-follow-up creations for the same phone.
+    const lock = await this.acquirePhoneAdvisoryLock(customerPhoneHash);
+    try {
 
     if (paymentMethod === 'PAY_ONLINE' && (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail))) {
       throw new TRPCError({
@@ -2921,6 +2917,10 @@ export class OrdersService {
     });
 
     return { id: order.id };
+
+    } finally {
+      if (lock.acquired) await this.releasePhoneAdvisoryLock(lock.key1, lock.key2);
+    }
   }
 
   /**
@@ -3213,6 +3213,44 @@ export class OrdersService {
       digits = '234' + digits.slice(1);
     }
     return createHash('sha256').update(`yannis:phone:${digits}`).digest('hex');
+  }
+
+  /**
+   * Acquire a PostgreSQL advisory lock keyed on the phone hash to serialize
+   * concurrent order creation for the same customer. Spin-retries up to 5×200ms.
+   * Returns { acquired, key1, key2 } — caller MUST release in a finally block.
+   */
+  private async acquirePhoneAdvisoryLock(phoneHash: string): Promise<{ acquired: boolean; key1: number; key2: number }> {
+    const hashHex = phoneHash.slice(0, 16);
+    const key1 = parseInt(hashHex.slice(0, 8), 16) | 0;
+    const key2 = parseInt(hashHex.slice(8, 16), 16) | 0;
+
+    const tryLock = async () => {
+      const result = await this.db.execute<{ acquired: boolean }>(
+        sql`SELECT pg_try_advisory_lock(${key1}, ${key2}) AS acquired`,
+      );
+      const rows = Array.isArray(result) ? result : (result as unknown as { rows: Array<{ acquired: boolean }> })?.rows ?? [];
+      return rows[0]?.acquired === true;
+    };
+
+    let acquired = await tryLock();
+    if (!acquired) {
+      for (let attempt = 0; attempt < 5 && !acquired; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        acquired = await tryLock();
+      }
+      if (!acquired) {
+        this.logger.warn(
+          { phoneHash: phoneHash.slice(0, 12) + '…' },
+          'advisory lock contended after 5 retries — proceeding with dedup SELECT only',
+        );
+      }
+    }
+    return { acquired, key1, key2 };
+  }
+
+  private async releasePhoneAdvisoryLock(key1: number, key2: number): Promise<void> {
+    await this.db.execute(sql`SELECT pg_advisory_unlock(${key1}, ${key2})`).catch(() => {});
   }
 
   /**
@@ -5543,6 +5581,31 @@ export class OrdersService {
         body: 'A delivery has been assigned to you. Please pick up and deliver.',
         data: { orderId: order.id },
       });
+    }
+
+    // Notify HoCS and the assigned CS closer when an order is retracked
+    if (isRetrack) {
+      const orderLabel = `YNS-${String(updated.orderNumber).padStart(5, '0')}`;
+      const actorName = await this.resolveUserNameById(actor.id).catch(() => null) ?? 'Someone';
+      const retrackBody = `${actorName} retracked order ${orderLabel} from ${currentStatus} to ${newStatus}.`;
+
+      this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
+        type: 'order:retracked',
+        title: `Order retracked: ${orderLabel}`,
+        body: retrackBody,
+        data: { orderId: order.id, orderNumber: updated.orderNumber, fromStatus: currentStatus, toStatus: newStatus },
+      });
+
+      // Notify the assigned CS closer so they know the order is back in their queue
+      if (updated.assignedCsId && updated.assignedCsId !== actor.id) {
+        this.notifications.enqueueCreate({
+          userId: updated.assignedCsId,
+          type: 'order:retracked',
+          title: `Order retracked: ${orderLabel}`,
+          body: `${orderLabel} was moved back to ${newStatus}. Please review.`,
+          data: { orderId: order.id, orderNumber: updated.orderNumber, fromStatus: currentStatus, toStatus: newStatus },
+        });
+      }
     }
 
     const { customerPhone: transitionPhone, ...updatedSafe } = updated;
