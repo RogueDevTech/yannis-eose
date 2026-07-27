@@ -5801,6 +5801,8 @@ export class MarketingService {
         originalOrderAmount: schema.orders.totalAmount,
         originalOrderNumber: schema.orders.orderNumber,
         originalOrderCreatedAt: schema.orders.createdAt,
+        originalOrderPhone: schema.orders.customerPhone,
+        originalOrderCustomerName: schema.orders.customerName,
       })
       .from(schema.crossFunnelAttempts)
       .leftJoin(productAlias, eq(schema.crossFunnelAttempts.productId, productAlias.id))
