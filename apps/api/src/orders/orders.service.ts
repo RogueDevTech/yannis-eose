@@ -8444,7 +8444,15 @@ export class OrdersService {
           confirmPerms.includes(canonicalPermissionCode(code));
         const sameBranch =
           !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
+        // Retracks (backward transitions) always bypass the call gate — the order
+        // was already confirmed before, requiring a new call makes no sense.
+        const CONFIRMED_POS = 3;
+        const RETRACK_STATUSES: Record<string, number> = {
+          AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+        };
+        const isRetrackToConfirmed = (RETRACK_STATUSES[order.status] ?? -1) > CONFIRMED_POS;
         const bypassCallGate =
+          isRetrackToConfirmed ||
           actor.role === 'SUPER_ADMIN' ||
           hasConfirmPerm('orders.confirm.bypass_call_gate') ||
           (hasConfirmPerm('branches.manage') && sameBranch);
@@ -8842,6 +8850,25 @@ export class OrdersService {
       if (previousOrder.status === 'DELIVERED') {
         // Reverse the FIFO delivery deduction before the switch re-reserves stock.
         await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+      } else if (
+        ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(previousOrder.status) &&
+        nextPos <= 3 && // retracking to CONFIRMED or earlier
+        updatedOrder.logisticsLocationId
+      ) {
+        // Release the reservedCount that was set by reserveForAllocateWithMovements
+        // when the order was assigned to an agent. Without this, available stock
+        // stays permanently reduced by the phantom reservation.
+        try {
+          await this.inventoryService.releaseAllocationReserveAtLocation(
+            updatedOrder.id,
+            updatedOrder.logisticsLocationId,
+            actor,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Reserve release on retrack for order ${updatedOrder.id} (${previousOrder.status} → ${newStatus}) failed: ${err instanceof Error ? err.message : err}`,
+          );
+        }
       }
       // GL reversals mirror the postings made on the way up.
       if (prevPos >= 8 && nextPos < 8) {
