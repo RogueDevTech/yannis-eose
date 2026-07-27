@@ -1903,7 +1903,7 @@ export class OrdersService {
     actorId: string | null,
     orderSource?: 'edge-form' | 'offline' | null,
     opts?: { isFollowUp?: boolean },
-  ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true }> {
+  ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true; alreadySubmitted?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -2022,6 +2022,48 @@ export class OrdersService {
       );
       if (servicingBranch) {
         servicingBranchId = servicingBranch;
+      }
+    }
+
+    // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).
+    // Same phone + same campaign + same products = idempotent return.
+    // This is distinct from the 7-day cross-funnel dedup below: that one records
+    // CFA rows but still creates the order. This one returns early.
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId) {
+      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+      const productIds = orderInput.items.map((i) => i.productId);
+      const [recentSameForm] = await this.db
+        .select({ id: schema.orders.id })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.customerPhoneHash, orderInput.customerPhoneHash),
+            eq(schema.orders.campaignId, orderInput.campaignId),
+            gte(schema.orders.createdAt, twoMinAgo),
+            isNull(schema.orders.deletedAt),
+            notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+            productIds.length === 1
+              ? exists(
+                  this.db.select({ x: sql`1` }).from(schema.orderItems)
+                    .where(and(
+                      eq(schema.orderItems.orderId, schema.orders.id),
+                      eq(schema.orderItems.productId, productIds[0]!),
+                    )),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(desc(schema.orders.createdAt))
+        .limit(1);
+      if (recentSameForm) {
+        this.logger.log(
+          { existingId: recentSameForm.id, phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', campaignId: orderInput.campaignId },
+          'same-form idempotency: returning existing order (rapid resubmit within 2min)',
+        );
+        if (cartId) {
+          await this.cartService.convert(cartId, recentSameForm.id, actorId ?? undefined).catch(() => {});
+        }
+        return { id: recentSameForm.id, alreadySubmitted: true };
       }
     }
 
