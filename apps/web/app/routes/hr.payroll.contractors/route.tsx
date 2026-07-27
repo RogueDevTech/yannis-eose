@@ -13,7 +13,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayrollContractorsPage } from '~/features/hr/PayrollContractorsPage';
 import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
-import type { BranchOption, PayrollContractor } from '~/features/hr/payroll-prd-types';
+import type { PayrollContractor } from '~/features/hr/payroll-prd-types';
 
 export const meta: MetaFunction = () => [{ title: 'Payroll contractors — Yannis EOSE' }];
 
@@ -26,16 +26,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {
-    const [contractorsRes, branchesRes] = await Promise.all([
-      apiRequest<unknown>('/trpc/hr.listContractors', { method: 'GET', cookie }),
-      apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
-    ]);
+    const contractorsRes = await apiRequest<unknown>('/trpc/hr.listContractors', { method: 'GET', cookie });
 
     const contractors = contractorsRes.ok
       ? (((contractorsRes.data as { result?: { data?: PayrollContractor[] } })?.result?.data) ?? [])
-      : [];
-    const branches = branchesRes.ok
-      ? (((branchesRes.data as { result?: { data?: BranchOption[] } })?.result?.data) ?? [])
       : [];
 
     const perms = user.permissions ?? [];
@@ -45,7 +39,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
 
-    return { contractors, branches, canWrite };
+    return { contractors, canWrite };
   })();
 
   return defer({ pageData });
@@ -71,8 +65,6 @@ export async function action({ request }: ActionFunctionArgs) {
     };
     const jobTitle = pickOptional('jobTitle');
     if (jobTitle) body.jobTitle = jobTitle;
-    const branchId = pickOptional('branchId');
-    if (branchId) body.branchId = branchId;
     const bankName = pickOptional('bankName');
     if (bankName) body.bankName = bankName;
     const bankCode = pickOptional('bankCode');
@@ -104,8 +96,6 @@ export async function action({ request }: ActionFunctionArgs) {
     if (jobTitle !== undefined) body.jobTitle = jobTitle;
     const monthlyFee = formData.get('monthlyFee')?.toString();
     if (monthlyFee) body.monthlyFee = Number(monthlyFee);
-    const branchId = formData.get('branchId')?.toString();
-    if (branchId !== undefined) body.branchId = branchId || null;
     const bankName = pickOptional('bankName');
     if (bankName !== undefined) body.bankName = bankName;
     const bankCode = pickOptional('bankCode');
@@ -137,7 +127,6 @@ export default function PayrollContractorsRoute() {
       {(data) => (
         <PayrollContractorsPage
           contractors={data.contractors}
-          branches={data.branches}
           canWrite={data.canWrite}
         />
       )}

@@ -7,7 +7,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
-import { FormSelect } from '~/components/ui/form-select';
+import { BankSelect } from '~/components/ui/bank-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -20,15 +20,14 @@ import {
 } from '~/components/ui/compact-table';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
-import type { BranchOption, PayrollContractor } from './payroll-prd-types';
+import type { PayrollContractor } from './payroll-prd-types';
 
 interface PayrollContractorsPageProps {
   contractors: PayrollContractor[];
-  branches: BranchOption[];
   canWrite: boolean;
 }
 
-export function PayrollContractorsPage({ contractors, branches, canWrite }: PayrollContractorsPageProps) {
+export function PayrollContractorsPage({ contractors, canWrite }: PayrollContractorsPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const [showCreate, setShowCreate] = useState(false);
@@ -45,11 +44,6 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleSuccess, { intent: 'createContractor' });
   useCloseOnFetcherSuccess(fetcher, handleSuccess, { intent: 'updateContractor' });
-
-  const branchName = useMemo(() => {
-    const map = new Map(branches.map((b) => [b.id, b.name]));
-    return (id: string | null) => (id ? map.get(id) ?? 'Unknown branch' : 'All branches');
-  }, [branches]);
 
   const columns: CompactTableColumn<PayrollContractor>[] = useMemo(
     () => [
@@ -76,11 +70,6 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
         header: 'Monthly fee',
         align: 'right',
         render: (row) => <NairaPrice amount={Number(row.monthlyFee)} />,
-      },
-      {
-        key: 'branch',
-        header: 'Branch',
-        render: (row) => <span className="text-sm text-app-fg-muted">{branchName(row.branchId)}</span>,
       },
       {
         key: 'bank',
@@ -112,7 +101,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
         ),
       },
     ],
-    [branchName, canWrite],
+    [canWrite],
   );
 
   return (
@@ -217,7 +206,7 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
                 <div>
                   <p className="font-medium text-app-fg text-sm">{row.name}</p>
                   <p className="text-xs text-app-fg-muted mt-0.5">
-                    {row.jobTitle ? `${row.jobTitle} · ` : ''}{branchName(row.branchId)}
+                    {row.jobTitle || 'Contractor'}
                   </p>
                 </div>
                 <span className="text-sm font-semibold text-app-fg">
@@ -236,7 +225,6 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
       {(showCreate || editRow) && (
         <ContractorModal
           contractor={editRow}
-          branches={branches}
           readOnly={false}
           submitting={fetcher.state === 'submitting'}
           error={surface.errorMatchingIntent(editRow ? 'updateContractor' : 'createContractor') ?? undefined}
@@ -254,7 +242,6 @@ export function PayrollContractorsPage({ contractors, branches, canWrite }: Payr
 
 function ContractorModal({
   contractor,
-  branches,
   readOnly,
   submitting,
   error,
@@ -262,7 +249,6 @@ function ContractorModal({
   onClose,
 }: {
   contractor: PayrollContractor | null;
-  branches: BranchOption[];
   readOnly: boolean;
   submitting: boolean;
   error?: string;
@@ -312,18 +298,16 @@ function ContractorModal({
             defaultValue={contractor ? String(Number(contractor.monthlyFee)) : ''}
           />
         </div>
-        <FormSelect
-          label="Branch (optional)"
-          name="branchId"
+        <BankSelect
+          id={isEdit ? `contractor-bank-${contractor.id}` : 'contractor-bank-new'}
+          defaultBankName={contractor?.bankName}
+          defaultBankCode={contractor?.bankCode}
+          nameBankName="bankName"
+          nameBankCode="bankCode"
           disabled={readOnly}
-          defaultValue={contractor?.branchId ?? ''}
-          options={[
-            { value: '', label: 'No branch' },
-            ...branches.map((b) => ({ value: b.id, label: b.name })),
-          ]}
+          label="Bank"
+          hint="Search and pick a bank. Bank code fills in automatically."
         />
-        <TextInput label="Bank name" name="bankName" readOnly={readOnly} defaultValue={contractor?.bankName ?? ''} />
-        <TextInput label="Bank code" name="bankCode" readOnly={readOnly} defaultValue={contractor?.bankCode ?? ''} />
         <TextInput
           label="Account number"
           name="accountNumber"
