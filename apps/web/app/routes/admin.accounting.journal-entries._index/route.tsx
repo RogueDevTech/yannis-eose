@@ -34,8 +34,8 @@ const EMPTY: ListResponse = {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.read',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.read',
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
@@ -51,7 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isAdminLevel(user) || user.role === 'FINANCE_OFFICER';
 
   const perms = (user as { permissions?: string[] }).permissions ?? [];
-  const canWrite = isAdminLevel(user) || user.role === 'FINANCE_OFFICER' || perms.includes('finance.ledger.write');
+  const canWrite = isAdminLevel(user) || user.role === 'FINANCE_OFFICER' || perms.includes('accounting.write');
 
   const shell = {
     canWrite,

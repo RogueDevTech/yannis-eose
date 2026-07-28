@@ -5353,6 +5353,9 @@ export class MarketingService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    /** When true, only return metrics for the requested buyerIds (supervisor view).
+     *  When false (default), also includes inactive MBs with orders on the branch. */
+    restrictToBuyerIds = false,
   ): Promise<Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>> {
     if (buyerIds.length === 0) return new Map();
 
@@ -5505,9 +5508,11 @@ export class MarketingService {
     );
 
     const result = new Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>();
-    // Include requested (active) buyers AND any inactive buyers with orders
-    // in the period so the overview total matches the Marketing Orders page.
-    const allBuyerIdsWithData = new Set([...buyerIds, ...orderByBuyer.keys(), ...cartByBuyer.keys()]);
+    // When restrictToBuyerIds is true (supervisor view), only include the
+    // requested buyer IDs. Otherwise include inactive MBs with orders too.
+    const allBuyerIdsWithData = restrictToBuyerIds
+      ? new Set(buyerIds)
+      : new Set([...buyerIds, ...orderByBuyer.keys(), ...cartByBuyer.keys()]);
     for (const buyerId of allBuyerIdsWithData) {
       const spend = spendByBuyer.get(buyerId) ?? 0;
       const orderRow = orderByBuyer.get(buyerId);
@@ -5552,6 +5557,7 @@ export class MarketingService {
       eligibleBuyers = eligibleBuyers.filter((b) => allow.has(b.id));
     }
 
+    const isSupervisorScoped = !!(restrictToMediaBuyerIds && restrictToMediaBuyerIds.length > 0);
     const [profitability, metricsByBuyer] = await Promise.all([
       this.getProfitabilityConfig(),
       this.getPerformanceMetricsBatched(
@@ -5561,6 +5567,7 @@ export class MarketingService {
         endDate,
         branchId,
         effectiveBranchIds,
+        isSupervisorScoped,
       ),
     ]);
 
@@ -5568,16 +5575,20 @@ export class MarketingService {
     // Inactive/probation buyers with orders in the period — look up their names
     // so they appear as rows in the leaderboard. Only include those assigned to
     // the selected branch so MBs from other branches don't leak in.
-    const branchUserIdSet = branchUserIds ? new Set(branchUserIds) : null;
-    const extraBuyerIds = [...metricsByBuyer.keys()].filter(
-      (id) => !eligibleIds.has(id) && (!branchUserIdSet || branchUserIdSet.has(id)),
-    );
+    // When restrictToMediaBuyerIds is provided (supervisor view), skip this —
+    // only show the supervisor's team members, not other branch members.
     let extraBuyers: Array<{ id: string; name: string; email: string | null }> = [];
-    if (extraBuyerIds.length > 0) {
-      extraBuyers = await this.db
-        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
-        .from(schema.users)
-        .where(inArray(schema.users.id, extraBuyerIds));
+    if (!restrictToMediaBuyerIds || restrictToMediaBuyerIds.length === 0) {
+      const branchUserIdSet = branchUserIds ? new Set(branchUserIds) : null;
+      const extraBuyerIds = [...metricsByBuyer.keys()].filter(
+        (id) => !eligibleIds.has(id) && (!branchUserIdSet || branchUserIdSet.has(id)),
+      );
+      if (extraBuyerIds.length > 0) {
+        extraBuyers = await this.db
+          .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+          .from(schema.users)
+          .where(inArray(schema.users.id, extraBuyerIds));
+      }
     }
     const allBuyers = [...eligibleBuyers, ...extraBuyers];
 

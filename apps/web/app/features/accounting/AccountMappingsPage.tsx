@@ -1,8 +1,9 @@
-import { useMemo, useCallback, useState, useEffect } from 'react';
+import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { Button } from '~/components/ui/button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -118,6 +119,14 @@ export function AccountConfigPage({
   const [activeTab, setActiveTab] = useState<'accounts' | 'mappings' | 'categories' | 'rules'>(
     'accounts',
   );
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  // The Accounts tab (ChartOfAccountsPage) registers its create-modal opener
+  // here so the page header's Add Account button can drive it.
+  const openAccountCreateRef = useRef<((kind: 'leaf' | 'group') => void) | null>(null);
+  const registerAccountCreate = useCallback((open: (kind: 'leaf' | 'group') => void) => {
+    openAccountCreateRef.current = open;
+  }, []);
 
   /** Account IDs referenced by a mapping — powers the deactivate warning. */
   const mappedAccountIds = useMemo(
@@ -225,11 +234,65 @@ export function AccountConfigPage({
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
+                {activeTab === 'accounts' && canWrite && (
+                  <ActionDropdown
+                    id="account-config-add-account"
+                    openMenuId={openMenuId}
+                    setOpenMenuId={setOpenMenuId}
+                    trigger="button"
+                    triggerVariant="primary"
+                    triggerLabel="Add Account"
+                    items={[
+                      { label: 'Leaf (postable)', onClick: () => openAccountCreateRef.current?.('leaf') },
+                      { label: 'Group (header)', onClick: () => openAccountCreateRef.current?.('group') },
+                    ]}
+                  />
+                )}
               </div>
+            }
+            sheet={
+              activeTab === 'accounts' && canWrite ? (
+                <ActionDropdown
+                  id="account-config-add-account-sheet"
+                  openMenuId={openMenuId}
+                  setOpenMenuId={setOpenMenuId}
+                  trigger="button"
+                  triggerVariant="primary"
+                  triggerLabel="Add Account"
+                  triggerClassName="w-full justify-center"
+                  align="start"
+                  items={[
+                    { label: 'Leaf (postable)', onClick: () => openAccountCreateRef.current?.('leaf') },
+                    { label: 'Group (header)', onClick: () => openAccountCreateRef.current?.('group') },
+                  ]}
+                />
+              ) : undefined
             }
           />
         }
       />
+
+      <Tabs
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as typeof activeTab)}
+        tabs={[
+          { value: 'accounts', label: `Accounts (${accountRows.length})` },
+          { value: 'mappings', label: `Mappings (${totalCount})` },
+          { value: 'categories', label: `Account Types (${accountTypeRows.length})` },
+          { value: 'rules', label: 'Posting Rules' },
+        ]}
+      />
+
+      {activeTab === 'accounts' && (
+        <ChartOfAccountsPage
+          accounts={accountRows}
+          canWrite={canWrite}
+          hasOpeningBalances={hasOpeningBalances}
+          mappedAccountIds={mappedAccountIds}
+          embedded
+          onRegisterCreate={registerAccountCreate}
+        />
+      )}
 
       {activeTab === 'mappings' && (
         <>
@@ -256,32 +319,7 @@ export function AccountConfigPage({
               </p>
             </div>
           )}
-        </>
-      )}
 
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as typeof activeTab)}
-        tabs={[
-          { value: 'accounts', label: `Accounts (${accountRows.length})` },
-          { value: 'mappings', label: `Mappings (${totalCount})` },
-          { value: 'categories', label: `Account Types (${accountTypeRows.length})` },
-          { value: 'rules', label: 'Posting Rules' },
-        ]}
-      />
-
-      {activeTab === 'accounts' && (
-        <ChartOfAccountsPage
-          accounts={accountRows}
-          canWrite={canWrite}
-          hasOpeningBalances={hasOpeningBalances}
-          mappedAccountIds={mappedAccountIds}
-          embedded
-        />
-      )}
-
-      {activeTab === 'mappings' && (
-        <>
           <div className="card !p-0 overflow-hidden">
             <div className="divide-y divide-app-border">
               {grouped.map(({ category, items }) => {
@@ -638,7 +676,7 @@ function MappingRow({
             <>
               {' · '}
               <Link
-                to={`/admin/finance/accounts/${mapping.accountId}`}
+                to={`/admin/accounting/accounts/${mapping.accountId}`}
                 className="text-brand-600 dark:text-brand-400 hover:underline"
               >
                 Open {mapping.accountCode}

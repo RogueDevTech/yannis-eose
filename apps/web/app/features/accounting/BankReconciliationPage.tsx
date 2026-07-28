@@ -438,7 +438,7 @@ function ReconciliationDetail({
       <PageHeader
         title={`Reconciliation: ${(detail.bankAccountName ?? 'Bank Account').replace(/\s*[—–]\s*/g, ' · ')}`}
         description={`Statement date: ${detail.statementDate}`}
-        backTo="/admin/finance/bank-reconciliation"
+        backTo="/admin/accounting/bank-reconciliation"
         mobileInlineActions
         actions={
           <PageHeaderMobileTools

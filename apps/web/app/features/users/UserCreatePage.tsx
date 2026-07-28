@@ -105,6 +105,11 @@ const ROLES = [
     description: 'Manages financials, invoices, and payouts',
   },
   {
+    value: 'ACCOUNTANT',
+    label: 'Accountant',
+    description: 'Chart of accounts, journals, and financial statements (no money movement)',
+  },
+  {
     value: 'HEAD_OF_LOGISTICS',
     label: 'Head of Logistics',
     description: 'Oversees logistics operations, logistics companies, 3PL partners, and transfers',

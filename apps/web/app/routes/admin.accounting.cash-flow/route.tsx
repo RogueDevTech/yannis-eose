@@ -19,8 +19,8 @@ const EMPTY: CashFlowPageProps = {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.read',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.read',
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);

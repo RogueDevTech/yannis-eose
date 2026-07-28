@@ -90,6 +90,7 @@ export function hasFinanceAccess(user: {
   if (user.role === 'AUDITOR') return true;
   if ((user.permissions ?? []).map((p) => canonicalPermissionCode(p)).includes('finance.costs.view')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
+  if (user.role === 'ACCOUNTANT') return true;
   return false;
 }
 

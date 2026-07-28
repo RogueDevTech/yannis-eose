@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useFetcher, Link, useRevalidator } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -54,6 +54,18 @@ export interface ChartOfAccountsPageProps {
    * compact toolbar instead.
    */
   embedded?: boolean;
+  /**
+   * When set, the embedded toolbar's Add Account button is hidden and this
+   * receives the open-create handler so a host header can drive it instead.
+   */
+  onRegisterCreate?: (open: (kind: 'leaf' | 'group') => void) => void;
+  /**
+   * View-only mode: hides all write controls (Add Account, edit, add leaf,
+   * deactivate/reactivate, opening-balance actions) regardless of `canWrite`.
+   * The standalone Chart of Accounts page uses this; account CRUD lives on
+   * Account Config.
+   */
+  readOnly?: boolean;
 }
 
 const ROOT_TYPES = [
@@ -130,12 +142,16 @@ function toTree(accounts: AccountRow[]): Array<AccountRow & { depth: number }> {
 
 export function ChartOfAccountsPage({
   accounts: accountsProp,
-  canWrite,
+  canWrite: canWriteProp,
   hasOpeningBalances = false,
   mappedAccountIds,
   embedded = false,
+  readOnly = false,
+  onRegisterCreate,
 }: ChartOfAccountsPageProps) {
   const revalidator = useRevalidator();
+  // Single gate for every write control on this surface.
+  const canWrite = canWriteProp && !readOnly;
   const serverAccounts = Array.isArray(accountsProp) ? accountsProp : [];
   const [createOpen, setCreateOpen] = useState(false);
   /** Explicit kind: group = header only; leaf = postable. */
@@ -179,6 +195,19 @@ export function ChartOfAccountsPage({
     setCreateOpen(true);
   };
 
+  // Let a host header (Account Config) drive the create modal. State setters are
+  // stable, so registering a top-level (no-parent) opener once on mount is safe.
+  useEffect(() => {
+    if (!onRegisterCreate) return;
+    onRegisterCreate((kind: 'leaf' | 'group') => {
+      setCreateKind(kind);
+      setParentId('');
+      setCreateRootType('ASSET');
+      setCreateOpen(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRegisterCreate]);
+
   const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const deactivateFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -194,8 +223,8 @@ export function ChartOfAccountsPage({
     setParentId('');
     setCreateKind('leaf');
     setCreateRootType('ASSET');
-    invalidateCachedLoader('/admin/finance/accounts');
-    invalidateCachedLoader('/admin/finance/account-mappings');
+    invalidateCachedLoader('/admin/accounting/accounts');
+    invalidateCachedLoader('/admin/accounting/account-config');
     revalidator.revalidate();
   });
   useCloseOnFetcherSuccess(editFetcher, () => setEditAccount(null));
@@ -416,33 +445,36 @@ export function ChartOfAccountsPage({
   return (
     <div className="space-y-4">
       {embedded ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <PageRefreshButton />
-          {canWrite && (
-            <Link to="/admin/finance/opening-balances" className="btn-secondary btn-sm inline-flex items-center">
-              {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
-            </Link>
-          )}
-          {canWrite && (
-            <ActionDropdown
-              id="coa-add-account-embedded"
-              openMenuId={openMenuId}
-              setOpenMenuId={setOpenMenuId}
-              trigger="button"
-              triggerVariant="primary"
-              triggerLabel="Add Account"
-              items={[
-                { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
-                { label: 'Group (header)', onClick: () => openCreate('group') },
-              ]}
-            />
-          )}
-        </div>
+        // When a host header drives create (onRegisterCreate), it also owns
+        // Refresh + Add Account, so render no embedded toolbar at all.
+        onRegisterCreate ? null : (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <PageRefreshButton />
+            {canWrite && (
+              <ActionDropdown
+                id="coa-add-account-embedded"
+                openMenuId={openMenuId}
+                setOpenMenuId={setOpenMenuId}
+                trigger="button"
+                triggerVariant="primary"
+                triggerLabel="Add Account"
+                items={[
+                  { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
+                  { label: 'Group (header)', onClick: () => openCreate('group') },
+                ]}
+              />
+            )}
+          </div>
+        )
       ) : (
       <>
       <PageHeader
         title="Chart of Accounts"
-        description="Create groups and leaf accounts here. Wire leaves to auto-posting on Account Mappings."
+        description={
+          readOnly
+            ? 'The full account tree with balances. Manage accounts and mappings on Account Config.'
+            : 'Create groups and leaf accounts here. Wire leaves to auto-posting on Account Mappings.'
+        }
         mobileInlineActions
         actions={
           <PageHeaderMobileTools
@@ -466,7 +498,7 @@ export function ChartOfAccountsPage({
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <PageRefreshButton />
                 {canWrite && (
-                  <Link to="/admin/finance/opening-balances" className="btn-secondary btn-sm inline-flex items-center">
+                  <Link to="/admin/accounting/opening-balances" className="btn-secondary btn-sm inline-flex items-center">
                     {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
                   </Link>
                 )}
@@ -489,7 +521,7 @@ export function ChartOfAccountsPage({
             sheet={
               canWrite ? (
                 <>
-                  <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
+                  <Link to="/admin/accounting/opening-balances" className="btn-secondary w-full flex items-center justify-center">
                     {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
                   </Link>
                   <ActionDropdown
@@ -519,7 +551,7 @@ export function ChartOfAccountsPage({
           canWrite ? (
             <>
               {!hasOpeningBalances && (
-                <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
+                <Link to="/admin/accounting/opening-balances" className="btn-secondary w-full flex items-center justify-center">
                   Post Opening Balances
                 </Link>
               )}
@@ -563,7 +595,7 @@ export function ChartOfAccountsPage({
               Post your go-live account balances so the ledger starts with the correct snapshot.
             </p>
           </div>
-          <Link to="/admin/finance/opening-balances" className="btn-primary btn-sm inline-flex items-center shrink-0">
+          <Link to="/admin/accounting/opening-balances" className="btn-primary btn-sm inline-flex items-center shrink-0">
             Post now
           </Link>
         </div>
@@ -664,16 +696,18 @@ export function ChartOfAccountsPage({
                     {/* Name: full remaining width on mobile (wrap); 40% + truncate on desktop */}
                     <div className="min-w-0 flex-1 basis-0 md:w-[40%] md:flex-none md:max-w-[40%] md:basis-auto">
                       <div className="flex items-start justify-between gap-3 min-w-0">
-                        {r.isGroup ? (
-                          <span className={`min-w-0 flex-1 text-sm font-semibold text-app-fg break-words md:truncate ${!r.isActive ? 'line-through' : ''}`}>
+                        {r.isGroup || embedded ? (
+                          <span className={`min-w-0 flex-1 text-sm text-app-fg break-words md:truncate ${r.isGroup ? 'font-semibold' : ''} ${!r.isActive ? 'line-through' : ''}`}>
                             {displayName(r.name)}
-                            <span className="hidden md:inline">
-                              <RealMoneyTag accountType={r.accountType} />
-                            </span>
+                            {!embedded && (
+                              <span className="hidden md:inline">
+                                <RealMoneyTag accountType={r.accountType} />
+                              </span>
+                            )}
                           </span>
                         ) : (
                           <Link
-                            to={`/admin/finance/accounts/${r.id}`}
+                            to={`/admin/accounting/accounts/${r.id}`}
                             className={`min-w-0 flex-1 text-sm text-app-fg hover:text-brand-600 transition-colors break-words md:truncate ${!r.isActive ? 'line-through' : ''}`}
                           >
                             {displayName(r.name)}
@@ -682,25 +716,38 @@ export function ChartOfAccountsPage({
                             </span>
                           </Link>
                         )}
-                        {!r.isGroup && (
+                        {!r.isGroup && !embedded && (
                           <Link
-                            to={`/admin/finance/accounts/${r.id}`}
+                            to={`/admin/accounting/accounts/${r.id}`}
                             className="md:hidden shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline pt-0.5"
                           >
                             View
                           </Link>
                         )}
+                        {embedded && canWrite && (
+                          <button
+                            type="button"
+                            onClick={() => setEditAccount(r)}
+                            className="md:hidden shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline pt-0.5"
+                          >
+                            Edit
+                          </button>
+                        )}
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-app-fg-muted md:hidden">
                         <span className="font-mono tabular-nums">{r.code}</span>
                         <span>{r.rootType}</span>
-                        {r.isGroup && (
-                          <span className="rounded bg-app-hover px-1.5 py-0.5 text-[10px] uppercase">
-                            group
-                          </span>
-                        )}
-                        <RealMoneyTag accountType={r.accountType} />
-                        {balanceNonZero && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] uppercase ${
+                            r.isGroup
+                              ? 'bg-app-hover'
+                              : 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                          }`}
+                        >
+                          {r.isGroup ? 'group' : 'leaf'}
+                        </span>
+                        {!embedded && <RealMoneyTag accountType={r.accountType} />}
+                        {!embedded && balanceNonZero && (
                           <span className="font-medium tabular-nums text-app-fg">
                             <NairaPrice amount={r.balance} />
                           </span>
@@ -709,6 +756,15 @@ export function ChartOfAccountsPage({
                           <span className="rounded bg-app-hover px-1.5 py-0.5 text-[10px] uppercase">
                             inactive
                           </span>
+                        )}
+                        {canWrite && r.isGroup && (
+                          <button
+                            type="button"
+                            onClick={() => openCreate('leaf', r.id)}
+                            className="font-medium text-brand-600 dark:text-brand-400"
+                          >
+                            Add leaf
+                          </button>
                         )}
                         {canWrite &&
                           (r.isActive ? (
@@ -733,23 +789,50 @@ export function ChartOfAccountsPage({
 
                     {/* Desktop meta: right-aligned with even column spacing */}
                     <div className="hidden md:flex flex-1 items-center justify-end gap-6 min-w-0 pl-4">
-                      {r.isGroup ? (
-                        <span className="rounded bg-app-hover px-1.5 py-0.5 text-[10px] uppercase text-app-fg-muted shrink-0">
-                          group
-                        </span>
-                      ) : (
-                        <span className="w-10 shrink-0" aria-hidden />
-                      )}
+                      {/* Leaf/Group tag column */}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] uppercase shrink-0 w-14 text-center ${
+                          r.isGroup
+                            ? 'bg-app-hover text-app-fg-muted'
+                            : 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                        }`}
+                      >
+                        {r.isGroup ? 'group' : 'leaf'}
+                      </span>
                       <span className="text-xs text-app-fg-muted w-20 shrink-0 text-right">
                         {r.rootType}
                       </span>
-                      <span className="text-xs font-medium tabular-nums shrink-0 text-right w-28">
-                        {balanceNonZero ? <NairaPrice amount={r.balance} /> : null}
-                      </span>
+                      {/* Balance column — Chart of Accounts only, not the Config surface */}
+                      {!embedded && (
+                        <span className="text-xs font-medium tabular-nums shrink-0 text-right w-28">
+                          {balanceNonZero ? <NairaPrice amount={r.balance} /> : null}
+                        </span>
+                      )}
                       <div className="flex items-center justify-end gap-3 shrink-0">
-                        {!r.isGroup ? (
+                        {embedded ? (
+                          canWrite && (
+                            <>
+                              {r.isGroup && (
+                                <button
+                                  type="button"
+                                  onClick={() => openCreate('leaf', r.id)}
+                                  className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0"
+                                >
+                                  Add leaf
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setEditAccount(r)}
+                                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0"
+                              >
+                                Edit
+                              </button>
+                            </>
+                          )
+                        ) : !r.isGroup ? (
                           <Link
-                            to={`/admin/finance/accounts/${r.id}`}
+                            to={`/admin/accounting/accounts/${r.id}`}
                             className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0"
                           >
                             View

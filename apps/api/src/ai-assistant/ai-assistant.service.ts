@@ -147,41 +147,41 @@ const PAGE_CONTEXT_MAP: Record<string, string> = {
 
   '/admin/finance/delivery-remittances': `Cash Remittances. Manages remittance batches. Metrics: Awaiting Amount/Count, Pending Amount/Count, Received Amount/Count, Disputed Amount/Count, Total Remitted. Location, sender, status filters.`,
 
-  '/admin/finance/profit-loss': `Profit & Loss statement. Metrics: Total Income, Total Expense, Net Profit. Income and expense line items. Consolidated vs branch view toggle.`,
+  '/admin/accounting/profit-loss': `Profit & Loss statement. Metrics: Total Income, Total Expense, Net Profit. Income and expense line items. Consolidated vs branch view toggle.`,
 
-  '/admin/finance/balance-sheet': `Balance Sheet. Point-in-time snapshot. Metrics: Total Assets, Total Liabilities, Total Equity. Balanced check.`,
+  '/admin/accounting/balance-sheet': `Balance Sheet. Point-in-time snapshot. Metrics: Total Assets, Total Liabilities, Total Equity. Balanced check.`,
 
-  '/admin/finance/cash-flow': `Cash Flow statement. Metrics: Opening Balance, Inflow, Outflow, Closing Balance. Cash flow by account category.`,
+  '/admin/accounting/cash-flow': `Cash Flow statement. Metrics: Opening Balance, Inflow, Outflow, Closing Balance. Cash flow by account category.`,
 
-  '/admin/finance/trial-balance': `Trial Balance. All GL accounts with debit/credit balances. Metrics: Total Debits, Total Credits, Balanced flag. As-of-date filter.`,
+  '/admin/accounting/trial-balance': `Trial Balance. All GL accounts with debit/credit balances. Metrics: Total Debits, Total Credits, Balanced flag. As-of-date filter.`,
 
   '/admin/finance/ledger': `General Ledger. Detailed transaction log. Metrics: Total Credits, Total Debits, Opening/Closing Balance. Filterable by user, entry type, date range.`,
 
-  '/admin/finance/journal-entries': `Journal Entries. Manual accounting entries with reversal capability.`,
+  '/admin/accounting/journal-entries': `Journal Entries. Manual accounting entries with reversal capability.`,
 
-  '/admin/finance/accounts': `Chart of Accounts. Master list of GL accounts (active only). Account codes, names, types in hierarchy.`,
+  '/admin/accounting/accounts': `Chart of Accounts. Master list of GL accounts (active only). Account codes, names, types in hierarchy.`,
 
   '/admin/finance/profit-by-shipment': `Profit by Shipment. P&L analysis scoped to a specific shipment. Revenue, costs, profit breakdown per shipment.`,
 
-  '/admin/finance/expenses': `Expense Submissions. Expense approval workflow with GL account assignment.`,
+  '/admin/accounting/expenses': `Expense Submissions. Expense approval workflow with GL account assignment.`,
 
-  '/admin/finance/aging': `Aging Report. Receivables/Payables aging by date buckets. Metrics: 0-30d, 31-60d, 61-90d, 90+d, Total. Kind toggle: Receivable/Payable.`,
+  '/admin/accounting/aging': `Aging Report. Receivables/Payables aging by date buckets. Metrics: 0-30d, 31-60d, 61-90d, 90+d, Total. Kind toggle: Receivable/Payable.`,
 
   '/admin/finance/staff-accounts': `Staff Accounts. User roster with financial context. Status/role/branch filters.`,
 
   '/admin/finance/disbursements': `Disbursements. Managing payouts to staff and partners.`,
 
-  '/admin/finance/assets': `Fixed Assets register. Asset tracking and depreciation.`,
+  '/admin/accounting/assets': `Fixed Assets register. Asset tracking and depreciation.`,
 
-  '/admin/finance/bank-reconciliation': `Bank Reconciliation. Matching bank statements to GL entries.`,
+  '/admin/accounting/bank-reconciliation': `Bank Reconciliation. Matching bank statements to GL entries.`,
 
-  '/admin/finance/budget-report': `Budget Report. Budget vs actual comparison.`,
+  '/admin/accounting/budget-report': `Budget Report. Budget vs actual comparison.`,
 
-  '/admin/finance/tax-returns': `Tax Returns. Tax filing data with date range filter.`,
+  '/admin/accounting/tax-returns': `Tax Returns. Tax filing data with date range filter.`,
 
-  '/admin/finance/wht-certificates': `WHT Certificates. Withholding tax certificate management.`,
+  '/admin/accounting/wht-certificates': `WHT Certificates. Withholding tax certificate management.`,
 
-  '/admin/finance/opening-balances': `Opening Balances. Initial GL account balances setup.`,
+  '/admin/accounting/opening-balances': `Opening Balances. Initial GL account balances setup.`,
 
   // ── Products ──
   '/admin/products': `Products page. Product catalog management. Metrics: total products, active count, unique categories. Two tabs: Products and Offers. Create, edit, import products.`,

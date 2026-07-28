@@ -49,6 +49,7 @@ export function hasFinanceAccess(user: { role: string; permissions?: string[] })
   if (user.role === 'AUDITOR') return true;
   if (user.permissions?.includes('finance.costView')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
+  if (user.role === 'ACCOUNTANT') return true;
   return false;
 }
 

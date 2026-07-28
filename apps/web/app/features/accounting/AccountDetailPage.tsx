@@ -129,7 +129,7 @@ export function AccountDetailPage({
       render: (r) =>
         r.journalEntryNumber ? (
           <Link
-            to={`/admin/finance/journal-entries?search=${encodeURIComponent(formatJeNumber(r.journalEntryNumber))}`}
+            to={`/admin/accounting/journal-entries?search=${encodeURIComponent(formatJeNumber(r.journalEntryNumber))}`}
             className="text-xs font-mono text-brand-600 hover:underline"
           >
             {formatJeNumber(r.journalEntryNumber)}
@@ -187,7 +187,7 @@ export function AccountDetailPage({
             <DateTimeText at={r.createdAt} dateOnly={r.postingDate} className="text-xs" />
             {r.journalEntryNumber ? (
               <Link
-                to={`/admin/finance/journal-entries?search=${encodeURIComponent(formatJeNumber(r.journalEntryNumber))}`}
+                to={`/admin/accounting/journal-entries?search=${encodeURIComponent(formatJeNumber(r.journalEntryNumber))}`}
                 className="text-xs font-mono text-brand-600"
               >
                 {formatJeNumber(r.journalEntryNumber)}
@@ -215,7 +215,7 @@ export function AccountDetailPage({
       <PageHeader
         title={displayName(account.name)}
         description={`Account ${account.code} sub-ledger entries.`}
-        backTo="/admin/finance/accounts"
+        backTo="/admin/accounting/accounts"
         mobileInlineActions
         actions={
           <PageHeaderMobileTools

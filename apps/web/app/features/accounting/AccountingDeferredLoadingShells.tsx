@@ -90,8 +90,8 @@ function AccountingChromeShell({
 export function ChartOfAccountsLoadingShell() {
   return (
     <AccountingChromeShell
-      title="Account Config"
-      description="Manage the chart of accounts and wire posting keys to the right GL accounts."
+      title="Chart of Accounts"
+      description="IFRS-compliant account tree for double-entry ledger postings."
       showSearch
       searchPlaceholder="Search accounts..."
       stats={[{ label: 'Accounts' }, { label: 'Active' }, { label: 'Groups' }]}

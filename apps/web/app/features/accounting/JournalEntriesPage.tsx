@@ -182,7 +182,7 @@ export function JournalEntriesPage({
                 ) : null}
                 <PageRefreshButton />
                 {canWrite ? (
-                  <Link to="/admin/finance/journal-entries/new" prefetch="intent">
+                  <Link to="/admin/accounting/journal-entries/new" prefetch="intent">
                     <Button type="button" size="sm">New Entry</Button>
                   </Link>
                 ) : null}
@@ -190,7 +190,7 @@ export function JournalEntriesPage({
             }
             sheet={
               canWrite ? (
-                <Link to="/admin/finance/journal-entries/new" prefetch="intent" className="block">
+                <Link to="/admin/accounting/journal-entries/new" prefetch="intent" className="block">
                   <Button type="button" className="w-full">New Entry</Button>
                 </Link>
               ) : undefined
@@ -258,7 +258,7 @@ export function JournalEntriesPage({
           description="Create a balanced entry to post to the ledger."
           action={
             canWrite ? (
-              <Link to="/admin/finance/journal-entries/new">
+              <Link to="/admin/accounting/journal-entries/new">
                 <Button type="button">New Entry</Button>
               </Link>
             ) : undefined

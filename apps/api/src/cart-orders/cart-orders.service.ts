@@ -314,10 +314,16 @@ export class CartOrdersService {
     mediaBuyerId?: string | null,
     viewerCloserId?: string | null,
     branchScope: 'servicing' | 'marketing' = 'servicing',
+    /** Filter by multiple media buyer IDs (supervisor team scoping). */
+    mediaBuyerIds?: string[] | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.cartOrders.deletedAt)];
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
-    if (mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+    if (mediaBuyerIds && mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.cartOrders.mediaBuyerId, mediaBuyerIds));
+    } else if (mediaBuyerId) {
+      conditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+    }
     {
       const branchCol = branchScope === 'marketing' ? schema.cartOrders.branchId : schema.cartOrders.servicingBranchId;
       const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
